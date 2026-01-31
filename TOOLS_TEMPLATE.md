@@ -1,5 +1,7 @@
 # Clawdbot TOOLS.md 整合範本
 
+> **最後更新:** 2026-01-31 11:49 UTC
+
 將以下內容加到 `~/clawd/TOOLS.md`，部署後填入實際 URL：
 
 ---
