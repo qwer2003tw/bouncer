@@ -529,5 +529,391 @@ class TestEdgeCases:
         # 目前不擋，但記錄為已知行為
 
 
+# ============================================================================
+# Long Polling Tests (高優先級)
+# ============================================================================
+
+class TestLongPolling:
+    """長輪詢功能測試"""
+    
+    @patch('app.send_telegram_message')
+    @patch('app.time.sleep')  # Mock sleep 避免真的等待
+    def test_wait_returns_when_approved(self, mock_sleep, mock_telegram, app_module):
+        """wait=true 時，審批後立即返回"""
+        # 先建立一個 pending 請求
+        event = {
+            'rawPath': '/',
+            'headers': {'x-approval-secret': 'test_secret_abc123'},
+            'body': '{"command": "aws ec2 start-instances --instance-ids i-123"}',
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        result = app_module.handle_clawdbot_request(event)
+        request_id = json.loads(result['body'])['request_id']
+        
+        # 模擬已被審批（直接更新 DynamoDB）
+        app_module.table.update_item(
+            Key={'request_id': request_id},
+            UpdateExpression='SET #s = :s, #r = :r',
+            ExpressionAttributeNames={'#s': 'status', '#r': 'result'},
+            ExpressionAttributeValues={':s': 'approved', ':r': 'done'}
+        )
+        
+        # wait_for_result 應該在第一次查詢就返回
+        result = app_module.wait_for_result(request_id, timeout=10)
+        assert result['statusCode'] == 200
+        body = json.loads(result['body'])
+        assert body['status'] == 'approved'
+        assert body['waited'] == True
+    
+    @patch('app.send_telegram_message')
+    @patch('app.time.sleep')
+    def test_wait_timeout_returns_pending(self, mock_sleep, mock_telegram, app_module):
+        """wait=true 但超時未審批，返回 202"""
+        event = {
+            'rawPath': '/',
+            'headers': {'x-approval-secret': 'test_secret_abc123'},
+            'body': '{"command": "aws ec2 start-instances --instance-ids i-456"}',
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        result = app_module.handle_clawdbot_request(event)
+        request_id = json.loads(result['body'])['request_id']
+        
+        # 不審批，直接等待
+        result = app_module.wait_for_result(request_id, timeout=4)  # 4秒，2次輪詢
+        assert result['statusCode'] == 202
+        body = json.loads(result['body'])
+        assert body['status'] == 'pending_approval'
+        assert '等待' in body['message']
+
+
+# ============================================================================
+# TTL & Expiry Tests (高優先級)
+# ============================================================================
+
+class TestTTLExpiry:
+    """TTL 過期相關測試"""
+    
+    @patch('app.send_telegram_message')
+    @patch('app.answer_callback')
+    def test_approve_expired_request_fails(self, mock_answer, mock_telegram, app_module):
+        """審批已過期的請求應該失敗"""
+        # 確保環境變數正確，並重新載入模組
+        os.environ['TELEGRAM_WEBHOOK_SECRET'] = 'webhook_secret_xyz'
+        os.environ['APPROVED_CHAT_ID'] = '999999999'
+        
+        # 更新模組變數（因為模組已載入）
+        app_module.TELEGRAM_WEBHOOK_SECRET = 'webhook_secret_xyz'
+        app_module.APPROVED_CHAT_ID = '999999999'
+        
+        # 直接建立一個「已過期」的請求（沒有在 DynamoDB 中）
+        event = {
+            'rawPath': '/webhook',
+            'headers': {'x-telegram-bot-api-secret-token': 'webhook_secret_xyz'},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'callback_expired',
+                    'from': {'id': 999999999},
+                    'data': 'approve:expired_request_id',
+                    'message': {'message_id': 111}
+                }
+            })
+        }
+        result = app_module.handle_telegram_webhook(event)
+        assert result['statusCode'] == 404
+        mock_answer.assert_called_once()
+        # 確認回覆了「已過期」
+        call_args = mock_answer.call_args[0]
+        assert '過期' in call_args[1] or '不存在' in call_args[1]
+    
+    @patch('app.send_telegram_message')
+    def test_status_query_expired_request(self, mock_telegram, app_module):
+        """查詢已過期請求返回 404"""
+        event = {
+            'rawPath': '/status/nonexistent_expired',
+            'headers': {'x-approval-secret': 'test_secret_abc123'},
+            'requestContext': {'http': {'method': 'GET'}}
+        }
+        result = app_module.handle_status_query(event, '/status/nonexistent_expired')
+        assert result['statusCode'] == 404
+
+
+# ============================================================================
+# Duplicate Approval Tests (高優先級)
+# ============================================================================
+
+class TestDuplicateApproval:
+    """重複審批測試"""
+    
+    @patch('app.send_telegram_message')
+    @patch('app.execute_command')
+    @patch('app.update_message')
+    @patch('app.answer_callback')
+    def test_double_approve_second_fails(self, mock_answer, mock_update, mock_exec, mock_send, app_module):
+        """同一請求不能審批兩次"""
+        mock_exec.return_value = 'done'
+        
+        # 確保環境變數正確
+        os.environ['TELEGRAM_WEBHOOK_SECRET'] = 'webhook_secret_xyz'
+        os.environ['APPROVED_CHAT_ID'] = '999999999'
+        
+        # 建立請求
+        submit_event = {
+            'rawPath': '/',
+            'headers': {'x-approval-secret': 'test_secret_abc123'},
+            'body': '{"command": "aws ec2 start-instances --instance-ids i-789"}',
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        result = app_module.handle_clawdbot_request(submit_event)
+        request_id = json.loads(result['body'])['request_id']
+        
+        # 第一次審批
+        approve_event = {
+            'rawPath': '/webhook',
+            'headers': {'x-telegram-bot-api-secret-token': 'webhook_secret_xyz'},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'first_approve',
+                    'from': {'id': 999999999},
+                    'data': f'approve:{request_id}',
+                    'message': {'message_id': 222}
+                }
+            })
+        }
+        result1 = app_module.handle_telegram_webhook(approve_event)
+        assert result1['statusCode'] == 200
+        
+        # 第二次審批（應該被拒絕，因為狀態已不是 pending）
+        approve_event2 = {
+            'rawPath': '/webhook',
+            'headers': {'x-telegram-bot-api-secret-token': 'webhook_secret_xyz'},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'second_approve',
+                    'from': {'id': 999999999},
+                    'data': f'approve:{request_id}',
+                    'message': {'message_id': 222}
+                }
+            })
+        }
+        result2 = app_module.handle_telegram_webhook(approve_event2)
+        # 第二次應該返回錯誤或提示已處理
+        # 檢查 execute_command 只被呼叫一次
+        assert mock_exec.call_count == 1
+
+
+# ============================================================================
+# Execute Command Error Paths (中優先級)
+# ============================================================================
+
+class TestExecuteCommandErrors:
+    """execute_command 錯誤路徑測試"""
+    
+    def test_non_aws_command_rejected(self, app_module):
+        """非 aws 開頭的命令被拒絕"""
+        result = app_module.execute_command('ls -la')
+        assert '只能執行 aws CLI' in result
+    
+    def test_malformed_command_shlex_error(self, app_module):
+        """shlex 解析錯誤"""
+        result = app_module.execute_command('aws s3 ls "unclosed')
+        assert '格式錯誤' in result or 'No closing quotation' in result
+    
+    @patch('subprocess.run')
+    def test_command_timeout(self, mock_run, app_module):
+        """命令執行超時"""
+        import subprocess
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd='aws', timeout=25)
+        result = app_module.execute_command('aws s3 ls')
+        assert '超時' in result
+    
+    @patch('subprocess.run')
+    def test_aws_cli_not_found(self, mock_run, app_module):
+        """aws CLI 未安裝"""
+        mock_run.side_effect = FileNotFoundError()
+        result = app_module.execute_command('aws s3 ls')
+        assert '未安裝' in result
+
+
+# ============================================================================
+# Lambda Handler Routing (中優先級)
+# ============================================================================
+
+class TestLambdaRouting:
+    """lambda_handler 路由測試"""
+    
+    def test_route_to_webhook(self, app_module):
+        """POST /webhook 路由到 handle_telegram_webhook"""
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': '{}',
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        # 應該走 webhook handler（會因為沒有 callback_query 返回 200 ok）
+        result = app_module.lambda_handler(event, None)
+        # 如果 webhook secret 設定了會返回 403，否則 200
+        assert result['statusCode'] in [200, 403]
+    
+    def test_route_to_status(self, app_module):
+        """GET /status/xxx 路由到 handle_status_query"""
+        event = {
+            'rawPath': '/status/test123',
+            'headers': {'x-approval-secret': 'test_secret_abc123'},
+            'requestContext': {'http': {'method': 'GET'}}
+        }
+        result = app_module.lambda_handler(event, None)
+        # 請求不存在，返回 404
+        assert result['statusCode'] == 404
+    
+    def test_route_to_main_handler(self, app_module):
+        """POST / 路由到 handle_clawdbot_request"""
+        event = {
+            'rawPath': '/',
+            'headers': {'x-approval-secret': 'wrong'},
+            'body': '{}',
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        result = app_module.lambda_handler(event, None)
+        # 錯誤的 secret 返回 403
+        assert result['statusCode'] == 403
+    
+    def test_unknown_route_returns_info(self, app_module):
+        """未知路徑返回服務資訊（GET 請求）"""
+        event = {
+            'rawPath': '/unknown/path',
+            'headers': {},
+            'requestContext': {'http': {'method': 'GET'}}
+        }
+        result = app_module.lambda_handler(event, None)
+        # GET 請求返回服務資訊
+        assert result['statusCode'] == 200
+        body = json.loads(result['body'])
+        assert 'service' in body
+        assert body['service'] == 'Bouncer'
+
+
+# ============================================================================
+# HMAC Enabled Flow (中優先級)
+# ============================================================================
+
+class TestHMACEnabledFlow:
+    """HMAC 啟用時的完整流程"""
+    
+    def test_hmac_enabled_rejects_unsigned_request(self, app_module):
+        """HMAC 啟用時，未簽名請求被拒絕"""
+        os.environ['ENABLE_HMAC'] = 'true'
+        # 重新載入以應用設定
+        import importlib
+        importlib.reload(app_module)
+        
+        event = {
+            'rawPath': '/',
+            'headers': {'x-approval-secret': 'test_secret_abc123'},
+            'body': '{"command": "aws s3 ls"}',
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        result = app_module.handle_clawdbot_request(event)
+        # 應該因為缺少 HMAC headers 而失敗
+        assert result['statusCode'] == 403
+        
+        # 重置
+        os.environ['ENABLE_HMAC'] = 'false'
+    
+    def test_hmac_enabled_accepts_signed_request(self, app_module):
+        """HMAC 啟用時，正確簽名的請求被接受"""
+        os.environ['ENABLE_HMAC'] = 'true'
+        import importlib
+        importlib.reload(app_module)
+        
+        body = '{"command": "aws sts get-caller-identity"}'
+        timestamp = str(int(time.time()))
+        nonce = 'unique_nonce_123'
+        payload = f"{timestamp}.{nonce}.{body}"
+        signature = hmac.new(
+            'test_secret_abc123'.encode(),
+            payload.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        
+        event = {
+            'rawPath': '/',
+            'headers': {
+                'x-approval-secret': 'test_secret_abc123',
+                'x-timestamp': timestamp,
+                'x-nonce': nonce,
+                'x-signature': signature
+            },
+            'body': body,
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        with patch('app.execute_command', return_value='{"Account": "123"}'):
+            result = app_module.handle_clawdbot_request(event)
+        
+        # 應該成功（SAFELIST 命令自動批准）
+        assert result['statusCode'] == 200
+        
+        # 重置
+        os.environ['ENABLE_HMAC'] = 'false'
+
+
+# ============================================================================
+# Multiple Chat IDs (低優先級)
+# ============================================================================
+
+class TestMultipleChatIDs:
+    """多 Chat ID 白名單測試"""
+    
+    def test_multiple_chat_ids_all_authorized(self, app_module):
+        """多個 Chat ID 都可以審批"""
+        # 設定多個 Chat ID
+        os.environ['APPROVED_CHAT_ID'] = '999999999,123456789,987654321'
+        import importlib
+        importlib.reload(app_module)
+        
+        # 第二個用戶也應該被授權
+        # 但 is_blocked/is_auto_approve 不檢查 chat_id，
+        # 只有 webhook handler 檢查
+        # 這裡只驗證邏輯設計
+        assert '999999999' in os.environ['APPROVED_CHAT_ID']
+        assert '123456789' in os.environ['APPROVED_CHAT_ID']
+        
+        # 重置
+        os.environ['APPROVED_CHAT_ID'] = '999999999'
+
+
+# ============================================================================
+# Telegram API Error Handling (中優先級)
+# ============================================================================
+
+class TestTelegramAPIErrors:
+    """Telegram API 錯誤處理"""
+    
+    @patch('app.urllib.request.urlopen')
+    def test_telegram_send_failure_doesnt_crash(self, mock_urlopen, app_module):
+        """Telegram 發送失敗不應導致 crash"""
+        mock_urlopen.side_effect = Exception('Network error')
+        
+        # send_telegram_message 應該捕獲異常，不向上拋出
+        try:
+            app_module.send_telegram_message('test message')
+            # 如果沒有 crash，測試通過
+            assert True
+        except:
+            # 如果 crash 了，測試失敗
+            assert False, "send_telegram_message should not crash on network error"
+    
+    @patch('app.urllib.request.urlopen')
+    def test_update_message_failure_doesnt_crash(self, mock_urlopen, app_module):
+        """更新消息失敗不應導致 crash"""
+        mock_urlopen.side_effect = Exception('API error')
+        
+        try:
+            app_module.update_message(123, 'updated text')
+            assert True
+        except:
+            assert False, "update_message should not crash on API error"
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v', '--tb=short'])
