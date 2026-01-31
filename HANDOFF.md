@@ -16,6 +16,7 @@
 | 程式碼 v1.1.0 | `src/app.py` - 整合三份報告建議 | 2026-01-31 |
 | SAM 模板 | `template.yaml` - 含 CloudWatch Alarms | 2026-01-31 |
 | 計畫文件 | `PLAN.md`, `INTEGRATED_PLAN.md` | 2026-01-31 |
+| **本地測試** | `test_local.py` - 全部通過 ✅ | 2026-01-31 |
 
 ### ⏳ 待完成
 
