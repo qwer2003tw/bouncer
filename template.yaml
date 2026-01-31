@@ -1,6 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Clawdbot AWS Approval System - 安全的 AWS 命令審批執行
+Description: >
+  Bouncer v1.1.0 - Clawdbot AWS 命令審批執行系統
+  整合 Security Analyst + Solutions Architect + Pragmatic Engineer 建議
 
 Parameters:
   TelegramBotToken:
@@ -19,15 +21,24 @@ Parameters:
     Type: String
     NoEcho: true
     Description: Telegram Webhook 驗證 Secret（防偽造）
+  EnableHmac:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: 啟用 HMAC 請求簽章驗證（Phase 2）
 
 Globals:
   Function:
-    Timeout: 30
+    Timeout: 60  # 增加到 60 秒支援長輪詢
     Runtime: python3.12
     MemorySize: 256
+    LoggingConfig:
+      LogFormat: JSON  # 結構化日誌
 
 Resources:
-  # 待審批請求存儲
+  # ============================================================
+  # DynamoDB - 待審批請求存儲
+  # ============================================================
   RequestsTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -42,16 +53,36 @@ Resources:
       TimeToLiveSpecification:
         AttributeName: ttl
         Enabled: true
+      Tags:
+        - Key: Project
+          Value: Bouncer
+        - Key: Owner
+          Value: Clawdbot
 
-  # 主 Lambda 函數
+  # ============================================================
+  # Lambda - 主函數
+  # ============================================================
   ApprovalFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: clawdbot-aws-approval
       CodeUri: src/
       Handler: app.lambda_handler
+      Description: Bouncer v1.1.0 - AWS 命令審批執行
       FunctionUrlConfig:
         AuthType: NONE
+        Cors:
+          AllowOrigins:
+            - "*"
+          AllowMethods:
+            - GET
+            - POST
+          AllowHeaders:
+            - Content-Type
+            - X-Approval-Secret
+            - X-Timestamp
+            - X-Nonce
+            - X-Signature
       Environment:
         Variables:
           TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
@@ -59,33 +90,56 @@ Resources:
           REQUEST_SECRET: !Ref RequestSecret
           TELEGRAM_WEBHOOK_SECRET: !Ref TelegramWebhookSecret
           TABLE_NAME: !Ref RequestsTable
+          ENABLE_HMAC: !Ref EnableHmac
       Policies:
+        # DynamoDB 權限
         - DynamoDBCrudPolicy:
             TableName: !Ref RequestsTable
-        # === AWS 執行權限（按需調整）===
+        
+        # AWS 執行權限
         - Version: '2012-10-17'
           Statement:
             # Read-only 權限（自動批准候選）
             - Sid: ReadOnly
               Effect: Allow
               Action:
+                # EC2
+                - ec2:Describe*
+                # S3
                 - s3:List*
                 - s3:Get*
-                - ec2:Describe*
+                # RDS
                 - rds:Describe*
+                # Lambda
                 - lambda:List*
                 - lambda:Get*
+                # CloudWatch
                 - logs:Describe*
                 - logs:Get*
                 - logs:FilterLogEvents
                 - cloudwatch:Describe*
                 - cloudwatch:Get*
                 - cloudwatch:List*
+                # IAM (read-only)
                 - iam:List*
                 - iam:Get*
+                # STS
                 - sts:GetCallerIdentity
+                # SSM (read-only)
+                - ssm:Describe*
+                - ssm:Get*
+                - ssm:List*
+                # Route53 (read-only)
+                - route53:List*
+                - route53:Get*
+                # ECS/EKS (read-only)
+                - ecs:Describe*
+                - ecs:List*
+                - eks:Describe*
+                - eks:List*
               Resource: '*'
-            # Write 權限（需要審批）
+            
+            # Write 權限（需要人工審批）
             - Sid: WriteWithApproval
               Effect: Allow
               Action:
@@ -93,14 +147,59 @@ Resources:
                 - s3:DeleteObject
                 - ec2:StartInstances
                 - ec2:StopInstances
+                - ec2:RebootInstances
                 - lambda:UpdateFunctionCode
                 - lambda:UpdateFunctionConfiguration
+                - lambda:InvokeFunction
               Resource: '*'
+
+  # ============================================================
+  # CloudWatch Alarm（監控異常）
+  # ============================================================
+  HighErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: bouncer-high-error-rate
+      AlarmDescription: Bouncer Lambda 錯誤率過高
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ApprovalFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  HighInvocationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: bouncer-high-invocations
+      AlarmDescription: Bouncer 調用量異常（可能是攻擊）
+      MetricName: Invocations
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ApprovalFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 100
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
 
 Outputs:
   FunctionUrl:
-    Description: Lambda Function URL (Clawdbot 用這個發請求)
+    Description: Lambda Function URL（Clawdbot 用這個發請求）
     Value: !GetAtt ApprovalFunctionUrl.FunctionUrl
   WebhookUrl:
-    Description: Telegram Webhook URL (設定 bot webhook 用)
+    Description: Telegram Webhook URL（設定 bot webhook 用）
     Value: !Sub "${ApprovalFunctionUrl.FunctionUrl}webhook"
+  StatusEndpoint:
+    Description: 查詢請求狀態 endpoint
+    Value: !Sub "${ApprovalFunctionUrl.FunctionUrl}status/{request_id}"
+  TableName:
+    Description: DynamoDB 表名
+    Value: !Ref RequestsTable
