@@ -322,8 +322,8 @@ def handle_telegram_webhook(event):
         # 更新狀態
         table.update_item(
             Key={'request_id': request_id},
-            UpdateExpression='SET #s = :s, result = :r, approved_at = :t, approver = :a',
-            ExpressionAttributeNames={'#s': 'status'},
+            UpdateExpression='SET #s = :s, #r = :r, approved_at = :t, approver = :a',
+            ExpressionAttributeNames={'#s': 'status', '#r': 'result'},
             ExpressionAttributeValues={
                 ':s': 'approved',
                 ':r': result[:3000],  # 限制結果長度
@@ -423,19 +423,42 @@ def verify_hmac(headers: dict, body: str) -> bool:
 # ============================================================================
 
 def execute_command(command: str) -> str:
-    """執行 AWS CLI 命令"""
+    """
+    執行 AWS CLI 命令
+    
+    安全設計：
+    - 使用 shlex.split() 解析命令（避免 shell injection）
+    - 不使用 shell=True
+    - 命令必須以 'aws' 開頭
+    - 已通過 BLOCKED_PATTERNS 檢查
+    """
+    import shlex
+    
     try:
+        # 解析命令為參數列表
+        args = shlex.split(command)
+        
+        # 額外安全檢查：必須是 aws 命令
+        if not args or args[0] != 'aws':
+            return '❌ 只能執行 aws CLI 命令'
+        
         result = subprocess.run(
-            command,
-            shell=True,
+            args,
+            shell=False,  # 安全：不使用 shell
             capture_output=True,
             text=True,
-            timeout=25
+            timeout=25,
+            env={**os.environ, 'AWS_PAGER': ''}  # 禁用 pager
         )
         output = result.stdout or result.stderr or '(no output)'
         return output[:4000]
     except subprocess.TimeoutExpired:
         return '❌ 命令執行超時 (25s)'
+    except ValueError as e:
+        # shlex 解析錯誤（如未閉合的引號）
+        return f'❌ 命令格式錯誤: {str(e)}'
+    except FileNotFoundError:
+        return '❌ aws CLI 未安裝'
     except Exception as e:
         return f'❌ 執行錯誤: {str(e)}'
 

@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# SAM
+.aws-sam/
+
+# IDE
+.idea/
+.vscode/
+*.swp
