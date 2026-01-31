@@ -1,6 +1,7 @@
-# Bouncer QA Report v2
+# Bouncer QA Report v3
 
-> **更新時間:** 2026-01-31 11:30 UTC
+> **更新時間:** 2026-01-31 11:47 UTC
+> **版本:** v1.2.0
 > **測試環境:** Amazon Linux 2023, Python 3.9, pytest 8.4, moto
 
 ---
@@ -13,9 +14,9 @@
 | YAML 結構 | ✅ PASS | CloudFormation 語法正確 |
 | 安全掃描 | ✅ PASS | 無硬編碼 secrets |
 | Lambda 依賴 | ✅ PASS | 全部內建或預裝 |
-| **單元測試** | ✅ **44/44 PASS** | pytest + moto |
-| **測試覆蓋率** | ✅ **65%** | 核心邏輯覆蓋 |
-| 程式碼品質 | ✅ IMPROVED | shell=False 改進 |
+| **單元測試** | ✅ **62/62 PASS** | pytest + moto |
+| **測試覆蓋率** | ✅ **89%** | 核心邏輯覆蓋 |
+| 程式碼品質 | ✅ shell=False | 安全改進完成 |
 
 **結論：Ready for deployment ✅**
 
@@ -23,7 +24,7 @@
 
 ## 🧪 測試詳情
 
-### 測試分類
+### 測試分類（16 類，62 個測試）
 
 | 類別 | 測試數 | 說明 |
 |------|--------|------|
@@ -35,12 +36,19 @@
 | E2EFlow | 3 | 完整審批流程（moto mock） |
 | Security | 2 | 安全性測試 |
 | EdgeCases | 3 | 邊界情況 |
-| **總計** | **44** | |
+| **LongPolling** | 2 | 長輪詢 wait=true |
+| **TTLExpiry** | 2 | 過期請求處理 |
+| **DuplicateApproval** | 1 | 重複審批防護 |
+| **ExecuteCommandErrors** | 4 | 命令執行錯誤路徑 |
+| **LambdaRouting** | 4 | Lambda handler 路由 |
+| **HMACEnabledFlow** | 2 | HMAC 完整流程 |
+| **TelegramAPIErrors** | 2 | API 異常處理 |
+| **MultipleChatIDs** | 1 | 多用戶白名單 |
+| **總計** | **62** | |
 
 ### 運行方式
 
 ```bash
-# 啟用虛擬環境
 cd ~/projects/bouncer
 source .venv/bin/activate
 
@@ -49,81 +57,58 @@ pytest tests/ -v
 
 # 帶覆蓋率
 pytest tests/ --cov=src --cov-report=term-missing
-
-# 只跑特定類別
-pytest tests/test_bouncer.py::TestE2EFlow -v
 ```
 
 ---
 
-## 🔐 安全改進
+## 🔐 安全改進 (v1.1.0 → v1.2.0)
 
 ### shell=True → shell=False ✅
 
 ```python
-# 舊版（有風險）
+# v1.1.0（有風險）
 subprocess.run(command, shell=True, ...)
 
-# 新版（更安全）
+# v1.2.0（安全）
+import shlex
 args = shlex.split(command)
 if args[0] != 'aws':
     return '❌ 只能執行 aws CLI 命令'
-subprocess.run(args, shell=False, ...)
+subprocess.run(args, shell=False, env={**os.environ, 'AWS_PAGER': ''})
 ```
 
 ### 測試覆蓋的攻擊向量
 
 - ✅ Shell injection: `;` `&&` `||` `|` `` ` `` `$()` `${}`
-- ✅ IAM 危險操作
+- ✅ IAM 危險操作（create/attach/delete）
 - ✅ STS assume-role
 - ✅ Organizations
 - ✅ sudo 前綴
 - ✅ 大小寫繞過
 - ✅ Webhook 偽造
 - ✅ 非授權用戶審批
+- ✅ 重複審批
+- ✅ 過期請求
 
 ---
 
 ## 📊 覆蓋率分析
 
 ```
-Name         Stmts   Miss  Cover   Missing
+Name         Stmts   Miss  Cover
 ------------------------------------------
-src/app.py     223     79    65%   (略)
+src/app.py     223     24    89%
 ------------------------------------------
 ```
 
-### 未覆蓋的部分
+### 未覆蓋的 11%
 
 主要是：
-- Telegram API 實際呼叫（被 mock）
-- Lambda 入口 routing（部分）
-- 長輪詢 wait_for_result（部分）
+- 實際 HTTP 請求（Telegram API）- 被 mock
+- 部分 try/except 分支
+- 長輪詢真實等待
 
-這些需要真實環境測試，部署後再驗證。
-
----
-
-## 📁 專案結構
-
-```
-~/projects/bouncer/
-├── README.md
-├── PLAN.md              # 執行計畫
-├── HANDOFF.md           # 交接文件
-├── QA_REPORT.md         # 本報告
-├── TOOLS_TEMPLATE.md    # Clawdbot 整合模板
-├── pytest.ini           # 測試配置
-├── template.yaml        # SAM 模板
-├── .gitignore
-├── .venv/               # Python 虛擬環境
-├── src/
-│   └── app.py           # Lambda v1.2.0
-├── tests/
-│   ├── __init__.py
-│   └── test_bouncer.py  # 44 個測試
-└── test_local.py        # 簡易本地測試（無依賴）
-```
+這些需要部署後做整合測試。
 
 ---
 
@@ -142,4 +127,4 @@ src/app.py     223     79    65%   (略)
 
 ---
 
-*QA Report v2 | 2026-01-31 | 44 tests passed | 65% coverage*
+*QA Report v3 | Bouncer v1.2.0 | 2026-01-31 | 62 tests | 89% coverage*

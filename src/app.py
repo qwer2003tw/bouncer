@@ -100,7 +100,7 @@ def lambda_handler(event, context):
     else:
         return response(200, {
             'service': 'Bouncer',
-            'version': '1.1.0',
+            'version': '1.2.0',
             'endpoints': {
                 'POST /': 'Submit command for approval',
                 'GET /status/{id}': 'Query request status',
