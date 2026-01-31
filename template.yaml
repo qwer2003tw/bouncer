@@ -1,0 +1,101 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Clawdbot AWS Approval System - 安全的 AWS 命令審批執行
+
+Parameters:
+  TelegramBotToken:
+    Type: String
+    NoEcho: true
+    Description: 審批專用 Telegram Bot Token
+  ApprovedChatId:
+    Type: String
+    Default: "999999999"
+    Description: 允許審批的 Telegram Chat ID
+  RequestSecret:
+    Type: String
+    NoEcho: true
+    Description: Clawdbot 請求時需要的 Secret
+
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: python3.12
+    MemorySize: 256
+
+Resources:
+  # 待審批請求存儲
+  RequestsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: clawdbot-approval-requests
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: request_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: request_id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # 主 Lambda 函數
+  ApprovalFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: clawdbot-aws-approval
+      CodeUri: src/
+      Handler: app.lambda_handler
+      FunctionUrlConfig:
+        AuthType: NONE
+      Environment:
+        Variables:
+          TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
+          APPROVED_CHAT_ID: !Ref ApprovedChatId
+          REQUEST_SECRET: !Ref RequestSecret
+          TABLE_NAME: !Ref RequestsTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RequestsTable
+        # === AWS 執行權限（按需調整）===
+        - Version: '2012-10-17'
+          Statement:
+            # Read-only 權限（自動批准候選）
+            - Sid: ReadOnly
+              Effect: Allow
+              Action:
+                - s3:List*
+                - s3:Get*
+                - ec2:Describe*
+                - rds:Describe*
+                - lambda:List*
+                - lambda:Get*
+                - logs:Describe*
+                - logs:Get*
+                - logs:FilterLogEvents
+                - cloudwatch:Describe*
+                - cloudwatch:Get*
+                - cloudwatch:List*
+                - iam:List*
+                - iam:Get*
+                - sts:GetCallerIdentity
+              Resource: '*'
+            # Write 權限（需要審批）
+            - Sid: WriteWithApproval
+              Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:DeleteObject
+                - ec2:StartInstances
+                - ec2:StopInstances
+                - lambda:UpdateFunctionCode
+                - lambda:UpdateFunctionConfiguration
+              Resource: '*'
+
+Outputs:
+  FunctionUrl:
+    Description: Lambda Function URL (Clawdbot 用這個發請求)
+    Value: !GetAtt ApprovalFunctionUrl.FunctionUrl
+  WebhookUrl:
+    Description: Telegram Webhook URL (設定 bot webhook 用)
+    Value: !Sub "${ApprovalFunctionUrl.FunctionUrl}webhook"
