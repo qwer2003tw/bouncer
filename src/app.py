@@ -1,7 +1,11 @@
 """
 Bouncer - Clawdbot AWS 命令審批執行系統
-版本: 1.1.0 (整合三份報告建議)
+版本: 2.0.0 (MCP 支援)
 更新: 2026-01-31
+
+支援兩種模式：
+1. REST API（向後兼容）
+2. MCP JSON-RPC（新增）
 """
 
 import json
@@ -12,8 +16,15 @@ import time
 import urllib.request
 import urllib.parse
 import subprocess
+import shlex
 import boto3
 from decimal import Decimal
+from typing import Optional, Dict, Any
+
+# ============================================================================
+# 版本
+# ============================================================================
+VERSION = '2.0.0'
 
 # ============================================================================
 # 環境變數
@@ -24,8 +35,11 @@ REQUEST_SECRET = os.environ.get('REQUEST_SECRET', '')
 TABLE_NAME = os.environ.get('TABLE_NAME', 'clawdbot-approval-requests')
 TELEGRAM_WEBHOOK_SECRET = os.environ.get('TELEGRAM_WEBHOOK_SECRET', '')
 
-# HMAC 驗證開關（Phase 2 啟用）
+# HMAC 驗證開關
 ENABLE_HMAC = os.environ.get('ENABLE_HMAC', 'false').lower() == 'true'
+
+# MCP 模式的最大等待時間（秒）- Lambda 最長 15 分鐘，保留 1 分鐘餘量
+MCP_MAX_WAIT = int(os.environ.get('MCP_MAX_WAIT', '840'))  # 14 分鐘
 
 # DynamoDB
 dynamodb = boto3.resource('dynamodb')
@@ -77,8 +91,57 @@ AUTO_APPROVE_PREFIXES = [
     'aws eks describe-', 'aws eks list-',
 ]
 
-# Layer 3: APPROVAL - 需要人工審批（在 SAFELIST 和 BLOCKED 之外的命令）
-# Layer 4: DEFAULT DENY - 未知命令拒絕（可選，目前走 APPROVAL）
+
+# ============================================================================
+# MCP Tool 定義
+# ============================================================================
+
+MCP_TOOLS = {
+    'bouncer_execute': {
+        'description': '執行 AWS CLI 命令。安全命令自動執行，危險命令需要 Telegram 審批。',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'command': {
+                    'type': 'string',
+                    'description': 'AWS CLI 命令（例如：aws ec2 describe-instances）'
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': '執行原因（用於審批記錄）',
+                    'default': 'No reason provided'
+                },
+                'timeout': {
+                    'type': 'integer',
+                    'description': '最大等待時間（秒），預設 840（14分鐘）',
+                    'default': 840,
+                    'maximum': 840
+                }
+            },
+            'required': ['command']
+        }
+    },
+    'bouncer_status': {
+        'description': '查詢請求狀態',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'request_id': {
+                    'type': 'string',
+                    'description': '請求 ID'
+                }
+            },
+            'required': ['request_id']
+        }
+    },
+    'bouncer_list_safelist': {
+        'description': '列出自動批准的命令前綴',
+        'parameters': {
+            'type': 'object',
+            'properties': {}
+        }
+    }
+}
 
 
 # ============================================================================
@@ -93,6 +156,8 @@ def lambda_handler(event, context):
     # 路由
     if path.endswith('/webhook'):
         return handle_telegram_webhook(event)
+    elif path.endswith('/mcp'):
+        return handle_mcp_request(event)
     elif '/status/' in path:
         return handle_status_query(event, path)
     elif method == 'POST':
@@ -100,28 +165,293 @@ def lambda_handler(event, context):
     else:
         return response(200, {
             'service': 'Bouncer',
-            'version': '1.2.0',
+            'version': VERSION,
             'endpoints': {
-                'POST /': 'Submit command for approval',
+                'POST /': 'Submit command for approval (REST)',
+                'POST /mcp': 'MCP JSON-RPC endpoint',
                 'GET /status/{id}': 'Query request status',
                 'POST /webhook': 'Telegram callback'
-            }
+            },
+            'mcp_tools': list(MCP_TOOLS.keys())
         })
 
 
 # ============================================================================
-# Status Query Endpoint（新增 - Architect 建議）
+# MCP JSON-RPC Handler
+# ============================================================================
+
+def handle_mcp_request(event) -> dict:
+    """處理 MCP JSON-RPC 請求"""
+    headers = event.get('headers', {})
+    
+    # 驗證 secret
+    if headers.get('x-approval-secret') != REQUEST_SECRET:
+        return mcp_error(None, -32600, 'Invalid secret')
+    
+    # 解析 JSON-RPC
+    try:
+        body = json.loads(event.get('body', '{}'))
+    except:
+        return mcp_error(None, -32700, 'Parse error')
+    
+    jsonrpc = body.get('jsonrpc')
+    method = body.get('method', '')
+    params = body.get('params', {})
+    req_id = body.get('id')
+    
+    if jsonrpc != '2.0':
+        return mcp_error(req_id, -32600, 'Invalid Request: jsonrpc must be "2.0"')
+    
+    # 處理 MCP 標準方法
+    if method == 'initialize':
+        return mcp_result(req_id, {
+            'protocolVersion': '2024-11-05',
+            'serverInfo': {
+                'name': 'bouncer',
+                'version': VERSION
+            },
+            'capabilities': {
+                'tools': {}
+            }
+        })
+    
+    elif method == 'tools/list':
+        tools = []
+        for name, spec in MCP_TOOLS.items():
+            tools.append({
+                'name': name,
+                'description': spec['description'],
+                'inputSchema': spec['parameters']
+            })
+        return mcp_result(req_id, {'tools': tools})
+    
+    elif method == 'tools/call':
+        tool_name = params.get('name', '')
+        arguments = params.get('arguments', {})
+        return handle_mcp_tool_call(req_id, tool_name, arguments)
+    
+    else:
+        return mcp_error(req_id, -32601, f'Method not found: {method}')
+
+
+def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
+    """處理 MCP tool 呼叫"""
+    
+    if tool_name == 'bouncer_execute':
+        return mcp_tool_execute(req_id, arguments)
+    
+    elif tool_name == 'bouncer_status':
+        return mcp_tool_status(req_id, arguments)
+    
+    elif tool_name == 'bouncer_list_safelist':
+        return mcp_result(req_id, {
+            'content': [{
+                'type': 'text',
+                'text': json.dumps({
+                    'safelist_prefixes': AUTO_APPROVE_PREFIXES,
+                    'blocked_patterns': BLOCKED_PATTERNS
+                }, indent=2)
+            }]
+        })
+    
+    else:
+        return mcp_error(req_id, -32602, f'Unknown tool: {tool_name}')
+
+
+def mcp_tool_execute(req_id, arguments: dict) -> dict:
+    """MCP tool: bouncer_execute"""
+    command = arguments.get('command', '').strip()
+    reason = arguments.get('reason', 'No reason provided')
+    timeout = min(arguments.get('timeout', MCP_MAX_WAIT), MCP_MAX_WAIT)
+    
+    if not command:
+        return mcp_error(req_id, -32602, 'Missing required parameter: command')
+    
+    # Layer 1: BLOCKED
+    if is_blocked(command):
+        return mcp_result(req_id, {
+            'content': [{
+                'type': 'text',
+                'text': json.dumps({
+                    'status': 'blocked',
+                    'error': 'Command blocked for security',
+                    'command': command
+                })
+            }],
+            'isError': True
+        })
+    
+    # Layer 2: SAFELIST (auto-approve)
+    if is_auto_approve(command):
+        result = execute_command(command)
+        return mcp_result(req_id, {
+            'content': [{
+                'type': 'text',
+                'text': json.dumps({
+                    'status': 'auto_approved',
+                    'command': command,
+                    'result': result
+                })
+            }]
+        })
+    
+    # Layer 3: APPROVAL (human review)
+    request_id = generate_request_id(command)
+    ttl = int(time.time()) + timeout + 60  # 過期時間 = timeout + buffer
+    
+    # 存入 DynamoDB
+    item = {
+        'request_id': request_id,
+        'command': command,
+        'reason': reason,
+        'status': 'pending_approval',
+        'created_at': int(time.time()),
+        'ttl': ttl,
+        'mode': 'mcp'
+    }
+    table.put_item(Item=item)
+    
+    # 發送 Telegram 審批請求
+    send_approval_request(request_id, command, reason, timeout)
+    
+    # 長輪詢等待結果
+    result = wait_for_result_mcp(request_id, timeout=timeout)
+    
+    return mcp_result(req_id, {
+        'content': [{
+            'type': 'text',
+            'text': json.dumps(result)
+        }],
+        'isError': result.get('status') in ['denied', 'timeout', 'error']
+    })
+
+
+def mcp_tool_status(req_id, arguments: dict) -> dict:
+    """MCP tool: bouncer_status"""
+    request_id = arguments.get('request_id', '')
+    
+    if not request_id:
+        return mcp_error(req_id, -32602, 'Missing required parameter: request_id')
+    
+    try:
+        result = table.get_item(Key={'request_id': request_id})
+        item = result.get('Item')
+        
+        if not item:
+            return mcp_result(req_id, {
+                'content': [{
+                    'type': 'text',
+                    'text': json.dumps({
+                        'error': 'Request not found',
+                        'request_id': request_id
+                    })
+                }],
+                'isError': True
+            })
+        
+        return mcp_result(req_id, {
+            'content': [{
+                'type': 'text',
+                'text': json.dumps(decimal_to_native(item))
+            }]
+        })
+        
+    except Exception as e:
+        return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
+
+
+def wait_for_result_mcp(request_id: str, timeout: int = 840) -> dict:
+    """MCP 模式的長輪詢，最多 timeout 秒"""
+    interval = 2  # 每 2 秒查一次
+    start_time = time.time()
+    
+    while (time.time() - start_time) < timeout:
+        time.sleep(interval)
+        
+        try:
+            result = table.get_item(Key={'request_id': request_id})
+            item = result.get('Item')
+            
+            if item:
+                status = item.get('status', '')
+                if status == 'approved':
+                    return {
+                        'status': 'approved',
+                        'request_id': request_id,
+                        'command': item.get('command'),
+                        'result': item.get('result', ''),
+                        'approved_by': item.get('approver', 'unknown'),
+                        'waited_seconds': int(time.time() - start_time)
+                    }
+                elif status == 'denied':
+                    return {
+                        'status': 'denied',
+                        'request_id': request_id,
+                        'command': item.get('command'),
+                        'denied_by': item.get('approver', 'unknown'),
+                        'waited_seconds': int(time.time() - start_time)
+                    }
+                # status == 'pending_approval' → 繼續等待
+        except Exception as e:
+            # 網路或 DynamoDB 錯誤，繼續嘗試
+            print(f"Polling error: {e}")
+            pass
+    
+    # 超時
+    return {
+        'status': 'timeout',
+        'request_id': request_id,
+        'message': f'等待 {timeout} 秒後仍未審批',
+        'waited_seconds': timeout
+    }
+
+
+def mcp_result(req_id, result: dict) -> dict:
+    """構造 MCP JSON-RPC 成功回應"""
+    return {
+        'statusCode': 200,
+        'headers': {
+            'Content-Type': 'application/json',
+            'X-Bouncer-Version': VERSION
+        },
+        'body': json.dumps({
+            'jsonrpc': '2.0',
+            'id': req_id,
+            'result': result
+        }, default=str)
+    }
+
+
+def mcp_error(req_id, code: int, message: str) -> dict:
+    """構造 MCP JSON-RPC 錯誤回應"""
+    return {
+        'statusCode': 200,  # JSON-RPC 錯誤仍返回 200
+        'headers': {
+            'Content-Type': 'application/json',
+            'X-Bouncer-Version': VERSION
+        },
+        'body': json.dumps({
+            'jsonrpc': '2.0',
+            'id': req_id,
+            'error': {
+                'code': code,
+                'message': message
+            }
+        })
+    }
+
+
+# ============================================================================
+# REST API Handlers（向後兼容）
 # ============================================================================
 
 def handle_status_query(event, path):
     """查詢請求狀態 - GET /status/{request_id}"""
     headers = event.get('headers', {})
     
-    # 驗證 secret
     if headers.get('x-approval-secret') != REQUEST_SECRET:
         return response(403, {'error': 'Invalid secret'})
     
-    # 提取 request_id
     parts = path.split('/status/')
     if len(parts) < 2:
         return response(400, {'error': 'Missing request_id'})
@@ -130,7 +460,6 @@ def handle_status_query(event, path):
     if not request_id:
         return response(400, {'error': 'Missing request_id'})
     
-    # 查詢 DynamoDB
     try:
         result = table.get_item(Key={'request_id': request_id})
         item = result.get('Item')
@@ -138,32 +467,24 @@ def handle_status_query(event, path):
         if not item:
             return response(404, {'error': 'Request not found', 'request_id': request_id})
         
-        # 轉換 Decimal
         return response(200, decimal_to_native(item))
         
     except Exception as e:
         return response(500, {'error': str(e)})
 
 
-# ============================================================================
-# Clawdbot Request Handler
-# ============================================================================
-
 def handle_clawdbot_request(event):
-    """處理 Clawdbot 的命令執行請求"""
+    """處理 REST API 的命令執行請求（向後兼容）"""
     headers = event.get('headers', {})
     
-    # 基本 Secret 驗證
     if headers.get('x-approval-secret') != REQUEST_SECRET:
         return response(403, {'error': 'Invalid secret'})
     
-    # HMAC 驗證（Phase 2，可選啟用）
     if ENABLE_HMAC:
         body_str = event.get('body', '')
         if not verify_hmac(headers, body_str):
             return response(403, {'error': 'Invalid HMAC signature'})
     
-    # 解析請求
     try:
         body = json.loads(event.get('body', '{}'))
     except:
@@ -171,12 +492,11 @@ def handle_clawdbot_request(event):
     
     command = body.get('command', '').strip()
     reason = body.get('reason', 'No reason provided')
-    wait = body.get('wait', False)  # 長輪詢選項
+    wait = body.get('wait', False)
+    timeout = min(body.get('timeout', 50), MCP_MAX_WAIT)
     
     if not command:
         return response(400, {'error': 'Missing command'})
-    
-    # ========== 四層命令分類 ==========
     
     # Layer 1: BLOCKED
     if is_blocked(command):
@@ -186,7 +506,7 @@ def handle_clawdbot_request(event):
             'command': command
         })
     
-    # Layer 2: SAFELIST (auto-approve)
+    # Layer 2: SAFELIST
     if is_auto_approve(command):
         result = execute_command(command)
         return response(200, {
@@ -195,55 +515,48 @@ def handle_clawdbot_request(event):
             'result': result
         })
     
-    # Layer 3: APPROVAL (human review)
+    # Layer 3: APPROVAL
     request_id = generate_request_id(command)
-    ttl = int(time.time()) + 300  # 5 分鐘過期
+    ttl = int(time.time()) + timeout + 60
     
-    # 存入 DynamoDB
     item = {
         'request_id': request_id,
         'command': command,
         'reason': reason,
-        'status': 'pending',
+        'status': 'pending_approval',
         'created_at': int(time.time()),
-        'ttl': ttl
+        'ttl': ttl,
+        'mode': 'rest'
     }
     table.put_item(Item=item)
     
-    # 發送 Telegram 審批請求
-    send_approval_request(request_id, command, reason)
+    send_approval_request(request_id, command, reason, timeout)
     
-    # 長輪詢等待結果（Pragmatic Engineer 建議）
     if wait:
-        return wait_for_result(request_id, timeout=50)
+        return wait_for_result_rest(request_id, timeout=timeout)
     
-    # 非等待模式，立即返回
     return response(202, {
         'status': 'pending_approval',
         'request_id': request_id,
         'message': '請求已發送，等待 Telegram 確認',
-        'expires_in': '5 minutes',
+        'expires_in': f'{timeout} seconds',
         'check_status': f'/status/{request_id}'
     })
 
 
-# ============================================================================
-# 長輪詢（Pragmatic Engineer 建議）
-# ============================================================================
-
-def wait_for_result(request_id: str, timeout: int = 50) -> dict:
-    """輪詢等待審批結果，最多 timeout 秒"""
-    interval = 2  # 每 2 秒查一次
-    iterations = timeout // interval
+def wait_for_result_rest(request_id: str, timeout: int = 50) -> dict:
+    """REST API 的輪詢等待"""
+    interval = 2
+    start_time = time.time()
     
-    for _ in range(iterations):
+    while (time.time() - start_time) < timeout:
         time.sleep(interval)
         
         try:
             result = table.get_item(Key={'request_id': request_id})
             item = result.get('Item')
             
-            if item and item.get('status') != 'pending':
+            if item and item.get('status') not in ['pending_approval', 'pending']:
                 return response(200, {
                     'status': item['status'],
                     'request_id': request_id,
@@ -254,7 +567,6 @@ def wait_for_result(request_id: str, timeout: int = 50) -> dict:
         except:
             pass
     
-    # 超時，返回 pending
     return response(202, {
         'status': 'pending_approval',
         'request_id': request_id,
@@ -271,7 +583,6 @@ def handle_telegram_webhook(event):
     """處理 Telegram callback"""
     headers = event.get('headers', {})
     
-    # 驗證 Telegram webhook 簽名（防偽造）
     if TELEGRAM_WEBHOOK_SECRET:
         received_secret = headers.get('x-telegram-bot-api-secret-token', '')
         if received_secret != TELEGRAM_WEBHOOK_SECRET:
@@ -286,7 +597,6 @@ def handle_telegram_webhook(event):
     if not callback:
         return response(200, {'ok': True})
     
-    # 驗證是授權用戶
     user_id = str(callback.get('from', {}).get('id', ''))
     if user_id != APPROVED_CHAT_ID:
         answer_callback(callback['id'], '❌ 你沒有審批權限')
@@ -298,7 +608,6 @@ def handle_telegram_webhook(event):
     
     action, request_id = data.split(':', 1)
     
-    # 從 DynamoDB 取得請求
     try:
         item = table.get_item(Key={'request_id': request_id}).get('Item')
     except:
@@ -308,7 +617,7 @@ def handle_telegram_webhook(event):
         answer_callback(callback['id'], '❌ 請求已過期或不存在')
         return response(404, {'error': 'Request not found'})
     
-    if item['status'] != 'pending':
+    if item['status'] not in ['pending_approval', 'pending']:
         answer_callback(callback['id'], '⚠️ 此請求已處理過')
         return response(200, {'ok': True})
     
@@ -316,23 +625,20 @@ def handle_telegram_webhook(event):
     command = item['command']
     
     if action == 'approve':
-        # 執行命令
         result = execute_command(command)
         
-        # 更新狀態
         table.update_item(
             Key={'request_id': request_id},
             UpdateExpression='SET #s = :s, #r = :r, approved_at = :t, approver = :a',
             ExpressionAttributeNames={'#s': 'status', '#r': 'result'},
             ExpressionAttributeValues={
                 ':s': 'approved',
-                ':r': result[:3000],  # 限制結果長度
+                ':r': result[:3000],
                 ':t': int(time.time()),
                 ':a': user_id
             }
         )
         
-        # 更新 Telegram 消息
         result_preview = result[:1500] if len(result) > 1500 else result
         update_message(
             message_id,
@@ -343,7 +649,6 @@ def handle_telegram_webhook(event):
         answer_callback(callback['id'], '✅ 已執行')
         
     elif action == 'deny':
-        # 拒絕
         table.update_item(
             Key={'request_id': request_id},
             UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
@@ -378,18 +683,11 @@ def is_auto_approve(command: str) -> bool:
 
 
 # ============================================================================
-# HMAC 驗證（Phase 2 - Security Analyst 建議）
+# HMAC 驗證
 # ============================================================================
 
 def verify_hmac(headers: dict, body: str) -> bool:
-    """
-    HMAC-SHA256 請求簽章驗證
-    
-    Headers required:
-    - X-Timestamp: Unix timestamp
-    - X-Nonce: Random string (防重放)
-    - X-Signature: HMAC-SHA256(timestamp.nonce.body)
-    """
+    """HMAC-SHA256 請求簽章驗證"""
     timestamp = headers.get('x-timestamp', '')
     nonce = headers.get('x-nonce', '')
     signature = headers.get('x-signature', '')
@@ -397,7 +695,6 @@ def verify_hmac(headers: dict, body: str) -> bool:
     if not all([timestamp, nonce, signature]):
         return False
     
-    # 檢查時間窗口（5 分鐘）
     try:
         ts = int(timestamp)
         if abs(time.time() - ts) > 300:
@@ -405,9 +702,6 @@ def verify_hmac(headers: dict, body: str) -> bool:
     except:
         return False
     
-    # TODO: 檢查 nonce 是否已使用（需要額外存儲）
-    
-    # 驗證簽章
     payload = f"{timestamp}.{nonce}.{body}"
     expected = hmac.new(
         REQUEST_SECRET.encode(),
@@ -423,39 +717,26 @@ def verify_hmac(headers: dict, body: str) -> bool:
 # ============================================================================
 
 def execute_command(command: str) -> str:
-    """
-    執行 AWS CLI 命令
-    
-    安全設計：
-    - 使用 shlex.split() 解析命令（避免 shell injection）
-    - 不使用 shell=True
-    - 命令必須以 'aws' 開頭
-    - 已通過 BLOCKED_PATTERNS 檢查
-    """
-    import shlex
-    
+    """執行 AWS CLI 命令"""
     try:
-        # 解析命令為參數列表
         args = shlex.split(command)
         
-        # 額外安全檢查：必須是 aws 命令
         if not args or args[0] != 'aws':
             return '❌ 只能執行 aws CLI 命令'
         
         result = subprocess.run(
             args,
-            shell=False,  # 安全：不使用 shell
+            shell=False,
             capture_output=True,
             text=True,
             timeout=25,
-            env={**os.environ, 'AWS_PAGER': ''}  # 禁用 pager
+            env={**os.environ, 'AWS_PAGER': ''}
         )
         output = result.stdout or result.stderr or '(no output)'
         return output[:4000]
     except subprocess.TimeoutExpired:
         return '❌ 命令執行超時 (25s)'
     except ValueError as e:
-        # shlex 解析錯誤（如未閉合的引號）
         return f'❌ 命令格式錯誤: {str(e)}'
     except FileNotFoundError:
         return '❌ aws CLI 未安裝'
@@ -467,17 +748,17 @@ def execute_command(command: str) -> str:
 # Telegram API
 # ============================================================================
 
-def send_approval_request(request_id: str, command: str, reason: str):
+def send_approval_request(request_id: str, command: str, reason: str, timeout: int = 840):
     """發送 Telegram 審批請求"""
-    # 命令預覽（過長截斷）
     cmd_preview = command if len(command) <= 500 else command[:500] + '...'
+    timeout_min = timeout // 60
     
     text = (
         f"🔐 *AWS 執行請求*\n\n"
         f"📋 *命令：*\n`{cmd_preview}`\n\n"
         f"💬 *原因：* {reason}\n\n"
         f"🆔 *ID：* `{request_id}`\n"
-        f"⏰ *5 分鐘後過期*"
+        f"⏰ *{timeout_min} 分鐘後過期*"
     )
     
     keyboard = {
@@ -588,7 +869,7 @@ def response(status_code: int, body: dict) -> dict:
         'statusCode': status_code,
         'headers': {
             'Content-Type': 'application/json',
-            'X-Bouncer-Version': '1.1.0'
+            'X-Bouncer-Version': VERSION
         },
         'body': json.dumps(body, default=str)
     }
