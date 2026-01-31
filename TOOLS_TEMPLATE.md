@@ -1,75 +1,74 @@
 # Clawdbot TOOLS.md 整合範本
 
-> **最後更新:** 2026-01-31 11:49 UTC
+> **最後更新:** 2026-01-31 12:21 UTC
 
-將以下內容加到 `~/clawd/TOOLS.md`，部署後填入實際 URL：
+部署後將以下內容加到 `~/clawd/TOOLS.md`：
 
 ---
 
-## 🔐 AWS Bouncer (命令審批系統)
+## 🔐 Bouncer - AWS 命令執行
 
-**用途：** 安全執行 AWS CLI 命令，透過 Telegram 人工審批
+**⚠️ 本主機無 AWS 權限，所有 AWS 命令必須透過 Bouncer**
 
-**Endpoint:** `<FUNCTION_URL>` _(部署後填入)_
-**Secret:** 存在 1Password `API Credentials` vault
+### 設定
+
+| 項目 | 值 |
+|------|-----|
+| **URL** | `https://xxxxxxxxxx.lambda-url.us-east-1.on.aws/` |
+| **Secret** | 存於 1Password |
 
 ### 使用方式
 
 ```bash
-# 1. 自動批准（read-only 命令）
 curl -X POST "$BOUNCER_URL" \
-  -H "Content-Type: application/json" \
   -H "X-Approval-Secret: $BOUNCER_SECRET" \
-  -d '{"command": "aws ec2 describe-instances", "reason": "檢查 EC2"}'
-
-# 回應：
-# {"status": "auto_approved", "result": "..."}
-
-# 2. 需要審批（write 命令）
-curl -X POST "$BOUNCER_URL" \
   -H "Content-Type: application/json" \
-  -H "X-Approval-Secret: $BOUNCER_SECRET" \
-  -d '{"command": "aws ec2 start-instances --instance-ids i-xxx", "reason": "啟動 EC2"}'
-
-# 回應：
-# {"status": "pending_approval", "request_id": "abc123def456"}
-
-# 3. 查詢結果
-curl "$BOUNCER_URL/status/abc123def456" \
-  -H "X-Approval-Secret: $BOUNCER_SECRET"
-
-# 4. 長輪詢（等待審批，最多 50 秒）
-curl -X POST "$BOUNCER_URL" \
-  -H "Content-Type: application/json" \
-  -H "X-Approval-Secret: $BOUNCER_SECRET" \
-  -d '{"command": "aws ec2 start-instances --instance-ids i-xxx", "wait": true}'
+  -d '{
+    "command": "aws ec2 describe-instances",
+    "reason": "用戶要求查看 EC2 狀態",
+    "wait": true
+  }'
 ```
+
+### 參數
+
+| 參數 | 必填 | 說明 |
+|------|------|------|
+| `command` | ✅ | AWS CLI 命令 |
+| `reason` | | 執行原因（顯示在審批訊息） |
+| `wait` | | `true` = 等待審批結果（最長 50 秒） |
+
+### 回應狀態
+
+| status | 說明 | HTTP |
+|--------|------|------|
+| `auto_approved` | SAFELIST 命令，已自動執行 | 200 |
+| `approved` | 審批通過，已執行 | 200 |
+| `denied` | 審批拒絕 | 200 |
+| `blocked` | 危險命令，直接拒絕 | 403 |
+| `pending_approval` | 等待審批中 | 202 |
 
 ### 命令分類
 
 | 類型 | 行為 | 範例 |
 |------|------|------|
-| **BLOCKED** | 403 拒絕 | `iam create-*`, `sts assume-role`, Shell 注入 |
-| **SAFELIST** | 自動執行 | `ec2 describe-*`, `s3 ls`, `sts get-caller-identity` |
-| **APPROVAL** | Telegram 審批 | `ec2 start/stop-*`, `s3 cp`, `lambda update-*` |
+| **BLOCKED** | 直接拒絕 | `iam create-*`, `sts assume-role`, shell 注入 |
+| **SAFELIST** | 自動執行 | `describe-*`, `list-*`, `get-*` |
+| **APPROVAL** | Telegram 審批 | `start-*`, `stop-*`, `delete-*` |
 
-### 回應狀態
+### ⚠️ 重要規則
 
-| status | 說明 |
-|--------|------|
-| `auto_approved` | 自動批准並已執行 |
-| `pending_approval` | 等待 Telegram 確認 |
-| `blocked` | 命令被拒絕（安全原因） |
-| `approved` | 已批准並執行完成 |
-| `denied` | 已被拒絕 |
+1. **不要嘗試直接執行 `aws` 命令** - 會失敗，主機無權限
+2. **所有 AWS 操作必須透過此 API**
+3. **危險命令會被自動阻擋**，無法執行
 
-### 環境變數
+### 查詢請求狀態
 
 ```bash
-export BOUNCER_URL="https://xxx.lambda-url.us-east-1.on.aws/"
-export BOUNCER_SECRET="your_secret_here"
+curl "$BOUNCER_URL/status/{request_id}" \
+  -H "X-Approval-Secret: $BOUNCER_SECRET"
 ```
 
 ---
 
-_Bouncer v1.1.0 | 部署日期: ____-__-___
+*部署後填入實際 URL 和 Secret*

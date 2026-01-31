@@ -1,180 +1,243 @@
 # Bouncer - 執行計畫
 
-> **版本:** 1.1.0
-> **最後更新:** 2026-01-31 11:49 UTC
-> **狀態:** 待部署
+> **最後更新:** 2026-01-31 12:21 UTC
+> **版本:** v1.2.0
+> **狀態:** 程式碼完成，待部署
 
 ---
 
-## 📋 專案概述
+## 🎯 核心設計
 
-**目的：** 讓 Clawdbot 能安全執行 AWS 命令，透過獨立審批機制防止 Prompt Injection 攻擊。
-
-**核心原則：** 
-- Clawdbot 只能「申請」，不能「執行」
-- 執行權在獨立的 Lambda，需要人工 Telegram 確認
-- 零信任：Clawdbot 被視為「可能被劫持的實體」
-
----
-
-## 🏗️ 架構
+**Clawdbot 主機零 AWS 權限，所有命令由 Bouncer Lambda 執行**
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                         AWS Cloud                                 │
-│                                                                   │
-│  Clawdbot ──POST──► Lambda (Function URL)                        │
-│     │                     │                                       │
-│     │                     ├─► DynamoDB (存請求，TTL 5min)         │
-│     │                     └─► Telegram Bot (發審批)               │
-│     │                              │                              │
-│     │                        Steven 點擊批准/拒絕                  │
-│     │                              │                              │
-│     │                     Lambda 執行命令                         │
-│     │                              │                              │
-│     └◄── /status/{id} ◄───────────┘                              │
-│          或 wait=true 長輪詢                                      │
-└──────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                    Clawdbot 主機                                 │
+│                   （零 AWS 權限）                                │
+│                                                                  │
+│  用戶: "幫我開 EC2 i-123"                                        │
+│           │                                                      │
+│           ▼                                                      │
+│  POST /submit {"command": "aws ec2 start-instances ...",        │
+│                "wait": true}                                     │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Bouncer Lambda                              │
+│                    （有 AWS 權限）                               │
+│                                                                  │
+│  1. 驗證 Secret                                                  │
+│  2. 命令分類：                                                   │
+│     ├─ BLOCKED (iam create/delete, 注入) → 403 拒絕             │
+│     ├─ SAFELIST (describe/list/get) → 直接執行，返回結果        │
+│     └─ 其他 → 發 Telegram 審批                                   │
+│  3. 等待審批（最長 50 秒）                                       │
+│  4. 審批通過 → 執行命令 → 返回結果                               │
+│                                                                  │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                        Telegram                                  │
+│                                                                  │
+│  🔐 AWS 命令審批請求                                             │
+│  📋 命令: aws ec2 start-instances --instance-ids i-123          │
+│                                                                  │
+│  [✅ 批准]  [❌ 拒絕]                                            │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## 🔐 安全機制
 
-### 命令分類（四層）
+### 四層命令分類
 
 | 層級 | 行為 | 範例 |
 |------|------|------|
-| **BLOCKED** | 永遠拒絕 | `iam create*`, `sts assume-role`, Shell 注入 |
-| **SAFELIST** | 自動批准 | `ec2 describe-*`, `s3 ls`, `logs filter-*` |
-| **APPROVAL** | 人工審批 | `ec2 start-instances`, `s3 cp`, `lambda update-*` |
-| **DEFAULT DENY** | 未知拒絕 | 不在上述任何分類的命令 |
+| **BLOCKED** | 直接拒絕 403 | `iam create-*`, `sts assume-role`, shell 注入 |
+| **SAFELIST** | 自動執行 | `describe-*`, `list-*`, `get-*`, `sts get-caller-identity` |
+| **APPROVAL** | Telegram 審批 | `start-*`, `stop-*`, `delete-*`, `put-*` |
+| **DEFAULT** | 視同 APPROVAL | 未分類的命令 |
 
-### 防護機制
+### 防重複執行
 
-| 威脅 | 防護 |
-|------|------|
-| 請求偽造 | X-Approval-Secret header |
-| Webhook 偽造 | X-Telegram-Bot-Api-Secret-Token |
-| 重放攻擊 | request_id + TTL (5min) |
-| 用戶偽造 | Chat ID 白名單 (999999999) |
-| 命令注入 | BLOCKED_PATTERNS |
+```python
+# Telegram webhook 處理
+if item['status'] != 'pending_approval':
+    answer_callback("❌ 此請求已處理過")
+    return  # 不會重複執行
+```
+
+### 安全執行
+
+```python
+# shell=False 防止注入
+args = shlex.split(command)
+subprocess.run(args, shell=False, ...)
+```
 
 ---
 
-## 📦 專案結構
+## 📋 部署步驟
+
+### Step 1: 前置準備
+
+```bash
+# 1. 建立 Telegram Bot
+# 到 @BotFather 執行 /newbot，取得 Token
+
+# 2. 產生 Secrets
+export REQUEST_SECRET=$(openssl rand -hex 16)
+export WEBHOOK_SECRET=$(openssl rand -hex 16)
+
+# 3. 記錄到 1Password（建議）
+```
+
+### Step 2: 部署 Lambda
+
+```bash
+cd ~/projects/bouncer
+
+# 建置
+sam build
+
+# 部署
+sam deploy --guided \
+  --stack-name clawdbot-bouncer \
+  --parameter-overrides \
+    TelegramBotToken=$BOT_TOKEN \
+    RequestSecret=$REQUEST_SECRET \
+    TelegramWebhookSecret=$WEBHOOK_SECRET \
+    ApprovedChatId=999999999
+```
+
+### Step 3: 設定 Telegram Webhook
+
+```bash
+# 取得 Function URL
+FUNCTION_URL=$(aws cloudformation describe-stacks \
+  --stack-name clawdbot-bouncer \
+  --query 'Stacks[0].Outputs[?OutputKey==`FunctionUrl`].OutputValue' \
+  --output text)
+
+# 設定 Webhook
+curl "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" \
+  -d "url=${FUNCTION_URL}webhook" \
+  -d "secret_token=${WEBHOOK_SECRET}"
+```
+
+### Step 4: 移除 Clawdbot 主機 AWS 權限
+
+```bash
+# 在 Clawdbot 主機上
+rm -rf ~/.aws/credentials ~/.aws/config
+
+# 或如果用 EC2 Instance Role，移除 Role
+# 確認 aws 命令無法執行
+aws sts get-caller-identity  # 應該失敗
+```
+
+### Step 5: 測試
+
+```bash
+# SAFELIST 命令（自動執行）
+curl -X POST "$FUNCTION_URL" \
+  -H "X-Approval-Secret: $REQUEST_SECRET" \
+  -d '{"command": "aws sts get-caller-identity"}'
+
+# APPROVAL 命令（需審批）
+curl -X POST "$FUNCTION_URL" \
+  -H "X-Approval-Secret: $REQUEST_SECRET" \
+  -d '{"command": "aws ec2 start-instances --instance-ids i-xxx", "wait": true}'
+```
+
+---
+
+## 🔧 Clawdbot 整合
+
+### TOOLS.md 新增內容
+
+```markdown
+## 🔐 Bouncer - AWS 命令執行
+
+**本主機無 AWS 權限，所有 AWS 命令必須透過 Bouncer**
+
+### URL
+`https://xxxxxxxxxx.lambda-url.us-east-1.on.aws/`
+
+### 使用方式
+
+curl -X POST "$BOUNCER_URL" \
+  -H "X-Approval-Secret: $BOUNCER_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "command": "aws ec2 describe-instances",
+    "reason": "用戶要求查看 EC2 狀態",
+    "wait": true
+  }'
+
+### 回應格式
+
+| status | 說明 |
+|--------|------|
+| `auto_approved` | SAFELIST 命令，已執行 |
+| `approved` | 審批通過，已執行 |
+| `denied` | 審批拒絕 |
+| `blocked` | 危險命令，直接拒絕 |
+| `pending_approval` | 等待審批中（wait=false 時） |
+
+### ⚠️ 重要
+
+- 不要嘗試直接執行 `aws` 命令（會失敗，主機無權限）
+- 所有 AWS 操作必須透過此 API
+```
+
+---
+
+## 📊 成本估算
+
+| 項目 | 用量 | 成本 |
+|------|------|------|
+| Lambda | <1M requests/月 | $0 (Free Tier) |
+| DynamoDB | <25 WCU/RCU | $0 (Free Tier) |
+| CloudWatch | 基本日誌 | $0 |
+| **總計** | | **$0/月** |
+
+---
+
+## 📁 專案檔案
 
 ```
 ~/projects/bouncer/
-├── README.md           # 專案簡介
-├── PLAN.md             # 本檔案 - 執行計畫
-├── HANDOFF.md          # 交接文件 - 未完成項目
-├── INTEGRATED_PLAN.md  # 三份報告整合（參考用）
-├── template.yaml       # AWS SAM 部署模板
-└── src/
-    └── app.py          # Lambda 程式碼 (v1.1.0)
+├── README.md              # 專案簡介
+├── PLAN.md                # 執行計畫（本檔案）
+├── HANDOFF.md             # 交接文件
+├── QA_REPORT.md           # QA 報告
+├── TOOLS_TEMPLATE.md      # Clawdbot 整合模板
+├── INTEGRATED_PLAN.md     # 設計分析
+├── template.yaml          # SAM 部署模板
+├── pytest.ini
+├── .venv/                 # Python 虛擬環境
+├── src/
+│   └── app.py             # Lambda v1.2.0 (62 tests, 89% cov)
+├── tests/
+│   └── test_bouncer.py    # pytest 測試
+└── test_local.py          # 簡易本地測試
 ```
 
 ---
 
-## 🚀 部署步驟
+## ✅ 待提供
 
-### 前置準備（人工）
-
-- [ ] **Step 1:** 建立 Telegram Bot
-  ```
-  1. 開啟 Telegram，找 @BotFather
-  2. 發送 /newbot
-  3. 設定名稱（建議：Bouncer 或 AWS Approval）
-  4. 取得 Bot Token（格式：123456789:ABC...）
-  ```
-
-- [ ] **Step 2:** 產生 Secrets
-  ```bash
-  # REQUEST_SECRET（Clawdbot 呼叫時驗證用）
-  openssl rand -hex 16
-  
-  # TELEGRAM_WEBHOOK_SECRET（防偽造 webhook）
-  openssl rand -hex 16
-  ```
-
-### 部署執行（自動）
-
-- [ ] **Step 3:** SAM 部署
-  ```bash
-  cd ~/projects/bouncer
-  sam build
-  sam deploy --guided \
-    --stack-name clawdbot-aws-approval \
-    --parameter-overrides \
-      TelegramBotToken=<BOT_TOKEN> \
-      RequestSecret=<REQUEST_SECRET> \
-      TelegramWebhookSecret=<WEBHOOK_SECRET>
-  ```
-
-- [ ] **Step 4:** 設定 Telegram Webhook
-  ```bash
-  # 取得 Function URL
-  FUNCTION_URL=$(aws cloudformation describe-stacks \
-    --stack-name clawdbot-aws-approval \
-    --query 'Stacks[0].Outputs[?OutputKey==`FunctionUrl`].OutputValue' \
-    --output text)
-  
-  # 設定 webhook
-  curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=${FUNCTION_URL}webhook&secret_token=<WEBHOOK_SECRET>"
-  ```
-
-- [ ] **Step 5:** 驗證
-  ```bash
-  # 測試自動批准（read-only）
-  curl -X POST "${FUNCTION_URL}" \
-    -H "Content-Type: application/json" \
-    -H "X-Approval-Secret: <REQUEST_SECRET>" \
-    -d '{"command": "aws sts get-caller-identity", "reason": "test"}'
-  
-  # 測試人工審批
-  curl -X POST "${FUNCTION_URL}" \
-    -H "Content-Type: application/json" \
-    -H "X-Approval-Secret: <REQUEST_SECRET>" \
-    -d '{"command": "aws ec2 start-instances --instance-ids i-xxx", "reason": "test approval"}'
-  ```
-
-### 整合 Clawdbot
-
-- [ ] **Step 6:** 更新 TOOLS.md
-  ```markdown
-  ## 🔐 AWS Bouncer
-  
-  **Endpoint:** <FUNCTION_URL>
-  **Secret:** 存在 1Password
-  
-  使用方式見 TOOLS.md
-  ```
+| 項目 | 來源 | 狀態 |
+|------|------|------|
+| `TELEGRAM_BOT_TOKEN` | @BotFather | ⏳ 待建立 |
+| `REQUEST_SECRET` | `openssl rand -hex 16` | ⏳ 待產生 |
+| `TELEGRAM_WEBHOOK_SECRET` | `openssl rand -hex 16` | ⏳ 待產生 |
 
 ---
 
-## 💰 成本
-
-| 組件 | 預估 |
-|------|------|
-| Lambda | $0 (Free Tier) |
-| DynamoDB | $0 (Free Tier) |
-| Function URL | $0 |
-| CloudWatch | $0 (Free Tier) |
-| **總計** | **$0/月** |
-
----
-
-## 📈 未來擴展（Phase 2）
-
-| 項目 | 優先級 | 說明 |
-|------|--------|------|
-| HMAC 簽章 | P2 | 已實現，設 `ENABLE_HMAC=true` 啟用 |
-| Rate Limiting | P2 | 防審批疲勞攻擊 |
-| 批量審批 | P3 | 同類命令合併 |
-| SNS 告警 | P2 | CloudWatch Alarm 觸發通知 |
-| 審計 Dashboard | P3 | QuickSight / Grafana |
-
----
-
-*Plan created: 2026-01-31*
+*Bouncer v1.2.0 | 最後更新: 2026-01-31 12:21 UTC*
