@@ -15,6 +15,10 @@ Parameters:
     Type: String
     NoEcho: true
     Description: Clawdbot 請求時需要的 Secret
+  TelegramWebhookSecret:
+    Type: String
+    NoEcho: true
+    Description: Telegram Webhook 驗證 Secret（防偽造）
 
 Globals:
   Function:
@@ -53,6 +57,7 @@ Resources:
           TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
           APPROVED_CHAT_ID: !Ref ApprovedChatId
           REQUEST_SECRET: !Ref RequestSecret
+          TELEGRAM_WEBHOOK_SECRET: !Ref TelegramWebhookSecret
           TABLE_NAME: !Ref RequestsTable
       Policies:
         - DynamoDBCrudPolicy:

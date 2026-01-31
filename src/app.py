@@ -13,6 +13,7 @@ TELEGRAM_TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
 APPROVED_CHAT_ID = os.environ['APPROVED_CHAT_ID']
 REQUEST_SECRET = os.environ['REQUEST_SECRET']
 TABLE_NAME = os.environ['TABLE_NAME']
+TELEGRAM_WEBHOOK_SECRET = os.environ.get('TELEGRAM_WEBHOOK_SECRET', '')  # 防偽造 webhook
 
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(TABLE_NAME)
@@ -67,64 +68,16 @@ def lambda_handler(event, context):
         return handle_clawdbot_request(event)
 
 
-def handle_clawdbot_request(event):
-    """處理 Clawdbot 的執行請求"""
-    # 驗證 secret
-    headers = event.get('headers', {})
-    if headers.get('x-approval-secret') != REQUEST_SECRET:
-        return response(403, {'error': 'Invalid secret'})
-    
-    try:
-        body = json.loads(event.get('body', '{}'))
-    except:
-        return response(400, {'error': 'Invalid JSON'})
-    
-    command = body.get('command', '').strip()
-    reason = body.get('reason', 'No reason provided')
-    
-    if not command:
-        return response(400, {'error': 'Missing command'})
-    
-    # 檢查黑名單
-    if is_blocked(command):
-        return response(403, {'error': 'Command blocked for security', 'command': command})
-    
-    # 檢查是否自動批准
-    if is_auto_approve(command):
-        result = execute_command(command)
-        return response(200, {
-            'status': 'auto_approved',
-            'command': command,
-            'result': result
-        })
-    
-    # 需要人工審批
-    request_id = hashlib.sha256(f"{command}{time.time()}".encode()).hexdigest()[:8]
-    ttl = int(time.time()) + 300  # 5 分鐘過期
-    
-    # 存入 DynamoDB
-    table.put_item(Item={
-        'request_id': request_id,
-        'command': command,
-        'reason': reason,
-        'status': 'pending',
-        'created_at': int(time.time()),
-        'ttl': ttl
-    })
-    
-    # 發送 Telegram 審批請求
-    send_approval_request(request_id, command, reason)
-    
-    return response(202, {
-        'status': 'pending_approval',
-        'request_id': request_id,
-        'message': '請求已發送，等待 Telegram 確認',
-        'expires_in': '5 minutes'
-    })
-
-
 def handle_telegram_webhook(event):
-    """處理 Telegram callback"""
+    """處理 Telegram callback - 加強驗證"""
+    headers = event.get('headers', {})
+    
+    # 🔐 驗證 Telegram webhook 簽名（防偽造）
+    if TELEGRAM_WEBHOOK_SECRET:
+        received_secret = headers.get('x-telegram-bot-api-secret-token', '')
+        if received_secret != TELEGRAM_WEBHOOK_SECRET:
+            return response(403, {'error': 'Invalid webhook signature'})
+    
     try:
         body = json.loads(event.get('body', '{}'))
     except:
@@ -192,6 +145,62 @@ def handle_telegram_webhook(event):
         answer_callback(callback['id'], '❌ 已拒絕')
     
     return response(200, {'ok': True})
+
+
+def handle_clawdbot_request(event):
+    """處理 Clawdbot 的執行請求"""
+    # 驗證 secret
+    headers = event.get('headers', {})
+    if headers.get('x-approval-secret') != REQUEST_SECRET:
+        return response(403, {'error': 'Invalid secret'})
+    
+    try:
+        body = json.loads(event.get('body', '{}'))
+    except:
+        return response(400, {'error': 'Invalid JSON'})
+    
+    command = body.get('command', '').strip()
+    reason = body.get('reason', 'No reason provided')
+    
+    if not command:
+        return response(400, {'error': 'Missing command'})
+    
+    # 檢查黑名單
+    if is_blocked(command):
+        return response(403, {'error': 'Command blocked for security', 'command': command})
+    
+    # 檢查是否自動批准
+    if is_auto_approve(command):
+        result = execute_command(command)
+        return response(200, {
+            'status': 'auto_approved',
+            'command': command,
+            'result': result
+        })
+    
+    # 需要人工審批
+    request_id = hashlib.sha256(f"{command}{time.time()}".encode()).hexdigest()[:8]
+    ttl = int(time.time()) + 300  # 5 分鐘過期
+    
+    # 存入 DynamoDB
+    table.put_item(Item={
+        'request_id': request_id,
+        'command': command,
+        'reason': reason,
+        'status': 'pending',
+        'created_at': int(time.time()),
+        'ttl': ttl
+    })
+    
+    # 發送 Telegram 審批請求
+    send_approval_request(request_id, command, reason)
+    
+    return response(202, {
+        'status': 'pending_approval',
+        'request_id': request_id,
+        'message': '請求已發送，等待 Telegram 確認',
+        'expires_in': '5 minutes'
+    })
 
 
 def is_blocked(command: str) -> bool:
