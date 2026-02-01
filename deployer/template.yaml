@@ -4,11 +4,6 @@ Description: >
   Bouncer SAM Deployer v1.0.0 - 安全的 SAM 部署系統
 
 Parameters:
-  Environment:
-    Type: String
-    Default: prod
-    AllowedValues: [prod, staging]
-  
   TelegramBotToken:
     Type: String
     NoEcho: true
@@ -27,7 +22,7 @@ Parameters:
 Globals:
   Function:
     Timeout: 30
-    Runtime: python3.11
+    Runtime: python3.9
     MemorySize: 256
     Architectures:
       - arm64
@@ -49,23 +44,6 @@ Resources:
             Principal:
               AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
             Action: "kms:*"
-            Resource: "*"
-          - Sid: AllowCodeBuildAccess
-            Effect: Allow
-            Principal:
-              AWS: !GetAtt CodeBuildRole.Arn
-            Action:
-              - kms:Decrypt
-              - kms:GenerateDataKey
-            Resource: "*"
-          - Sid: AllowLambdaAccess
-            Effect: Allow
-            Principal:
-              AWS: 
-                - !GetAtt NotifierLambdaRole.Arn
-                - !GetAtt DeployTriggerRole.Arn
-            Action:
-              - kms:Decrypt
             Resource: "*"
       Tags:
         - Key: Project
@@ -126,24 +104,6 @@ Resources:
             Condition:
               Bool:
                 "aws:SecureTransport": "false"
-          - Sid: AllowCodeBuildOnly
-            Effect: Allow
-            Principal:
-              AWS: !GetAtt CodeBuildRole.Arn
-            Action:
-              - s3:GetObject
-              - s3:PutObject
-              - s3:DeleteObject
-              - s3:ListBucket
-            Resource:
-              - !Sub "${ArtifactsBucket.Arn}"
-              - !Sub "${ArtifactsBucket.Arn}/*"
-          - Sid: AllowCloudFormation
-            Effect: Allow
-            Principal:
-              Service: cloudformation.amazonaws.com
-            Action: s3:GetObject
-            Resource: !Sub "${ArtifactsBucket.Arn}/*"
 
   # ============================================================
   # DynamoDB - 專案配置
@@ -161,10 +121,6 @@ Resources:
           KeyType: HASH
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
-      SSESpecification:
-        SSEEnabled: true
-        SSEType: KMS
-        KMSMasterKeyId: !Ref DeployerKMSKey
       Tags:
         - Key: Project
           Value: BounceDeployer
@@ -203,10 +159,6 @@ Resources:
         Enabled: true
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
-      SSESpecification:
-        SSEEnabled: true
-        SSEType: KMS
-        KMSMasterKeyId: !Ref DeployerKMSKey
       Tags:
         - Key: Project
           Value: BounceDeployer
@@ -230,10 +182,6 @@ Resources:
       TimeToLiveSpecification:
         AttributeName: ttl
         Enabled: true
-      SSESpecification:
-        SSEEnabled: true
-        SSEType: KMS
-        KMSMasterKeyId: !Ref DeployerKMSKey
       Tags:
         - Key: Project
           Value: BounceDeployer
@@ -251,7 +199,6 @@ Resources:
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
-          # 允許的服務
           - Sid: AllowedServices
             Effect: Allow
             Action:
@@ -270,7 +217,6 @@ Resources:
               - cloudwatch:*
               - xray:*
             Resource: "*"
-          # 允許的 IAM 操作
           - Sid: AllowIAMReadAndPassRole
             Effect: Allow
             Action:
@@ -280,7 +226,6 @@ Resources:
               - iam:ListAttachedRolePolicies
               - iam:PassRole
             Resource: "*"
-          # 禁止的操作
           - Sid: DenyDangerousActions
             Effect: Deny
             Action:
@@ -307,123 +252,88 @@ Resources:
             Principal:
               Service: codebuild.amazonaws.com
             Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildSAMDeployerPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: CloudWatchLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/sam-deployer*"
+              - Sid: S3Artifacts
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource:
+                  - !Sub "${ArtifactsBucket.Arn}"
+                  - !Sub "${ArtifactsBucket.Arn}/*"
+                  - "arn:aws:s3:::aws-sam-cli-managed-default-*"
+                  - "arn:aws:s3:::aws-sam-cli-managed-default-*/*"
+              - Sid: SecretsManager
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:sam-deployer/*"
+              - Sid: KMS
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource: !GetAtt DeployerKMSKey.Arn
+              - Sid: CloudFormation
+                Effect: Allow
+                Action:
+                  - cloudformation:*
+                Resource: "*"
+              - Sid: SAMResources
+                Effect: Allow
+                Action:
+                  - lambda:*
+                  - apigateway:*
+                  - dynamodb:*
+                  - events:*
+                  - sqs:*
+                  - sns:*
+                  - logs:*
+                  - cloudwatch:*
+                Resource: "*"
+              - Sid: IAMForSAM
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:PassRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                Resource:
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/*"
+              - Sid: CrossAccountAssumeRole
+                Effect: Allow
+                Action: sts:AssumeRole
+                Resource: "arn:aws:iam::*:role/BouncerDeployerRole"
       Tags:
         - Key: Project
           Value: BounceDeployer
         - Key: auto-delete
           Value: "no"
-
-  CodeBuildPolicy:
-    Type: AWS::IAM::Policy
-    Properties:
-      PolicyName: CodeBuildSAMDeployerPolicy
-      Roles:
-        - !Ref CodeBuildRole
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          # CloudWatch Logs
-          - Sid: CloudWatchLogs
-            Effect: Allow
-            Action:
-              - logs:CreateLogGroup
-              - logs:CreateLogStream
-              - logs:PutLogEvents
-            Resource:
-              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/sam-deployer*"
-          
-          # S3 Artifacts
-          - Sid: S3Artifacts
-            Effect: Allow
-            Action:
-              - s3:GetObject
-              - s3:PutObject
-              - s3:DeleteObject
-              - s3:ListBucket
-              - s3:GetBucketLocation
-            Resource:
-              - !Sub "${ArtifactsBucket.Arn}"
-              - !Sub "${ArtifactsBucket.Arn}/*"
-              - "arn:aws:s3:::aws-sam-cli-managed-default-*"
-              - "arn:aws:s3:::aws-sam-cli-managed-default-*/*"
-          
-          # Secrets Manager
-          - Sid: SecretsManager
-            Effect: Allow
-            Action:
-              - secretsmanager:GetSecretValue
-            Resource:
-              - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:sam-deployer/*"
-              - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${GitHubPATSecretName}-*"
-          
-          # KMS
-          - Sid: KMS
-            Effect: Allow
-            Action:
-              - kms:Decrypt
-              - kms:GenerateDataKey
-            Resource: !GetAtt DeployerKMSKey.Arn
-          
-          # CloudFormation
-          - Sid: CloudFormation
-            Effect: Allow
-            Action:
-              - cloudformation:*
-            Resource: "*"
-          
-          # SAM 資源
-          - Sid: SAMResources
-            Effect: Allow
-            Action:
-              - lambda:*
-              - apigateway:*
-              - dynamodb:*
-              - events:*
-              - sqs:*
-              - sns:*
-              - logs:*
-              - cloudwatch:*
-            Resource: "*"
-          
-          # IAM - 有限制
-          - Sid: IAMForSAM
-            Effect: Allow
-            Action:
-              - iam:CreateRole
-              - iam:DeleteRole
-              - iam:AttachRolePolicy
-              - iam:DetachRolePolicy
-              - iam:PutRolePolicy
-              - iam:DeleteRolePolicy
-              - iam:GetRole
-              - iam:GetRolePolicy
-              - iam:PassRole
-              - iam:TagRole
-              - iam:UntagRole
-              - iam:ListRolePolicies
-              - iam:ListAttachedRolePolicies
-            Resource:
-              - !Sub "arn:aws:iam::${AWS::AccountId}:role/sam-*"
-              - !Sub "arn:aws:iam::${AWS::AccountId}:role/*-ApprovalFunctionRole-*"
-              - !Sub "arn:aws:iam::${AWS::AccountId}:role/*-NotifierLambdaRole-*"
-          
-          # IAM - Permission Boundary 強制
-          - Sid: IAMRequireBoundary
-            Effect: Deny
-            Action:
-              - iam:CreateRole
-              - iam:PutRolePermissionsBoundary
-              - iam:DeleteRolePermissionsBoundary
-            Resource: "*"
-            Condition:
-              StringNotEquals:
-                "iam:PermissionsBoundary": !Ref SAMDeployerBoundary
-          
-          # Cross-Account AssumeRole
-          - Sid: CrossAccountAssumeRole
-            Effect: Allow
-            Action: sts:AssumeRole
-            Resource: "arn:aws:iam::*:role/BouncerDeployerRole"
 
   # ============================================================
   # IAM - Notifier Lambda Role
@@ -451,12 +361,6 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
-              - Sid: SecretsManager
-                Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
-                Resource:
-                  - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:sam-deployer/*"
               - Sid: DynamoDB
                 Effect: Allow
                 Action:
@@ -469,63 +373,6 @@ Resources:
                 Action:
                   - kms:Decrypt
                 Resource: !GetAtt DeployerKMSKey.Arn
-      Tags:
-        - Key: Project
-          Value: BounceDeployer
-        - Key: auto-delete
-          Value: "no"
-
-  # ============================================================
-  # IAM - Deploy Trigger Role (Bouncer 用)
-  # ============================================================
-  DeployTriggerRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: BounceDeployerTriggerRole
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: DeployTriggerPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Sid: StepFunctions
-                Effect: Allow
-                Action:
-                  - states:StartExecution
-                  - states:DescribeExecution
-                  - states:StopExecution
-                Resource: !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:sam-deployer-*"
-              - Sid: DynamoDB
-                Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:PutItem
-                  - dynamodb:UpdateItem
-                  - dynamodb:DeleteItem
-                  - dynamodb:Query
-                Resource:
-                  - !GetAtt ProjectsTable.Arn
-                  - !GetAtt DeployHistoryTable.Arn
-                  - !Sub "${DeployHistoryTable.Arn}/index/*"
-                  - !GetAtt DeployLocksTable.Arn
-              - Sid: KMS
-                Effect: Allow
-                Action:
-                  - kms:Decrypt
-                Resource: !GetAtt DeployerKMSKey.Arn
-              - Sid: CloudWatchLogs
-                Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
       Tags:
         - Key: Project
           Value: BounceDeployer
@@ -575,6 +422,16 @@ Resources:
                   - xray:PutTraceSegments
                   - xray:PutTelemetryRecords
                 Resource: "*"
+              - Sid: EventBridge
+                Effect: Allow
+                Action:
+                  - events:PutTargets
+                  - events:PutRule
+                  - events:DescribeRule
+                  - events:DeleteRule
+                  - events:RemoveTargets
+                Resource:
+                  - !Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/StepFunctions*"
       Tags:
         - Key: Project
           Value: BounceDeployer
@@ -597,7 +454,7 @@ Resources:
         Type: ARM_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/amazonlinux2-aarch64-standard:3.0
-        PrivilegedMode: false
+        PrivilegedMode: true
         EnvironmentVariables:
           - Name: ARTIFACTS_BUCKET
             Value: !Ref ArtifactsBucket
@@ -620,19 +477,15 @@ Resources:
               commands:
                 - echo "Cloning repository..."
                 - git clone --depth 1 -b ${GIT_BRANCH} https://${GITHUB_PAT}@github.com/${GIT_REPO}.git repo
-                - cd repo/${SAM_TEMPLATE_PATH}
                 - echo "Running cfn-lint..."
-                - cfn-lint template.yaml || true
+                - cfn-lint repo/${SAM_TEMPLATE_PATH}/template.yaml || true
             build:
               commands:
-                - cd repo/${SAM_TEMPLATE_PATH}
-                - echo "Building SAM application..."
-                - sam build
-                - echo "Deploying SAM application..."
+                - cd repo/${SAM_TEMPLATE_PATH} && echo "Building SAM application..." && sam build
                 - |
-                  sam deploy \
+                  cd repo/${SAM_TEMPLATE_PATH} && sam deploy \
                     --stack-name ${STACK_NAME} \
-                    --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND \
+                    --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM \
                     --resolve-s3 \
                     --no-confirm-changeset \
                     --no-fail-on-empty-changeset \
@@ -745,26 +598,6 @@ Resources:
       Tags:
         Project: BounceDeployer
         auto-delete: "no"
-
-  # ============================================================
-  # CloudWatch Alarms
-  # ============================================================
-  DeployFailureAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: bouncer-deployer-failures
-      AlarmDescription: Alert when deployments fail
-      MetricName: ExecutionsFailed
-      Namespace: AWS/States
-      Dimensions:
-        - Name: StateMachineArn
-          Value: !Ref DeployStateMachine
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 1
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      TreatMissingData: notBreaching
 
 Outputs:
   ArtifactsBucket:
