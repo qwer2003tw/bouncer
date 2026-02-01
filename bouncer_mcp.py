@@ -263,33 +263,97 @@ def tool_status(arguments: dict) -> dict:
     return http_request('GET', f'/status/{request_id}')
 
 
+def poll_for_result(request_id: str, timeout: int, action: str) -> dict:
+    """共用的輪詢邏輯"""
+    start_time = time.time()
+    log(f"Waiting for approval: {request_id} ({action}, timeout: {timeout}s)")
+    
+    while (time.time() - start_time) < timeout:
+        time.sleep(POLL_INTERVAL)
+        
+        status_result = http_request('GET', f'/status/{request_id}')
+        current_status = status_result.get('status', '')
+        
+        if current_status == 'approved':
+            return {
+                'status': 'approved',
+                'request_id': request_id,
+                'action': action,
+                'waited_seconds': int(time.time() - start_time)
+            }
+        
+        elif current_status == 'denied':
+            return {
+                'status': 'denied',
+                'request_id': request_id,
+                'action': action,
+                'waited_seconds': int(time.time() - start_time)
+            }
+        
+        elif current_status == 'timeout':
+            return {
+                'status': 'timeout',
+                'request_id': request_id,
+                'message': 'Request expired on server'
+            }
+        
+        # pending_approval → 繼續等待
+    
+    return {
+        'status': 'timeout',
+        'request_id': request_id,
+        'message': f'No response after {timeout} seconds',
+        'waited_seconds': timeout
+    }
+
+
 def tool_add_account(arguments: dict) -> dict:
-    """新增帳號（走 MCP 端點）"""
+    """新增帳號（使用 async 模式 + 本地輪詢）"""
     if not SECRET:
         return {'error': 'BOUNCER_SECRET not configured'}
     
-    # 透過 MCP 端點呼叫
+    timeout = arguments.get('timeout', DEFAULT_TIMEOUT)
+    
+    # 加上 async=true 讓 Lambda 立即返回
+    args_with_async = dict(arguments)
+    args_with_async['async'] = True
+    
     payload = {
         'jsonrpc': '2.0',
         'id': 'add-account',
         'method': 'tools/call',
         'params': {
             'name': 'bouncer_add_account',
-            'arguments': arguments
+            'arguments': args_with_async
         }
     }
     
     result = http_request('POST', '/mcp', payload)
     
     # 解析 MCP 回應
+    inner_result = None
     if 'result' in result:
         content = result['result'].get('content', [])
         if content and content[0].get('type') == 'text':
             try:
-                return json.loads(content[0]['text'])
+                inner_result = json.loads(content[0]['text'])
             except:
-                return content[0]
-    return result
+                return result
+    
+    if not inner_result:
+        return result
+    
+    # 如果是 error 或其他終態，直接返回
+    status = inner_result.get('status', '')
+    if status != 'pending_approval':
+        return inner_result
+    
+    # 開始本地輪詢
+    request_id = inner_result.get('request_id')
+    if not request_id:
+        return {'error': 'No request_id returned', 'response': inner_result}
+    
+    return poll_for_result(request_id, timeout, 'add_account')
 
 
 def tool_list_accounts(arguments: dict) -> dict:
@@ -320,9 +384,14 @@ def tool_list_accounts(arguments: dict) -> dict:
 
 
 def tool_remove_account(arguments: dict) -> dict:
-    """移除帳號（走 MCP 端點）"""
+    """移除帳號（使用 async 模式 + 本地輪詢）"""
     if not SECRET:
         return {'error': 'BOUNCER_SECRET not configured'}
+    
+    timeout = arguments.get('timeout', DEFAULT_TIMEOUT)
+    
+    args_with_async = dict(arguments)
+    args_with_async['async'] = True
     
     payload = {
         'jsonrpc': '2.0',
@@ -330,20 +399,33 @@ def tool_remove_account(arguments: dict) -> dict:
         'method': 'tools/call',
         'params': {
             'name': 'bouncer_remove_account',
-            'arguments': arguments
+            'arguments': args_with_async
         }
     }
     
     result = http_request('POST', '/mcp', payload)
     
+    inner_result = None
     if 'result' in result:
         content = result['result'].get('content', [])
         if content and content[0].get('type') == 'text':
             try:
-                return json.loads(content[0]['text'])
+                inner_result = json.loads(content[0]['text'])
             except:
-                return content[0]
-    return result
+                return result
+    
+    if not inner_result:
+        return result
+    
+    status = inner_result.get('status', '')
+    if status != 'pending_approval':
+        return inner_result
+    
+    request_id = inner_result.get('request_id')
+    if not request_id:
+        return {'error': 'No request_id returned', 'response': inner_result}
+    
+    return poll_for_result(request_id, timeout, 'remove_account')
 
 # ============================================================================
 # MCP Server

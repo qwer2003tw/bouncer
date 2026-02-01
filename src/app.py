@@ -557,6 +557,7 @@ def mcp_tool_add_account(req_id, arguments: dict) -> dict:
     name = str(arguments.get('name', '')).strip()
     role_arn = str(arguments.get('role_arn', '')).strip()
     source = arguments.get('source', None)
+    async_mode = arguments.get('async', False)  # 如果 True，立即返回 pending
     
     # 驗證
     valid, error = validate_account_id(account_id)
@@ -600,7 +601,18 @@ def mcp_tool_add_account(req_id, arguments: dict) -> dict:
     # 發送 Telegram 審批
     send_account_approval_request(request_id, 'add', account_id, name, role_arn, source)
     
-    # 等待結果
+    # 如果是 async 模式，立即返回讓 client 輪詢
+    if async_mode:
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'pending_approval',
+                'request_id': request_id,
+                'message': '請求已發送，等待 Telegram 確認',
+                'expires_in': '300 seconds'
+            })}]
+        })
+    
+    # 同步模式：等待結果（會被 API Gateway 29s 超時）
     result = wait_for_result_mcp(request_id, timeout=300)
     
     return mcp_result(req_id, {
@@ -628,6 +640,7 @@ def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
     """MCP tool: bouncer_remove_account（需要 Telegram 審批）"""
     account_id = str(arguments.get('account_id', '')).strip()
     source = arguments.get('source', None)
+    async_mode = arguments.get('async', False)
     
     # 驗證
     valid, error = validate_account_id(account_id)
@@ -672,7 +685,18 @@ def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
     # 發送 Telegram 審批
     send_account_approval_request(request_id, 'remove', account_id, account.get('name', ''), None, source)
     
-    # 等待結果
+    # 如果是 async 模式，立即返回讓 client 輪詢
+    if async_mode:
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'pending_approval',
+                'request_id': request_id,
+                'message': '請求已發送，等待 Telegram 確認',
+                'expires_in': '300 seconds'
+            })}]
+        })
+    
+    # 同步模式：等待結果
     result = wait_for_result_mcp(request_id, timeout=300)
     
     return mcp_result(req_id, {
