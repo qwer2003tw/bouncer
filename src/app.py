@@ -405,6 +405,7 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
     if account_id:
         account_id = str(account_id).strip()
     timeout = min(int(arguments.get('timeout', MCP_MAX_WAIT)), MCP_MAX_WAIT)
+    async_mode = arguments.get('async', False)  # 如果 True，立即返回 pending
     
     if not command:
         return mcp_error(req_id, -32602, 'Missing required parameter: command')
@@ -505,7 +506,24 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
     # 發送 Telegram 審批請求
     send_approval_request_v2(request_id, command, reason, timeout, source, account_id, account_name)
     
-    # 長輪詢等待結果
+    # 如果是 async 模式，立即返回讓 client 輪詢
+    if async_mode:
+        return mcp_result(req_id, {
+            'content': [{
+                'type': 'text',
+                'text': json.dumps({
+                    'status': 'pending_approval',
+                    'request_id': request_id,
+                    'command': command,
+                    'account': account_id,
+                    'account_name': account_name,
+                    'message': '請求已發送，等待 Telegram 確認',
+                    'expires_in': f'{timeout} seconds'
+                })
+            }]
+        })
+    
+    # 同步模式：長輪詢等待結果（會被 API Gateway 29s 超時）
     result = wait_for_result_mcp(request_id, timeout=timeout)
     
     return mcp_result(req_id, {

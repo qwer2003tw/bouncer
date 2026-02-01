@@ -169,7 +169,7 @@ def http_request(method: str, path: str, data: dict = None) -> dict:
 # ============================================================================
 
 def tool_execute(arguments: dict) -> dict:
-    """執行 AWS 命令，等待審批（透過 MCP endpoint）"""
+    """執行 AWS 命令，等待審批（使用 async 模式 + 本地輪詢）"""
     command = str(arguments.get('command', '')).strip()
     reason = str(arguments.get('reason', 'No reason provided'))
     source = arguments.get('source', 'OpenClaw Agent')
@@ -184,12 +184,13 @@ def tool_execute(arguments: dict) -> dict:
     if not SECRET:
         return {'error': 'BOUNCER_SECRET not configured'}
     
-    # 透過 MCP endpoint 呼叫
+    # 使用 async 模式讓 Lambda 立即返回
     mcp_args = {
         'command': command,
         'reason': reason,
         'source': source,
-        'timeout': timeout
+        'timeout': timeout,
+        'async': True  # 關鍵：讓 Lambda 不等待，立即返回
     }
     if account:
         mcp_args['account'] = account
@@ -219,12 +220,12 @@ def tool_execute(arguments: dict) -> dict:
     if not inner_result:
         return result
     
-    # 如果是自動批准、blocked、error，直接返回
+    # 如果是 auto_approved、blocked、error，直接返回
     status = inner_result.get('status', '')
     if status in ('auto_approved', 'blocked', 'error'):
         return inner_result
     
-    # 如果不是 pending，直接返回
+    # 如果不是 pending_approval，直接返回
     if status != 'pending_approval':
         return inner_result
     
@@ -233,8 +234,8 @@ def tool_execute(arguments: dict) -> dict:
     if not request_id:
         return {'error': 'No request_id returned', 'response': inner_result}
     
-    start_time = time.time()
     log(f"Waiting for approval: {request_id} (timeout: {timeout}s)")
+    start_time = time.time()
     
     while (time.time() - start_time) < timeout:
         time.sleep(POLL_INTERVAL)
