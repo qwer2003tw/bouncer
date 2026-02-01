@@ -1444,13 +1444,47 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
     from io import StringIO
     
     try:
-        args = shlex.split(command)
+        # 使用 shlex.split 但保留引號給 JSON 參數
+        # shlex.split 會移除引號，所以我們需要特殊處理
+        try:
+            args = shlex.split(command)
+        except ValueError as e:
+            return f'❌ 命令格式錯誤: {str(e)}'
         
         if not args or args[0] != 'aws':
             return '❌ 只能執行 aws CLI 命令'
         
         # 移除 'aws' 前綴，awscli.clidriver 不需要它
         cli_args = args[1:]
+        
+        # 修復 JSON 參數：shlex.split 會把 {"key": "value"} 變成 {key: value}
+        # 需要從原始命令中重新提取 JSON 參數
+        json_params = ['--item', '--expression-attribute-values', '--expression-attribute-names', 
+                       '--key', '--update-expression', '--cli-input-json', '--filter-expression']
+        
+        for i, arg in enumerate(cli_args):
+            if arg in json_params and i + 1 < len(cli_args):
+                # 從原始命令中找出這個參數的值
+                param_pos = command.find(arg)
+                if param_pos != -1:
+                    # 找參數後面的值（可能是 JSON）
+                    after_param = command[param_pos + len(arg):].lstrip()
+                    if after_param.startswith('{') or after_param.startswith("'{") or after_param.startswith('"{'):
+                        # 提取 JSON 字串
+                        after_param = after_param.lstrip("'\"")
+                        brace_count = 0
+                        json_end = 0
+                        for j, c in enumerate(after_param):
+                            if c == '{':
+                                brace_count += 1
+                            elif c == '}':
+                                brace_count -= 1
+                                if brace_count == 0:
+                                    json_end = j + 1
+                                    break
+                        if json_end > 0:
+                            json_str = after_param[:json_end]
+                            cli_args[i + 1] = json_str
         
         # 保存原始環境變數
         original_env = {}
