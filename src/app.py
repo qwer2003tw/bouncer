@@ -1391,7 +1391,11 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
 
 def is_blocked(command: str) -> bool:
     """Layer 1: 檢查命令是否在黑名單"""
-    cmd_lower = command.lower()
+    import re
+    # 移除 --query 參數內容（JMESPath 語法可能包含反引號）
+    # 匹配 --query '...' 或 --query "..."
+    cmd_sanitized = re.sub(r"--query\s+['\"].*?['\"]", "--query REDACTED", command)
+    cmd_lower = cmd_sanitized.lower()
     return any(pattern in cmd_lower for pattern in BLOCKED_PATTERNS)
 
 
