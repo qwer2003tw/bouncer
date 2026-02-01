@@ -228,7 +228,7 @@ def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str) -
         'branch': branch or project.get('default_branch', 'master'),
         'stack_name': project.get('stack_name', ''),
         'sam_template_path': project.get('sam_template_path', '.'),
-        'sam_params': '',  # 從 Secrets Manager 讀取
+        'sam_params': project.get('sam_params', ''),
         'github_pat_secret': 'sam-deployer/github-pat',
         'secrets_id': project.get('secrets_id', '')
     }
