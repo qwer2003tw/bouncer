@@ -1393,8 +1393,9 @@ def is_blocked(command: str) -> bool:
     """Layer 1: 檢查命令是否在黑名單"""
     import re
     # 移除 --query 參數內容（JMESPath 語法可能包含反引號）
-    # 匹配 --query '...' 或 --query "..."
+    # 匹配 --query '...' 或 --query "..." 或 --query xxx（無引號，到下一個空格或結尾）
     cmd_sanitized = re.sub(r"--query\s+['\"].*?['\"]", "--query REDACTED", command)
+    cmd_sanitized = re.sub(r"--query\s+[^\s'\"]+", "--query REDACTED", cmd_sanitized)
     cmd_lower = cmd_sanitized.lower()
     return any(pattern in cmd_lower for pattern in BLOCKED_PATTERNS)
 
