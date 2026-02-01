@@ -4,6 +4,10 @@ Description: >
   Bouncer v3.0.0 - Clawdbot AWS 命令審批執行系統 (API Gateway)
 
 Parameters:
+  Environment:
+    Type: String
+    Default: "prod"
+    Description: 環境名稱（prod/dev/staging），用於資源名稱前綴
   TelegramBotToken:
     Type: String
     NoEcho: true
@@ -47,7 +51,7 @@ Resources:
   RequestsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: clawdbot-approval-requests
+      TableName: !Sub "bouncer-${Environment}-requests"
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: request_id
@@ -70,7 +74,7 @@ Resources:
   AccountsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: bouncer-accounts
+      TableName: !Sub "bouncer-${Environment}-accounts"
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: account_id
@@ -90,7 +94,7 @@ Resources:
   ApprovalFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: clawdbot-aws-approval
+      FunctionName: !Sub "bouncer-${Environment}-function"
       CodeUri: src/
       Handler: app.lambda_handler
       Description: Bouncer v3.0.0 - AWS 命令審批執行
