@@ -492,19 +492,19 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
     target_account = project.get('target_account', '')
     
     branch = branch or project.get('default_branch', 'master')
-    source_line = f"🤖 *來源：* {source}\n" if source else ""
-    account_line = f"🏢 *帳號：* `{target_account}`\n" if target_account else ""
+    source_line = f"🤖 來源： {source}\n" if source else ""
+    account_line = f"🏢 帳號： {target_account}\n" if target_account else ""
     
     text = (
-        f"🚀 *SAM 部署請求*\n\n"
+        f"🚀 SAM 部署請求\n\n"
         f"{source_line}"
-        f"📦 *專案：* {project_name}\n"
-        f"🌿 *分支：* {branch}\n"
+        f"📦 專案： {project_name}\n"
+        f"🌿 分支： {branch}\n"
         f"{account_line}"
-        f"📋 *Stack：* {stack_name}\n\n"
-        f"💬 *原因：* {reason}\n\n"
-        f"🆔 *ID：* `{request_id}`\n"
-        f"⏰ *5 分鐘後過期*"
+        f"📋 Stack： {stack_name}\n\n"
+        f"💬 原因： {reason}\n\n"
+        f"🆔 ID： {request_id}\n"
+        f"⏰ 5 分鐘後過期"
     )
     
     keyboard = {
@@ -521,7 +521,6 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
     data = {
         'chat_id': APPROVED_CHAT_ID,
         'text': text,
-        'parse_mode': 'Markdown',
         'reply_markup': json.dumps(keyboard)
     }
     

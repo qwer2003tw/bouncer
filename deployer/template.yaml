@@ -473,23 +473,29 @@ Resources:
                 python: 3.11
               commands:
                 - pip install aws-sam-cli cfn-lint
+                - nohup /usr/local/bin/dockerd --host=unix:///var/run/docker.sock --host=tcp://127.0.0.1:2375 &
+                - timeout 15 sh -c "until docker info; do echo .; sleep 1; done"
             pre_build:
               commands:
                 - echo "Cloning repository..."
                 - git clone --depth 1 -b ${GIT_BRANCH} https://${GITHUB_PAT}@github.com/${GIT_REPO}.git repo
+                - export WORK_DIR=$(pwd)/repo/${SAM_TEMPLATE_PATH}
+                - echo "WORK_DIR=$WORK_DIR"
                 - echo "Running cfn-lint..."
-                - cfn-lint repo/${SAM_TEMPLATE_PATH}/template.yaml || true
+                - cfn-lint ${WORK_DIR}/template.yaml || true
             build:
               commands:
-                - cd repo/${SAM_TEMPLATE_PATH} && echo "Building SAM application..." && sam build
+                - export WORK_DIR=$(pwd)/repo/${SAM_TEMPLATE_PATH}
+                - echo "Building SAM application in $WORK_DIR..."
+                - cd $WORK_DIR && sam build --use-container
+                - echo "Deploying to stack $STACK_NAME..."
                 - |
-                  cd repo/${SAM_TEMPLATE_PATH} && sam deploy \
-                    --stack-name ${STACK_NAME} \
-                    --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM \
-                    --resolve-s3 \
-                    --no-confirm-changeset \
-                    --no-fail-on-empty-changeset \
-                    --parameter-overrides ${SAM_PARAMS}
+                  cd $WORK_DIR
+                  if [ -n "$SAM_PARAMS" ]; then
+                    sam deploy --stack-name "$STACK_NAME" --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM --resolve-s3 --no-confirm-changeset --no-fail-on-empty-changeset --parameter-overrides $SAM_PARAMS
+                  else
+                    sam deploy --stack-name "$STACK_NAME" --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM --resolve-s3 --no-confirm-changeset --no-fail-on-empty-changeset
+                  fi
             post_build:
               commands:
                 - echo "Deployment complete!"
@@ -558,16 +564,22 @@ Resources:
               ProjectName: sam-deployer
               EnvironmentVariablesOverride:
                 - Name: GIT_REPO
+                  Type: PLAINTEXT
                   Value.$: $.git_repo
                 - Name: GIT_BRANCH
+                  Type: PLAINTEXT
                   Value.$: $.branch
                 - Name: STACK_NAME
+                  Type: PLAINTEXT
                   Value.$: $.stack_name
                 - Name: SAM_TEMPLATE_PATH
+                  Type: PLAINTEXT
                   Value.$: $.sam_template_path
                 - Name: SAM_PARAMS
+                  Type: PLAINTEXT
                   Value.$: $.sam_params
                 - Name: GITHUB_PAT_SECRET
+                  Type: PLAINTEXT
                   Value.$: $.github_pat_secret
             ResultPath: $.build_result
             Next: NotifySuccess

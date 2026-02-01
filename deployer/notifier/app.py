@@ -178,11 +178,7 @@ def handle_failure(event):
     duration = int(time.time()) - int(started_at) if started_at else 0
     
     # 解析錯誤訊息
-    error_message = 'Unknown error'
-    if isinstance(error, dict):
-        error_message = error.get('Cause', error.get('Error', str(error)))
-    else:
-        error_message = str(error)
+    error_message = extract_error_message(error)
     
     # 截斷錯誤訊息
     if len(error_message) > 500:
@@ -305,3 +301,57 @@ def format_duration(seconds: int) -> str:
         hours = seconds // 3600
         minutes = (seconds % 3600) // 60
         return f"{hours} 小時 {minutes} 分"
+
+
+def extract_error_message(error) -> str:
+    """從 Step Functions 錯誤中提取可讀訊息"""
+    if not error:
+        return 'Unknown error'
+    
+    # 如果是字串，直接返回
+    if isinstance(error, str):
+        return error
+    
+    # 如果是 dict，嘗試解析
+    if isinstance(error, dict):
+        # Step Functions 錯誤結構
+        cause = error.get('Cause', '')
+        error_type = error.get('Error', '')
+        
+        # 嘗試解析 Cause（可能是 JSON 字串）
+        if cause:
+            try:
+                cause_obj = json.loads(cause) if isinstance(cause, str) else cause
+                
+                # CodeBuild 錯誤
+                if isinstance(cause_obj, dict):
+                    build = cause_obj.get('Build', {})
+                    if build:
+                        status = build.get('BuildStatus', '')
+                        phases = build.get('Phases', [])
+                        
+                        # 找到失敗的 phase
+                        for phase in phases:
+                            if phase.get('PhaseStatus') == 'FAILED':
+                                phase_type = phase.get('PhaseType', '')
+                                contexts = phase.get('Contexts', [])
+                                if contexts:
+                                    msg = contexts[0].get('Message', '')
+                                    return f"[{phase_type}] {msg}"
+                        
+                        return f"Build {status}"
+                    
+                    # 其他錯誤
+                    return str(cause_obj)[:500]
+            except (json.JSONDecodeError, TypeError):
+                pass
+            
+            # 無法解析，返回原始 cause（截斷）
+            return cause[:500] if len(cause) > 500 else cause
+        
+        # 沒有 Cause，返回 Error type
+        if error_type:
+            return f"Error: {error_type}"
+    
+    # 兜底
+    return str(error)[:500]
