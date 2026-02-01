@@ -1,0 +1,12 @@
+# MCP Server 版本的依賴
+# 不需要 boto3 等 Lambda 依賴
+
+# 無外部依賴！
+# - sqlite3: Python 內建
+# - urllib: Python 內建
+# - json: Python 內建
+# - threading: Python 內建
+
+# 測試用
+pytest>=7.0.0
+pytest-cov>=4.0.0

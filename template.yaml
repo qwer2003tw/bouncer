@@ -1,8 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  Bouncer v1.1.0 - Clawdbot AWS 命令審批執行系統
-  整合 Security Analyst + Solutions Architect + Pragmatic Engineer 建議
+  Bouncer v3.0.0 - Clawdbot AWS 命令審批執行系統 (API Gateway)
 
 Parameters:
   TelegramBotToken:
@@ -26,14 +25,18 @@ Parameters:
     Default: "false"
     AllowedValues: ["true", "false"]
     Description: 啟用 HMAC 請求簽章驗證（Phase 2）
+  McpMaxWait:
+    Type: String
+    Default: "840"
+    Description: MCP 模式最大等待時間（秒），預設 840（14分鐘）
 
 Globals:
   Function:
-    Timeout: 60  # 增加到 60 秒支援長輪詢
-    Runtime: python3.12
+    Timeout: 900
+    Runtime: python3.9
     MemorySize: 256
     LoggingConfig:
-      LogFormat: JSON  # 結構化日誌
+      LogFormat: JSON
 
 Resources:
   # ============================================================
@@ -56,8 +59,28 @@ Resources:
       Tags:
         - Key: Project
           Value: Bouncer
-        - Key: Owner
-          Value: Clawdbot
+        - Key: auto-delete
+          Value: "no"
+
+  # ============================================================
+  # DynamoDB - 帳號配置
+  # ============================================================
+  AccountsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: bouncer-accounts
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: account_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: account_id
+          KeyType: HASH
+      Tags:
+        - Key: Project
+          Value: Bouncer
+        - Key: auto-delete
+          Value: "no"
 
   # ============================================================
   # Lambda - 主函數
@@ -68,21 +91,41 @@ Resources:
       FunctionName: clawdbot-aws-approval
       CodeUri: src/
       Handler: app.lambda_handler
-      Description: Bouncer v1.1.0 - AWS 命令審批執行
-      FunctionUrlConfig:
-        AuthType: NONE
-        Cors:
-          AllowOrigins:
-            - "*"
-          AllowMethods:
-            - GET
-            - POST
-          AllowHeaders:
-            - Content-Type
-            - X-Approval-Secret
-            - X-Timestamp
-            - X-Nonce
-            - X-Signature
+      Description: Bouncer v3.0.0 - AWS 命令審批執行
+      Tags:
+        Project: Bouncer
+        auto-delete: "no"
+      Events:
+        RootPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BouncerApi
+            Path: /
+            Method: POST
+        RootGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BouncerApi
+            Path: /
+            Method: GET
+        Webhook:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BouncerApi
+            Path: /webhook
+            Method: POST
+        Mcp:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BouncerApi
+            Path: /mcp
+            Method: POST
+        Status:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BouncerApi
+            Path: /status/{request_id}
+            Method: GET
       Environment:
         Variables:
           TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
@@ -90,77 +133,66 @@ Resources:
           REQUEST_SECRET: !Ref RequestSecret
           TELEGRAM_WEBHOOK_SECRET: !Ref TelegramWebhookSecret
           TABLE_NAME: !Ref RequestsTable
+          ACCOUNTS_TABLE_NAME: !Ref AccountsTable
           ENABLE_HMAC: !Ref EnableHmac
+          MCP_MAX_WAIT: !Ref McpMaxWait
+          DEFAULT_ACCOUNT_ID: '111111111111'
       Policies:
-        # DynamoDB 權限
         - DynamoDBCrudPolicy:
             TableName: !Ref RequestsTable
-        
-        # AWS 執行權限
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AccountsTable
         - Version: '2012-10-17'
           Statement:
-            # Read-only 權限（自動批准候選）
-            - Sid: ReadOnly
+            # PowerUser: 可以做大部分事情，但不能動 IAM
+            - Sid: PowerUserAccess
               Effect: Allow
-              Action:
-                # EC2
-                - ec2:Describe*
-                # S3
-                - s3:List*
-                - s3:Get*
-                # RDS
-                - rds:Describe*
-                # Lambda
-                - lambda:List*
-                - lambda:Get*
-                # CloudWatch
-                - logs:Describe*
-                - logs:Get*
-                - logs:FilterLogEvents
-                - cloudwatch:Describe*
-                - cloudwatch:Get*
-                - cloudwatch:List*
-                # IAM (read-only)
-                - iam:List*
-                - iam:Get*
-                # STS
-                - sts:GetCallerIdentity
-                # SSM (read-only)
-                - ssm:Describe*
-                - ssm:Get*
-                - ssm:List*
-                # Route53 (read-only)
-                - route53:List*
-                - route53:Get*
-                # ECS/EKS (read-only)
-                - ecs:Describe*
-                - ecs:List*
-                - eks:Describe*
-                - eks:List*
+              Action: '*'
               Resource: '*'
-            
-            # Write 權限（需要人工審批）
-            - Sid: WriteWithApproval
-              Effect: Allow
+            - Sid: DenyDangerousIAM
+              Effect: Deny
               Action:
-                - s3:PutObject
-                - s3:DeleteObject
-                - ec2:StartInstances
-                - ec2:StopInstances
-                - ec2:RebootInstances
-                - lambda:UpdateFunctionCode
-                - lambda:UpdateFunctionConfiguration
-                - lambda:InvokeFunction
+                - iam:CreateUser
+                - iam:DeleteUser
+                - iam:CreateRole
+                - iam:DeleteRole
+                - iam:AttachUserPolicy
+                - iam:DetachUserPolicy
+                - iam:AttachRolePolicy
+                - iam:DetachRolePolicy
+                - iam:PutUserPolicy
+                - iam:DeleteUserPolicy
+                - iam:PutRolePolicy
+                - iam:DeleteRolePolicy
+                - iam:CreateAccessKey
+                - iam:DeleteAccessKey
+                - iam:UpdateAccessKey
+                - organizations:*
               Resource: '*'
 
   # ============================================================
-  # CloudWatch Alarm（監控異常）
+  # API Gateway
+  # ============================================================
+  BouncerApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: bouncer-api
+      StageName: prod
+      Tags:
+        Project: Bouncer
+        auto-delete: "no"
+      Cors:
+        AllowOrigin: "'*'"
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Approval-Secret,X-Timestamp,X-Nonce,X-Signature'"
+
+  # ============================================================
+  # CloudWatch Alarms
   # ============================================================
   HighErrorAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: bouncer-high-error-rate
-      AlarmDescription: Bouncer Lambda 錯誤率過高
       MetricName: Errors
       Namespace: AWS/Lambda
       Dimensions:
@@ -173,33 +205,19 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
 
-  HighInvocationAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: bouncer-high-invocations
-      AlarmDescription: Bouncer 調用量異常（可能是攻擊）
-      MetricName: Invocations
-      Namespace: AWS/Lambda
-      Dimensions:
-        - Name: FunctionName
-          Value: !Ref ApprovalFunction
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 100
-      ComparisonOperator: GreaterThanThreshold
-      TreatMissingData: notBreaching
-
 Outputs:
-  FunctionUrl:
-    Description: Lambda Function URL（Clawdbot 用這個發請求）
-    Value: !GetAtt ApprovalFunctionUrl.FunctionUrl
+  ApiUrl:
+    Description: API Gateway URL（Clawdbot 用這個發請求）
+    Value: !Sub "https://${BouncerApi}.execute-api.${AWS::Region}.amazonaws.com/prod/"
+  McpEndpoint:
+    Description: MCP JSON-RPC endpoint
+    Value: !Sub "https://${BouncerApi}.execute-api.${AWS::Region}.amazonaws.com/prod/mcp"
   WebhookUrl:
-    Description: Telegram Webhook URL（設定 bot webhook 用）
-    Value: !Sub "${ApprovalFunctionUrl.FunctionUrl}webhook"
+    Description: Telegram Webhook URL
+    Value: !Sub "https://${BouncerApi}.execute-api.${AWS::Region}.amazonaws.com/prod/webhook"
   StatusEndpoint:
     Description: 查詢請求狀態 endpoint
-    Value: !Sub "${ApprovalFunctionUrl.FunctionUrl}status/{request_id}"
+    Value: !Sub "https://${BouncerApi}.execute-api.${AWS::Region}.amazonaws.com/prod/status/{request_id}"
   TableName:
     Description: DynamoDB 表名
     Value: !Ref RequestsTable
