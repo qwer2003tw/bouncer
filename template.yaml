@@ -202,7 +202,7 @@ Resources:
   BouncerApi:
     Type: AWS::Serverless::Api
     Properties:
-      Name: bouncer-api
+      Name: !Sub "bouncer-${Environment}-api"
       StageName: prod
       Tags:
         Project: Bouncer
@@ -218,7 +218,7 @@ Resources:
   HighErrorAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: bouncer-high-error-rate
+      AlarmName: !Sub "bouncer-${Environment}-high-error-rate"
       MetricName: Errors
       Namespace: AWS/Lambda
       Dimensions:
