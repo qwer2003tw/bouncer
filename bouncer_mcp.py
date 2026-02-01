@@ -169,12 +169,14 @@ def http_request(method: str, path: str, data: dict = None) -> dict:
 # ============================================================================
 
 def tool_execute(arguments: dict) -> dict:
-    """執行 AWS 命令，等待審批"""
-    command = arguments.get('command', '').strip()
-    reason = arguments.get('reason', 'No reason provided')
+    """執行 AWS 命令，等待審批（透過 MCP endpoint）"""
+    command = str(arguments.get('command', '')).strip()
+    reason = str(arguments.get('reason', 'No reason provided'))
     source = arguments.get('source', 'OpenClaw Agent')
-    account = arguments.get('account', None)  # 目標帳號 ID
-    timeout = arguments.get('timeout', DEFAULT_TIMEOUT)
+    account = arguments.get('account', None)
+    if account:
+        account = str(account).strip()
+    timeout = int(arguments.get('timeout', DEFAULT_TIMEOUT))
     
     if not command:
         return {'error': 'Missing required parameter: command'}
@@ -182,30 +184,54 @@ def tool_execute(arguments: dict) -> dict:
     if not SECRET:
         return {'error': 'BOUNCER_SECRET not configured'}
     
-    # 1. 提交請求
-    payload = {
+    # 透過 MCP endpoint 呼叫
+    mcp_args = {
         'command': command,
         'reason': reason,
-        'source': source
+        'source': source,
+        'timeout': timeout
     }
     if account:
-        payload['account'] = account
+        mcp_args['account'] = account
     
-    result = http_request('POST', '/', payload)
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'execute',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_execute',
+            'arguments': mcp_args
+        }
+    }
     
-    # 如果是自動批准或被阻擋，直接返回
-    status = result.get('status', '')
-    if status in ('auto_approved', 'blocked'):
+    result = http_request('POST', '/mcp', payload)
+    
+    # 解析 MCP 回應
+    inner_result = None
+    if 'result' in result:
+        content = result['result'].get('content', [])
+        if content and content[0].get('type') == 'text':
+            try:
+                inner_result = json.loads(content[0]['text'])
+            except:
+                return result
+    
+    if not inner_result:
         return result
     
-    # 如果不是 pending，可能是錯誤
+    # 如果是自動批准、blocked、error，直接返回
+    status = inner_result.get('status', '')
+    if status in ('auto_approved', 'blocked', 'error'):
+        return inner_result
+    
+    # 如果不是 pending，直接返回
     if status != 'pending_approval':
-        return result
+        return inner_result
     
-    # 2. 輪詢等待結果
-    request_id = result.get('request_id')
+    # 開始本地輪詢
+    request_id = inner_result.get('request_id')
     if not request_id:
-        return {'error': 'No request_id returned', 'response': result}
+        return {'error': 'No request_id returned', 'response': inner_result}
     
     start_time = time.time()
     log(f"Waiting for approval: {request_id} (timeout: {timeout}s)")
@@ -221,6 +247,7 @@ def tool_execute(arguments: dict) -> dict:
                 'status': 'approved',
                 'request_id': request_id,
                 'command': command,
+                'account': account,
                 'result': status_result.get('result', ''),
                 'approved_by': status_result.get('approver'),
                 'waited_seconds': int(time.time() - start_time)
@@ -231,6 +258,7 @@ def tool_execute(arguments: dict) -> dict:
                 'status': 'denied',
                 'request_id': request_id,
                 'command': command,
+                'account': account,
                 'denied_by': status_result.get('approver'),
                 'waited_seconds': int(time.time() - start_time)
             }
@@ -241,8 +269,6 @@ def tool_execute(arguments: dict) -> dict:
                 'request_id': request_id,
                 'message': 'Request expired on server'
             }
-        
-        # pending_approval → 繼續等待
     
     # Client 端超時
     return {
