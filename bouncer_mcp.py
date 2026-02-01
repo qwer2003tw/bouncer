@@ -132,6 +132,83 @@ TOOLS = [
             },
             'required': ['account_id']
         }
+    },
+    # ========== Deployer Tools ==========
+    {
+        'name': 'bouncer_deploy',
+        'description': '部署 SAM 專案（需要 Telegram 審批）',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'project': {
+                    'type': 'string',
+                    'description': '專案 ID（例如：bouncer）'
+                },
+                'branch': {
+                    'type': 'string',
+                    'description': 'Git 分支（預設使用專案設定的分支）'
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': '部署原因'
+                }
+            },
+            'required': ['project', 'reason']
+        }
+    },
+    {
+        'name': 'bouncer_deploy_status',
+        'description': '查詢部署狀態',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'deploy_id': {
+                    'type': 'string',
+                    'description': '部署 ID'
+                }
+            },
+            'required': ['deploy_id']
+        }
+    },
+    {
+        'name': 'bouncer_deploy_cancel',
+        'description': '取消進行中的部署',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'deploy_id': {
+                    'type': 'string',
+                    'description': '部署 ID'
+                }
+            },
+            'required': ['deploy_id']
+        }
+    },
+    {
+        'name': 'bouncer_deploy_history',
+        'description': '查詢專案部署歷史',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'project': {
+                    'type': 'string',
+                    'description': '專案 ID'
+                },
+                'limit': {
+                    'type': 'integer',
+                    'description': '返回筆數（預設 10）'
+                }
+            },
+            'required': ['project']
+        }
+    },
+    {
+        'name': 'bouncer_project_list',
+        'description': '列出可部署的專案',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {}
+        }
     }
 ]
 
@@ -454,6 +531,135 @@ def tool_remove_account(arguments: dict) -> dict:
     
     return poll_for_result(request_id, timeout, 'remove_account')
 
+
+# ============================================================================
+# Deployer Tools
+# ============================================================================
+
+def tool_deploy(arguments: dict) -> dict:
+    """部署專案（使用 async 模式 + 本地輪詢）"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+    
+    timeout = arguments.get('timeout', DEFAULT_TIMEOUT)
+    
+    args_with_async = dict(arguments)
+    args_with_async['async'] = True
+    
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'deploy',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_deploy',
+            'arguments': args_with_async
+        }
+    }
+    
+    result = http_request('POST', '/mcp', payload)
+    inner_result = parse_mcp_result(result)
+    
+    if not inner_result:
+        return result
+    
+    status = inner_result.get('status', '')
+    if status != 'pending_approval':
+        return inner_result
+    
+    request_id = inner_result.get('request_id')
+    if not request_id:
+        return {'error': 'No request_id returned', 'response': inner_result}
+    
+    return poll_for_result(request_id, timeout, 'deploy')
+
+
+def tool_deploy_status(arguments: dict) -> dict:
+    """查詢部署狀態"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+    
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'deploy-status',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_deploy_status',
+            'arguments': arguments
+        }
+    }
+    
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
+def tool_deploy_cancel(arguments: dict) -> dict:
+    """取消部署"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+    
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'deploy-cancel',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_deploy_cancel',
+            'arguments': arguments
+        }
+    }
+    
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
+def tool_deploy_history(arguments: dict) -> dict:
+    """查詢部署歷史"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+    
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'deploy-history',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_deploy_history',
+            'arguments': arguments
+        }
+    }
+    
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
+def tool_project_list(arguments: dict) -> dict:
+    """列出專案"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+    
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'project-list',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_project_list',
+            'arguments': arguments
+        }
+    }
+    
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
+def parse_mcp_result(result: dict) -> dict:
+    """解析 MCP 回應"""
+    if 'result' in result:
+        content = result['result'].get('content', [])
+        if content and content[0].get('type') == 'text':
+            try:
+                return json.loads(content[0]['text'])
+            except:
+                pass
+    return None
+
 # ============================================================================
 # MCP Server
 # ============================================================================
@@ -499,6 +705,17 @@ def handle_request(request: dict) -> dict:
             result = tool_list_accounts(arguments)
         elif tool_name == 'bouncer_remove_account':
             result = tool_remove_account(arguments)
+        # Deployer tools
+        elif tool_name == 'bouncer_deploy':
+            result = tool_deploy(arguments)
+        elif tool_name == 'bouncer_deploy_status':
+            result = tool_deploy_status(arguments)
+        elif tool_name == 'bouncer_deploy_cancel':
+            result = tool_deploy_cancel(arguments)
+        elif tool_name == 'bouncer_deploy_history':
+            result = tool_deploy_history(arguments)
+        elif tool_name == 'bouncer_project_list':
+            result = tool_project_list(arguments)
         else:
             return error_response(req_id, -32602, f'Unknown tool: {tool_name}')
         

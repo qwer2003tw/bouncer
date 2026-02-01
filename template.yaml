@@ -137,6 +137,11 @@ Resources:
           ENABLE_HMAC: !Ref EnableHmac
           MCP_MAX_WAIT: !Ref McpMaxWait
           DEFAULT_ACCOUNT_ID: '111111111111'
+          # Deployer 相關（暫時硬編碼，部署 deployer stack 後更新）
+          PROJECTS_TABLE: bouncer-projects
+          HISTORY_TABLE: bouncer-deploy-history
+          LOCKS_TABLE: bouncer-deploy-locks
+          DEPLOY_STATE_MACHINE_ARN: ''
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref RequestsTable

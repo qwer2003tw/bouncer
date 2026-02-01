@@ -261,6 +261,79 @@ MCP_TOOLS = {
             },
             'required': ['account_id']
         }
+    },
+    # ========== Deployer Tools ==========
+    'bouncer_deploy': {
+        'description': '部署 SAM 專案（需要 Telegram 審批）',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'project': {
+                    'type': 'string',
+                    'description': '專案 ID（例如：bouncer）'
+                },
+                'branch': {
+                    'type': 'string',
+                    'description': 'Git 分支（預設使用專案設定的分支）'
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': '部署原因'
+                }
+            },
+            'required': ['project', 'reason']
+        }
+    },
+    'bouncer_deploy_status': {
+        'description': '查詢部署狀態',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'deploy_id': {
+                    'type': 'string',
+                    'description': '部署 ID'
+                }
+            },
+            'required': ['deploy_id']
+        }
+    },
+    'bouncer_deploy_cancel': {
+        'description': '取消進行中的部署',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'deploy_id': {
+                    'type': 'string',
+                    'description': '部署 ID'
+                }
+            },
+            'required': ['deploy_id']
+        }
+    },
+    'bouncer_deploy_history': {
+        'description': '查詢專案部署歷史',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'project': {
+                    'type': 'string',
+                    'description': '專案 ID'
+                },
+                'limit': {
+                    'type': 'integer',
+                    'description': '返回筆數（預設 10）',
+                    'default': 10
+                }
+            },
+            'required': ['project']
+        }
+    },
+    'bouncer_project_list': {
+        'description': '列出可部署的專案',
+        'parameters': {
+            'type': 'object',
+            'properties': {}
+        }
     }
 }
 
@@ -391,6 +464,27 @@ def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
     
     elif tool_name == 'bouncer_remove_account':
         return mcp_tool_remove_account(req_id, arguments)
+    
+    # Deployer tools
+    elif tool_name == 'bouncer_deploy':
+        from deployer import mcp_tool_deploy
+        return mcp_tool_deploy(req_id, arguments, table, send_approval_request_v2)
+    
+    elif tool_name == 'bouncer_deploy_status':
+        from deployer import mcp_tool_deploy_status
+        return mcp_tool_deploy_status(req_id, arguments)
+    
+    elif tool_name == 'bouncer_deploy_cancel':
+        from deployer import mcp_tool_deploy_cancel
+        return mcp_tool_deploy_cancel(req_id, arguments)
+    
+    elif tool_name == 'bouncer_deploy_history':
+        from deployer import mcp_tool_deploy_history
+        return mcp_tool_deploy_history(req_id, arguments)
+    
+    elif tool_name == 'bouncer_project_list':
+        from deployer import mcp_tool_project_list
+        return mcp_tool_project_list(req_id, arguments)
     
     else:
         return mcp_error(req_id, -32602, f'Unknown tool: {tool_name}')
@@ -1009,6 +1103,8 @@ def handle_telegram_webhook(event):
         return handle_account_add_callback(action, request_id, item, message_id, callback['id'], user_id)
     elif request_action == 'remove_account':
         return handle_account_remove_callback(action, request_id, item, message_id, callback['id'], user_id)
+    elif request_action == 'deploy':
+        return handle_deploy_callback(action, request_id, item, message_id, callback['id'], user_id)
     else:
         return handle_command_callback(action, request_id, item, message_id, callback['id'], user_id)
 
@@ -1202,6 +1298,85 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
             f"{source_line}"
             f"🆔 *帳號 ID：* `{account_id}`\n"
             f"📛 *名稱：* {account_name}"
+        )
+        answer_callback(callback_id, '❌ 已拒絕')
+    
+    return response(200, {'ok': True})
+
+
+def handle_deploy_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str):
+    """處理部署的審批 callback"""
+    from deployer import start_deploy, release_lock
+    
+    project_id = item.get('project_id', '')
+    project_name = item.get('project_name', project_id)
+    branch = item.get('branch', 'master')
+    stack_name = item.get('stack_name', '')
+    source = item.get('source', '')
+    reason = item.get('reason', '')
+    
+    source_line = f"🤖 *來源：* {source}\n" if source else ""
+    
+    if action == 'approve':
+        # 更新審批狀態
+        table.update_item(
+            Key={'request_id': request_id},
+            UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
+            ExpressionAttributeNames={'#s': 'status'},
+            ExpressionAttributeValues={
+                ':s': 'approved',
+                ':t': int(time.time()),
+                ':a': user_id
+            }
+        )
+        
+        # 啟動部署
+        result = start_deploy(project_id, branch, user_id, reason)
+        
+        if 'error' in result:
+            update_message(
+                message_id,
+                f"❌ *部署啟動失敗*\n\n"
+                f"{source_line}"
+                f"📦 *專案：* {project_name}\n"
+                f"🌿 *分支：* {branch}\n\n"
+                f"❗ *錯誤：* {result['error']}"
+            )
+            answer_callback(callback_id, '❌ 部署啟動失敗')
+        else:
+            deploy_id = result.get('deploy_id', '')
+            update_message(
+                message_id,
+                f"🚀 *部署已啟動*\n\n"
+                f"{source_line}"
+                f"📦 *專案：* {project_name}\n"
+                f"🌿 *分支：* {branch}\n"
+                f"📋 *Stack：* {stack_name}\n\n"
+                f"🆔 *部署 ID：* `{deploy_id}`\n\n"
+                f"⏳ 部署進行中..."
+            )
+            answer_callback(callback_id, '🚀 部署已啟動')
+        
+    elif action == 'deny':
+        table.update_item(
+            Key={'request_id': request_id},
+            UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
+            ExpressionAttributeNames={'#s': 'status'},
+            ExpressionAttributeValues={
+                ':s': 'denied',
+                ':t': int(time.time()),
+                ':a': user_id
+            }
+        )
+        
+        update_message(
+            message_id,
+            f"❌ *已拒絕部署*\n\n"
+            f"{source_line}"
+            f"📦 *專案：* {project_name}\n"
+            f"🌿 *分支：* {branch}\n"
+            f"📋 *Stack：* {stack_name}\n\n"
+            f"💬 *原因：* {reason}"
         )
         answer_callback(callback_id, '❌ 已拒絕')
     
