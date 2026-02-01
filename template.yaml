@@ -15,7 +15,7 @@ Parameters:
   ApprovedChatId:
     Type: String
     Default: "999999999"
-    Description: 允許審批的 Telegram Chat ID
+    Description: 允許審批的 Telegram Chat ID（支援多個，用逗號分隔，例如：999999999,-5177412711）
   RequestSecret:
     Type: String
     NoEcho: true

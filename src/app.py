@@ -47,7 +47,9 @@ VERSION = '3.0.0'
 # 環境變數
 # ============================================================================
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
-APPROVED_CHAT_ID = os.environ.get('APPROVED_CHAT_ID', '999999999')
+# 支援多個 Chat ID，用逗號分隔
+APPROVED_CHAT_IDS = set(os.environ.get('APPROVED_CHAT_ID', '999999999').replace(' ', '').split(','))
+APPROVED_CHAT_ID = os.environ.get('APPROVED_CHAT_ID', '999999999').split(',')[0]  # 向後相容，取第一個作為主要發送目標
 REQUEST_SECRET = os.environ.get('REQUEST_SECRET', '')
 TABLE_NAME = os.environ.get('TABLE_NAME', 'clawdbot-approval-requests')
 ACCOUNTS_TABLE_NAME = os.environ.get('ACCOUNTS_TABLE_NAME', 'bouncer-accounts')
@@ -1059,7 +1061,7 @@ def handle_telegram_webhook(event):
         return response(200, {'ok': True})
     
     user_id = str(callback.get('from', {}).get('id', ''))
-    if user_id != APPROVED_CHAT_ID:
+    if user_id not in APPROVED_CHAT_IDS:
         answer_callback(callback['id'], '❌ 你沒有審批權限')
         return response(403, {'error': 'Unauthorized user'})
     
