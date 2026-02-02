@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+          
+      - name: Install ruff
+        run: pip install ruff
+        
+      - name: Run ruff check
+        run: ruff check src/ mcp_server/ --ignore E501
+
+  cfn-lint:
+    name: CloudFormation Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+          
+      - name: Install cfn-lint
+        run: pip install cfn-lint
+        
+      - name: Run cfn-lint
+        run: cfn-lint template.yaml
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+          
+      - name: Install dependencies
+        run: |
+          pip install boto3 moto pytest
+          
+      - name: Run pytest
+        run: pytest tests/ -v --tb=short
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+          TABLE_NAME: test-table
+          ACCOUNTS_TABLE_NAME: test-accounts
+          REQUEST_SECRET: test-secret
+          TELEGRAM_BOT_TOKEN: test-token
+          APPROVED_CHAT_ID: '999999999'
+          MCP_MAX_WAIT: '5'
