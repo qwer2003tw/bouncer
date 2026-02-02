@@ -123,6 +123,101 @@ def validate_role_arn(role_arn: str) -> tuple:
     return True, None
 
 # ============================================================================
+# Rate Limiting
+# ============================================================================
+
+RATE_LIMIT_WINDOW = 60  # 60 秒視窗
+RATE_LIMIT_MAX_REQUESTS = 5  # 每視窗最多 5 個審批請求
+MAX_PENDING_PER_SOURCE = 10  # 每 source 最多 10 個 pending
+RATE_LIMIT_ENABLED = os.environ.get('RATE_LIMIT_ENABLED', 'true').lower() == 'true'
+
+class RateLimitExceeded(Exception):
+    """Rate limit 超出例外"""
+    pass
+
+class PendingLimitExceeded(Exception):
+    """Pending limit 超出例外"""
+    pass
+
+def check_rate_limit(source: str) -> None:
+    """
+    檢查 source 的請求頻率
+
+    Args:
+        source: 請求來源識別
+
+    Raises:
+        RateLimitExceeded: 如果超出頻率限制
+        PendingLimitExceeded: 如果 pending 請求過多
+    """
+    if not RATE_LIMIT_ENABLED:
+        return
+
+    if not source:
+        source = "__anonymous__"
+
+    now = int(time.time())
+    window_start = now - RATE_LIMIT_WINDOW
+
+    try:
+        # 查詢此 source 在時間視窗內的審批請求數
+        response = table.query(
+            IndexName='source-created-index',
+            KeyConditionExpression='#src = :source AND created_at >= :window_start',
+            FilterExpression='#st IN (:pending, :approved, :denied)',
+            ExpressionAttributeNames={
+                '#src': 'source',
+                '#st': 'status'
+            },
+            ExpressionAttributeValues={
+                ':source': source,
+                ':window_start': window_start,
+                ':pending': 'pending_approval',
+                ':approved': 'approved',
+                ':denied': 'denied'
+            },
+            Select='COUNT'
+        )
+
+        recent_count = response.get('Count', 0)
+
+        if recent_count >= RATE_LIMIT_MAX_REQUESTS:
+            raise RateLimitExceeded(
+                f"Rate limit exceeded: {recent_count}/{RATE_LIMIT_MAX_REQUESTS} "
+                f"requests in last {RATE_LIMIT_WINDOW}s"
+            )
+
+        # 查詢 pending 請求數
+        pending_response = table.query(
+            IndexName='source-created-index',
+            KeyConditionExpression='#src = :source',
+            FilterExpression='#st = :pending',
+            ExpressionAttributeNames={
+                '#src': 'source',
+                '#st': 'status'
+            },
+            ExpressionAttributeValues={
+                ':source': source,
+                ':pending': 'pending_approval'
+            },
+            Select='COUNT'
+        )
+
+        pending_count = pending_response.get('Count', 0)
+
+        if pending_count >= MAX_PENDING_PER_SOURCE:
+            raise PendingLimitExceeded(
+                f"Pending limit exceeded: {pending_count}/{MAX_PENDING_PER_SOURCE} "
+                f"pending requests"
+            )
+
+    except (RateLimitExceeded, PendingLimitExceeded):
+        raise
+    except Exception as e:
+        # GSI 不存在或其他錯誤，記錄但不阻擋（fail-open）
+        print(f"Rate limit check error (allowing): {e}")
+
+# ============================================================================
 # 命令分類系統（四層）
 # ============================================================================
 
@@ -589,6 +684,36 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
             }]
         })
 
+    # Rate Limit 檢查（只對需要審批的命令）
+    try:
+        check_rate_limit(source)
+    except RateLimitExceeded as e:
+        return mcp_result(req_id, {
+            'content': [{
+                'type': 'text',
+                'text': json.dumps({
+                    'status': 'rate_limited',
+                    'error': str(e),
+                    'command': command,
+                    'retry_after': RATE_LIMIT_WINDOW
+                })
+            }],
+            'isError': True
+        })
+    except PendingLimitExceeded as e:
+        return mcp_result(req_id, {
+            'content': [{
+                'type': 'text',
+                'text': json.dumps({
+                    'status': 'pending_limit_exceeded',
+                    'error': str(e),
+                    'command': command,
+                    'hint': '請等待 pending 請求處理後再試'
+                })
+            }],
+            'isError': True
+        })
+
     # Layer 3: APPROVAL (human review)
     request_id = generate_request_id(command)
     ttl = int(time.time()) + timeout + 60
@@ -598,7 +723,7 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
         'request_id': request_id,
         'command': command,
         'reason': reason,
-        'source': source,
+        'source': source or '__anonymous__',  # GSI 需要有值
         'account_id': account_id,
         'account_name': account_name,
         'assume_role': assume_role,
@@ -714,7 +839,7 @@ def mcp_tool_add_account(req_id, arguments: dict) -> dict:
         'account_id': account_id,
         'account_name': name,
         'role_arn': role_arn,
-        'source': source,
+        'source': source or '__anonymous__',
         'status': 'pending_approval',
         'created_at': int(time.time()),
         'ttl': ttl,
@@ -798,7 +923,7 @@ def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
         'action': 'remove_account',
         'account_id': account_id,
         'account_name': account.get('name', account_id),
-        'source': source,
+        'source': source or '__anonymous__',
         'status': 'pending_approval',
         'created_at': int(time.time()),
         'ttl': ttl,
@@ -994,7 +1119,7 @@ def handle_clawdbot_request(event):
         'request_id': request_id,
         'command': command,
         'reason': reason,
-        'source': source,
+        'source': source or '__anonymous__',
         'assume_role': assume_role,
         'status': 'pending_approval',
         'created_at': int(time.time()),

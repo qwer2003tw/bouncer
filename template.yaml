@@ -56,9 +56,24 @@ Resources:
       AttributeDefinitions:
         - AttributeName: request_id
           AttributeType: S
+        - AttributeName: source
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: N
       KeySchema:
         - AttributeName: request_id
           KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: source-created-index
+          KeySchema:
+            - AttributeName: source
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes:
+              - status
       TimeToLiveSpecification:
         AttributeName: ttl
         Enabled: true
