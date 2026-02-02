@@ -19,6 +19,17 @@ BLOCKED_PATTERNS = [
     'iam put', 'iam update', 'iam add', 'iam remove',
     # STS 危險操作
     'sts assume-role',
+    'sts get-session-token',      # 取得臨時 credentials
+    'sts get-federation-token',   # 取得 federation token
+    # Secrets/KMS 危險操作
+    'secretsmanager get-secret-value',  # 讀取 secrets
+    'kms decrypt',                       # 解密資料
+    # Compute 危險操作
+    'lambda invoke',              # 直接呼叫 Lambda
+    'ecs run-task',               # 執行 ECS task
+    'eks get-token',              # 取得 EKS token
+    # S3 Presigned URL
+    '--presign',                  # 產生 presigned URL
     # Organizations
     'organizations ',
     # Shell 注入
