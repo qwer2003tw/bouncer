@@ -217,6 +217,33 @@ TOOLS = [
             'type': 'object',
             'properties': {}
         }
+    },
+    {
+        'name': 'bouncer_trust_status',
+        'description': '查詢當前的信任時段狀態',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'source': {
+                    'type': 'string',
+                    'description': '來源標識（不填則查詢所有活躍時段）'
+                }
+            }
+        }
+    },
+    {
+        'name': 'bouncer_trust_revoke',
+        'description': '撤銷信任時段',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'trust_id': {
+                    'type': 'string',
+                    'description': '信任時段 ID'
+                }
+            },
+            'required': ['trust_id']
+        }
     }
 ]
 
@@ -676,6 +703,44 @@ def tool_list_safelist(arguments: dict) -> dict:
     return parse_mcp_result(result) or result
 
 
+def tool_trust_status(arguments: dict) -> dict:
+    """查詢信任時段狀態"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'trust-status',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_trust_status',
+            'arguments': arguments
+        }
+    }
+
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
+def tool_trust_revoke(arguments: dict) -> dict:
+    """撤銷信任時段"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'trust-revoke',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_trust_revoke',
+            'arguments': arguments
+        }
+    }
+
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
 def parse_mcp_result(result: dict) -> dict:
     """解析 MCP 回應"""
     if 'result' in result:
@@ -745,6 +810,10 @@ def handle_request(request: dict) -> dict:
             result = tool_project_list(arguments)
         elif tool_name == 'bouncer_list_safelist':
             result = tool_list_safelist(arguments)
+        elif tool_name == 'bouncer_trust_status':
+            result = tool_trust_status(arguments)
+        elif tool_name == 'bouncer_trust_revoke':
+            result = tool_trust_revoke(arguments)
         else:
             return error_response(req_id, -32602, f'Unknown tool: {tool_name}')
         

@@ -218,6 +218,191 @@ def check_rate_limit(source: str) -> None:
         print(f"Rate limit check error (allowing): {e}")
 
 # ============================================================================
+# Trust Session - 連續批准功能
+# ============================================================================
+
+TRUST_SESSION_DURATION = 600  # 10 分鐘
+TRUST_SESSION_MAX_COMMANDS = 20  # 信任時段內最多執行 20 個命令
+TRUST_SESSION_ENABLED = os.environ.get('TRUST_SESSION_ENABLED', 'true').lower() == 'true'
+
+# 高危服務 - 即使在信任時段也需要審批
+TRUST_EXCLUDED_SERVICES = [
+    'iam', 'sts', 'organizations', 'kms', 'secretsmanager',
+    'cloudformation', 'cloudtrail'
+]
+
+# 高危操作 - 即使在信任時段也需要審批
+TRUST_EXCLUDED_ACTIONS = [
+    'delete-', 'terminate-', 'remove-', 'destroy-',
+    'update-function-code',  # lambda
+    'send-command',  # ssm
+    'put-bucket-policy', 'delete-bucket',  # s3
+]
+
+
+def get_trust_session(source: str, account_id: str) -> Optional[Dict]:
+    """
+    查詢有效的信任時段
+
+    Args:
+        source: 請求來源
+        account_id: AWS 帳號 ID
+
+    Returns:
+        信任時段記錄，或 None
+    """
+    if not TRUST_SESSION_ENABLED or not source:
+        return None
+
+    now = int(time.time())
+
+    try:
+        # 用 Scan 查詢（量小可接受，之後可加 GSI 優化）
+        response = table.scan(
+            FilterExpression='#type = :type AND #src = :source AND account_id = :account AND expires_at > :now',
+            ExpressionAttributeNames={
+                '#type': 'type',
+                '#src': 'source'
+            },
+            ExpressionAttributeValues={
+                ':type': 'trust_session',
+                ':source': source,
+                ':account': account_id,
+                ':now': now
+            }
+        )
+
+        items = response.get('Items', [])
+        if items:
+            return items[0]
+        return None
+
+    except Exception as e:
+        print(f"Trust session check error: {e}")
+        return None
+
+
+def create_trust_session(source: str, account_id: str, approved_by: str) -> str:
+    """
+    建立信任時段
+
+    Args:
+        source: 請求來源
+        account_id: AWS 帳號 ID
+        approved_by: 批准者 ID
+
+    Returns:
+        trust_id
+    """
+    import hashlib
+    source_hash = hashlib.md5(source.encode()).hexdigest()[:8]
+    trust_id = f"trust-{source_hash}-{account_id}"
+
+    now = int(time.time())
+    expires_at = now + TRUST_SESSION_DURATION
+
+    # 使用固定 ID，後來的會覆蓋（同 source+account 只有一個）
+    item = {
+        'request_id': trust_id,
+        'type': 'trust_session',
+        'source': source,
+        'account_id': account_id,
+        'approved_by': approved_by,
+        'created_at': now,
+        'expires_at': expires_at,
+        'command_count': 0,
+        'ttl': expires_at
+    }
+
+    table.put_item(Item=item)
+    return trust_id
+
+
+def revoke_trust_session(trust_id: str) -> bool:
+    """
+    撤銷信任時段
+
+    Args:
+        trust_id: 信任時段 ID
+
+    Returns:
+        是否成功
+    """
+    try:
+        table.delete_item(Key={'request_id': trust_id})
+        return True
+    except Exception as e:
+        print(f"Revoke trust session error: {e}")
+        return False
+
+
+def increment_trust_command_count(trust_id: str) -> int:
+    """
+    增加信任時段的命令計數
+
+    Returns:
+        新的計數值
+    """
+    try:
+        response = table.update_item(
+            Key={'request_id': trust_id},
+            UpdateExpression='SET command_count = if_not_exists(command_count, :zero) + :one',
+            ExpressionAttributeValues={
+                ':zero': 0,
+                ':one': 1
+            },
+            ReturnValues='UPDATED_NEW'
+        )
+        return response.get('Attributes', {}).get('command_count', 0)
+    except Exception as e:
+        print(f"Increment trust command count error: {e}")
+        return 0
+
+
+def should_trust_approve(command: str, source: str, account_id: str) -> tuple:
+    """
+    檢查是否應該透過信任時段自動批准
+
+    Args:
+        command: AWS CLI 命令
+        source: 請求來源
+        account_id: AWS 帳號 ID
+
+    Returns:
+        (should_approve: bool, trust_session: dict or None, reason: str)
+    """
+    if not TRUST_SESSION_ENABLED or not source:
+        return False, None, "Trust session disabled or no source"
+
+    # 檢查是否有有效的信任時段
+    session = get_trust_session(source, account_id)
+    if not session:
+        return False, None, "No active trust session"
+
+    # 檢查命令計數
+    if session.get('command_count', 0) >= TRUST_SESSION_MAX_COMMANDS:
+        return False, session, f"Trust session command limit reached ({TRUST_SESSION_MAX_COMMANDS})"
+
+    # 檢查是否是高危服務
+    cmd_lower = command.lower()
+    for service in TRUST_EXCLUDED_SERVICES:
+        if f'aws {service} ' in cmd_lower or f'aws {service}\t' in cmd_lower:
+            return False, session, f"Service '{service}' excluded from trust"
+
+    # 檢查是否是高危操作
+    for action in TRUST_EXCLUDED_ACTIONS:
+        if action in cmd_lower:
+            return False, session, f"Action '{action}' excluded from trust"
+
+    # 計算剩餘時間
+    remaining = session.get('expires_at', 0) - int(time.time())
+    if remaining <= 0:
+        return False, None, "Trust session expired"
+
+    return True, session, f"Trust session active ({remaining}s remaining)"
+
+
+# ============================================================================
 # 命令分類系統（四層）
 # ============================================================================
 
@@ -326,6 +511,31 @@ MCP_TOOLS = {
         'parameters': {
             'type': 'object',
             'properties': {}
+        }
+    },
+    'bouncer_trust_status': {
+        'description': '查詢當前的信任時段狀態',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'source': {
+                    'type': 'string',
+                    'description': '來源標識（不填則查詢所有活躍時段）'
+                }
+            }
+        }
+    },
+    'bouncer_trust_revoke': {
+        'description': '撤銷信任時段',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'trust_id': {
+                    'type': 'string',
+                    'description': '信任時段 ID'
+                }
+            },
+            'required': ['trust_id']
         }
     },
     'bouncer_add_account': {
@@ -563,6 +773,12 @@ def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
             }]
         })
 
+    elif tool_name == 'bouncer_trust_status':
+        return mcp_tool_trust_status(req_id, arguments)
+
+    elif tool_name == 'bouncer_trust_revoke':
+        return mcp_tool_trust_revoke(req_id, arguments)
+
     elif tool_name == 'bouncer_add_account':
         return mcp_tool_add_account(req_id, arguments)
 
@@ -714,6 +930,40 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
             'isError': True
         })
 
+    # Trust Session 檢查（連續批准功能）
+    should_trust, trust_session, trust_reason = should_trust_approve(command, source, account_id)
+    if should_trust and trust_session:
+        # 增加命令計數
+        new_count = increment_trust_command_count(trust_session['request_id'])
+
+        # 執行命令
+        result = execute_command(command, assume_role)
+
+        # 計算剩餘時間
+        remaining = trust_session.get('expires_at', 0) - int(time.time())
+        remaining_str = f"{remaining // 60}:{remaining % 60:02d}" if remaining > 0 else "0:00"
+
+        # 發送靜默通知
+        send_trust_auto_approve_notification(
+            command, trust_session['request_id'], remaining_str, new_count
+        )
+
+        return mcp_result(req_id, {
+            'content': [{
+                'type': 'text',
+                'text': json.dumps({
+                    'status': 'trust_auto_approved',
+                    'command': command,
+                    'account': account_id,
+                    'account_name': account_name,
+                    'result': result,
+                    'trust_session': trust_session['request_id'],
+                    'remaining': remaining_str,
+                    'command_count': f"{new_count}/{TRUST_SESSION_MAX_COMMANDS}"
+                })
+            }]
+        })
+
     # Layer 3: APPROVAL (human review)
     request_id = generate_request_id(command)
     ttl = int(time.time()) + timeout + 60
@@ -798,6 +1048,86 @@ def mcp_tool_status(req_id, arguments: dict) -> dict:
 
     except Exception as e:
         return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
+
+
+def mcp_tool_trust_status(req_id, arguments: dict) -> dict:
+    """MCP tool: bouncer_trust_status"""
+    source = arguments.get('source')
+    now = int(time.time())
+
+    try:
+        if source:
+            # 查詢特定 source 的信任時段
+            response = table.scan(
+                FilterExpression='#type = :type AND #src = :source AND expires_at > :now',
+                ExpressionAttributeNames={'#type': 'type', '#src': 'source'},
+                ExpressionAttributeValues={
+                    ':type': 'trust_session',
+                    ':source': source,
+                    ':now': now
+                }
+            )
+        else:
+            # 查詢所有活躍的信任時段
+            response = table.scan(
+                FilterExpression='#type = :type AND expires_at > :now',
+                ExpressionAttributeNames={'#type': 'type'},
+                ExpressionAttributeValues={
+                    ':type': 'trust_session',
+                    ':now': now
+                }
+            )
+
+        items = response.get('Items', [])
+
+        # 格式化輸出
+        sessions = []
+        for item in items:
+            remaining = item.get('expires_at', 0) - now
+            sessions.append({
+                'trust_id': item.get('request_id'),
+                'source': item.get('source'),
+                'account_id': item.get('account_id'),
+                'remaining_seconds': remaining,
+                'remaining': f"{remaining // 60}:{remaining % 60:02d}",
+                'command_count': item.get('command_count', 0),
+                'approved_by': item.get('approved_by')
+            })
+
+        return mcp_result(req_id, {
+            'content': [{
+                'type': 'text',
+                'text': json.dumps({
+                    'active_sessions': len(sessions),
+                    'sessions': sessions
+                }, indent=2)
+            }]
+        })
+
+    except Exception as e:
+        return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
+
+
+def mcp_tool_trust_revoke(req_id, arguments: dict) -> dict:
+    """MCP tool: bouncer_trust_revoke"""
+    trust_id = arguments.get('trust_id', '')
+
+    if not trust_id:
+        return mcp_error(req_id, -32602, 'Missing required parameter: trust_id')
+
+    success = revoke_trust_session(trust_id)
+
+    return mcp_result(req_id, {
+        'content': [{
+            'type': 'text',
+            'text': json.dumps({
+                'success': success,
+                'trust_id': trust_id,
+                'message': '信任時段已撤銷' if success else '撤銷失敗'
+            })
+        }],
+        'isError': not success
+    })
 
 
 def mcp_tool_add_account(req_id, arguments: dict) -> dict:
@@ -1206,6 +1536,17 @@ def handle_telegram_webhook(event):
 
     action, request_id = data.split(':', 1)
 
+    # 特殊處理：撤銷信任時段
+    if action == 'revoke_trust':
+        success = revoke_trust_session(request_id)
+        message_id = callback.get('message', {}).get('message_id')
+        if success:
+            update_message(message_id, f"🛑 *信任時段已結束*\n\n`{request_id}`")
+            answer_callback(callback['id'], '🛑 信任已結束')
+        else:
+            answer_callback(callback['id'], '❌ 撤銷失敗')
+        return response(200, {'ok': True})
+
     try:
         item = table.get_item(Key={'request_id': request_id}).get('Item')
     except:
@@ -1284,6 +1625,38 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             f"📤 *結果：*\n```\n{result_preview}\n```"
         )
         answer_callback(callback_id, '✅ 已執行')
+
+    elif action == 'approve_trust':
+        # 批准並建立信任時段
+        result = execute_command(command, assume_role)
+
+        table.update_item(
+            Key={'request_id': request_id},
+            UpdateExpression='SET #s = :s, #r = :r, approved_at = :t, approver = :a',
+            ExpressionAttributeNames={'#s': 'status', '#r': 'result'},
+            ExpressionAttributeValues={
+                ':s': 'approved',
+                ':r': result[:3000],
+                ':t': int(time.time()),
+                ':a': user_id
+            }
+        )
+
+        # 建立信任時段
+        trust_id = create_trust_session(source, account_id, user_id)
+
+        result_preview = result[:800] if len(result) > 800 else result
+        update_message(
+            message_id,
+            f"✅ *已批准並執行* + 🔓 *信任 10 分鐘*\n\n"
+            f"{source_line}"
+            f"{account_line}"
+            f"📋 *命令：*\n`{command}`\n\n"
+            f"💬 *原因：* {reason}\n\n"
+            f"📤 *結果：*\n```\n{result_preview}\n```\n\n"
+            f"🔓 信任時段已啟動：`{trust_id}`"
+        )
+        answer_callback(callback_id, '✅ 已執行 + 🔓 信任啟動')
 
     elif action == 'deny':
         table.update_item(
@@ -1763,10 +2136,13 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
     )
 
     keyboard = {
-        'inline_keyboard': [[
-            {'text': '✅ 批准執行', 'callback_data': f'approve:{request_id}'},
-            {'text': '❌ 拒絕', 'callback_data': f'deny:{request_id}'}
-        ]]
+        'inline_keyboard': [
+            [
+                {'text': '✅ 批准', 'callback_data': f'approve:{request_id}'},
+                {'text': '🔓 信任10分鐘', 'callback_data': f'approve_trust:{request_id}'},
+                {'text': '❌ 拒絕', 'callback_data': f'deny:{request_id}'}
+            ]
+        ]
     }
 
     send_telegram_message(text, keyboard)
@@ -1807,6 +2183,61 @@ def send_account_approval_request(request_id: str, action: str, account_id: str,
     }
 
     send_telegram_message(text, keyboard)
+
+
+def send_trust_auto_approve_notification(command: str, trust_id: str, remaining: str, count: int):
+    """
+    發送 Trust Session 自動批准的靜默通知
+
+    Args:
+        command: 執行的命令
+        trust_id: 信任時段 ID
+        remaining: 剩餘時間 (格式: M:SS)
+        count: 已執行命令數
+    """
+    cmd_preview = command if len(command) <= 100 else command[:100] + '...'
+    cmd_preview = escape_markdown(cmd_preview)
+
+    text = (
+        f"🔓 *自動批准* · 剩餘 {remaining}\n"
+        f"📋 `{cmd_preview}`\n"
+        f"📊 {count}/{TRUST_SESSION_MAX_COMMANDS}"
+    )
+
+    keyboard = {
+        'inline_keyboard': [[
+            {'text': '🛑 結束信任', 'callback_data': f'revoke_trust:{trust_id}'}
+        ]]
+    }
+
+    # 靜默通知
+    send_telegram_message_silent(text, keyboard)
+
+
+def send_telegram_message_silent(text: str, reply_markup: dict = None):
+    """發送靜默 Telegram 消息（不響鈴）"""
+    if not TELEGRAM_TOKEN:
+        return
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    data = {
+        'chat_id': APPROVED_CHAT_ID,
+        'text': text,
+        'parse_mode': 'Markdown',
+        'disable_notification': True  # 靜默
+    }
+    if reply_markup:
+        data['reply_markup'] = json.dumps(reply_markup)
+
+    try:
+        req = urllib.request.Request(
+            url,
+            data=urllib.parse.urlencode(data).encode(),
+            method='POST'
+        )
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        print(f"Telegram silent send error: {e}")
 
 
 def escape_markdown(text: str) -> str:
