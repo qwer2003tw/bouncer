@@ -610,6 +610,22 @@ MCP_TOOLS = {
             'properties': {}
         }
     },
+    'bouncer_list_pending': {
+        'description': '列出待審批的請求',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'source': {
+                    'type': 'string',
+                    'description': '來源標識（不填則列出所有）'
+                },
+                'limit': {
+                    'type': 'integer',
+                    'description': '最大數量（預設 20）'
+                }
+            }
+        }
+    },
     'bouncer_remove_account': {
         'description': '移除 AWS 帳號配置（需要 Telegram 審批）',
         'parameters': {
@@ -828,6 +844,9 @@ def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
 
     elif tool_name == 'bouncer_list_accounts':
         return mcp_tool_list_accounts(req_id, arguments)
+
+    elif tool_name == 'bouncer_list_pending':
+        return mcp_tool_list_pending(req_id, arguments)
 
     elif tool_name == 'bouncer_remove_account':
         return mcp_tool_remove_account(req_id, arguments)
@@ -1258,6 +1277,66 @@ def mcp_tool_list_accounts(req_id, arguments: dict) -> dict:
             }, indent=2, ensure_ascii=False)
         }]
     })
+
+
+def mcp_tool_list_pending(req_id, arguments: dict) -> dict:
+    """MCP tool: bouncer_list_pending - 列出待審批請求"""
+    source = arguments.get('source')
+    limit = min(int(arguments.get('limit', 20)), 100)
+
+    try:
+        if source:
+            # 查詢特定 source 的 pending 請求
+            response = table.scan(
+                FilterExpression='#status = :status AND #src = :source',
+                ExpressionAttributeNames={'#status': 'status', '#src': 'source'},
+                ExpressionAttributeValues={
+                    ':status': 'pending',
+                    ':source': source
+                },
+                Limit=limit
+            )
+        else:
+            # 查詢所有 pending 請求
+            response = table.scan(
+                FilterExpression='#status = :status',
+                ExpressionAttributeNames={'#status': 'status'},
+                ExpressionAttributeValues={':status': 'pending'},
+                Limit=limit
+            )
+
+        items = response.get('Items', [])
+
+        # 格式化輸出
+        pending = []
+        for item in items:
+            created = item.get('created_at', 0)
+            age_seconds = int(time.time()) - int(created) if created else 0
+            pending.append({
+                'request_id': item.get('request_id'),
+                'command': item.get('command', '')[:100],  # 截斷長命令
+                'source': item.get('source'),
+                'account_id': item.get('account_id'),
+                'reason': item.get('reason'),
+                'age_seconds': age_seconds,
+                'age': f"{age_seconds // 60}m {age_seconds % 60}s"
+            })
+
+        # 按時間排序（最舊的先）
+        pending.sort(key=lambda x: x.get('age_seconds', 0), reverse=True)
+
+        return mcp_result(req_id, {
+            'content': [{
+                'type': 'text',
+                'text': json.dumps({
+                    'pending_count': len(pending),
+                    'requests': pending
+                }, indent=2, ensure_ascii=False)
+            }]
+        })
+
+    except Exception as e:
+        return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
 
 
 def mcp_tool_remove_account(req_id, arguments: dict) -> dict:

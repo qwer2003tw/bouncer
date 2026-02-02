@@ -219,6 +219,23 @@ TOOLS = [
         }
     },
     {
+        'name': 'bouncer_list_pending',
+        'description': '列出待審批的請求',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'source': {
+                    'type': 'string',
+                    'description': '來源標識（不填則列出所有）'
+                },
+                'limit': {
+                    'type': 'integer',
+                    'description': '最大數量（預設 20）'
+                }
+            }
+        }
+    },
+    {
         'name': 'bouncer_trust_status',
         'description': '查詢當前的信任時段狀態',
         'inputSchema': {
@@ -703,6 +720,25 @@ def tool_list_safelist(arguments: dict) -> dict:
     return parse_mcp_result(result) or result
 
 
+def tool_list_pending(arguments: dict) -> dict:
+    """列出待審批的請求"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'list-pending',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_list_pending',
+            'arguments': arguments
+        }
+    }
+
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
 def tool_trust_status(arguments: dict) -> dict:
     """查詢信任時段狀態"""
     if not SECRET:
@@ -810,6 +846,8 @@ def handle_request(request: dict) -> dict:
             result = tool_project_list(arguments)
         elif tool_name == 'bouncer_list_safelist':
             result = tool_list_safelist(arguments)
+        elif tool_name == 'bouncer_list_pending':
+            result = tool_list_pending(arguments)
         elif tool_name == 'bouncer_trust_status':
             result = tool_trust_status(arguments)
         elif tool_name == 'bouncer_trust_revoke':
