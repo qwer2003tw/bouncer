@@ -940,7 +940,7 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
         result = execute_command(command, assume_role)
 
         # 計算剩餘時間
-        remaining = trust_session.get('expires_at', 0) - int(time.time())
+        remaining = int(trust_session.get('expires_at', 0)) - int(time.time())
         remaining_str = f"{remaining // 60}:{remaining % 60:02d}" if remaining > 0 else "0:00"
 
         # 發送靜默通知
@@ -1084,13 +1084,14 @@ def mcp_tool_trust_status(req_id, arguments: dict) -> dict:
         sessions = []
         for item in items:
             remaining = item.get('expires_at', 0) - now
+            remaining = int(item.get('expires_at', 0)) - now
             sessions.append({
                 'trust_id': item.get('request_id'),
                 'source': item.get('source'),
                 'account_id': item.get('account_id'),
                 'remaining_seconds': remaining,
                 'remaining': f"{remaining // 60}:{remaining % 60:02d}",
-                'command_count': item.get('command_count', 0),
+                'command_count': int(item.get('command_count', 0)),
                 'approved_by': item.get('approved_by')
             })
 
