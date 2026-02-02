@@ -15,11 +15,10 @@ import hmac
 import time
 import urllib.request
 import urllib.parse
-import subprocess
 import shlex
 import boto3
 from decimal import Decimal
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 
 
 def get_header(headers: dict, key: str) -> Optional[str]:
@@ -130,7 +129,7 @@ def validate_role_arn(role_arn: str) -> tuple:
 # Layer 1: BLOCKED - 永遠拒絕
 BLOCKED_PATTERNS = [
     # IAM 危險操作
-    'iam create', 'iam delete', 'iam attach', 'iam detach', 
+    'iam create', 'iam delete', 'iam attach', 'iam detach',
     'iam put', 'iam update', 'iam add', 'iam remove',
     # STS 危險操作
     'sts assume-role',
@@ -359,7 +358,7 @@ def lambda_handler(event, context):
     """主入口 - 路由請求"""
     # 支援 Function URL (rawPath) 和 API Gateway (path)
     path = event.get('rawPath') or event.get('path') or '/'
-    
+
     # 支援 Function URL 和 API Gateway 的 method 格式
     method = (
         event.get('requestContext', {}).get('http', {}).get('method') or
@@ -367,7 +366,7 @@ def lambda_handler(event, context):
         event.get('httpMethod') or
         'GET'
     )
-    
+
     # 路由
     if path.endswith('/webhook'):
         return handle_telegram_webhook(event)
@@ -398,25 +397,25 @@ def lambda_handler(event, context):
 def handle_mcp_request(event) -> dict:
     """處理 MCP JSON-RPC 請求"""
     headers = event.get('headers', {})
-    
+
     # 驗證 secret
     if get_header(headers, 'x-approval-secret') != REQUEST_SECRET:
         return mcp_error(None, -32600, 'Invalid secret')
-    
+
     # 解析 JSON-RPC
     try:
         body = json.loads(event.get('body', '{}'))
     except:
         return mcp_error(None, -32700, 'Parse error')
-    
+
     jsonrpc = body.get('jsonrpc')
     method = body.get('method', '')
     params = body.get('params', {})
     req_id = body.get('id')
-    
+
     if jsonrpc != '2.0':
         return mcp_error(req_id, -32600, 'Invalid Request: jsonrpc must be "2.0"')
-    
+
     # 處理 MCP 標準方法
     if method == 'initialize':
         return mcp_result(req_id, {
@@ -429,7 +428,7 @@ def handle_mcp_request(event) -> dict:
                 'tools': {}
             }
         })
-    
+
     elif method == 'tools/list':
         tools = []
         for name, spec in MCP_TOOLS.items():
@@ -439,25 +438,25 @@ def handle_mcp_request(event) -> dict:
                 'inputSchema': spec['parameters']
             })
         return mcp_result(req_id, {'tools': tools})
-    
+
     elif method == 'tools/call':
         tool_name = params.get('name', '')
         arguments = params.get('arguments', {})
         return handle_mcp_tool_call(req_id, tool_name, arguments)
-    
+
     else:
         return mcp_error(req_id, -32601, f'Method not found: {method}')
 
 
 def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
     """處理 MCP tool 呼叫"""
-    
+
     if tool_name == 'bouncer_execute':
         return mcp_tool_execute(req_id, arguments)
-    
+
     elif tool_name == 'bouncer_status':
         return mcp_tool_status(req_id, arguments)
-    
+
     elif tool_name == 'bouncer_list_safelist':
         return mcp_result(req_id, {
             'content': [{
@@ -468,37 +467,37 @@ def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
                 }, indent=2)
             }]
         })
-    
+
     elif tool_name == 'bouncer_add_account':
         return mcp_tool_add_account(req_id, arguments)
-    
+
     elif tool_name == 'bouncer_list_accounts':
         return mcp_tool_list_accounts(req_id, arguments)
-    
+
     elif tool_name == 'bouncer_remove_account':
         return mcp_tool_remove_account(req_id, arguments)
-    
+
     # Deployer tools
     elif tool_name == 'bouncer_deploy':
         from deployer import mcp_tool_deploy
         return mcp_tool_deploy(req_id, arguments, table, send_approval_request)
-    
+
     elif tool_name == 'bouncer_deploy_status':
         from deployer import mcp_tool_deploy_status
         return mcp_tool_deploy_status(req_id, arguments)
-    
+
     elif tool_name == 'bouncer_deploy_cancel':
         from deployer import mcp_tool_deploy_cancel
         return mcp_tool_deploy_cancel(req_id, arguments)
-    
+
     elif tool_name == 'bouncer_deploy_history':
         from deployer import mcp_tool_deploy_history
         return mcp_tool_deploy_history(req_id, arguments)
-    
+
     elif tool_name == 'bouncer_project_list':
         from deployer import mcp_tool_project_list
         return mcp_tool_project_list(req_id, arguments)
-    
+
     else:
         return mcp_error(req_id, -32602, f'Unknown tool: {tool_name}')
 
@@ -513,13 +512,13 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
         account_id = str(account_id).strip()
     timeout = min(int(arguments.get('timeout', MCP_MAX_WAIT)), MCP_MAX_WAIT)
     async_mode = arguments.get('async', False)  # 如果 True，立即返回 pending
-    
+
     if not command:
         return mcp_error(req_id, -32602, 'Missing required parameter: command')
-    
+
     # 初始化預設帳號
     init_default_account()
-    
+
     # 解析帳號配置
     if account_id:
         # 驗證帳號 ID 格式
@@ -529,7 +528,7 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
                 'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': error})}],
                 'isError': True
             })
-        
+
         # 查詢帳號配置
         account = get_account(account_id)
         if not account:
@@ -542,7 +541,7 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
                 })}],
                 'isError': True
             })
-        
+
         if not account.get('enabled', True):
             return mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
@@ -551,7 +550,7 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
                 })}],
                 'isError': True
             })
-        
+
         assume_role = account.get('role_arn')
         account_name = account.get('name', account_id)
     else:
@@ -559,7 +558,7 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
         account_id = DEFAULT_ACCOUNT_ID
         assume_role = None
         account_name = 'Default'
-    
+
     # Layer 1: BLOCKED
     if is_blocked(command):
         return mcp_result(req_id, {
@@ -573,7 +572,7 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
             }],
             'isError': True
         })
-    
+
     # Layer 2: SAFELIST (auto-approve)
     if is_auto_approve(command):
         result = execute_command(command, assume_role)
@@ -589,11 +588,11 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
                 })
             }]
         })
-    
+
     # Layer 3: APPROVAL (human review)
     request_id = generate_request_id(command)
     ttl = int(time.time()) + timeout + 60
-    
+
     # 存入 DynamoDB
     item = {
         'request_id': request_id,
@@ -609,10 +608,10 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
         'mode': 'mcp'
     }
     table.put_item(Item=item)
-    
+
     # 發送 Telegram 審批請求
     send_approval_request(request_id, command, reason, timeout, source, account_id, account_name)
-    
+
     # 如果是 async 模式，立即返回讓 client 輪詢
     if async_mode:
         return mcp_result(req_id, {
@@ -629,10 +628,10 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
                 })
             }]
         })
-    
+
     # 同步模式：長輪詢等待結果（會被 API Gateway 29s 超時）
     result = wait_for_result_mcp(request_id, timeout=timeout)
-    
+
     return mcp_result(req_id, {
         'content': [{
             'type': 'text',
@@ -645,14 +644,14 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
 def mcp_tool_status(req_id, arguments: dict) -> dict:
     """MCP tool: bouncer_status"""
     request_id = arguments.get('request_id', '')
-    
+
     if not request_id:
         return mcp_error(req_id, -32602, 'Missing required parameter: request_id')
-    
+
     try:
         result = table.get_item(Key={'request_id': request_id})
         item = result.get('Item')
-        
+
         if not item:
             return mcp_result(req_id, {
                 'content': [{
@@ -664,14 +663,14 @@ def mcp_tool_status(req_id, arguments: dict) -> dict:
                 }],
                 'isError': True
             })
-        
+
         return mcp_result(req_id, {
             'content': [{
                 'type': 'text',
                 'text': json.dumps(decimal_to_native(item))
             }]
         })
-        
+
     except Exception as e:
         return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
 
@@ -683,7 +682,7 @@ def mcp_tool_add_account(req_id, arguments: dict) -> dict:
     role_arn = str(arguments.get('role_arn', '')).strip()
     source = arguments.get('source', None)
     async_mode = arguments.get('async', False)  # 如果 True，立即返回 pending
-    
+
     # 驗證
     valid, error = validate_account_id(account_id)
     if not valid:
@@ -691,24 +690,24 @@ def mcp_tool_add_account(req_id, arguments: dict) -> dict:
             'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': error})}],
             'isError': True
         })
-    
+
     if not name:
         return mcp_result(req_id, {
             'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': '名稱不能為空'})}],
             'isError': True
         })
-    
+
     valid, error = validate_role_arn(role_arn)
     if not valid:
         return mcp_result(req_id, {
             'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': error})}],
             'isError': True
         })
-    
+
     # 建立審批請求
     request_id = generate_request_id(f"add_account:{account_id}")
     ttl = int(time.time()) + 300 + 60
-    
+
     item = {
         'request_id': request_id,
         'action': 'add_account',
@@ -722,10 +721,10 @@ def mcp_tool_add_account(req_id, arguments: dict) -> dict:
         'mode': 'mcp'
     }
     table.put_item(Item=item)
-    
+
     # 發送 Telegram 審批
     send_account_approval_request(request_id, 'add', account_id, name, role_arn, source)
-    
+
     # 如果是 async 模式，立即返回讓 client 輪詢
     if async_mode:
         return mcp_result(req_id, {
@@ -736,10 +735,10 @@ def mcp_tool_add_account(req_id, arguments: dict) -> dict:
                 'expires_in': '300 seconds'
             })}]
         })
-    
+
     # 同步模式：等待結果（會被 API Gateway 29s 超時）
     result = wait_for_result_mcp(request_id, timeout=300)
-    
+
     return mcp_result(req_id, {
         'content': [{'type': 'text', 'text': json.dumps(result)}],
         'isError': result.get('status') != 'approved'
@@ -766,7 +765,7 @@ def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
     account_id = str(arguments.get('account_id', '')).strip()
     source = arguments.get('source', None)
     async_mode = arguments.get('async', False)
-    
+
     # 驗證
     valid, error = validate_account_id(account_id)
     if not valid:
@@ -774,14 +773,14 @@ def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
             'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': error})}],
             'isError': True
         })
-    
+
     # 不能刪除預設帳號
     if account_id == DEFAULT_ACCOUNT_ID:
         return mcp_result(req_id, {
             'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': '不能移除預設帳號'})}],
             'isError': True
         })
-    
+
     # 檢查帳號是否存在
     account = get_account(account_id)
     if not account:
@@ -789,11 +788,11 @@ def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
             'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': f'帳號 {account_id} 不存在'})}],
             'isError': True
         })
-    
+
     # 建立審批請求
     request_id = generate_request_id(f"remove_account:{account_id}")
     ttl = int(time.time()) + 300 + 60
-    
+
     item = {
         'request_id': request_id,
         'action': 'remove_account',
@@ -806,10 +805,10 @@ def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
         'mode': 'mcp'
     }
     table.put_item(Item=item)
-    
+
     # 發送 Telegram 審批
     send_account_approval_request(request_id, 'remove', account_id, account.get('name', ''), None, source)
-    
+
     # 如果是 async 模式，立即返回讓 client 輪詢
     if async_mode:
         return mcp_result(req_id, {
@@ -820,10 +819,10 @@ def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
                 'expires_in': '300 seconds'
             })}]
         })
-    
+
     # 同步模式：等待結果
     result = wait_for_result_mcp(request_id, timeout=300)
-    
+
     return mcp_result(req_id, {
         'content': [{'type': 'text', 'text': json.dumps(result)}],
         'isError': result.get('status') != 'approved'
@@ -834,14 +833,14 @@ def wait_for_result_mcp(request_id: str, timeout: int = 840) -> dict:
     """MCP 模式的長輪詢，最多 timeout 秒"""
     interval = 2  # 每 2 秒查一次
     start_time = time.time()
-    
+
     while (time.time() - start_time) < timeout:
         time.sleep(interval)
-        
+
         try:
             result = table.get_item(Key={'request_id': request_id})
             item = result.get('Item')
-            
+
             if item:
                 status = item.get('status', '')
                 if status == 'approved':
@@ -866,7 +865,7 @@ def wait_for_result_mcp(request_id: str, timeout: int = 840) -> dict:
             # 網路或 DynamoDB 錯誤，繼續嘗試
             print(f"Polling error: {e}")
             pass
-    
+
     # 超時
     return {
         'status': 'timeout',
@@ -918,27 +917,27 @@ def mcp_error(req_id, code: int, message: str) -> dict:
 def handle_status_query(event, path):
     """查詢請求狀態 - GET /status/{request_id}"""
     headers = event.get('headers', {})
-    
+
     if get_header(headers, 'x-approval-secret') != REQUEST_SECRET:
         return response(403, {'error': 'Invalid secret'})
-    
+
     parts = path.split('/status/')
     if len(parts) < 2:
         return response(400, {'error': 'Missing request_id'})
-    
+
     request_id = parts[1].strip('/')
     if not request_id:
         return response(400, {'error': 'Missing request_id'})
-    
+
     try:
         result = table.get_item(Key={'request_id': request_id})
         item = result.get('Item')
-        
+
         if not item:
             return response(404, {'error': 'Request not found', 'request_id': request_id})
-        
+
         return response(200, decimal_to_native(item))
-        
+
     except Exception as e:
         return response(500, {'error': str(e)})
 
@@ -946,30 +945,30 @@ def handle_status_query(event, path):
 def handle_clawdbot_request(event):
     """處理 REST API 的命令執行請求（向後兼容）"""
     headers = event.get('headers', {})
-    
+
     if get_header(headers, 'x-approval-secret') != REQUEST_SECRET:
         return response(403, {'error': 'Invalid secret'})
-    
+
     if ENABLE_HMAC:
         body_str = event.get('body', '')
         if not verify_hmac(headers, body_str):
             return response(403, {'error': 'Invalid HMAC signature'})
-    
+
     try:
         body = json.loads(event.get('body', '{}'))
     except:
         return response(400, {'error': 'Invalid JSON'})
-    
+
     command = body.get('command', '').strip()
     reason = body.get('reason', 'No reason provided')
     source = body.get('source', None)  # 來源（哪個 agent/系統）
     assume_role = body.get('assume_role', None)  # 目標帳號 role ARN
     wait = body.get('wait', False)
     timeout = min(body.get('timeout', 300), MCP_MAX_WAIT)
-    
+
     if not command:
         return response(400, {'error': 'Missing command'})
-    
+
     # Layer 1: BLOCKED
     if is_blocked(command):
         return response(403, {
@@ -977,7 +976,7 @@ def handle_clawdbot_request(event):
             'error': 'Command blocked for security',
             'command': command
         })
-    
+
     # Layer 2: SAFELIST
     if is_auto_approve(command):
         result = execute_command(command, assume_role)
@@ -986,11 +985,11 @@ def handle_clawdbot_request(event):
             'command': command,
             'result': result
         })
-    
+
     # Layer 3: APPROVAL
     request_id = generate_request_id(command)
     ttl = int(time.time()) + timeout + 60
-    
+
     item = {
         'request_id': request_id,
         'command': command,
@@ -1003,12 +1002,12 @@ def handle_clawdbot_request(event):
         'mode': 'rest'
     }
     table.put_item(Item=item)
-    
+
     send_approval_request(request_id, command, reason, timeout, source, assume_role)
-    
+
     if wait:
         return wait_for_result_rest(request_id, timeout=timeout)
-    
+
     return response(202, {
         'status': 'pending_approval',
         'request_id': request_id,
@@ -1022,14 +1021,14 @@ def wait_for_result_rest(request_id: str, timeout: int = 50) -> dict:
     """REST API 的輪詢等待"""
     interval = 2
     start_time = time.time()
-    
+
     while (time.time() - start_time) < timeout:
         time.sleep(interval)
-        
+
         try:
             result = table.get_item(Key={'request_id': request_id})
             item = result.get('Item')
-            
+
             if item and item.get('status') not in ['pending_approval', 'pending']:
                 return response(200, {
                     'status': item['status'],
@@ -1040,7 +1039,7 @@ def wait_for_result_rest(request_id: str, timeout: int = 50) -> dict:
                 })
         except:
             pass
-    
+
     return response(202, {
         'status': 'pending_approval',
         'request_id': request_id,
@@ -1056,45 +1055,45 @@ def wait_for_result_rest(request_id: str, timeout: int = 50) -> dict:
 def handle_telegram_webhook(event):
     """處理 Telegram callback"""
     headers = event.get('headers', {})
-    
+
     if TELEGRAM_WEBHOOK_SECRET:
         received_secret = get_header(headers, 'x-telegram-bot-api-secret-token') or ''
         if received_secret != TELEGRAM_WEBHOOK_SECRET:
             return response(403, {'error': 'Invalid webhook signature'})
-    
+
     try:
         body = json.loads(event.get('body', '{}'))
     except:
         return response(400, {'error': 'Invalid JSON'})
-    
+
     callback = body.get('callback_query')
     if not callback:
         return response(200, {'ok': True})
-    
+
     user_id = str(callback.get('from', {}).get('id', ''))
     if user_id not in APPROVED_CHAT_IDS:
         answer_callback(callback['id'], '❌ 你沒有審批權限')
         return response(403, {'error': 'Unauthorized user'})
-    
+
     data = callback.get('data', '')
     if ':' not in data:
         return response(400, {'error': 'Invalid callback data'})
-    
+
     action, request_id = data.split(':', 1)
-    
+
     try:
         item = table.get_item(Key={'request_id': request_id}).get('Item')
     except:
         item = None
-    
+
     if not item:
         answer_callback(callback['id'], '❌ 請求已過期或不存在')
         return response(404, {'error': 'Request not found'})
-    
+
     if item['status'] not in ['pending_approval', 'pending']:
         answer_callback(callback['id'], '⚠️ 此請求已處理過')
         return response(200, {'ok': True})
-    
+
     # 檢查是否過期
     ttl = item.get('ttl', 0)
     if ttl and int(time.time()) > ttl:
@@ -1106,12 +1105,12 @@ def handle_telegram_webhook(event):
             ExpressionAttributeValues={':s': 'timeout'}
         )
         return response(200, {'ok': True, 'expired': True})
-    
+
     message_id = callback.get('message', {}).get('message_id')
-    
+
     # 根據請求類型處理
     request_action = item.get('action', 'execute')  # 預設是命令執行
-    
+
     if request_action == 'add_account':
         return handle_account_add_callback(action, request_id, item, message_id, callback['id'], user_id)
     elif request_action == 'remove_account':
@@ -1130,13 +1129,13 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
     reason = item.get('reason', '')
     account_id = item.get('account_id', DEFAULT_ACCOUNT_ID)
     account_name = item.get('account_name', 'Default')
-    
+
     source_line = f"🤖 *來源：* {source}\n" if source else ""
     account_line = f"🏢 *帳號：* `{account_id}` ({account_name})\n"
-    
+
     if action == 'approve':
         result = execute_command(command, assume_role)
-        
+
         table.update_item(
             Key={'request_id': request_id},
             UpdateExpression='SET #s = :s, #r = :r, approved_at = :t, approver = :a',
@@ -1148,7 +1147,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
                 ':a': user_id
             }
         )
-        
+
         result_preview = result[:1000] if len(result) > 1000 else result
         update_message(
             message_id,
@@ -1160,7 +1159,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             f"📤 *結果：*\n```\n{result_preview}\n```"
         )
         answer_callback(callback_id, '✅ 已執行')
-        
+
     elif action == 'deny':
         table.update_item(
             Key={'request_id': request_id},
@@ -1172,7 +1171,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
                 ':a': user_id
             }
         )
-        
+
         update_message(
             message_id,
             f"❌ *已拒絕*\n\n"
@@ -1182,7 +1181,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             f"💬 *原因：* {reason}"
         )
         answer_callback(callback_id, '❌ 已拒絕')
-    
+
     return response(200, {'ok': True})
 
 
@@ -1192,9 +1191,9 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
     account_name = item.get('account_name', '')
     role_arn = item.get('role_arn', '')
     source = item.get('source', '')
-    
+
     source_line = f"🤖 *來源：* {source}\n" if source else ""
-    
+
     if action == 'approve':
         # 寫入帳號配置
         try:
@@ -1207,7 +1206,7 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
                 'created_at': int(time.time()),
                 'created_by': user_id
             })
-            
+
             table.update_item(
                 Key={'request_id': request_id},
                 UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
@@ -1218,7 +1217,7 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
                     ':a': user_id
                 }
             )
-            
+
             update_message(
                 message_id,
                 f"✅ *已新增帳號*\n\n"
@@ -1228,11 +1227,11 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
                 f"🔗 *Role：* `{role_arn}`"
             )
             answer_callback(callback_id, '✅ 帳號已新增')
-            
+
         except Exception as e:
             answer_callback(callback_id, f'❌ 新增失敗: {str(e)[:50]}')
             return response(500, {'error': str(e)})
-        
+
     elif action == 'deny':
         table.update_item(
             Key={'request_id': request_id},
@@ -1244,7 +1243,7 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
                 ':a': user_id
             }
         )
-        
+
         update_message(
             message_id,
             f"❌ *已拒絕新增帳號*\n\n"
@@ -1253,7 +1252,7 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
             f"📛 *名稱：* {account_name}"
         )
         answer_callback(callback_id, '❌ 已拒絕')
-    
+
     return response(200, {'ok': True})
 
 
@@ -1262,13 +1261,13 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
     account_id = item.get('account_id', '')
     account_name = item.get('account_name', '')
     source = item.get('source', '')
-    
+
     source_line = f"🤖 *來源：* {source}\n" if source else ""
-    
+
     if action == 'approve':
         try:
             accounts_table.delete_item(Key={'account_id': account_id})
-            
+
             table.update_item(
                 Key={'request_id': request_id},
                 UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
@@ -1279,7 +1278,7 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
                     ':a': user_id
                 }
             )
-            
+
             update_message(
                 message_id,
                 f"✅ *已移除帳號*\n\n"
@@ -1288,11 +1287,11 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
                 f"📛 *名稱：* {account_name}"
             )
             answer_callback(callback_id, '✅ 帳號已移除')
-            
+
         except Exception as e:
             answer_callback(callback_id, f'❌ 移除失敗: {str(e)[:50]}')
             return response(500, {'error': str(e)})
-        
+
     elif action == 'deny':
         table.update_item(
             Key={'request_id': request_id},
@@ -1304,7 +1303,7 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
                 ':a': user_id
             }
         )
-        
+
         update_message(
             message_id,
             f"❌ *已拒絕移除帳號*\n\n"
@@ -1313,23 +1312,23 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
             f"📛 *名稱：* {account_name}"
         )
         answer_callback(callback_id, '❌ 已拒絕')
-    
+
     return response(200, {'ok': True})
 
 
 def handle_deploy_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str):
     """處理部署的審批 callback"""
-    from deployer import start_deploy, release_lock
-    
+    from deployer import start_deploy
+
     project_id = item.get('project_id', '')
     project_name = item.get('project_name', project_id)
     branch = item.get('branch', 'master')
     stack_name = item.get('stack_name', '')
     source = item.get('source', '')
     reason = item.get('reason', '')
-    
+
     source_line = f"🤖 *來源：* {source}\n" if source else ""
-    
+
     if action == 'approve':
         # 更新審批狀態
         table.update_item(
@@ -1342,10 +1341,10 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
                 ':a': user_id
             }
         )
-        
+
         # 啟動部署
         result = start_deploy(project_id, branch, user_id, reason)
-        
+
         if 'error' in result:
             update_message(
                 message_id,
@@ -1369,7 +1368,7 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
                 f"⏳ 部署進行中..."
             )
             answer_callback(callback_id, '🚀 部署已啟動')
-        
+
     elif action == 'deny':
         table.update_item(
             Key={'request_id': request_id},
@@ -1381,7 +1380,7 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
                 ':a': user_id
             }
         )
-        
+
         update_message(
             message_id,
             f"❌ *已拒絕部署*\n\n"
@@ -1392,7 +1391,7 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
             f"💬 *原因：* {reason}"
         )
         answer_callback(callback_id, '❌ 已拒絕')
-    
+
     return response(200, {'ok': True})
 
 
@@ -1426,24 +1425,24 @@ def verify_hmac(headers: dict, body: str) -> bool:
     timestamp = headers.get('x-timestamp', '')
     nonce = headers.get('x-nonce', '')
     signature = headers.get('x-signature', '')
-    
+
     if not all([timestamp, nonce, signature]):
         return False
-    
+
     try:
         ts = int(timestamp)
         if abs(time.time() - ts) > 300:
             return False
     except:
         return False
-    
+
     payload = f"{timestamp}.{nonce}.{body}"
     expected = hmac.new(
         REQUEST_SECRET.encode(),
         payload.encode(),
         hashlib.sha256
     ).hexdigest()
-    
+
     return hmac.compare_digest(signature, expected)
 
 
@@ -1453,14 +1452,14 @@ def verify_hmac(headers: dict, body: str) -> bool:
 
 def execute_command(command: str, assume_role_arn: str = None) -> str:
     """執行 AWS CLI 命令
-    
+
     Args:
         command: AWS CLI 命令
         assume_role_arn: 可選，要 assume 的 role ARN
     """
     import sys
     from io import StringIO
-    
+
     try:
         # 使用 shlex.split 但保留引號給 JSON 參數
         # shlex.split 會移除引號，所以我們需要特殊處理
@@ -1468,18 +1467,18 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
             args = shlex.split(command)
         except ValueError as e:
             return f'❌ 命令格式錯誤: {str(e)}'
-        
+
         if not args or args[0] != 'aws':
             return '❌ 只能執行 aws CLI 命令'
-        
+
         # 移除 'aws' 前綴，awscli.clidriver 不需要它
         cli_args = args[1:]
-        
+
         # 修復 JSON 參數：shlex.split 會把 {"key": "value"} 變成 {key: value}
         # 需要從原始命令中重新提取 JSON 參數
-        json_params = ['--item', '--expression-attribute-values', '--expression-attribute-names', 
+        json_params = ['--item', '--expression-attribute-values', '--expression-attribute-names',
                        '--key', '--update-expression', '--cli-input-json', '--filter-expression']
-        
+
         for i, arg in enumerate(cli_args):
             if arg in json_params and i + 1 < len(cli_args):
                 # 從原始命令中找出這個參數的值
@@ -1503,10 +1502,10 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
                         if json_end > 0:
                             json_str = after_param[:json_end]
                             cli_args[i + 1] = json_str
-        
+
         # 保存原始環境變數
         original_env = {}
-        
+
         # 如果需要 assume role，先取得臨時 credentials
         if assume_role_arn:
             try:
@@ -1517,7 +1516,7 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
                     DurationSeconds=900  # 15 分鐘
                 )
                 creds = assumed['Credentials']
-                
+
                 # 設定環境變數讓 awscli 使用這些 credentials
                 original_env = {
                     'AWS_ACCESS_KEY_ID': os.environ.get('AWS_ACCESS_KEY_ID'),
@@ -1527,32 +1526,32 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
                 os.environ['AWS_ACCESS_KEY_ID'] = creds['AccessKeyId']
                 os.environ['AWS_SECRET_ACCESS_KEY'] = creds['SecretAccessKey']
                 os.environ['AWS_SESSION_TOKEN'] = creds['SessionToken']
-                
+
             except Exception as e:
                 return f'❌ Assume role 失敗: {str(e)}'
-        
+
         # 捕獲 stdout/stderr
         old_stdout = sys.stdout
         old_stderr = sys.stderr
         sys.stdout = StringIO()
         sys.stderr = StringIO()
-        
+
         try:
             from awscli.clidriver import create_clidriver
             driver = create_clidriver()
-            
+
             # 禁用 pager
             os.environ['AWS_PAGER'] = ''
-            
+
             exit_code = driver.main(cli_args)
-            
+
             stdout_output = sys.stdout.getvalue()
             stderr_output = sys.stderr.getvalue()
-            
+
         finally:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
-            
+
             # 還原環境變數
             if assume_role_arn and original_env:
                 for key, value in original_env.items():
@@ -1560,14 +1559,14 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
                         os.environ.pop(key, None)
                     else:
                         os.environ[key] = value
-        
+
         output = stdout_output or stderr_output or '(no output)'
-        
+
         if exit_code != 0 and not output.strip():
             output = f'(exit code: {exit_code})'
-        
+
         return output[:4000]
-        
+
     except ImportError:
         return '❌ awscli 模組未安裝'
     except ValueError as e:
@@ -1580,11 +1579,11 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
 # Telegram API
 # ============================================================================
 
-def send_approval_request(request_id: str, command: str, reason: str, timeout: int = 840, 
+def send_approval_request(request_id: str, command: str, reason: str, timeout: int = 840,
                           source: str = None, account_id: str = None, account_name: str = None,
                           assume_role: str = None):
     """發送 Telegram 審批請求
-    
+
     Args:
         request_id: 請求 ID
         command: AWS CLI 命令
@@ -1596,7 +1595,7 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
         assume_role: Role ARN（向後相容，如果沒有 account_id 會從這裡解析）
     """
     cmd_preview = command if len(command) <= 500 else command[:500] + '...'
-    
+
     # 顯示時間（秒或分鐘）
     if timeout < 60:
         timeout_str = f"{timeout} 秒"
@@ -1604,10 +1603,10 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
         timeout_str = f"{timeout // 60} 分鐘"
     else:
         timeout_str = f"{timeout // 3600} 小時"
-    
+
     # 來源資訊
     source_line = f"🤖 *來源：* {source}\n" if source else ""
-    
+
     # 帳號資訊
     if account_id and account_name:
         account_line = f"🏢 *帳號：* `{account_id}` ({account_name})\n"
@@ -1623,7 +1622,7 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
         # 預設帳號
         default_account = os.environ.get('AWS_ACCOUNT_ID', '111111111111')
         account_line = f"🏢 *帳號：* `{default_account}` (預設)\n"
-    
+
     text = (
         f"🔐 *AWS 執行請求*\n\n"
         f"{source_line}"
@@ -1633,21 +1632,21 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
         f"🆔 *ID：* `{request_id}`\n"
         f"⏰ *{timeout_str}後過期*"
     )
-    
+
     keyboard = {
         'inline_keyboard': [[
             {'text': '✅ 批准執行', 'callback_data': f'approve:{request_id}'},
             {'text': '❌ 拒絕', 'callback_data': f'deny:{request_id}'}
         ]]
     }
-    
+
     send_telegram_message(text, keyboard)
 
 
 def send_account_approval_request(request_id: str, action: str, account_id: str, name: str, role_arn: str, source: str):
     """發送帳號管理的 Telegram 審批請求"""
     source_line = f"🤖 *來源：* {source}\n" if source else ""
-    
+
     if action == 'add':
         text = (
             f"🔐 *新增 AWS 帳號請求*\n\n"
@@ -1667,14 +1666,14 @@ def send_account_approval_request(request_id: str, action: str, account_id: str,
             f"📝 *請求 ID：* `{request_id}`\n"
             f"⏰ *5 分鐘後過期*"
         )
-    
+
     keyboard = {
         'inline_keyboard': [[
             {'text': '✅ 批准', 'callback_data': f'approve:{request_id}'},
             {'text': '❌ 拒絕', 'callback_data': f'deny:{request_id}'}
         ]]
     }
-    
+
     send_telegram_message(text, keyboard)
 
 
@@ -1682,7 +1681,7 @@ def send_telegram_message(text: str, reply_markup: dict = None):
     """發送 Telegram 消息"""
     if not TELEGRAM_TOKEN:
         return
-        
+
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     data = {
         'chat_id': APPROVED_CHAT_ID,
@@ -1691,7 +1690,7 @@ def send_telegram_message(text: str, reply_markup: dict = None):
     }
     if reply_markup:
         data['reply_markup'] = json.dumps(reply_markup)
-    
+
     try:
         req = urllib.request.Request(
             url,
@@ -1707,7 +1706,7 @@ def update_message(message_id: int, text: str):
     """更新 Telegram 消息"""
     if not TELEGRAM_TOKEN:
         return
-        
+
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/editMessageText"
     data = {
         'chat_id': APPROVED_CHAT_ID,
@@ -1715,7 +1714,7 @@ def update_message(message_id: int, text: str):
         'text': text,
         'parse_mode': 'Markdown'
     }
-    
+
     try:
         req = urllib.request.Request(
             url,
@@ -1731,13 +1730,13 @@ def answer_callback(callback_id: str, text: str):
     """回應 Telegram callback"""
     if not TELEGRAM_TOKEN:
         return
-        
+
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery"
     data = {
         'callback_query_id': callback_id,
         'text': text
     }
-    
+
     try:
         req = urllib.request.Request(
             url,

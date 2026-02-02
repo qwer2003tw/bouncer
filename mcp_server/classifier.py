@@ -15,7 +15,7 @@ from typing import Tuple, Optional
 # Layer 1: BLOCKED - 永遠拒絕
 BLOCKED_PATTERNS = [
     # IAM 危險操作
-    'iam create', 'iam delete', 'iam attach', 'iam detach', 
+    'iam create', 'iam delete', 'iam attach', 'iam detach',
     'iam put', 'iam update', 'iam add', 'iam remove',
     # STS 危險操作
     'sts assume-role',
@@ -69,24 +69,24 @@ SAFELIST_PREFIXES = [
 def classify_command(command: str) -> str:
     """
     分類命令
-    
+
     Returns:
         'BLOCKED' - 永遠拒絕
         'SAFELIST' - 自動執行
         'APPROVAL' - 需要人工審批
     """
     cmd_lower = command.lower().strip()
-    
+
     # Layer 1: BLOCKED
     for pattern in BLOCKED_PATTERNS:
         if pattern in cmd_lower:
             return 'BLOCKED'
-    
+
     # Layer 2: SAFELIST
     for prefix in SAFELIST_PREFIXES:
         if cmd_lower.startswith(prefix):
             return 'SAFELIST'
-    
+
     # Layer 3 & 4: 需要審批
     return 'APPROVAL'
 
@@ -94,25 +94,25 @@ def classify_command(command: str) -> str:
 def is_valid_aws_command(command: str) -> Tuple[bool, Optional[str]]:
     """
     驗證是否為有效的 AWS CLI 命令
-    
+
     Returns:
         (is_valid, error_message)
     """
     command = command.strip()
-    
+
     if not command:
         return False, "Command is empty"
-    
+
     if not command.startswith('aws '):
         return False, "Only AWS CLI commands are allowed (must start with 'aws ')"
-    
+
     try:
         args = shlex.split(command)
         if len(args) < 2:
             return False, "Invalid AWS command format"
     except ValueError as e:
         return False, f"Command parsing error: {e}"
-    
+
     return True, None
 
 
@@ -123,12 +123,12 @@ def execute_command(
 ) -> Tuple[str, int]:
     """
     執行 AWS CLI 命令
-    
+
     Args:
         command: AWS CLI 命令
         credentials_file: 可選的 AWS credentials 檔案路徑
         timeout: 執行超時（秒）
-    
+
     Returns:
         (output, exit_code)
     """
@@ -136,17 +136,17 @@ def execute_command(
     is_valid, error = is_valid_aws_command(command)
     if not is_valid:
         return f"❌ {error}", 1
-    
+
     try:
         args = shlex.split(command)
-        
+
         # 設定環境變數
         env = os.environ.copy()
         env['AWS_PAGER'] = ''  # 禁用 pager
-        
+
         if credentials_file:
             env['AWS_SHARED_CREDENTIALS_FILE'] = credentials_file
-        
+
         # 執行命令（使用 subprocess，不用 shell=True）
         result = subprocess.run(
             args,
@@ -155,10 +155,10 @@ def execute_command(
             timeout=timeout,
             env=env
         )
-        
+
         output = result.stdout or result.stderr or '(no output)'
         return output.strip()[:10000], result.returncode
-        
+
     except subprocess.TimeoutExpired:
         return f"❌ Command timed out after {timeout} seconds", 124
     except FileNotFoundError:

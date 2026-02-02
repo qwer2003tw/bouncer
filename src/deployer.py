@@ -36,7 +36,7 @@ def list_projects() -> list:
     try:
         result = projects_table.scan()
         return result.get('Items', [])
-    except Exception as e:
+    except Exception:
         return []
 
 
@@ -146,7 +146,7 @@ def update_deploy_record(deploy_id: str, updates: dict):
         update_expr = 'SET ' + ', '.join(f'#{k} = :{k}' for k in updates.keys())
         expr_names = {f'#{k}': k for k in updates.keys()}
         expr_values = {f':{k}': v for k, v in updates.items()}
-        
+
         history_table.update_item(
             Key={'deploy_id': deploy_id},
             UpdateExpression=update_expr,
@@ -192,10 +192,10 @@ def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str) -
     project = get_project(project_id)
     if not project:
         return {'error': f'專案 {project_id} 不存在'}
-    
+
     if not project.get('enabled', True):
         return {'error': f'專案 {project_id} 已停用'}
-    
+
     # 檢查並行鎖
     existing_lock = get_lock(project_id)
     if existing_lock:
@@ -205,21 +205,21 @@ def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str) -
             'locked_by': existing_lock.get('locked_by'),
             'locked_at': existing_lock.get('locked_at')
         }
-    
+
     # 建立部署 ID
     deploy_id = f"deploy-{uuid.uuid4().hex[:12]}"
-    
+
     # 取得鎖
     if not acquire_lock(project_id, deploy_id, triggered_by):
         return {'error': '無法取得部署鎖，可能有其他部署正在進行'}
-    
+
     # 建立部署記錄
     create_deploy_record(deploy_id, project_id, {
         'branch': branch,
         'triggered_by': triggered_by,
         'reason': reason
     })
-    
+
     # 準備 Step Functions 輸入
     sfn_input = {
         'deploy_id': deploy_id,
@@ -232,7 +232,7 @@ def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str) -
         'github_pat_secret': 'sam-deployer/github-pat',
         'secrets_id': project.get('secrets_id', '')
     }
-    
+
     # 啟動 Step Functions
     try:
         response = sfn_client.start_execution(
@@ -240,13 +240,13 @@ def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str) -
             name=deploy_id,
             input=json.dumps(sfn_input)
         )
-        
+
         # 更新部署記錄
         update_deploy_record(deploy_id, {
             'status': 'RUNNING',
             'execution_arn': response['executionArn']
         })
-        
+
         return {
             'status': 'started',
             'deploy_id': deploy_id,
@@ -254,7 +254,7 @@ def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str) -
             'project_id': project_id,
             'branch': sfn_input['branch']
         }
-        
+
     except Exception as e:
         # 失敗時釋放鎖
         release_lock(project_id)
@@ -270,10 +270,10 @@ def cancel_deploy(deploy_id: str) -> dict:
     record = get_deploy_record(deploy_id)
     if not record:
         return {'error': '部署記錄不存在'}
-    
+
     if record.get('status') not in ['PENDING', 'RUNNING']:
         return {'error': f'部署狀態為 {record.get("status")}，無法取消'}
-    
+
     execution_arn = record.get('execution_arn')
     if execution_arn:
         try:
@@ -283,16 +283,16 @@ def cancel_deploy(deploy_id: str) -> dict:
             )
         except Exception as e:
             print(f"Error stopping execution: {e}")
-    
+
     # 釋放鎖
     release_lock(record.get('project_id'))
-    
+
     # 更新記錄
     update_deploy_record(deploy_id, {
         'status': 'CANCELLED',
         'finished_at': int(time.time())
     })
-    
+
     return {'status': 'cancelled', 'deploy_id': deploy_id}
 
 
@@ -301,23 +301,23 @@ def get_deploy_status(deploy_id: str) -> dict:
     record = get_deploy_record(deploy_id)
     if not record:
         return {'error': '部署記錄不存在'}
-    
+
     # 如果有 execution_arn，查詢 Step Functions 狀態
     execution_arn = record.get('execution_arn')
     if execution_arn and record.get('status') == 'RUNNING':
         try:
             response = sfn_client.describe_execution(executionArn=execution_arn)
             sfn_status = response.get('status')
-            
+
             # 同步狀態
             if sfn_status in ['SUCCEEDED', 'FAILED', 'TIMED_OUT', 'ABORTED']:
                 new_status = 'SUCCESS' if sfn_status == 'SUCCEEDED' else 'FAILED'
                 update_deploy_record(deploy_id, {'status': new_status})
                 record['status'] = new_status
-                
+
         except Exception as e:
             print(f"Error getting execution status: {e}")
-    
+
     return record
 
 
@@ -327,20 +327,20 @@ def get_deploy_status(deploy_id: str) -> dict:
 
 def mcp_tool_deploy(req_id, arguments: dict, table, send_approval_func) -> dict:
     """MCP tool: bouncer_deploy（需要審批）"""
-    from app import mcp_result, mcp_error, generate_request_id, send_telegram_message
-    
+    from app import mcp_result, mcp_error, generate_request_id
+
     project_id = str(arguments.get('project', '')).strip()
     branch = str(arguments.get('branch', '')).strip() or None
     reason = str(arguments.get('reason', '')).strip()
     source = arguments.get('source', None)
     async_mode = arguments.get('async', True)
-    
+
     if not project_id:
         return mcp_error(req_id, -32602, 'Missing required parameter: project')
-    
+
     if not reason:
         return mcp_error(req_id, -32602, 'Missing required parameter: reason')
-    
+
     # 取得專案配置
     project = get_project(project_id)
     if not project:
@@ -353,7 +353,7 @@ def mcp_tool_deploy(req_id, arguments: dict, table, send_approval_func) -> dict:
             })}],
             'isError': True
         })
-    
+
     # 檢查並行鎖
     existing_lock = get_lock(project_id)
     if existing_lock:
@@ -365,11 +365,11 @@ def mcp_tool_deploy(req_id, arguments: dict, table, send_approval_func) -> dict:
             })}],
             'isError': True
         })
-    
+
     # 建立審批請求
     request_id = generate_request_id(f"deploy:{project_id}")
     ttl = int(time.time()) + 300 + 60
-    
+
     item = {
         'request_id': request_id,
         'action': 'deploy',
@@ -385,10 +385,10 @@ def mcp_tool_deploy(req_id, arguments: dict, table, send_approval_func) -> dict:
         'mode': 'mcp'
     }
     table.put_item(Item=item)
-    
+
     # 發送 Telegram 審批請求
     send_deploy_approval_request(request_id, project, branch, reason, source)
-    
+
     if async_mode:
         return mcp_result(req_id, {
             'content': [{'type': 'text', 'text': json.dumps({
@@ -399,7 +399,7 @@ def mcp_tool_deploy(req_id, arguments: dict, table, send_approval_func) -> dict:
                 'expires_in': '300 seconds'
             })}]
         })
-    
+
     # 同步模式需要等待，但這裡不實作
     return mcp_result(req_id, {
         'content': [{'type': 'text', 'text': json.dumps({
@@ -412,19 +412,19 @@ def mcp_tool_deploy(req_id, arguments: dict, table, send_approval_func) -> dict:
 def mcp_tool_deploy_status(req_id, arguments: dict) -> dict:
     """MCP tool: bouncer_deploy_status"""
     from app import mcp_result, mcp_error, decimal_to_native
-    
+
     deploy_id = str(arguments.get('deploy_id', '')).strip()
-    
+
     if not deploy_id:
         return mcp_error(req_id, -32602, 'Missing required parameter: deploy_id')
-    
+
     record = get_deploy_status(deploy_id)
     if 'error' in record:
         return mcp_result(req_id, {
             'content': [{'type': 'text', 'text': json.dumps(record)}],
             'isError': True
         })
-    
+
     return mcp_result(req_id, {
         'content': [{'type': 'text', 'text': json.dumps(decimal_to_native(record), indent=2, ensure_ascii=False)}]
     })
@@ -433,12 +433,12 @@ def mcp_tool_deploy_status(req_id, arguments: dict) -> dict:
 def mcp_tool_deploy_cancel(req_id, arguments: dict) -> dict:
     """MCP tool: bouncer_deploy_cancel"""
     from app import mcp_result, mcp_error
-    
+
     deploy_id = str(arguments.get('deploy_id', '')).strip()
-    
+
     if not deploy_id:
         return mcp_error(req_id, -32602, 'Missing required parameter: deploy_id')
-    
+
     result = cancel_deploy(deploy_id)
     return mcp_result(req_id, {
         'content': [{'type': 'text', 'text': json.dumps(result)}],
@@ -449,13 +449,13 @@ def mcp_tool_deploy_cancel(req_id, arguments: dict) -> dict:
 def mcp_tool_deploy_history(req_id, arguments: dict) -> dict:
     """MCP tool: bouncer_deploy_history"""
     from app import mcp_result, mcp_error, decimal_to_native
-    
+
     project_id = str(arguments.get('project', '')).strip()
     limit = int(arguments.get('limit', 10))
-    
+
     if not project_id:
         return mcp_error(req_id, -32602, 'Missing required parameter: project')
-    
+
     history = get_deploy_history(project_id, limit)
     return mcp_result(req_id, {
         'content': [{'type': 'text', 'text': json.dumps({
@@ -468,7 +468,7 @@ def mcp_tool_deploy_history(req_id, arguments: dict) -> dict:
 def mcp_tool_project_list(req_id, arguments: dict) -> dict:
     """MCP tool: bouncer_project_list"""
     from app import mcp_result, decimal_to_native
-    
+
     projects = list_projects()
     return mcp_result(req_id, {
         'content': [{'type': 'text', 'text': json.dumps({
@@ -485,16 +485,16 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
     """發送部署審批請求到 Telegram"""
     import urllib.request
     import urllib.parse
-    
+
     project_id = project.get('project_id', '')
     project_name = project.get('name', project_id)
     stack_name = project.get('stack_name', '')
     target_account = project.get('target_account', '')
-    
+
     branch = branch or project.get('default_branch', 'master')
     source_line = f"🤖 來源： {source}\n" if source else ""
     account_line = f"🏢 帳號： {target_account}\n" if target_account else ""
-    
+
     text = (
         f"🚀 SAM 部署請求\n\n"
         f"{source_line}"
@@ -506,24 +506,24 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
         f"🆔 ID： {request_id}\n"
         f"⏰ 5 分鐘後過期"
     )
-    
+
     keyboard = {
         'inline_keyboard': [[
             {'text': '✅ 批准部署', 'callback_data': f'approve:{request_id}'},
             {'text': '❌ 拒絕', 'callback_data': f'deny:{request_id}'}
         ]]
     }
-    
+
     if not TELEGRAM_BOT_TOKEN or not APPROVED_CHAT_ID:
         return
-    
+
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     data = {
         'chat_id': APPROVED_CHAT_ID,
         'text': text,
         'reply_markup': json.dumps(keyboard)
     }
-    
+
     try:
         req = urllib.request.Request(
             url,
