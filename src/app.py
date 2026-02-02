@@ -237,6 +237,7 @@ TRUST_EXCLUDED_ACTIONS = [
     'update-function-code',  # lambda
     'send-command',  # ssm
     'put-bucket-policy', 'delete-bucket',  # s3
+    's3 rm', 's3api delete',  # s3 刪除
 ]
 
 
