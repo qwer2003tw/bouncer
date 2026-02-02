@@ -233,11 +233,37 @@ TRUST_EXCLUDED_SERVICES = [
 
 # 高危操作 - 即使在信任時段也需要審批
 TRUST_EXCLUDED_ACTIONS = [
+    # 通用破壞性操作
     'delete-', 'terminate-', 'remove-', 'destroy-',
-    'update-function-code',  # lambda
-    'send-command',  # ssm
-    'put-bucket-policy', 'delete-bucket',  # s3
-    's3 rm', 's3api delete',  # s3 刪除
+    'stop-', 'disable-', 'deregister-',
+
+    # EC2
+    'modify-instance-attribute',
+
+    # S3
+    's3 rm', 's3 mv', 's3api delete', 's3 sync --delete',
+    'put-bucket-policy', 'put-bucket-acl', 'delete-bucket',
+
+    # Lambda
+    'update-function-code', 'update-function-configuration',
+
+    # ECS
+    'update-service',  # 可以 desired-count=0
+
+    # RDS
+    'modify-db-instance', 'reboot-db-instance',
+
+    # Route53
+    'change-resource-record-sets',
+
+    # SSM
+    'send-command', 'start-session',
+
+    # Secrets Manager / KMS
+    'put-secret-value', 'schedule-key-deletion',
+
+    # CloudWatch
+    'put-metric-alarm',
 ]
 
 
