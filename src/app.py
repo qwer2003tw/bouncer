@@ -2220,14 +2220,14 @@ def send_trust_auto_approve_notification(command: str, trust_id: str, remaining:
     Args:
         command: 執行的命令
         trust_id: 信任時段 ID
-        remaining: 剩餘時間 (格式: M:SS)
+        remaining: 剩餘時間 (不再顯示)
         count: 已執行命令數
     """
     cmd_preview = command if len(command) <= 100 else command[:100] + '...'
     cmd_preview = escape_markdown(cmd_preview)
 
     text = (
-        f"🔓 *自動批准* · 剩餘 {remaining}\n"
+        f"🔓 *自動批准* (信任中)\n"
         f"📋 `{cmd_preview}`\n"
         f"📊 {count}/{TRUST_SESSION_MAX_COMMANDS}"
     )
