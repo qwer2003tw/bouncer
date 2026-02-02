@@ -470,7 +470,7 @@ def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
     # Deployer tools
     elif tool_name == 'bouncer_deploy':
         from deployer import mcp_tool_deploy
-        return mcp_tool_deploy(req_id, arguments, table, send_approval_request_v2)
+        return mcp_tool_deploy(req_id, arguments, table, send_approval_request)
     
     elif tool_name == 'bouncer_deploy_status':
         from deployer import mcp_tool_deploy_status
@@ -600,7 +600,7 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
     table.put_item(Item=item)
     
     # 發送 Telegram 審批請求
-    send_approval_request_v2(request_id, command, reason, timeout, source, account_id, account_name)
+    send_approval_request(request_id, command, reason, timeout, source, account_id, account_name)
     
     # 如果是 async 模式，立即返回讓 client 輪詢
     if async_mode:
@@ -1569,8 +1569,21 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
 # Telegram API
 # ============================================================================
 
-def send_approval_request(request_id: str, command: str, reason: str, timeout: int = 840, source: str = None, assume_role: str = None):
-    """發送 Telegram 審批請求"""
+def send_approval_request(request_id: str, command: str, reason: str, timeout: int = 840, 
+                          source: str = None, account_id: str = None, account_name: str = None,
+                          assume_role: str = None):
+    """發送 Telegram 審批請求
+    
+    Args:
+        request_id: 請求 ID
+        command: AWS CLI 命令
+        reason: 執行原因
+        timeout: 超時秒數
+        source: 來源識別（哪個 agent/系統發的請求）
+        account_id: AWS 帳號 ID
+        account_name: 帳號名稱
+        assume_role: Role ARN（向後相容，如果沒有 account_id 會從這裡解析）
+    """
     cmd_preview = command if len(command) <= 500 else command[:500] + '...'
     
     # 顯示時間（秒或分鐘）
@@ -1585,53 +1598,20 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
     source_line = f"🤖 *來源：* {source}\n" if source else ""
     
     # 帳號資訊
-    if assume_role:
-        # arn:aws:iam::111111111111:role/RoleName -> 111111111111
+    if account_id and account_name:
+        account_line = f"🏢 *帳號：* `{account_id}` ({account_name})\n"
+    elif assume_role:
+        # 向後相容：從 assume_role 解析帳號
         try:
-            account_id = assume_role.split(':')[4]
+            parsed_account_id = assume_role.split(':')[4]
             role_name = assume_role.split('/')[-1]
-            account_line = f"🏢 *帳號：* `{account_id}` ({role_name})\n"
+            account_line = f"🏢 *帳號：* `{parsed_account_id}` ({role_name})\n"
         except:
             account_line = f"🏢 *Role：* `{assume_role}`\n"
     else:
-        # 預設帳號（從 Lambda 環境取得）
+        # 預設帳號
         default_account = os.environ.get('AWS_ACCOUNT_ID', '111111111111')
         account_line = f"🏢 *帳號：* `{default_account}` (預設)\n"
-    
-    text = (
-        f"🔐 *AWS 執行請求*\n\n"
-        f"{source_line}"
-        f"{account_line}"
-        f"📋 *命令：*\n`{cmd_preview}`\n\n"
-        f"💬 *原因：* {reason}\n\n"
-        f"🆔 *ID：* `{request_id}`\n"
-        f"⏰ *{timeout_str}後過期*"
-    )
-    
-    keyboard = {
-        'inline_keyboard': [[
-            {'text': '✅ 批准執行', 'callback_data': f'approve:{request_id}'},
-            {'text': '❌ 拒絕', 'callback_data': f'deny:{request_id}'}
-        ]]
-    }
-    
-    send_telegram_message(text, keyboard)
-
-
-def send_approval_request_v2(request_id: str, command: str, reason: str, timeout: int, source: str, account_id: str, account_name: str):
-    """發送 Telegram 審批請求（v2: 使用 account_id）"""
-    cmd_preview = command if len(command) <= 500 else command[:500] + '...'
-    
-    # 顯示時間
-    if timeout < 60:
-        timeout_str = f"{timeout} 秒"
-    elif timeout < 3600:
-        timeout_str = f"{timeout // 60} 分鐘"
-    else:
-        timeout_str = f"{timeout // 3600} 小時"
-    
-    source_line = f"🤖 *來源：* {source}\n" if source else ""
-    account_line = f"🏢 *帳號：* `{account_id}` ({account_name})\n"
     
     text = (
         f"🔐 *AWS 執行請求*\n\n"
