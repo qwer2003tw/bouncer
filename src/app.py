@@ -266,6 +266,18 @@ TRUST_EXCLUDED_ACTIONS = [
     'put-metric-alarm',
 ]
 
+# 危險旗標 - 帶這些參數的命令不自動批准
+TRUST_EXCLUDED_FLAGS = [
+    '--force',
+    '--no-wait',
+    '--yes',
+    '--no-verify-ssl',
+    '--recursive',  # s3 rm --recursive
+    '--include-all-instances',  # ec2 stop/terminate
+    '--skip-final-snapshot',
+    '--delete-automated-backups',
+]
+
 
 def get_trust_session(source: str, account_id: str) -> Optional[Dict]:
     """
@@ -421,8 +433,13 @@ def should_trust_approve(command: str, source: str, account_id: str) -> tuple:
         if action in cmd_lower:
             return False, session, f"Action '{action}' excluded from trust"
 
+    # 檢查是否有危險旗標
+    for flag in TRUST_EXCLUDED_FLAGS:
+        if flag in cmd_lower:
+            return False, session, f"Flag '{flag}' excluded from trust"
+
     # 計算剩餘時間
-    remaining = session.get('expires_at', 0) - int(time.time())
+    remaining = int(session.get('expires_at', 0)) - int(time.time())
     if remaining <= 0:
         return False, None, "Trust session expired"
 
