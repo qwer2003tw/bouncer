@@ -209,6 +209,14 @@ TOOLS = [
             'type': 'object',
             'properties': {}
         }
+    },
+    {
+        'name': 'bouncer_list_safelist',
+        'description': '列出命令分類規則：哪些命令會自動執行（safelist）、哪些會被封鎖（blocked）',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {}
+        }
     }
 ]
 
@@ -634,7 +642,7 @@ def tool_project_list(arguments: dict) -> dict:
     """列出專案"""
     if not SECRET:
         return {'error': 'BOUNCER_SECRET not configured'}
-    
+
     payload = {
         'jsonrpc': '2.0',
         'id': 'project-list',
@@ -644,7 +652,26 @@ def tool_project_list(arguments: dict) -> dict:
             'arguments': arguments
         }
     }
-    
+
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
+def tool_list_safelist(arguments: dict) -> dict:
+    """列出 safelist 和 blocked patterns"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'list-safelist',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_list_safelist',
+            'arguments': {}
+        }
+    }
+
     result = http_request('POST', '/mcp', payload)
     return parse_mcp_result(result) or result
 
@@ -716,6 +743,8 @@ def handle_request(request: dict) -> dict:
             result = tool_deploy_history(arguments)
         elif tool_name == 'bouncer_project_list':
             result = tool_project_list(arguments)
+        elif tool_name == 'bouncer_list_safelist':
+            result = tool_list_safelist(arguments)
         else:
             return error_response(req_id, -32602, f'Unknown tool: {tool_name}')
         

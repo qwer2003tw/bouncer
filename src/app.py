@@ -1720,6 +1720,10 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
         assume_role: Role ARN（向後相容，如果沒有 account_id 會從這裡解析）
     """
     cmd_preview = command if len(command) <= 500 else command[:500] + '...'
+    # 轉義用戶輸入的 Markdown 特殊字元
+    cmd_preview = escape_markdown(cmd_preview)
+    reason = escape_markdown(reason)
+    source = escape_markdown(source) if source else None
 
     # 顯示時間（秒或分鐘）
     if timeout < 60:
@@ -1770,6 +1774,9 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
 
 def send_account_approval_request(request_id: str, action: str, account_id: str, name: str, role_arn: str, source: str):
     """發送帳號管理的 Telegram 審批請求"""
+    # 轉義用戶輸入
+    name = escape_markdown(name) if name else name
+    source = escape_markdown(source) if source else None
     source_line = f"🤖 *來源：* {source}\n" if source else ""
 
     if action == 'add':
@@ -1800,6 +1807,16 @@ def send_account_approval_request(request_id: str, action: str, account_id: str,
     }
 
     send_telegram_message(text, keyboard)
+
+
+def escape_markdown(text: str) -> str:
+    """轉義 Telegram Markdown 特殊字元"""
+    if not text:
+        return text
+    # Markdown 特殊字元: * _ ` [
+    for char in ['*', '_', '`', '[']:
+        text = text.replace(char, '\\' + char)
+    return text
 
 
 def send_telegram_message(text: str, reply_markup: dict = None):
