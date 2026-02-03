@@ -105,7 +105,7 @@ def init_bot_commands():
             data=json.dumps({"commands": commands}).encode(),
             headers={'Content-Type': 'application/json'}
         )
-        urllib.request.urlopen(req, timeout=5)
+        urllib.request.urlopen(req, timeout=5)  # nosec B310
         _bot_commands_initialized = True
         print("Bot commands initialized")
     except Exception as e:
@@ -316,7 +316,7 @@ def create_trust_session(source: str, account_id: str, approved_by: str) -> str:
         trust_id
     """
     import hashlib
-    source_hash = hashlib.md5(source.encode()).hexdigest()[:8]
+    source_hash = hashlib.md5(source.encode(), usedforsecurity=False).hexdigest()[:8]
     trust_id = f"trust-{source_hash}-{account_id}"
 
     now = int(time.time())
@@ -2943,7 +2943,7 @@ def _telegram_request(method: str, data: dict, timeout: int = 5, json_body: bool
                 data=urllib.parse.urlencode(data).encode(),
                 method='POST'
             )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
             return json.loads(resp.read().decode())
     except Exception as e:
         print(f"Telegram {method} error: {e}")

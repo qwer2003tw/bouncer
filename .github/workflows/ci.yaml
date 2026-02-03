@@ -27,6 +27,23 @@ jobs:
       - name: Run ruff check
         run: ruff check src/ mcp_server/ --ignore E501,E722
 
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+          
+      - name: Install bandit
+        run: pip install bandit
+        
+      - name: Run bandit
+        run: bandit -r src/ -ll  # Medium and above
+
   cfn-lint:
     name: CloudFormation Lint
     runs-on: ubuntu-latest
