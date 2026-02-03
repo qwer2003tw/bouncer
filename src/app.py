@@ -1,7 +1,7 @@
 """
 Bouncer - Clawdbot AWS 命令審批執行系統
-版本: 2.0.0 (MCP 支援)
-更新: 2026-01-31
+版本: 3.0.0 (MCP 支援)
+更新: 2026-02-03
 
 支援兩種模式：
 1. REST API（向後兼容）
@@ -20,6 +20,40 @@ import boto3
 from decimal import Decimal
 from typing import Optional, Dict
 
+# 從 constants.py 導入所有常數
+try:
+    # Lambda 環境
+    from constants import (
+        VERSION,
+        TELEGRAM_TOKEN, TELEGRAM_WEBHOOK_SECRET, TELEGRAM_API_BASE,
+        APPROVED_CHAT_IDS, APPROVED_CHAT_ID,
+        TABLE_NAME, ACCOUNTS_TABLE_NAME,
+        DEFAULT_ACCOUNT_ID,
+        REQUEST_SECRET, ENABLE_HMAC,
+        MCP_MAX_WAIT,
+        RATE_LIMIT_WINDOW, RATE_LIMIT_MAX_REQUESTS, MAX_PENDING_PER_SOURCE, RATE_LIMIT_ENABLED,
+        TRUST_SESSION_DURATION, TRUST_SESSION_MAX_COMMANDS, TRUST_SESSION_ENABLED,
+        TRUST_EXCLUDED_SERVICES, TRUST_EXCLUDED_ACTIONS, TRUST_EXCLUDED_FLAGS,
+        OUTPUT_PAGE_SIZE, OUTPUT_MAX_INLINE, OUTPUT_PAGE_TTL,
+        BLOCKED_PATTERNS, AUTO_APPROVE_PREFIXES,
+    )
+except ImportError:
+    # 本地測試環境
+    from src.constants import (
+        VERSION,
+        TELEGRAM_TOKEN, TELEGRAM_WEBHOOK_SECRET, TELEGRAM_API_BASE,
+        APPROVED_CHAT_IDS, APPROVED_CHAT_ID,
+        TABLE_NAME, ACCOUNTS_TABLE_NAME,
+        DEFAULT_ACCOUNT_ID,
+        REQUEST_SECRET, ENABLE_HMAC,
+        MCP_MAX_WAIT,
+        RATE_LIMIT_WINDOW, RATE_LIMIT_MAX_REQUESTS, MAX_PENDING_PER_SOURCE, RATE_LIMIT_ENABLED,
+        TRUST_SESSION_DURATION, TRUST_SESSION_MAX_COMMANDS, TRUST_SESSION_ENABLED,
+        TRUST_EXCLUDED_SERVICES, TRUST_EXCLUDED_ACTIONS, TRUST_EXCLUDED_FLAGS,
+        OUTPUT_PAGE_SIZE, OUTPUT_MAX_INLINE, OUTPUT_PAGE_TTL,
+        BLOCKED_PATTERNS, AUTO_APPROVE_PREFIXES,
+    )
+
 
 def get_header(headers: dict, key: str) -> Optional[str]:
     """Case-insensitive header lookup for API Gateway compatibility"""
@@ -36,30 +70,6 @@ def get_header(headers: dict, key: str) -> Optional[str]:
             return v
     return None
 
-
-# ============================================================================
-# 版本
-# ============================================================================
-VERSION = '3.0.0'
-
-# ============================================================================
-# 環境變數
-# ============================================================================
-TELEGRAM_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
-# 支援多個 Chat ID，用逗號分隔
-APPROVED_CHAT_IDS = set(os.environ.get('APPROVED_CHAT_ID', '999999999').replace(' ', '').split(','))
-APPROVED_CHAT_ID = os.environ.get('APPROVED_CHAT_ID', '999999999').split(',')[0]  # 向後相容，取第一個作為主要發送目標
-REQUEST_SECRET = os.environ.get('REQUEST_SECRET', '')
-TABLE_NAME = os.environ.get('TABLE_NAME', 'clawdbot-approval-requests')
-ACCOUNTS_TABLE_NAME = os.environ.get('ACCOUNTS_TABLE_NAME', 'bouncer-accounts')
-TELEGRAM_WEBHOOK_SECRET = os.environ.get('TELEGRAM_WEBHOOK_SECRET', '')
-DEFAULT_ACCOUNT_ID = os.environ.get('DEFAULT_ACCOUNT_ID', '111111111111')
-
-# HMAC 驗證開關
-ENABLE_HMAC = os.environ.get('ENABLE_HMAC', 'false').lower() == 'true'
-
-# MCP 模式的最大等待時間（秒）- Lambda 最長 15 分鐘，保留 1 分鐘餘量
-MCP_MAX_WAIT = int(os.environ.get('MCP_MAX_WAIT', '840'))  # 14 分鐘
 
 # DynamoDB
 dynamodb = boto3.resource('dynamodb')
@@ -160,11 +170,6 @@ def validate_role_arn(role_arn: str) -> tuple:
 # Rate Limiting
 # ============================================================================
 
-RATE_LIMIT_WINDOW = 60  # 60 秒視窗
-RATE_LIMIT_MAX_REQUESTS = 5  # 每視窗最多 5 個審批請求
-MAX_PENDING_PER_SOURCE = 10  # 每 source 最多 10 個 pending
-RATE_LIMIT_ENABLED = os.environ.get('RATE_LIMIT_ENABLED', 'true').lower() == 'true'
-
 class RateLimitExceeded(Exception):
     """Rate limit 超出例外"""
     pass
@@ -253,72 +258,8 @@ def check_rate_limit(source: str) -> None:
 
 # ============================================================================
 # Trust Session - 連續批准功能
+# (常數已移至 constants.py)
 # ============================================================================
-
-TRUST_SESSION_DURATION = 600  # 10 分鐘
-TRUST_SESSION_MAX_COMMANDS = 20  # 信任時段內最多執行 20 個命令
-TRUST_SESSION_ENABLED = os.environ.get('TRUST_SESSION_ENABLED', 'true').lower() == 'true'
-
-# Output Paging - 長輸出分頁
-# ============================================================================
-
-OUTPUT_PAGE_SIZE = 3000  # 每頁字元數
-OUTPUT_MAX_INLINE = 3500  # 直接回傳的最大長度
-OUTPUT_PAGE_TTL = 3600  # 分頁資料保留 1 小時
-
-# 高危服務 - 即使在信任時段也需要審批
-TRUST_EXCLUDED_SERVICES = [
-    'iam', 'sts', 'organizations', 'kms', 'secretsmanager',
-    'cloudformation', 'cloudtrail'
-]
-
-# 高危操作 - 即使在信任時段也需要審批
-TRUST_EXCLUDED_ACTIONS = [
-    # 通用破壞性操作
-    'delete-', 'terminate-', 'remove-', 'destroy-',
-    'stop-', 'disable-', 'deregister-',
-
-    # EC2
-    'modify-instance-attribute',
-
-    # S3
-    's3 rm', 's3 mv', 's3api delete', 's3 sync --delete',
-    'put-bucket-policy', 'put-bucket-acl', 'delete-bucket',
-
-    # Lambda
-    'update-function-code', 'update-function-configuration',
-
-    # ECS
-    'update-service',  # 可以 desired-count=0
-
-    # RDS
-    'modify-db-instance', 'reboot-db-instance',
-
-    # Route53
-    'change-resource-record-sets',
-
-    # SSM
-    'send-command', 'start-session',
-
-    # Secrets Manager / KMS
-    'put-secret-value', 'schedule-key-deletion',
-
-    # CloudWatch
-    'put-metric-alarm',
-]
-
-# 危險旗標 - 帶這些參數的命令不自動批准
-TRUST_EXCLUDED_FLAGS = [
-    '--force',
-    '--no-wait',
-    '--yes',
-    '--no-verify-ssl',
-    '--recursive',  # s3 rm --recursive
-    '--include-all-instances',  # ec2 stop/terminate
-    '--skip-final-snapshot',
-    '--delete-automated-backups',
-]
-
 
 def get_trust_session(source: str, account_id: str) -> Optional[Dict]:
     """
@@ -492,60 +433,8 @@ def should_trust_approve(command: str, source: str, account_id: str) -> tuple:
 # ============================================================================
 
 # Layer 1: BLOCKED - 永遠拒絕
-BLOCKED_PATTERNS = [
-    # IAM 危險操作
-    'iam create', 'iam delete', 'iam attach', 'iam detach',
-    'iam put', 'iam update', 'iam add', 'iam remove',
-    # STS 危險操作
-    'sts assume-role',
-    'sts get-session-token',      # 取得臨時 credentials
-    'sts get-federation-token',   # 取得 federation token
-    # Secrets/KMS 危險操作
-    'secretsmanager get-secret-value',  # 讀取 secrets
-    'kms decrypt',                       # 解密資料
-    # Compute 危險操作
-    'lambda invoke',              # 直接呼叫 Lambda
-    'ecs run-task',               # 執行 ECS task
-    'eks get-token',              # 取得 EKS token
-    # S3 Presigned URL
-    '--presign',                  # 產生 presigned URL
-    # Organizations
-    'organizations ',
-    # Shell 注入
-    ';', '|', '&&', '||', '`', '$(', '${',
-    'rm -rf', 'sudo ', '> /dev', 'chmod 777',
-    # 其他危險
-    'delete-account', 'close-account',
-]
 
 # Layer 2: SAFELIST - 自動批准（Read-only）
-AUTO_APPROVE_PREFIXES = [
-    # EC2
-    'aws ec2 describe-',
-    # S3 (read-only)
-    'aws s3 ls', 'aws s3api list-', 'aws s3api get-',
-    # RDS
-    'aws rds describe-',
-    # Lambda
-    'aws lambda list-', 'aws lambda get-',
-    # CloudWatch
-    'aws logs describe-', 'aws logs get-', 'aws logs filter-log-events',
-    'aws cloudwatch describe-', 'aws cloudwatch get-', 'aws cloudwatch list-',
-    # IAM (read-only)
-    'aws iam list-', 'aws iam get-',
-    # STS
-    'aws sts get-caller-identity',
-    # SSM (read-only)
-    'aws ssm describe-', 'aws ssm get-', 'aws ssm list-',
-    # Route53 (read-only)
-    'aws route53 list-', 'aws route53 get-',
-    # ECS/EKS (read-only)
-    'aws ecs describe-', 'aws ecs list-',
-    'aws eks describe-', 'aws eks list-',
-    # Cost Explorer (read-only)
-    'aws ce get-cost-', 'aws ce get-dimension-', 'aws ce get-reservation-',
-    'aws ce get-savings-', 'aws ce get-tags', 'aws ce describe-',
-]
 
 
 # ============================================================================
@@ -2564,7 +2453,6 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
 # Telegram API - 統一封裝
 # ============================================================================
 
-TELEGRAM_API_BASE = "https://api.telegram.org/bot"
 
 
 def _telegram_request(method: str, data: dict, timeout: int = 5, json_body: bool = False) -> dict:
