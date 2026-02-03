@@ -42,7 +42,10 @@ mcporter call bouncer bouncer_execute command="<aws command>" reason="<why>" sou
 **Parameters:**
 - `command` (required): AWS CLI 命令（例如：`aws ec2 describe-instances`）
 - `reason` (required): 執行原因，會顯示在審批請求中
-- `source` (required): 來源標識（例如：`Steven's Private Bot`）
+- `source` (required): 來源標識，格式：`{Bot名稱} ({專案/任務})`
+  - ✅ 好：`Private Bot (Bouncer - 部署修復)`
+  - ✅ 好：`Public Bot (AgentCoreNexus - 建立 ECS)`
+  - ❌ 差：`Private Bot`（太模糊，不知道在做什麼）
 - `account` (optional): 目標 AWS 帳號 ID（12 位數字），不填使用預設帳號
 - `sync` (optional): 同步模式，等待審批結果（預設 false，不推薦）
 
