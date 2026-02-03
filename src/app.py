@@ -120,7 +120,8 @@ def get_account(account_id: str) -> Optional[Dict]:
     try:
         result = accounts_table.get_item(Key={'account_id': account_id})
         return result.get('Item')
-    except:
+    except Exception as e:
+        print(f"Error: {e}")
         return None
 
 def list_accounts() -> list:
@@ -128,7 +129,8 @@ def list_accounts() -> list:
     try:
         result = accounts_table.scan()
         return result.get('Items', [])
-    except:
+    except Exception as e:
+        print(f"Error: {e}")
         return []
 
 def validate_account_id(account_id: str) -> tuple:
@@ -825,7 +827,8 @@ def handle_mcp_request(event) -> dict:
     # 解析 JSON-RPC
     try:
         body = json.loads(event.get('body', '{}'))
-    except:
+    except Exception as e:
+        print(f"Error: {e}")
         return mcp_error(None, -32700, 'Parse error')
 
     jsonrpc = body.get('jsonrpc')
@@ -1647,7 +1650,8 @@ def handle_clawdbot_request(event):
 
     try:
         body = json.loads(event.get('body', '{}'))
-    except:
+    except Exception as e:
+        print(f"Error: {e}")
         return response(400, {'error': 'Invalid JSON'})
 
     command = body.get('command', '').strip()
@@ -1728,7 +1732,8 @@ def wait_for_result_rest(request_id: str, timeout: int = 50) -> dict:
                     'result': item.get('result', ''),
                     'waited': True
                 })
-        except:
+        except Exception as e:
+            print(f"Error: {e}")
             pass
 
     return response(202, {
@@ -1805,7 +1810,8 @@ def handle_trust_command(chat_id: str) -> dict:
             }
         )
         items = resp.get('Items', [])
-    except:
+    except Exception as e:
+        print(f"Error: {e}")
         items = []
 
     if not items:
@@ -1833,7 +1839,8 @@ def handle_pending_command(chat_id: str) -> dict:
             ExpressionAttributeValues={':status': 'pending'}
         )
         items = resp.get('Items', [])
-    except:
+    except Exception as e:
+        print(f"Error: {e}")
         items = []
 
     if not items:
@@ -1899,7 +1906,8 @@ def handle_telegram_webhook(event):
 
     try:
         body = json.loads(event.get('body', '{}'))
-    except:
+    except Exception as e:
+        print(f"Error: {e}")
         return response(400, {'error': 'Invalid JSON'})
 
     # 處理文字訊息（指令）
@@ -1935,7 +1943,8 @@ def handle_telegram_webhook(event):
 
     try:
         item = table.get_item(Key={'request_id': request_id}).get('Item')
-    except:
+    except Exception as e:
+        print(f"Error: {e}")
         item = None
 
     if not item:
@@ -2347,7 +2356,8 @@ def verify_hmac(headers: dict, body: str) -> bool:
         ts = int(timestamp)
         if abs(time.time() - ts) > 300:
             return False
-    except:
+    except Exception as e:
+        print(f"Error: {e}")
         return False
 
     payload = f"{timestamp}.{nonce}.{body}"
@@ -2599,7 +2609,8 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
             parsed_account_id = assume_role.split(':')[4]
             role_name = assume_role.split('/')[-1]
             account_line = f"🏢 *帳號：* `{parsed_account_id}` ({role_name})\n"
-        except:
+        except Exception as e:
+            print(f"Error: {e}")
             account_line = f"🏢 *Role：* `{assume_role}`\n"
     else:
         # 預設帳號
@@ -2798,7 +2809,8 @@ def answer_callback(callback_id: str, text: str):
             method='POST'
         )
         urllib.request.urlopen(req, timeout=5)
-    except:
+    except Exception as e:
+        print(f"Error: {e}")
         pass
 
 
