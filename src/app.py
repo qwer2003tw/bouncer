@@ -2170,6 +2170,9 @@ def handle_telegram_webhook(event):
         answer_callback(callback['id'], '⚠️ 此請求已處理過')
         return response(200, {'ok': True})
 
+    # 取得 message_id（用於更新訊息）
+    message_id = callback.get('message', {}).get('message_id')
+
     # 檢查是否過期
     ttl = item.get('ttl', 0)
     if ttl and int(time.time()) > ttl:
@@ -2195,8 +2198,6 @@ def handle_telegram_webhook(event):
                 f"💬 *原因：* {escape_markdown(reason)}"
             )
         return response(200, {'ok': True, 'expired': True})
-
-    message_id = callback.get('message', {}).get('message_id')
 
     # 根據請求類型處理
     request_action = item.get('action', 'execute')  # 預設是命令執行
