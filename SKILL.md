@@ -73,15 +73,14 @@ mcporter call bouncer bouncer_remove_account account_id="111111111111" source="<
 ```
 
 ### bouncer_upload
-上傳檔案到 S3（需要 Telegram 審批）。用於 CloudFormation template 等無法用命令直接建立的場景。
+上傳檔案到固定 S3 桶（需要 Telegram 審批）。檔案會上傳到集中管理的 `bouncer-uploads-111111111111` 桶，30 天後自動刪除。
 
 ```bash
 # 先把檔案 base64 encode
 CONTENT=$(base64 -w0 template.yaml)
 
 mcporter call bouncer bouncer_upload \
-  bucket="my-bucket" \
-  key="templates/stack.yaml" \
+  filename="template.yaml" \
   content="$CONTENT" \
   content_type="text/yaml" \
   reason="上傳 CloudFormation template" \
@@ -89,11 +88,9 @@ mcporter call bouncer bouncer_upload \
 ```
 
 **Parameters:**
-- `bucket` (required): S3 bucket 名稱
-- `key` (required): S3 object key（檔案路徑）
+- `filename` (required): 檔案名稱（例如 `template.yaml`）
 - `content` (required): 檔案內容（base64 encoded）
 - `content_type` (optional): Content-Type（預設 `application/octet-stream`）
-- `account_id` (optional): 目標 AWS 帳號 ID（不填使用 Bouncer Lambda 帳號）
 - `reason` (required): 上傳原因
 - `source` (required): 來源標識
 
@@ -103,9 +100,15 @@ mcporter call bouncer bouncer_upload \
 ```json
 {
   "status": "approved",
-  "s3_uri": "s3://my-bucket/templates/stack.yaml",
-  "s3_url": "https://my-bucket.s3.amazonaws.com/templates/stack.yaml"
+  "s3_uri": "s3://bouncer-uploads-111111111111/Clawd/20260203_121500_abc123/template.yaml",
+  "s3_url": "https://bouncer-uploads-111111111111.s3.amazonaws.com/Clawd/20260203_121500_abc123/template.yaml"
 }
+```
+
+**特性：**
+- 自動產生唯一路徑：`{source}/{timestamp}_{uuid}/{filename}`
+- 30 天 lifecycle 自動刪除
+- 跨帳號讀取權限已設定（Dev/1st/AgentCoreNexusTest）
 ```
 
 ### bouncer_get_page

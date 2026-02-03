@@ -678,17 +678,13 @@ MCP_TOOLS = {
     },
     # ========== Upload Tool ==========
     'bouncer_upload': {
-        'description': '上傳檔案到 S3（需要 Telegram 審批）。用於 CloudFormation template 等場景。',
+        'description': '上傳檔案到固定 S3 桶（需要 Telegram 審批）。用於 CloudFormation template 等場景。檔案會上傳到 bouncer-uploads 桶，30 天後自動刪除。',
         'parameters': {
             'type': 'object',
             'properties': {
-                'bucket': {
+                'filename': {
                     'type': 'string',
-                    'description': 'S3 bucket 名稱'
-                },
-                'key': {
-                    'type': 'string',
-                    'description': 'S3 object key（檔案路徑）'
+                    'description': '檔案名稱（例如 template.yaml）'
                 },
                 'content': {
                     'type': 'string',
@@ -699,10 +695,6 @@ MCP_TOOLS = {
                     'description': 'Content-Type（預設 application/octet-stream）',
                     'default': 'application/octet-stream'
                 },
-                'account_id': {
-                    'type': 'string',
-                    'description': 'AWS 帳號 ID（選填，預設使用 Lambda 執行帳號）'
-                },
                 'reason': {
                     'type': 'string',
                     'description': '上傳原因'
@@ -712,7 +704,7 @@ MCP_TOOLS = {
                     'description': '請求來源標識'
                 }
             },
-            'required': ['bucket', 'key', 'content', 'reason', 'source']
+            'required': ['filename', 'content', 'reason', 'source']
         }
     }
 }
@@ -1467,28 +1459,30 @@ def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
     })
 
 
-def mcp_tool_upload(req_id, arguments: dict) -> dict:
-    """MCP tool: bouncer_upload（上傳檔案到 S3，需要 Telegram 審批）"""
-    import base64
+# 固定上傳桶
+UPLOAD_BUCKET = 'bouncer-uploads-111111111111'
 
-    bucket = str(arguments.get('bucket', '')).strip()
-    key = str(arguments.get('key', '')).strip()
+
+def mcp_tool_upload(req_id, arguments: dict) -> dict:
+    """MCP tool: bouncer_upload（上傳檔案到固定 S3 桶，需要 Telegram 審批）"""
+    import base64
+    import uuid
+
+    filename = str(arguments.get('filename', '')).strip()
     content_b64 = str(arguments.get('content', '')).strip()
     content_type = str(arguments.get('content_type', 'application/octet-stream')).strip()
-    account_id = arguments.get('account_id', None)
     reason = str(arguments.get('reason', 'No reason provided'))
     source = arguments.get('source', None)
     async_mode = arguments.get('async', False)
 
+    # 向後相容：如果有 bucket/key 就用舊邏輯
+    legacy_bucket = arguments.get('bucket', None)
+    legacy_key = arguments.get('key', None)
+
     # 驗證必要參數
-    if not bucket:
+    if not filename and not legacy_key:
         return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': 'bucket is required'})}],
-            'isError': True
-        })
-    if not key:
-        return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': 'key is required'})}],
+            'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': 'filename is required'})}],
             'isError': True
         })
     if not content_b64:
@@ -1518,21 +1512,19 @@ def mcp_tool_upload(req_id, arguments: dict) -> dict:
             'isError': True
         })
 
-    # 取得帳號資訊
-    account_name = None
-    assume_role_arn = None
-    if account_id:
-        account_id = str(account_id).strip()
-        valid, error = validate_account_id(account_id)
-        if not valid:
-            return mcp_result(req_id, {
-                'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': error})}],
-                'isError': True
-            })
-        account = get_account(account_id)
-        if account:
-            account_name = account.get('name', account_id)
-            assume_role_arn = account.get('role_arn')
+    # 決定 bucket 和 key
+    if legacy_bucket and legacy_key:
+        # 向後相容模式
+        bucket = legacy_bucket
+        key = legacy_key
+    else:
+        # 固定桶模式：自動產生路徑
+        # 格式: {source}/{timestamp}_{uuid}/{filename}
+        bucket = UPLOAD_BUCKET
+        source_path = (source or 'anonymous').replace(' ', '_').replace("'", '')
+        timestamp = time.strftime('%Y%m%d_%H%M%S')
+        unique_id = uuid.uuid4().hex[:8]
+        key = f"{source_path}/{timestamp}_{unique_id}/{filename or legacy_key}"
 
     # Rate limit 檢查
     if source:
@@ -1569,8 +1561,6 @@ def mcp_tool_upload(req_id, arguments: dict) -> dict:
         'content': content_b64,  # 存 base64，審批後再上傳
         'content_type': content_type,
         'content_size': content_size,
-        'account_id': account_id,
-        'assume_role_arn': assume_role_arn,
         'reason': reason,
         'source': source or '__anonymous__',
         'status': 'pending_approval',
@@ -1582,17 +1572,10 @@ def mcp_tool_upload(req_id, arguments: dict) -> dict:
 
     # 發送 Telegram 審批
     s3_uri = f"s3://{bucket}/{key}"
-    account_line = ""
-    if account_id:
-        account_line = f"🏢 帳號： {account_id}"
-        if account_name:
-            account_line += f" ({account_name})"
-        account_line += "\n"
 
     message = (
         f"📤 上傳檔案請求\n"
         f"🤖 來源： {source or 'Unknown'}\n"
-        f"{account_line}"
         f"📁 目標： {s3_uri}\n"
         f"📊 大小： {size_str}\n"
         f"📝 類型： {content_type}\n"
@@ -1675,7 +1658,7 @@ def wait_for_upload_result(request_id: str, timeout: int = 300) -> dict:
 
 
 def execute_upload(request_id: str, approver: str) -> dict:
-    """執行已審批的上傳"""
+    """執行已審批的上傳（上傳到固定桶）"""
     import base64
 
     try:
@@ -1689,28 +1672,12 @@ def execute_upload(request_id: str, approver: str) -> dict:
         key = item.get('key')
         content_b64 = item.get('content')
         content_type = item.get('content_type', 'application/octet-stream')
-        assume_role_arn = item.get('assume_role_arn')
 
         # 解碼內容
         content_bytes = base64.b64decode(content_b64)
 
-        # 建立 S3 client
-        if assume_role_arn:
-            sts = boto3.client('sts')
-            assumed = sts.assume_role(
-                RoleArn=assume_role_arn,
-                RoleSessionName='bouncer-upload',
-                DurationSeconds=900
-            )
-            creds = assumed['Credentials']
-            s3 = boto3.client(
-                's3',
-                aws_access_key_id=creds['AccessKeyId'],
-                aws_secret_access_key=creds['SecretAccessKey'],
-                aws_session_token=creds['SessionToken']
-            )
-        else:
-            s3 = boto3.client('s3')
+        # 使用 Lambda 本身的權限上傳
+        s3 = boto3.client('s3')
 
         # 上傳
         s3.put_object(
@@ -2565,11 +2532,9 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
     content_size = int(item.get('content_size', 0))
     source = item.get('source', '')
     reason = item.get('reason', '')
-    account_id = item.get('account_id')
 
     s3_uri = f"s3://{bucket}/{key}"
     source_line = f"🤖 來源： {source}\n" if source else ""
-    account_line = f"🏢 帳號： {account_id}\n" if account_id else ""
 
     # 格式化大小
     if content_size >= 1024 * 1024:
@@ -2588,7 +2553,6 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
                 message_id,
                 f"✅ 已上傳\n\n"
                 f"{source_line}"
-                f"{account_line}"
                 f"📁 目標： {s3_uri}\n"
                 f"📊 大小： {size_str}\n"
                 f"🔗 URL： {result.get('s3_url', '')}\n"
@@ -2602,7 +2566,6 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
                 message_id,
                 f"❌ 上傳失敗\n\n"
                 f"{source_line}"
-                f"{account_line}"
                 f"📁 目標： {s3_uri}\n"
                 f"📊 大小： {size_str}\n"
                 f"❗ 錯誤： {error}\n"
@@ -2626,7 +2589,6 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
             message_id,
             f"❌ 已拒絕上傳\n\n"
             f"{source_line}"
-            f"{account_line}"
             f"📁 目標： {s3_uri}\n"
             f"📊 大小： {size_str}\n"
             f"💬 原因： {reason}"

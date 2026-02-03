@@ -278,17 +278,13 @@ TOOLS = [
     },
     {
         'name': 'bouncer_upload',
-        'description': '上傳檔案到 S3（需要 Telegram 審批）。用於 CloudFormation template 等場景。檔案大小限制 4.5 MB。',
+        'description': '上傳檔案到固定 S3 桶（需要 Telegram 審批）。檔案會上傳到 bouncer-uploads 桶，30 天後自動刪除。檔案大小限制 4.5 MB。',
         'inputSchema': {
             'type': 'object',
             'properties': {
-                'bucket': {
+                'filename': {
                     'type': 'string',
-                    'description': 'S3 bucket 名稱'
-                },
-                'key': {
-                    'type': 'string',
-                    'description': 'S3 object key（檔案路徑）'
+                    'description': '檔案名稱（例如 template.yaml）'
                 },
                 'content': {
                     'type': 'string',
@@ -297,10 +293,6 @@ TOOLS = [
                 'content_type': {
                     'type': 'string',
                     'description': 'Content-Type（預設 application/octet-stream）'
-                },
-                'account_id': {
-                    'type': 'string',
-                    'description': 'AWS 帳號 ID（選填，預設使用 Bouncer Lambda 帳號）'
                 },
                 'reason': {
                     'type': 'string',
@@ -311,7 +303,7 @@ TOOLS = [
                     'description': '請求來源標識'
                 }
             },
-            'required': ['bucket', 'key', 'content', 'reason', 'source']
+            'required': ['filename', 'content', 'reason', 'source']
         }
     }
 ]
