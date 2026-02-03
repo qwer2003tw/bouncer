@@ -1466,7 +1466,6 @@ UPLOAD_BUCKET = 'bouncer-uploads-111111111111'
 def mcp_tool_upload(req_id, arguments: dict) -> dict:
     """MCP tool: bouncer_upload（上傳檔案到固定 S3 桶，需要 Telegram 審批）"""
     import base64
-    import uuid
 
     filename = str(arguments.get('filename', '')).strip()
     content_b64 = str(arguments.get('content', '')).strip()
@@ -1519,12 +1518,12 @@ def mcp_tool_upload(req_id, arguments: dict) -> dict:
         key = legacy_key
     else:
         # 固定桶模式：自動產生路徑
-        # 格式: {source}/{timestamp}_{uuid}/{filename}
+        # 格式: {date}/{request_id}/{filename}
         bucket = UPLOAD_BUCKET
-        source_path = (source or 'anonymous').replace(' ', '_').replace("'", '')
-        timestamp = time.strftime('%Y%m%d_%H%M%S')
-        unique_id = uuid.uuid4().hex[:8]
-        key = f"{source_path}/{timestamp}_{unique_id}/{filename or legacy_key}"
+        date_str = time.strftime('%Y-%m-%d')
+        # request_id 在這裡先產生，後面會用到
+        request_id = generate_request_id(f"upload:{filename}")
+        key = f"{date_str}/{request_id}/{filename or legacy_key}"
 
     # Rate limit 檢查
     if source:
@@ -1541,8 +1540,9 @@ def mcp_tool_upload(req_id, arguments: dict) -> dict:
                 'isError': True
             })
 
-    # 建立審批請求
-    request_id = generate_request_id(f"upload:{bucket}:{key}")
+    # 建立審批請求（固定桶模式已在上面產生 request_id）
+    if legacy_bucket and legacy_key:
+        request_id = generate_request_id(f"upload:{bucket}:{key}")
     ttl = int(time.time()) + 300 + 60
 
     # 格式化大小顯示

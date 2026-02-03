@@ -100,13 +100,13 @@ mcporter call bouncer bouncer_upload \
 ```json
 {
   "status": "approved",
-  "s3_uri": "s3://bouncer-uploads-111111111111/Clawd/20260203_121500_abc123/template.yaml",
-  "s3_url": "https://bouncer-uploads-111111111111.s3.amazonaws.com/Clawd/20260203_121500_abc123/template.yaml"
+  "s3_uri": "s3://bouncer-uploads-111111111111/2026-02-03/upload_abc12345/template.yaml",
+  "s3_url": "https://bouncer-uploads-111111111111.s3.amazonaws.com/2026-02-03/upload_abc12345/template.yaml"
 }
 ```
 
 **特性：**
-- 自動產生唯一路徑：`{source}/{timestamp}_{uuid}/{filename}`
+- 自動產生唯一路徑：`{date}/{request_id}/{filename}`
 - 30 天 lifecycle 自動刪除
 - 跨帳號讀取權限已設定（Dev/1st/AgentCoreNexusTest）
 ```
