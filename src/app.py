@@ -2240,7 +2240,10 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         )
 
         result_preview = result[:1000] if len(result) > 1000 else result
-        truncate_notice = f"\n\n⚠️ 輸出已截斷 ({paged['output_length']} 字元，共 {paged['total_pages']} 頁)" if paged.get('paged') else ""
+        if paged.get('paged'):
+            truncate_notice = f"\n\n⚠️ 輸出已截斷 ({paged['output_length']} 字元，共 {paged['total_pages']} 頁)\n📄 下一頁：`{paged.get('next_page')}`"
+        else:
+            truncate_notice = ""
         update_message(
             message_id,
             f"✅ *已批准並執行*\n\n"
@@ -2285,7 +2288,10 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         trust_id = create_trust_session(source, account_id, user_id)
 
         result_preview = result[:800] if len(result) > 800 else result
-        truncate_notice = f"\n\n⚠️ 輸出已截斷 ({paged['output_length']} 字元，共 {paged['total_pages']} 頁)" if paged.get('paged') else ""
+        if paged.get('paged'):
+            truncate_notice = f"\n\n⚠️ 輸出已截斷 ({paged['output_length']} 字元，共 {paged['total_pages']} 頁)\n📄 下一頁：`{paged.get('next_page')}`"
+        else:
+            truncate_notice = ""
         update_message(
             message_id,
             f"✅ *已批准並執行* + 🔓 *信任 10 分鐘*\n\n"
