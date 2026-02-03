@@ -2259,7 +2259,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
 
         result_preview = result[:1000] if len(result) > 1000 else result
         if paged.get('paged'):
-            truncate_notice = f"\n\n⚠️ 輸出已截斷 ({paged['output_length']} 字元，共 {paged['total_pages']} 頁)\n📄 下一頁：`{paged.get('next_page')}`"
+            truncate_notice = f"\n\n⚠️ 輸出較長 ({paged['output_length']} 字元，共 {paged['total_pages']} 頁)"
         else:
             truncate_notice = ""
         update_and_answer(
@@ -2274,6 +2274,9 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             callback_id,
             '✅ 已執行'
         )
+        # 自動發送剩餘頁面
+        if paged.get('paged'):
+            send_remaining_pages(request_id, paged['total_pages'])
 
     elif action == 'approve_trust':
         # 批准並建立信任時段
@@ -2309,7 +2312,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
 
         result_preview = result[:800] if len(result) > 800 else result
         if paged.get('paged'):
-            truncate_notice = f"\n\n⚠️ 輸出已截斷 ({paged['output_length']} 字元，共 {paged['total_pages']} 頁)\n📄 下一頁：`{paged.get('next_page')}`"
+            truncate_notice = f"\n\n⚠️ 輸出較長 ({paged['output_length']} 字元，共 {paged['total_pages']} 頁)"
         else:
             truncate_notice = ""
         update_and_answer(
@@ -2325,6 +2328,9 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             callback_id,
             '✅ 已執行 + 🔓 信任啟動'
         )
+        # 自動發送剩餘頁面
+        if paged.get('paged'):
+            send_remaining_pages(request_id, paged['total_pages'])
 
     elif action == 'deny':
         table.update_item(
@@ -2698,6 +2704,25 @@ def verify_hmac(headers: dict, body: str) -> bool:
 # ============================================================================
 # Output Paging - 長輸出分頁
 # ============================================================================
+
+def send_remaining_pages(request_id: str, total_pages: int):
+    """自動發送剩餘的分頁內容"""
+    if total_pages <= 1:
+        return
+
+    for page_num in range(2, total_pages + 1):
+        page_id = f"{request_id}:page:{page_num}"
+        try:
+            result = table.get_item(Key={'request_id': page_id}).get('Item')
+            if result and 'content' in result:
+                content = result['content']
+                send_telegram_message(
+                    f"📄 *第 {page_num}/{total_pages} 頁*\n\n"
+                    f"```\n{content}\n```"
+                )
+        except Exception as e:
+            print(f"Error sending page {page_num}: {e}")
+
 
 def store_paged_output(request_id: str, output: str) -> dict:
     """存儲長輸出並分頁
