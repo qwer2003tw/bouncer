@@ -45,7 +45,7 @@ def get_project(project_id: str) -> dict:
     try:
         result = projects_table.get_item(Key={'project_id': project_id})
         return result.get('Item')
-    except:
+    except Exception:
         return None
 
 
@@ -74,7 +74,7 @@ def remove_project(project_id: str) -> bool:
     try:
         projects_table.delete_item(Key={'project_id': project_id})
         return True
-    except:
+    except Exception:
         return False
 
 
@@ -107,7 +107,7 @@ def release_lock(project_id: str) -> bool:
     try:
         locks_table.delete_item(Key={'project_id': project_id})
         return True
-    except:
+    except Exception:
         return False
 
 
@@ -128,7 +128,7 @@ def get_lock(project_id: str) -> dict:
             return None
 
         return item
-    except:
+    except Exception:
         return None
 
 
@@ -174,7 +174,7 @@ def get_deploy_record(deploy_id: str) -> dict:
     try:
         result = history_table.get_item(Key={'deploy_id': deploy_id})
         return result.get('Item')
-    except:
+    except Exception:
         return None
 
 

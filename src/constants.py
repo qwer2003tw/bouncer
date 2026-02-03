@@ -184,51 +184,138 @@ DANGEROUS_PATTERNS = [
 # ============================================================================
 
 AUTO_APPROVE_PREFIXES = [
-    # 讀取操作
+    # STS
+    'aws sts get-caller-identity',
+
+    # S3 唯讀
     'aws s3 ls',
     'aws s3 cp s3:',  # 只允許從 S3 下載
+    'aws s3api head-',
+    'aws s3api get-object',
+    'aws s3api list-',
+
+    # EC2
     'aws ec2 describe-',
+
+    # RDS
     'aws rds describe-',
+    'aws rds list-',
+
+    # Lambda
     'aws lambda list-',
     'aws lambda get-',
+
+    # DynamoDB
     'aws dynamodb describe-',
     'aws dynamodb list-',
     'aws dynamodb scan',
     'aws dynamodb query',
     'aws dynamodb get-item',
+
+    # CloudFormation
     'aws cloudformation describe-',
     'aws cloudformation list-',
+    'aws cloudformation get-',
+
+    # CloudWatch Logs
     'aws logs describe-',
     'aws logs filter-log-events',
     'aws logs get-log-events',
-    'aws sts get-caller-identity',
-    'aws iam list-',
-    'aws iam get-',
+    'aws logs get-',
+    'aws logs list-',
+    'aws logs tail',
+
+    # CloudWatch Metrics
     'aws cloudwatch describe-',
     'aws cloudwatch list-',
     'aws cloudwatch get-',
-    'aws events list-',
-    'aws events describe-',
-    'aws sns list-',
-    'aws sqs list-',
-    'aws sqs get-queue-attributes',
-    'aws route53 list-',
-    'aws route53 get-',
-    'aws apigateway get-',
+
+    # IAM (唯讀)
+    'aws iam list-',
+    'aws iam get-',
+
+    # ECS/ECR
     'aws ecs list-',
     'aws ecs describe-',
     'aws ecr describe-',
     'aws ecr list-',
     'aws ecr get-',
+
+    # Secrets Manager (唯讀)
     'aws secretsmanager list-secrets',
     'aws secretsmanager describe-secret',
     'aws secretsmanager get-secret-value',
+
+    # KMS (唯讀)
     'aws kms list-',
     'aws kms describe-',
+
+    # SSM Parameter Store
+    'aws ssm describe-',
+    'aws ssm get-parameter',
+    'aws ssm get-parameters',
+    'aws ssm list-',
+
+    # SNS/SQS
+    'aws sns list-',
+    'aws sns get-',
+    'aws sqs list-',
+    'aws sqs get-queue-attributes',
+    'aws sqs get-queue-url',
+
+    # API Gateway
+    'aws apigateway get-',
+    'aws apigatewayv2 get-',
+
+    # Route53
+    'aws route53 list-',
+    'aws route53 get-',
+
+    # ACM
+    'aws acm describe-',
+    'aws acm list-',
+
+    # CloudFront
+    'aws cloudfront get-',
+    'aws cloudfront list-',
+
+    # Step Functions / States
     'aws states list-',
     'aws states describe-',
+    'aws states get-',
     'aws stepfunctions list-',
     'aws stepfunctions describe-',
+    'aws stepfunctions get-',
+
+    # EventBridge
+    'aws events list-',
+    'aws events describe-',
+
+    # Network Firewall
     'aws network-firewall describe-',
     'aws network-firewall list-',
+
+    # Cost Explorer
+    'aws ce get-',
+
+    # Organizations (唯讀)
+    'aws organizations list-',
+    'aws organizations describe-',
+
+    # ElastiCache
+    'aws elasticache describe-',
+    'aws elasticache list-',
+
+    # Elastic Load Balancing
+    'aws elbv2 describe-',
+    'aws elb describe-',
+
+    # Auto Scaling
+    'aws autoscaling describe-',
+
+    # CodeBuild/CodePipeline
+    'aws codebuild list-',
+    'aws codebuild batch-get-',
+    'aws codepipeline list-',
+    'aws codepipeline get-',
 ]
