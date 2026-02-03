@@ -380,6 +380,36 @@ def increment_trust_command_count(trust_id: str) -> int:
         return 0
 
 
+def is_trust_excluded(command: str) -> bool:
+    """
+    檢查命令是否被 Trust Session 排除（高危命令）
+
+    Args:
+        command: AWS CLI 命令
+
+    Returns:
+        True 如果命令被排除，False 如果可以信任
+    """
+    cmd_lower = command.lower()
+
+    # 檢查是否是高危服務
+    for service in TRUST_EXCLUDED_SERVICES:
+        if f'aws {service} ' in cmd_lower or f'aws {service}\t' in cmd_lower:
+            return True
+
+    # 檢查是否是高危操作
+    for action in TRUST_EXCLUDED_ACTIONS:
+        if action in cmd_lower:
+            return True
+
+    # 檢查是否有危險旗標
+    for flag in TRUST_EXCLUDED_FLAGS:
+        if flag in cmd_lower:
+            return True
+
+    return False
+
+
 def should_trust_approve(command: str, source: str, account_id: str) -> tuple:
     """
     檢查是否應該透過信任時段自動批准
@@ -404,21 +434,9 @@ def should_trust_approve(command: str, source: str, account_id: str) -> tuple:
     if session.get('command_count', 0) >= TRUST_SESSION_MAX_COMMANDS:
         return False, session, f"Trust session command limit reached ({TRUST_SESSION_MAX_COMMANDS})"
 
-    # 檢查是否是高危服務
-    cmd_lower = command.lower()
-    for service in TRUST_EXCLUDED_SERVICES:
-        if f'aws {service} ' in cmd_lower or f'aws {service}\t' in cmd_lower:
-            return False, session, f"Service '{service}' excluded from trust"
-
-    # 檢查是否是高危操作
-    for action in TRUST_EXCLUDED_ACTIONS:
-        if action in cmd_lower:
-            return False, session, f"Action '{action}' excluded from trust"
-
-    # 檢查是否有危險旗標
-    for flag in TRUST_EXCLUDED_FLAGS:
-        if flag in cmd_lower:
-            return False, session, f"Flag '{flag}' excluded from trust"
+    # 使用統一的排除檢查
+    if is_trust_excluded(command):
+        return False, session, "Command excluded from trust"
 
     # 計算剩餘時間
     remaining = int(session.get('expires_at', 0)) - int(time.time())

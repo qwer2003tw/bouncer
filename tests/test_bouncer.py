@@ -724,5 +724,189 @@ class TestStatusQuery:
         assert result['statusCode'] == 404
 
 
+# ============================================================================
+# Trust Session 測試
+# ============================================================================
+
+class TestTrustSession:
+    """Trust Session 測試"""
+    
+    def test_should_trust_approve_no_session(self, app_module):
+        """沒有 Trust Session 時應該返回 False"""
+        should_trust, session, reason = app_module.should_trust_approve(
+            'aws ec2 describe-instances',
+            'test-source',
+            '111111111111'
+        )
+        assert should_trust is False
+        assert session is None
+    
+    def test_trust_excluded_services(self, app_module):
+        """高危服務應該被排除"""
+        # IAM 命令不應該被信任
+        assert app_module.is_trust_excluded('aws iam list-users') is True
+        assert app_module.is_trust_excluded('aws sts get-caller-identity') is True
+        assert app_module.is_trust_excluded('aws kms list-keys') is True
+        
+        # 安全命令可以被信任
+        assert app_module.is_trust_excluded('aws ec2 describe-instances') is False
+        assert app_module.is_trust_excluded('aws s3 ls') is False
+    
+    def test_trust_excluded_actions(self, app_module):
+        """高危操作應該被排除"""
+        # 刪除操作
+        assert app_module.is_trust_excluded('aws ec2 delete-vpc --vpc-id vpc-123') is True
+        assert app_module.is_trust_excluded('aws s3 rm s3://bucket/key') is True
+        
+        # 終止操作
+        assert app_module.is_trust_excluded('aws ec2 terminate-instances --instance-ids i-123') is True
+        
+        # 停止操作
+        assert app_module.is_trust_excluded('aws ec2 stop-instances --instance-ids i-123') is True
+    
+    def test_trust_excluded_flags(self, app_module):
+        """危險旗標應該被排除"""
+        # --force
+        assert app_module.is_trust_excluded('aws s3 rm s3://bucket --force') is True
+        
+        # --recursive
+        assert app_module.is_trust_excluded('aws s3 rm s3://bucket --recursive') is True
+        
+        # --skip-final-snapshot
+        assert app_module.is_trust_excluded('aws rds delete-db-instance --skip-final-snapshot') is True
+        
+        # 安全命令
+        assert app_module.is_trust_excluded('aws s3 ls s3://bucket') is False
+
+
+# ============================================================================
+# Rate Limiting 測試
+# ============================================================================
+
+class TestRateLimiting:
+    """Rate Limiting 測試"""
+    
+    def test_rate_limit_not_exceeded(self, app_module):
+        """正常請求不應該觸發 rate limit"""
+        # 第一次請求應該通過
+        try:
+            app_module.check_rate_limit('test-source-1')
+        except (app_module.RateLimitExceeded, app_module.PendingLimitExceeded):
+            pytest.fail("Rate limit should not be exceeded on first request")
+    
+    def test_rate_limit_disabled(self, app_module):
+        """停用 rate limit 時應該跳過檢查"""
+        original = app_module.RATE_LIMIT_ENABLED
+        try:
+            app_module.RATE_LIMIT_ENABLED = False
+            # 即使呼叫多次也不應該觸發
+            for _ in range(20):
+                app_module.check_rate_limit('test-source-2')
+        finally:
+            app_module.RATE_LIMIT_ENABLED = original
+
+
+# ============================================================================
+# Output Paging 測試
+# ============================================================================
+
+class TestOutputPaging:
+    """Output Paging 測試"""
+    
+    def test_short_output_not_paged(self, app_module):
+        """短輸出不應該分頁"""
+        result = app_module.store_paged_output('req-123', 'short output')
+        assert result['paged'] is False
+        assert result['result'] == 'short output'
+    
+    def test_long_output_is_paged(self, app_module):
+        """長輸出應該分頁"""
+        long_output = 'x' * 5000  # 超過 OUTPUT_MAX_INLINE
+        result = app_module.store_paged_output('req-456', long_output)
+        
+        assert result['paged'] is True
+        assert result['page'] == 1
+        assert result['total_pages'] == 2  # 5000 / 3000 = 2 頁
+        assert result['output_length'] == 5000
+        assert result['next_page'] == 'req-456:page:2'
+        assert len(result['result']) == 3000  # 第一頁
+    
+    def test_get_paged_output(self, app_module):
+        """測試取得分頁輸出"""
+        # 先存一個長輸出
+        long_output = 'A' * 3000 + 'B' * 3000  # 6000 字元，2 頁
+        app_module.store_paged_output('req-789', long_output)
+        
+        # 取得第 2 頁
+        result = app_module.get_paged_output('req-789:page:2')
+        
+        assert 'error' not in result
+        assert result['page'] == 2
+        assert result['total_pages'] == 2
+        assert result['result'] == 'B' * 3000
+        assert result['next_page'] is None  # 最後一頁
+    
+    def test_get_nonexistent_page(self, app_module):
+        """測試取得不存在的分頁"""
+        result = app_module.get_paged_output('nonexistent:page:99')
+        assert 'error' in result
+
+
+# ============================================================================
+# 命令分類測試（補充）
+# ============================================================================
+
+class TestCommandClassification:
+    """命令分類補充測試"""
+    
+    def test_blocked_iam_commands(self, app_module):
+        """IAM 危險命令應該被阻擋"""
+        blocked_commands = [
+            'aws iam delete-user --user-name admin',
+            'aws iam create-access-key --user-name admin',
+            'aws iam attach-role-policy --role-name Admin --policy-arn arn:aws:iam::aws:policy/AdministratorAccess',
+            'aws sts assume-role --role-arn arn:aws:iam::123:role/Admin',
+        ]
+        for cmd in blocked_commands:
+            assert app_module.is_blocked(cmd) is True, f"Should block: {cmd}"
+    
+    def test_blocked_destructive_commands(self, app_module):
+        """破壞性命令應該被阻擋"""
+        blocked_commands = [
+            'aws ec2 terminate-instances --instance-ids i-12345',
+            'aws rds delete-db-instance --db-instance-identifier prod-db',
+            'aws lambda delete-function --function-name important-func',
+            'aws cloudformation delete-stack --stack-name prod-stack',
+        ]
+        for cmd in blocked_commands:
+            assert app_module.is_blocked(cmd) is True, f"Should block: {cmd}"
+    
+    def test_auto_approve_read_commands(self, app_module):
+        """讀取命令應該自動批准"""
+        auto_approve_commands = [
+            'aws s3 ls',
+            'aws ec2 describe-instances',
+            'aws lambda list-functions',
+            'aws dynamodb scan --table-name test',
+            'aws logs get-log-events --log-group-name /aws/lambda/test',
+        ]
+        for cmd in auto_approve_commands:
+            assert app_module.is_auto_approve(cmd) is True, f"Should auto-approve: {cmd}"
+    
+    def test_needs_approval_write_commands(self, app_module):
+        """寫入命令應該需要審批"""
+        need_approval_commands = [
+            'aws ec2 run-instances --image-id ami-123',
+            'aws s3 cp file.txt s3://bucket/',
+            'aws lambda invoke --function-name test output.json',
+            'aws dynamodb put-item --table-name test --item {}',
+        ]
+        for cmd in need_approval_commands:
+            # 不被阻擋
+            assert app_module.is_blocked(cmd) is False, f"Should not block: {cmd}"
+            # 也不自動批准
+            assert app_module.is_auto_approve(cmd) is False, f"Should not auto-approve: {cmd}"
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
