@@ -64,6 +64,15 @@ jobs:
             HEAD=${{ github.sha }}
           fi
           
+          # 取得 commit message
+          COMMIT_MSG=$(git log -1 --pretty=%B $HEAD)
+          
+          # 如果是 fix/docs/refactor/ci/test 開頭，跳過文件檢查
+          if echo "$COMMIT_MSG" | grep -qiE '^(fix|docs|refactor|ci|test|chore):'; then
+            echo "Commit type is fix/docs/refactor/ci/test/chore, skipping docs check"
+            exit 0
+          fi
+          
           # 檢查是否有程式碼變動
           CODE_CHANGED=$(git diff --name-only $BASE $HEAD | grep -E '^src/app\.py|^bouncer_mcp\.py' || true)
           
@@ -76,6 +85,7 @@ jobs:
           # 如果程式碼有改但文件沒改，強制失敗
           if [ -n "$CODE_CHANGED" ] && [ -z "$DOCS_CHANGED" ]; then
             echo "::error::程式碼有改動但 SKILL.md/README.md 沒有更新！新增/修改/刪除功能必須更新文件。"
+            echo "::error::如果是 bug fix，請用 'fix:' 開頭的 commit message。"
             exit 1
           fi
 
