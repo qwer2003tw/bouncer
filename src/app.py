@@ -2180,6 +2180,20 @@ def handle_telegram_webhook(event):
             ExpressionAttributeNames={'#s': 'status'},
             ExpressionAttributeValues={':s': 'timeout'}
         )
+        # 更新 Telegram 訊息，移除按鈕
+        if message_id:
+            source = item.get('source', '')
+            command = item.get('command', '')
+            reason = item.get('reason', '')
+            source_line = f"🤖 *來源：* {escape_markdown(source)}\n" if source else ""
+            cmd_preview = command[:200] + '...' if len(command) > 200 else command
+            update_message(
+                message_id,
+                f"⏰ *已過期*\n\n"
+                f"{source_line}"
+                f"📋 *命令：*\n`{escape_markdown(cmd_preview)}`\n\n"
+                f"💬 *原因：* {escape_markdown(reason)}"
+            )
         return response(200, {'ok': True, 'expired': True})
 
     message_id = callback.get('message', {}).get('message_id')
