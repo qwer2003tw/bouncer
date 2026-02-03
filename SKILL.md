@@ -198,13 +198,20 @@ mcporter call bouncer bouncer_project_list
 
 | Type | Behavior | Examples |
 |------|----------|----------|
-| **BLOCKED** | 永遠拒絕 | `iam create-*`, shell injection |
+| **BLOCKED** | 永遠拒絕 | `iam create-*`, `iam delete-*`, `sts assume-role` |
+| **DANGEROUS** | 特殊審批（⚠️ 高危警告） | `delete-bucket`, `terminate-instances`, `delete-stack` |
 | **SAFELIST** | 自動執行 | `describe-*`, `list-*`, `get-*` |
-| **APPROVAL** | 需要 Telegram 審批 | `start-*`, `stop-*`, `delete-*`, `create-*` |
+| **APPROVAL** | 需要 Telegram 審批 | `start-*`, `stop-*`, `create-*` |
 
 ### Telegram 審批按鈕
+
+**一般命令：**
 - `[✅ 批准]` - 只批准這一次
 - `[🔓 信任10分鐘]` - 批准並啟動信任時段
+- `[❌ 拒絕]`
+
+**高危命令（DANGEROUS）：**
+- `[⚠️ 確認執行]` - 確認執行（無信任選項）
 - `[❌ 拒絕]`
 
 ---

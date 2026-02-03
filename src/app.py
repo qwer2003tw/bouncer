@@ -35,7 +35,7 @@ try:
         TRUST_SESSION_DURATION, TRUST_SESSION_MAX_COMMANDS, TRUST_SESSION_ENABLED,
         TRUST_EXCLUDED_SERVICES, TRUST_EXCLUDED_ACTIONS, TRUST_EXCLUDED_FLAGS,
         OUTPUT_PAGE_SIZE, OUTPUT_MAX_INLINE, OUTPUT_PAGE_TTL,
-        BLOCKED_PATTERNS, AUTO_APPROVE_PREFIXES,
+        BLOCKED_PATTERNS, DANGEROUS_PATTERNS, AUTO_APPROVE_PREFIXES,
     )
 except ImportError:
     # 本地測試環境
@@ -51,7 +51,7 @@ except ImportError:
         TRUST_SESSION_DURATION, TRUST_SESSION_MAX_COMMANDS, TRUST_SESSION_ENABLED,
         TRUST_EXCLUDED_SERVICES, TRUST_EXCLUDED_ACTIONS, TRUST_EXCLUDED_FLAGS,
         OUTPUT_PAGE_SIZE, OUTPUT_MAX_INLINE, OUTPUT_PAGE_TTL,
-        BLOCKED_PATTERNS, AUTO_APPROVE_PREFIXES,
+        BLOCKED_PATTERNS, DANGEROUS_PATTERNS, AUTO_APPROVE_PREFIXES,
     )
 
 
@@ -2641,18 +2641,23 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
 # ============================================================================
 
 def is_blocked(command: str) -> bool:
-    """Layer 1: 檢查命令是否在黑名單"""
+    """Layer 1: 檢查命令是否在黑名單（絕對禁止）"""
     import re
     # 移除 --query 參數內容（JMESPath 語法可能包含反引號）
-    # 匹配 --query '...' 或 --query "..." 或 --query xxx（無引號，到下一個空格或結尾）
     cmd_sanitized = re.sub(r"--query\s+['\"].*?['\"]", "--query REDACTED", command)
     cmd_sanitized = re.sub(r"--query\s+[^\s'\"]+", "--query REDACTED", cmd_sanitized)
     cmd_lower = cmd_sanitized.lower()
     return any(pattern in cmd_lower for pattern in BLOCKED_PATTERNS)
 
 
+def is_dangerous(command: str) -> bool:
+    """Layer 2: 檢查命令是否是高危操作（需特殊審批）"""
+    cmd_lower = command.lower()
+    return any(pattern in cmd_lower for pattern in DANGEROUS_PATTERNS)
+
+
 def is_auto_approve(command: str) -> bool:
-    """Layer 2: 檢查命令是否可自動批准"""
+    """Layer 3: 檢查命令是否可自動批准"""
     cmd_lower = command.lower()
     return any(cmd_lower.startswith(prefix) for prefix in AUTO_APPROVE_PREFIXES)
 
@@ -3004,6 +3009,9 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
     reason = escape_markdown(reason)
     source = escape_markdown(source) if source else None
 
+    # 檢查是否是高危操作
+    dangerous = is_dangerous(command)
+
     # 顯示時間（秒或分鐘）
     if timeout < 60:
         timeout_str = f"{timeout} 秒"
@@ -3032,25 +3040,46 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
         default_account = os.environ.get('AWS_ACCOUNT_ID', '111111111111')
         account_line = f"🏢 *帳號：* `{default_account}` (預設)\n"
 
-    text = (
-        f"🔐 *AWS 執行請求*\n\n"
-        f"{source_line}"
-        f"{account_line}"
-        f"📋 *命令：*\n`{cmd_preview}`\n\n"
-        f"💬 *原因：* {reason}\n\n"
-        f"🆔 *ID：* `{request_id}`\n"
-        f"⏰ *{timeout_str}後過期*"
-    )
-
-    keyboard = {
-        'inline_keyboard': [
-            [
-                {'text': '✅ 批准', 'callback_data': f'approve:{request_id}'},
-                {'text': '🔓 信任10分鐘', 'callback_data': f'approve_trust:{request_id}'},
-                {'text': '❌ 拒絕', 'callback_data': f'deny:{request_id}'}
+    # 根據是否高危決定訊息格式
+    if dangerous:
+        text = (
+            f"⚠️ *高危操作請求* ⚠️\n\n"
+            f"{source_line}"
+            f"{account_line}"
+            f"📋 *命令：*\n`{cmd_preview}`\n\n"
+            f"💬 *原因：* {reason}\n\n"
+            f"⚠️ *此操作可能不可逆，請仔細確認！*\n\n"
+            f"🆔 *ID：* `{request_id}`\n"
+            f"⏰ *{timeout_str}後過期*"
+        )
+        # 高危操作不提供信任選項
+        keyboard = {
+            'inline_keyboard': [
+                [
+                    {'text': '⚠️ 確認執行', 'callback_data': f'approve:{request_id}'},
+                    {'text': '❌ 拒絕', 'callback_data': f'deny:{request_id}'}
+                ]
             ]
-        ]
-    }
+        }
+    else:
+        text = (
+            f"🔐 *AWS 執行請求*\n\n"
+            f"{source_line}"
+            f"{account_line}"
+            f"📋 *命令：*\n`{cmd_preview}`\n\n"
+            f"💬 *原因：* {reason}\n\n"
+            f"🆔 *ID：* `{request_id}`\n"
+            f"⏰ *{timeout_str}後過期*"
+        )
+        keyboard = {
+            'inline_keyboard': [
+                [
+                    {'text': '✅ 批准', 'callback_data': f'approve:{request_id}'},
+                    {'text': '🔓 信任10分鐘', 'callback_data': f'approve_trust:{request_id}'},
+                    {'text': '❌ 拒絕', 'callback_data': f'deny:{request_id}'}
+                ]
+            ]
+        }
 
     send_telegram_message(text, keyboard)
 

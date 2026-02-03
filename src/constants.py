@@ -129,7 +129,7 @@ OUTPUT_PAGE_TTL = 3600  # 分頁資料保留 1 小時
 # ============================================================================
 
 BLOCKED_PATTERNS = [
-    # 危險操作
+    # IAM 危險操作 - 絕對禁止
     'iam delete-user',
     'iam delete-role',
     'iam delete-policy',
@@ -144,23 +144,38 @@ BLOCKED_PATTERNS = [
     'sts assume-role',
     'sts get-session-token',
     'organizations',
-    # 高危刪除操作
-    'ec2 terminate-instances',
-    'rds delete-db-instance',
-    'rds delete-db-cluster',
-    's3 rb',  # remove bucket
-    's3api delete-bucket',
-    'lambda delete-function',
-    'dynamodb delete-table',
-    'cloudformation delete-stack',
-    # 新增的危險操作
+    # 其他絕對禁止
     'ec2 modify-instance-attribute',
     'ec2 create-key-pair',
     'ec2 import-key-pair',
     'kms create-key',
     'kms schedule-key-deletion',
+]
+
+# ============================================================================
+# 命令分類 - 高危操作（需要特殊審批，顯示警告）
+# ============================================================================
+
+DANGEROUS_PATTERNS = [
+    # S3 刪除
+    's3 rb',  # remove bucket
+    's3api delete-bucket',
+    # EC2 刪除/終止
+    'ec2 terminate-instances',
+    # RDS 刪除
+    'rds delete-db-instance',
+    'rds delete-db-cluster',
+    # Lambda 刪除
+    'lambda delete-function',
+    # DynamoDB 刪除
+    'dynamodb delete-table',
+    # CloudFormation 刪除
+    'cloudformation delete-stack',
+    # Secrets Manager 刪除
     'secretsmanager delete-secret',
+    # Logs 刪除
     'logs delete-log-group',
+    # Events 刪除
     'events delete-rule',
 ]
 
