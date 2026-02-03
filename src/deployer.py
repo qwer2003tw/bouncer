@@ -396,7 +396,7 @@ def mcp_tool_deploy(req_id, arguments: dict, table, send_approval_func) -> dict:
         'branch': branch or project.get('default_branch', 'master'),
         'stack_name': project.get('stack_name', ''),
         'reason': reason,
-        'source': source,
+        'source': source or 'mcp',  # GSI 不允許 NULL，用預設值
         'status': 'pending_approval',
         'created_at': int(time.time()),
         'ttl': ttl,
