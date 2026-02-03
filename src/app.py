@@ -254,6 +254,13 @@ TRUST_SESSION_DURATION = 600  # 10 分鐘
 TRUST_SESSION_MAX_COMMANDS = 20  # 信任時段內最多執行 20 個命令
 TRUST_SESSION_ENABLED = os.environ.get('TRUST_SESSION_ENABLED', 'true').lower() == 'true'
 
+# Output Paging - 長輸出分頁
+# ============================================================================
+
+OUTPUT_PAGE_SIZE = 3000  # 每頁字元數
+OUTPUT_MAX_INLINE = 3500  # 直接回傳的最大長度
+OUTPUT_PAGE_TTL = 3600  # 分頁資料保留 1 小時
+
 # 高危服務 - 即使在信任時段也需要審批
 TRUST_EXCLUDED_SERVICES = [
     'iam', 'sts', 'organizations', 'kms', 'secretsmanager',
@@ -530,6 +537,9 @@ AUTO_APPROVE_PREFIXES = [
     # ECS/EKS (read-only)
     'aws ecs describe-', 'aws ecs list-',
     'aws eks describe-', 'aws eks list-',
+    # Cost Explorer (read-only)
+    'aws ce get-cost-', 'aws ce get-dimension-', 'aws ce get-reservation-',
+    'aws ce get-savings-', 'aws ce get-tags', 'aws ce describe-',
 ]
 
 
@@ -637,6 +647,19 @@ MCP_TOOLS = {
         'parameters': {
             'type': 'object',
             'properties': {}
+        }
+    },
+    'bouncer_get_page': {
+        'description': '取得長輸出的下一頁（當結果有 paged=true 時使用）',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'page_id': {
+                    'type': 'string',
+                    'description': '分頁 ID（從 next_page 欄位取得）'
+                }
+            },
+            'required': ['page_id']
         }
     },
     'bouncer_list_pending': {
@@ -877,6 +900,9 @@ def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
     elif tool_name == 'bouncer_list_accounts':
         return mcp_tool_list_accounts(req_id, arguments)
 
+    elif tool_name == 'bouncer_get_page':
+        return mcp_tool_get_page(req_id, arguments)
+
     elif tool_name == 'bouncer_list_pending':
         return mcp_tool_list_pending(req_id, arguments)
 
@@ -982,16 +1008,27 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
     # Layer 2: SAFELIST (auto-approve)
     if is_auto_approve(command):
         result = execute_command(command, assume_role)
+        paged = store_paged_output(generate_request_id(command), result)
+        
+        response_data = {
+            'status': 'auto_approved',
+            'command': command,
+            'account': account_id,
+            'account_name': account_name,
+            'result': paged['result']
+        }
+        
+        if paged.get('paged'):
+            response_data['paged'] = True
+            response_data['page'] = paged['page']
+            response_data['total_pages'] = paged['total_pages']
+            response_data['output_length'] = paged['output_length']
+            response_data['next_page'] = paged.get('next_page')
+        
         return mcp_result(req_id, {
             'content': [{
                 'type': 'text',
-                'text': json.dumps({
-                    'status': 'auto_approved',
-                    'command': command,
-                    'account': account_id,
-                    'account_name': account_name,
-                    'result': result
-                })
+                'text': json.dumps(response_data)
             }]
         })
 
@@ -1033,6 +1070,7 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
 
         # 執行命令
         result = execute_command(command, assume_role)
+        paged = store_paged_output(generate_request_id(command), result)
 
         # 計算剩餘時間
         remaining = int(trust_session.get('expires_at', 0)) - int(time.time())
@@ -1043,19 +1081,28 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
             command, trust_session['request_id'], remaining_str, new_count
         )
 
+        response_data = {
+            'status': 'trust_auto_approved',
+            'command': command,
+            'account': account_id,
+            'account_name': account_name,
+            'result': paged['result'],
+            'trust_session': trust_session['request_id'],
+            'remaining': remaining_str,
+            'command_count': f"{new_count}/{TRUST_SESSION_MAX_COMMANDS}"
+        }
+        
+        if paged.get('paged'):
+            response_data['paged'] = True
+            response_data['page'] = paged['page']
+            response_data['total_pages'] = paged['total_pages']
+            response_data['output_length'] = paged['output_length']
+            response_data['next_page'] = paged.get('next_page')
+
         return mcp_result(req_id, {
             'content': [{
                 'type': 'text',
-                'text': json.dumps({
-                    'status': 'trust_auto_approved',
-                    'command': command,
-                    'account': account_id,
-                    'account_name': account_name,
-                    'result': result,
-                    'trust_session': trust_session['request_id'],
-                    'remaining': remaining_str,
-                    'command_count': f"{new_count}/{TRUST_SESSION_MAX_COMMANDS}"
-                })
+                'text': json.dumps(response_data)
             }]
         })
 
@@ -1311,6 +1358,26 @@ def mcp_tool_list_accounts(req_id, arguments: dict) -> dict:
     })
 
 
+def mcp_tool_get_page(req_id, arguments: dict) -> dict:
+    """MCP tool: bouncer_get_page - 取得長輸出的下一頁"""
+    page_id = str(arguments.get('page_id', '')).strip()
+    
+    if not page_id:
+        return mcp_error(req_id, -32602, 'Missing required parameter: page_id')
+    
+    result = get_paged_output(page_id)
+    
+    if 'error' in result:
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps(result)}],
+            'isError': True
+        })
+    
+    return mcp_result(req_id, {
+        'content': [{'type': 'text', 'text': json.dumps(result)}]
+    })
+
+
 def mcp_tool_list_pending(req_id, arguments: dict) -> dict:
     """MCP tool: bouncer_list_pending - 列出待審批請求"""
     source = arguments.get('source')
@@ -1460,7 +1527,7 @@ def wait_for_result_mcp(request_id: str, timeout: int = 840) -> dict:
             if item:
                 status = item.get('status', '')
                 if status == 'approved':
-                    return {
+                    response = {
                         'status': 'approved',
                         'request_id': request_id,
                         'command': item.get('command'),
@@ -1468,6 +1535,14 @@ def wait_for_result_mcp(request_id: str, timeout: int = 840) -> dict:
                         'approved_by': item.get('approver', 'unknown'),
                         'waited_seconds': int(time.time() - start_time)
                     }
+                    # 加入分頁資訊
+                    if item.get('paged'):
+                        response['paged'] = True
+                        response['page'] = 1
+                        response['total_pages'] = int(item.get('total_pages', 1))
+                        response['output_length'] = int(item.get('output_length', 0))
+                        response['next_page'] = item.get('next_page')
+                    return response
                 elif status == 'denied':
                     return {
                         'status': 'denied',
@@ -1912,20 +1987,34 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
 
     if action == 'approve':
         result = execute_command(command, assume_role)
+        paged = store_paged_output(request_id, result)
+
+        # 存入 DynamoDB（包含分頁資訊）
+        update_expr = 'SET #s = :s, #r = :r, approved_at = :t, approver = :a'
+        expr_names = {'#s': 'status', '#r': 'result'}
+        expr_values = {
+            ':s': 'approved',
+            ':r': paged['result'],
+            ':t': int(time.time()),
+            ':a': user_id
+        }
+        
+        if paged.get('paged'):
+            update_expr += ', paged = :p, total_pages = :tp, output_length = :ol, next_page = :np'
+            expr_values[':p'] = True
+            expr_values[':tp'] = paged['total_pages']
+            expr_values[':ol'] = paged['output_length']
+            expr_values[':np'] = paged.get('next_page')
 
         table.update_item(
             Key={'request_id': request_id},
-            UpdateExpression='SET #s = :s, #r = :r, approved_at = :t, approver = :a',
-            ExpressionAttributeNames={'#s': 'status', '#r': 'result'},
-            ExpressionAttributeValues={
-                ':s': 'approved',
-                ':r': result[:3000],
-                ':t': int(time.time()),
-                ':a': user_id
-            }
+            UpdateExpression=update_expr,
+            ExpressionAttributeNames=expr_names,
+            ExpressionAttributeValues=expr_values
         )
 
         result_preview = result[:1000] if len(result) > 1000 else result
+        truncate_notice = f"\n\n⚠️ 輸出已截斷 ({paged['output_length']} 字元，共 {paged['total_pages']} 頁)" if paged.get('paged') else ""
         update_message(
             message_id,
             f"✅ *已批准並執行*\n\n"
@@ -1933,30 +2022,44 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             f"{account_line}"
             f"📋 *命令：*\n`{command}`\n\n"
             f"💬 *原因：* {reason}\n\n"
-            f"📤 *結果：*\n```\n{result_preview}\n```"
+            f"📤 *結果：*\n```\n{result_preview}\n```{truncate_notice}"
         )
         answer_callback(callback_id, '✅ 已執行')
 
     elif action == 'approve_trust':
         # 批准並建立信任時段
         result = execute_command(command, assume_role)
+        paged = store_paged_output(request_id, result)
+
+        # 存入 DynamoDB（包含分頁資訊）
+        update_expr = 'SET #s = :s, #r = :r, approved_at = :t, approver = :a'
+        expr_names = {'#s': 'status', '#r': 'result'}
+        expr_values = {
+            ':s': 'approved',
+            ':r': paged['result'],
+            ':t': int(time.time()),
+            ':a': user_id
+        }
+        
+        if paged.get('paged'):
+            update_expr += ', paged = :p, total_pages = :tp, output_length = :ol, next_page = :np'
+            expr_values[':p'] = True
+            expr_values[':tp'] = paged['total_pages']
+            expr_values[':ol'] = paged['output_length']
+            expr_values[':np'] = paged.get('next_page')
 
         table.update_item(
             Key={'request_id': request_id},
-            UpdateExpression='SET #s = :s, #r = :r, approved_at = :t, approver = :a',
-            ExpressionAttributeNames={'#s': 'status', '#r': 'result'},
-            ExpressionAttributeValues={
-                ':s': 'approved',
-                ':r': result[:3000],
-                ':t': int(time.time()),
-                ':a': user_id
-            }
+            UpdateExpression=update_expr,
+            ExpressionAttributeNames=expr_names,
+            ExpressionAttributeValues=expr_values
         )
 
         # 建立信任時段
         trust_id = create_trust_session(source, account_id, user_id)
 
         result_preview = result[:800] if len(result) > 800 else result
+        truncate_notice = f"\n\n⚠️ 輸出已截斷 ({paged['output_length']} 字元，共 {paged['total_pages']} 頁)" if paged.get('paged') else ""
         update_message(
             message_id,
             f"✅ *已批准並執行* + 🔓 *信任 10 分鐘*\n\n"
@@ -1964,7 +2067,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             f"{account_line}"
             f"📋 *命令：*\n`{command}`\n\n"
             f"💬 *原因：* {reason}\n\n"
-            f"📤 *結果：*\n```\n{result_preview}\n```\n\n"
+            f"📤 *結果：*\n```\n{result_preview}\n```{truncate_notice}\n\n"
             f"🔓 信任時段已啟動：`{trust_id}`"
         )
         answer_callback(callback_id, '✅ 已執行 + 🔓 信任啟動')
@@ -2258,6 +2361,67 @@ def verify_hmac(headers: dict, body: str) -> bool:
 
 
 # ============================================================================
+# Output Paging - 長輸出分頁
+# ============================================================================
+
+def store_paged_output(request_id: str, output: str) -> dict:
+    """存儲長輸出並分頁
+    
+    Returns:
+        dict with page info and first page content
+    """
+    if len(output) <= OUTPUT_MAX_INLINE:
+        return {'paged': False, 'result': output}
+    
+    # 分頁
+    chunks = [output[i:i+OUTPUT_PAGE_SIZE] for i in range(0, len(output), OUTPUT_PAGE_SIZE)]
+    total_pages = len(chunks)
+    ttl = int(time.time()) + OUTPUT_PAGE_TTL
+    
+    # 存儲每一頁（跳過第一頁，會直接回傳）
+    for i, chunk in enumerate(chunks[1:], start=2):
+        table.put_item(Item={
+            'request_id': f"{request_id}:page:{i}",
+            'content': chunk,
+            'page': i,
+            'total_pages': total_pages,
+            'original_request': request_id,
+            'ttl': ttl
+        })
+    
+    return {
+        'paged': True,
+        'result': chunks[0],
+        'page': 1,
+        'total_pages': total_pages,
+        'output_length': len(output),
+        'next_page': f"{request_id}:page:2" if total_pages > 1 else None
+    }
+
+
+def get_paged_output(page_request_id: str) -> dict:
+    """取得分頁輸出"""
+    try:
+        result = table.get_item(Key={'request_id': page_request_id})
+        item = result.get('Item')
+        
+        if not item:
+            return {'error': '分頁不存在或已過期'}
+        
+        page = int(item.get('page', 0))
+        total_pages = int(item.get('total_pages', 0))
+        
+        return {
+            'result': item.get('content', ''),
+            'page': page,
+            'total_pages': total_pages,
+            'next_page': f"{item.get('original_request')}:page:{page+1}" if page < total_pages else None
+        }
+    except Exception as e:
+        return {'error': f'取得分頁失敗: {str(e)}'}
+
+
+# ============================================================================
 # 命令執行
 # ============================================================================
 
@@ -2376,7 +2540,7 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
         if exit_code != 0 and not output.strip():
             output = f'(exit code: {exit_code})'
 
-        return output[:4000]
+        return output  # 不截斷，讓呼叫端用 store_paged_output 處理
 
     except ImportError:
         return '❌ awscli 模組未安裝'

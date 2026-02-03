@@ -219,6 +219,20 @@ TOOLS = [
         }
     },
     {
+        'name': 'bouncer_get_page',
+        'description': '取得長輸出的下一頁（當結果有 paged=true 時使用）',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'page_id': {
+                    'type': 'string',
+                    'description': '分頁 ID（從 next_page 欄位取得）'
+                }
+            },
+            'required': ['page_id']
+        }
+    },
+    {
         'name': 'bouncer_list_pending',
         'description': '列出待審批的請求',
         'inputSchema': {
@@ -720,6 +734,12 @@ def tool_list_safelist(arguments: dict) -> dict:
     return parse_mcp_result(result) or result
 
 
+def tool_get_page(arguments: dict) -> dict:
+    """取得長輸出的下一頁"""
+    result = call_mcp_tool('bouncer_get_page', arguments)
+    return parse_mcp_result(result) or result
+
+
 def tool_list_pending(arguments: dict) -> dict:
     """列出待審批的請求"""
     if not SECRET:
@@ -846,6 +866,8 @@ def handle_request(request: dict) -> dict:
             result = tool_project_list(arguments)
         elif tool_name == 'bouncer_list_safelist':
             result = tool_list_safelist(arguments)
+        elif tool_name == 'bouncer_get_page':
+            result = tool_get_page(arguments)
         elif tool_name == 'bouncer_list_pending':
             result = tool_list_pending(arguments)
         elif tool_name == 'bouncer_trust_status':
