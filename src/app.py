@@ -857,7 +857,7 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
 
         # 發送靜默通知
         send_trust_auto_approve_notification(
-            command, trust_session['request_id'], remaining_str, new_count
+            command, trust_session['request_id'], remaining_str, new_count, result
         )
 
         response_data = {
@@ -2652,7 +2652,8 @@ def send_account_approval_request(request_id: str, action: str, account_id: str,
     send_telegram_message(text, keyboard)
 
 
-def send_trust_auto_approve_notification(command: str, trust_id: str, remaining: str, count: int):
+def send_trust_auto_approve_notification(command: str, trust_id: str, remaining: str, count: int,
+                                         result: str = None):
     """
     發送 Trust Session 自動批准的靜默通知
 
@@ -2661,14 +2662,29 @@ def send_trust_auto_approve_notification(command: str, trust_id: str, remaining:
         trust_id: 信任時段 ID
         remaining: 剩餘時間 (不再顯示)
         count: 已執行命令數
+        result: 執行結果（可選）
     """
     cmd_preview = command if len(command) <= 100 else command[:100] + '...'
     cmd_preview = escape_markdown(cmd_preview)
+
+    # 結果摘要
+    result_preview = ""
+    if result:
+        # 判斷成功/失敗
+        if result.startswith('❌') or 'error' in result.lower()[:100]:
+            result_status = "❌"
+        else:
+            result_status = "✅"
+        # 取前 200 字元
+        result_text = result[:200] + '...' if len(result) > 200 else result
+        result_text = escape_markdown(result_text)
+        result_preview = f"\n{result_status} `{result_text}`"
 
     text = (
         f"🔓 *自動批准* (信任中)\n"
         f"📋 `{cmd_preview}`\n"
         f"📊 {count}/{TRUST_SESSION_MAX_COMMANDS}"
+        f"{result_preview}"
     )
 
     keyboard = {
