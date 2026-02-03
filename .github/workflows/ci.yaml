@@ -44,6 +44,40 @@ jobs:
       - name: Run cfn-lint
         run: cfn-lint template.yaml || true  # Ignore warnings
 
+  docs-check:
+    name: Docs Updated Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 需要完整歷史來比較
+      
+      - name: Check if SKILL.md updated with code changes
+        run: |
+          # 取得這次 PR/push 改動的檔案
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE=${{ github.event.pull_request.base.sha }}
+            HEAD=${{ github.event.pull_request.head.sha }}
+          else
+            # push event: 比較前一個 commit
+            BASE=${{ github.event.before }}
+            HEAD=${{ github.sha }}
+          fi
+          
+          # 檢查是否有程式碼變動
+          CODE_CHANGED=$(git diff --name-only $BASE $HEAD | grep -E '^src/app\.py|^bouncer_mcp\.py' || true)
+          
+          # 檢查是否有文件變動
+          DOCS_CHANGED=$(git diff --name-only $BASE $HEAD | grep -E 'SKILL\.md|README\.md' || true)
+          
+          echo "Code changed: $CODE_CHANGED"
+          echo "Docs changed: $DOCS_CHANGED"
+          
+          # 如果程式碼有改但文件沒改，發出警告（不阻擋，只提醒）
+          if [ -n "$CODE_CHANGED" ] && [ -z "$DOCS_CHANGED" ]; then
+            echo "::warning::程式碼有改動但 SKILL.md/README.md 沒有更新。如果新增/修改/刪除了功能，請更新文件！"
+          fi
+
   test:
     name: Tests
     runs-on: ubuntu-latest
