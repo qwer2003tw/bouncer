@@ -39,15 +39,18 @@ def mock_dynamodb():
 def app_module(mock_dynamodb):
     """載入 app 模組並注入 mock"""
     # 設定環境變數
+    os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'
     os.environ['TABLE_NAME'] = 'clawdbot-approval-requests'
     os.environ['REQUEST_SECRET'] = 'test-secret'
     os.environ['TELEGRAM_BOT_TOKEN'] = 'test-token'
     os.environ['APPROVED_CHAT_ID'] = '999999999'
     os.environ['MCP_MAX_WAIT'] = '5'  # 測試用短時間
     
-    # 重新載入模組
-    if 'app' in sys.modules:
-        del sys.modules['app']
+    # 重新載入模組（包括新模組）
+    for mod in ['app', 'telegram', 'paging', 'trust', 'commands',
+                'src.app', 'src.telegram', 'src.paging', 'src.trust', 'src.commands']:
+        if mod in sys.modules:
+            del sys.modules[mod]
     
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
     import app

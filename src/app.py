@@ -21,6 +21,32 @@ import boto3
 from decimal import Decimal
 from typing import Optional, Dict
 
+# 從模組導入（逐步遷移中）
+try:
+    from telegram import (
+        escape_markdown, send_telegram_message, send_telegram_message_silent,
+        send_telegram_message_to, update_message, answer_callback, update_and_answer,
+        _telegram_request, _telegram_requests_parallel,
+    )
+    from paging import store_paged_output, get_paged_output, send_remaining_pages
+    from trust import (
+        get_trust_session, create_trust_session, revoke_trust_session,
+        increment_trust_command_count, is_trust_excluded, should_trust_approve,
+    )
+    from commands import is_blocked, is_dangerous, is_auto_approve, execute_command, fix_json_args
+except ImportError:
+    from src.telegram import (
+        escape_markdown, send_telegram_message, send_telegram_message_silent,
+        send_telegram_message_to, update_message, answer_callback, update_and_answer,
+        _telegram_request, _telegram_requests_parallel,
+    )
+    from src.paging import store_paged_output, get_paged_output, send_remaining_pages
+    from src.trust import (
+        get_trust_session, create_trust_session, revoke_trust_session,
+        increment_trust_command_count, is_trust_excluded, should_trust_approve,
+    )
+    from src.commands import is_blocked, is_dangerous, is_auto_approve, execute_command, fix_json_args
+
 # 從 constants.py 導入所有常數
 try:
     # Lambda 環境
