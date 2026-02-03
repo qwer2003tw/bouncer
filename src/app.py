@@ -2338,6 +2338,90 @@ def get_paged_output(page_request_id: str) -> dict:
 # 命令執行
 # ============================================================================
 
+def fix_json_args(command: str, cli_args: list) -> list:
+    """
+    修復被 shlex.split 破壞的 JSON/陣列參數
+
+    shlex.split 會移除引號，導致 {"key":"val"} 變成 {key:val}
+    此函數從原始命令中重新提取正確的 JSON
+
+    Args:
+        command: 原始命令字串
+        cli_args: shlex.split 後的參數列表（不含 'aws'）
+
+    Returns:
+        修復後的參數列表
+    """
+    import re
+
+    for i, arg in enumerate(cli_args):
+        if i + 1 >= len(cli_args):
+            continue
+        next_val = cli_args[i + 1]
+
+        # 檢查是否是 JSON 或陣列開頭
+        if not (next_val.startswith('{') or next_val.startswith('[')):
+            continue
+
+        # 簡單 JSON 匹配
+        pattern = re.escape(arg) + r'''\s+(['"]?)(\{[^}]*\}|\[[^\]]*\])\1'''
+        match = re.search(pattern, command)
+        if match:
+            cli_args[i + 1] = match.group(2)
+            continue
+
+        # 複雜 JSON（多層巢狀）：用括號計數
+        param_pos = command.find(arg)
+        if param_pos == -1:
+            continue
+        after_param = command[param_pos + len(arg):].lstrip()
+
+        # 移除開頭的引號
+        quote_char = None
+        if after_param and after_param[0] in "'\"":
+            quote_char = after_param[0]
+            after_param = after_param[1:]
+
+        if not after_param or after_param[0] not in '{[':
+            continue
+
+        # 計數括號找結尾
+        open_char = after_param[0]
+        close_char = '}' if open_char == '{' else ']'
+        depth = 0
+        in_string = False
+        escape_next = False
+        end_pos = 0
+
+        for j, c in enumerate(after_param):
+            if escape_next:
+                escape_next = False
+                continue
+            if c == '\\':
+                escape_next = True
+                continue
+            if c == '"' and not in_string:
+                in_string = True
+            elif c == '"' and in_string:
+                in_string = False
+            elif not in_string:
+                if c == open_char:
+                    depth += 1
+                elif c == close_char:
+                    depth -= 1
+                    if depth == 0:
+                        end_pos = j + 1
+                        break
+
+        if end_pos > 0:
+            json_str = after_param[:end_pos]
+            if quote_char and json_str.endswith(quote_char):
+                json_str = json_str[:-1]
+            cli_args[i + 1] = json_str
+
+    return cli_args
+
+
 def execute_command(command: str, assume_role_arn: str = None) -> str:
     """執行 AWS CLI 命令
 
@@ -2349,8 +2433,7 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
     from io import StringIO
 
     try:
-        # 使用 shlex.split 但保留引號給 JSON 參數
-        # shlex.split 會移除引號，所以我們需要特殊處理
+        # 使用 shlex.split 解析命令
         try:
             args = shlex.split(command)
         except ValueError as e:
@@ -2362,77 +2445,8 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
         # 移除 'aws' 前綴，awscli.clidriver 不需要它
         cli_args = args[1:]
 
-        # 修復 JSON/陣列參數：shlex.split 會移除引號導致 JSON 被破壞
-        # 策略：檢測任何看起來像 JSON 的參數值，從原始命令重新提取
-        for i, arg in enumerate(cli_args):
-            if i + 1 >= len(cli_args):
-                continue
-            next_val = cli_args[i + 1]
-
-            # 檢查是否是被破壞的 JSON（shlex 會把 {"key":"val"} 變成 {key:val}）
-            # 或是陣列開頭
-            if not (next_val.startswith('{') or next_val.startswith('[')):
-                continue
-
-            # 從原始命令中找這個參數的正確值
-            # 找 "arg" 後面跟著 JSON 的模式
-            import re
-            # 匹配: --param '{"..."}' 或 --param "{'...'}" 或 --param {...}
-            pattern = re.escape(arg) + r'''\s+(['"]?)(\{[^}]*\}|\[[^\]]*\])\1'''
-            match = re.search(pattern, command)
-            if match:
-                cli_args[i + 1] = match.group(2)
-                continue
-
-            # 更複雜的 JSON（多層巢狀）：用括號計數
-            param_pos = command.find(arg)
-            if param_pos == -1:
-                continue
-            after_param = command[param_pos + len(arg):].lstrip()
-
-            # 移除開頭的引號
-            quote_char = None
-            if after_param and after_param[0] in "'\"":
-                quote_char = after_param[0]
-                after_param = after_param[1:]
-
-            if not after_param or after_param[0] not in '{[':
-                continue
-
-            # 計數括號找結尾
-            open_char = after_param[0]
-            close_char = '}' if open_char == '{' else ']'
-            depth = 0
-            in_string = False
-            escape_next = False
-            end_pos = 0
-
-            for j, c in enumerate(after_param):
-                if escape_next:
-                    escape_next = False
-                    continue
-                if c == '\\':
-                    escape_next = True
-                    continue
-                if c == '"' and not in_string:
-                    in_string = True
-                elif c == '"' and in_string:
-                    in_string = False
-                elif not in_string:
-                    if c == open_char:
-                        depth += 1
-                    elif c == close_char:
-                        depth -= 1
-                        if depth == 0:
-                            end_pos = j + 1
-                            break
-
-            if end_pos > 0:
-                json_str = after_param[:end_pos]
-                # 移除尾端引號
-                if quote_char and json_str.endswith(quote_char):
-                    json_str = json_str[:-1]
-                cli_args[i + 1] = json_str
+        # 修復被 shlex 破壞的 JSON 參數
+        cli_args = fix_json_args(command, cli_args)
 
         # 保存原始環境變數
         original_env = {}

@@ -908,5 +908,72 @@ class TestCommandClassification:
             assert app_module.is_auto_approve(cmd) is False, f"Should not auto-approve: {cmd}"
 
 
+# ============================================================================
+# JSON 參數修復測試
+# ============================================================================
+
+class TestJsonParameterFix:
+    """測試 shlex.split 破壞 JSON 參數的修復邏輯"""
+    
+    def test_simple_json_with_quotes(self, app_module):
+        """帶引號的簡單 JSON"""
+        import shlex
+        cmd = '''aws secretsmanager create-secret --name test --generate-secret-string '{"PasswordLength":32}' '''
+        args = shlex.split(cmd)
+        cli_args = args[1:]  # 移除 'aws'
+        
+        # 修復後應該保持 JSON 完整
+        fixed = app_module.fix_json_args(cmd, cli_args.copy())
+        json_idx = fixed.index('--generate-secret-string') + 1
+        assert fixed[json_idx] == '{"PasswordLength":32}'
+    
+    def test_json_without_quotes(self, app_module):
+        """無引號的 JSON（shlex 會破壞）"""
+        import shlex
+        cmd = 'aws secretsmanager create-secret --name test --generate-secret-string {"PasswordLength":32,"ExcludePunctuation":true}'
+        args = shlex.split(cmd)
+        cli_args = args[1:]
+        
+        # shlex 會破壞 JSON
+        broken_idx = cli_args.index('--generate-secret-string') + 1
+        assert ':' not in cli_args[broken_idx] or '"' not in cli_args[broken_idx]
+        
+        # 修復後應該還原
+        fixed = app_module.fix_json_args(cmd, cli_args.copy())
+        assert fixed[broken_idx] == '{"PasswordLength":32,"ExcludePunctuation":true}'
+    
+    def test_nested_json(self, app_module):
+        """巢狀 JSON"""
+        import shlex
+        cmd = '''aws dynamodb put-item --table-name test --item '{"id":{"S":"123"},"data":{"M":{"key":{"S":"val"}}}}' '''
+        args = shlex.split(cmd)
+        cli_args = args[1:]
+        
+        fixed = app_module.fix_json_args(cmd, cli_args.copy())
+        json_idx = fixed.index('--item') + 1
+        assert fixed[json_idx] == '{"id":{"S":"123"},"data":{"M":{"key":{"S":"val"}}}}'
+    
+    def test_array_parameter(self, app_module):
+        """陣列參數"""
+        import shlex
+        cmd = '''aws ec2 create-tags --resources i-123 --tags '[{"Key":"Name","Value":"Test"}]' '''
+        args = shlex.split(cmd)
+        cli_args = args[1:]
+        
+        fixed = app_module.fix_json_args(cmd, cli_args.copy())
+        json_idx = fixed.index('--tags') + 1
+        assert fixed[json_idx] == '[{"Key":"Name","Value":"Test"}]'
+    
+    def test_non_json_parameter_unchanged(self, app_module):
+        """非 JSON 參數不應該被改變"""
+        import shlex
+        cmd = 'aws s3 ls s3://my-bucket --recursive'
+        args = shlex.split(cmd)
+        cli_args = args[1:]
+        
+        fixed = app_module.fix_json_args(cmd, cli_args.copy())
+        assert fixed == cli_args  # 應該完全相同
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
