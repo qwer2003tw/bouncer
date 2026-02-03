@@ -1009,7 +1009,7 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
     if is_auto_approve(command):
         result = execute_command(command, assume_role)
         paged = store_paged_output(generate_request_id(command), result)
-        
+
         response_data = {
             'status': 'auto_approved',
             'command': command,
@@ -1017,14 +1017,14 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
             'account_name': account_name,
             'result': paged['result']
         }
-        
+
         if paged.get('paged'):
             response_data['paged'] = True
             response_data['page'] = paged['page']
             response_data['total_pages'] = paged['total_pages']
             response_data['output_length'] = paged['output_length']
             response_data['next_page'] = paged.get('next_page')
-        
+
         return mcp_result(req_id, {
             'content': [{
                 'type': 'text',
@@ -1091,7 +1091,7 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
             'remaining': remaining_str,
             'command_count': f"{new_count}/{TRUST_SESSION_MAX_COMMANDS}"
         }
-        
+
         if paged.get('paged'):
             response_data['paged'] = True
             response_data['page'] = paged['page']
@@ -1361,18 +1361,18 @@ def mcp_tool_list_accounts(req_id, arguments: dict) -> dict:
 def mcp_tool_get_page(req_id, arguments: dict) -> dict:
     """MCP tool: bouncer_get_page - 取得長輸出的下一頁"""
     page_id = str(arguments.get('page_id', '')).strip()
-    
+
     if not page_id:
         return mcp_error(req_id, -32602, 'Missing required parameter: page_id')
-    
+
     result = get_paged_output(page_id)
-    
+
     if 'error' in result:
         return mcp_result(req_id, {
             'content': [{'type': 'text', 'text': json.dumps(result)}],
             'isError': True
         })
-    
+
     return mcp_result(req_id, {
         'content': [{'type': 'text', 'text': json.dumps(result)}]
     })
@@ -1998,7 +1998,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             ':t': int(time.time()),
             ':a': user_id
         }
-        
+
         if paged.get('paged'):
             update_expr += ', paged = :p, total_pages = :tp, output_length = :ol, next_page = :np'
             expr_values[':p'] = True
@@ -2040,7 +2040,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             ':t': int(time.time()),
             ':a': user_id
         }
-        
+
         if paged.get('paged'):
             update_expr += ', paged = :p, total_pages = :tp, output_length = :ol, next_page = :np'
             expr_values[':p'] = True
@@ -2366,18 +2366,18 @@ def verify_hmac(headers: dict, body: str) -> bool:
 
 def store_paged_output(request_id: str, output: str) -> dict:
     """存儲長輸出並分頁
-    
+
     Returns:
         dict with page info and first page content
     """
     if len(output) <= OUTPUT_MAX_INLINE:
         return {'paged': False, 'result': output}
-    
+
     # 分頁
     chunks = [output[i:i+OUTPUT_PAGE_SIZE] for i in range(0, len(output), OUTPUT_PAGE_SIZE)]
     total_pages = len(chunks)
     ttl = int(time.time()) + OUTPUT_PAGE_TTL
-    
+
     # 存儲每一頁（跳過第一頁，會直接回傳）
     for i, chunk in enumerate(chunks[1:], start=2):
         table.put_item(Item={
@@ -2388,7 +2388,7 @@ def store_paged_output(request_id: str, output: str) -> dict:
             'original_request': request_id,
             'ttl': ttl
         })
-    
+
     return {
         'paged': True,
         'result': chunks[0],
@@ -2404,13 +2404,13 @@ def get_paged_output(page_request_id: str) -> dict:
     try:
         result = table.get_item(Key={'request_id': page_request_id})
         item = result.get('Item')
-        
+
         if not item:
             return {'error': '分頁不存在或已過期'}
-        
+
         page = int(item.get('page', 0))
         total_pages = int(item.get('total_pages', 0))
-        
+
         return {
             'result': item.get('content', ''),
             'page': page,

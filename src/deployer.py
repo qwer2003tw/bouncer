@@ -116,17 +116,17 @@ def get_lock(project_id: str) -> dict:
     try:
         result = locks_table.get_item(Key={'project_id': project_id})
         item = result.get('Item')
-        
+
         if not item:
             return None
-            
+
         # 檢查 TTL 是否過期
         ttl = item.get('ttl', 0)
         if ttl and int(time.time()) > ttl:
             # Lock 已過期，自動清理
             release_lock(project_id)
             return None
-            
+
         return item
     except:
         return None
@@ -329,7 +329,7 @@ def get_deploy_status(deploy_id: str) -> dict:
                     'finished_at': int(time.time())
                 })
                 record['status'] = new_status
-                
+
                 # 釋放鎖
                 release_lock(record.get('project_id'))
 
