@@ -275,6 +275,44 @@ TOOLS = [
             },
             'required': ['trust_id']
         }
+    },
+    {
+        'name': 'bouncer_upload',
+        'description': '上傳檔案到 S3（需要 Telegram 審批）。用於 CloudFormation template 等場景。檔案大小限制 4.5 MB。',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'bucket': {
+                    'type': 'string',
+                    'description': 'S3 bucket 名稱'
+                },
+                'key': {
+                    'type': 'string',
+                    'description': 'S3 object key（檔案路徑）'
+                },
+                'content': {
+                    'type': 'string',
+                    'description': '檔案內容（base64 encoded）'
+                },
+                'content_type': {
+                    'type': 'string',
+                    'description': 'Content-Type（預設 application/octet-stream）'
+                },
+                'account_id': {
+                    'type': 'string',
+                    'description': 'AWS 帳號 ID（選填，預設使用 Bouncer Lambda 帳號）'
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': '上傳原因'
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '請求來源標識'
+                }
+            },
+            'required': ['bucket', 'key', 'content', 'reason', 'source']
+        }
     }
 ]
 
@@ -810,6 +848,25 @@ def tool_trust_revoke(arguments: dict) -> dict:
     return parse_mcp_result(result) or result
 
 
+def tool_upload(arguments: dict) -> dict:
+    """上傳檔案到 S3"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'upload',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_upload',
+            'arguments': arguments
+        }
+    }
+
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
 def parse_mcp_result(result: dict) -> dict:
     """解析 MCP 回應"""
     if 'result' in result:
@@ -887,6 +944,8 @@ def handle_request(request: dict) -> dict:
             result = tool_trust_status(arguments)
         elif tool_name == 'bouncer_trust_revoke':
             result = tool_trust_revoke(arguments)
+        elif tool_name == 'bouncer_upload':
+            result = tool_upload(arguments)
         else:
             return error_response(req_id, -32602, f'Unknown tool: {tool_name}')
 

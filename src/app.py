@@ -675,6 +675,45 @@ MCP_TOOLS = {
             'type': 'object',
             'properties': {}
         }
+    },
+    # ========== Upload Tool ==========
+    'bouncer_upload': {
+        'description': '上傳檔案到 S3（需要 Telegram 審批）。用於 CloudFormation template 等場景。',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'bucket': {
+                    'type': 'string',
+                    'description': 'S3 bucket 名稱'
+                },
+                'key': {
+                    'type': 'string',
+                    'description': 'S3 object key（檔案路徑）'
+                },
+                'content': {
+                    'type': 'string',
+                    'description': '檔案內容（base64 encoded）'
+                },
+                'content_type': {
+                    'type': 'string',
+                    'description': 'Content-Type（預設 application/octet-stream）',
+                    'default': 'application/octet-stream'
+                },
+                'account_id': {
+                    'type': 'string',
+                    'description': 'AWS 帳號 ID（選填，預設使用 Lambda 執行帳號）'
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': '上傳原因'
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '請求來源標識'
+                }
+            },
+            'required': ['bucket', 'key', 'content', 'reason', 'source']
+        }
     }
 }
 
@@ -842,6 +881,9 @@ def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
     elif tool_name == 'bouncer_project_list':
         from deployer import mcp_tool_project_list
         return mcp_tool_project_list(req_id, arguments)
+
+    elif tool_name == 'bouncer_upload':
+        return mcp_tool_upload(req_id, arguments)
 
     else:
         return mcp_error(req_id, -32602, f'Unknown tool: {tool_name}')
@@ -1425,6 +1467,299 @@ def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
     })
 
 
+def mcp_tool_upload(req_id, arguments: dict) -> dict:
+    """MCP tool: bouncer_upload（上傳檔案到 S3，需要 Telegram 審批）"""
+    import base64
+
+    bucket = str(arguments.get('bucket', '')).strip()
+    key = str(arguments.get('key', '')).strip()
+    content_b64 = str(arguments.get('content', '')).strip()
+    content_type = str(arguments.get('content_type', 'application/octet-stream')).strip()
+    account_id = arguments.get('account_id', None)
+    reason = str(arguments.get('reason', 'No reason provided'))
+    source = arguments.get('source', None)
+    async_mode = arguments.get('async', False)
+
+    # 驗證必要參數
+    if not bucket:
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': 'bucket is required'})}],
+            'isError': True
+        })
+    if not key:
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': 'key is required'})}],
+            'isError': True
+        })
+    if not content_b64:
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': 'content is required'})}],
+            'isError': True
+        })
+
+    # 解碼 base64 驗證格式
+    try:
+        content_bytes = base64.b64decode(content_b64)
+        content_size = len(content_bytes)
+    except Exception as e:
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': f'Invalid base64 content: {str(e)}'})}],
+            'isError': True
+        })
+
+    # 檢查大小（4.5 MB 限制）
+    max_size = 4.5 * 1024 * 1024
+    if content_size > max_size:
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'error',
+                'error': f'Content too large: {content_size} bytes (max {int(max_size)} bytes)'
+            })}],
+            'isError': True
+        })
+
+    # 取得帳號資訊
+    account_name = None
+    assume_role_arn = None
+    if account_id:
+        account_id = str(account_id).strip()
+        valid, error = validate_account_id(account_id)
+        if not valid:
+            return mcp_result(req_id, {
+                'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': error})}],
+                'isError': True
+            })
+        account = get_account(account_id)
+        if account:
+            account_name = account.get('name', account_id)
+            assume_role_arn = account.get('role_arn')
+
+    # Rate limit 檢查
+    if source:
+        try:
+            check_rate_limit(source)
+        except RateLimitExceeded as e:
+            return mcp_result(req_id, {
+                'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': str(e)})}],
+                'isError': True
+            })
+        except PendingLimitExceeded as e:
+            return mcp_result(req_id, {
+                'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': str(e)})}],
+                'isError': True
+            })
+
+    # 建立審批請求
+    request_id = generate_request_id(f"upload:{bucket}:{key}")
+    ttl = int(time.time()) + 300 + 60
+
+    # 格式化大小顯示
+    if content_size >= 1024 * 1024:
+        size_str = f"{content_size / 1024 / 1024:.2f} MB"
+    elif content_size >= 1024:
+        size_str = f"{content_size / 1024:.2f} KB"
+    else:
+        size_str = f"{content_size} bytes"
+
+    item = {
+        'request_id': request_id,
+        'action': 'upload',
+        'bucket': bucket,
+        'key': key,
+        'content': content_b64,  # 存 base64，審批後再上傳
+        'content_type': content_type,
+        'content_size': content_size,
+        'account_id': account_id,
+        'assume_role_arn': assume_role_arn,
+        'reason': reason,
+        'source': source or '__anonymous__',
+        'status': 'pending_approval',
+        'created_at': int(time.time()),
+        'ttl': ttl,
+        'mode': 'mcp'
+    }
+    table.put_item(Item=item)
+
+    # 發送 Telegram 審批
+    s3_uri = f"s3://{bucket}/{key}"
+    account_line = ""
+    if account_id:
+        account_line = f"🏢 帳號： {account_id}"
+        if account_name:
+            account_line += f" ({account_name})"
+        account_line += "\n"
+
+    message = (
+        f"📤 上傳檔案請求\n"
+        f"🤖 來源： {source or 'Unknown'}\n"
+        f"{account_line}"
+        f"📁 目標： {s3_uri}\n"
+        f"📊 大小： {size_str}\n"
+        f"📝 類型： {content_type}\n"
+        f"💬 原因： {reason}"
+    )
+
+    keyboard = {
+        'inline_keyboard': [[
+            {'text': '✅ 批准', 'callback_data': f'approve:{request_id}'},
+            {'text': '❌ 拒絕', 'callback_data': f'deny:{request_id}'}
+        ]]
+    }
+
+    send_telegram_message(message, keyboard)
+
+    # 如果是 async 模式，立即返回
+    if async_mode:
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'pending_approval',
+                'request_id': request_id,
+                's3_uri': s3_uri,
+                'size': size_str,
+                'message': '請求已發送，等待 Telegram 確認',
+                'expires_in': '300 seconds'
+            })}]
+        })
+
+    # 同步模式：等待結果
+    result = wait_for_upload_result(request_id, timeout=300)
+
+    return mcp_result(req_id, {
+        'content': [{'type': 'text', 'text': json.dumps(result)}],
+        'isError': result.get('status') != 'approved'
+    })
+
+
+def wait_for_upload_result(request_id: str, timeout: int = 300) -> dict:
+    """等待上傳審批結果"""
+    interval = 2
+    start_time = time.time()
+
+    while (time.time() - start_time) < timeout:
+        time.sleep(interval)
+
+        try:
+            result = table.get_item(Key={'request_id': request_id})
+            item = result.get('Item')
+
+            if item:
+                status = item.get('status', '')
+                if status == 'approved':
+                    return {
+                        'status': 'approved',
+                        'request_id': request_id,
+                        's3_uri': f"s3://{item.get('bucket')}/{item.get('key')}",
+                        's3_url': item.get('s3_url', ''),
+                        'size': int(item.get('content_size', 0)),
+                        'approved_by': item.get('approver', 'unknown'),
+                        'waited_seconds': int(time.time() - start_time)
+                    }
+                elif status == 'denied':
+                    return {
+                        'status': 'denied',
+                        'request_id': request_id,
+                        's3_uri': f"s3://{item.get('bucket')}/{item.get('key')}",
+                        'denied_by': item.get('approver', 'unknown'),
+                        'waited_seconds': int(time.time() - start_time)
+                    }
+        except Exception as e:
+            print(f"Polling error: {e}")
+            pass
+
+    return {
+        'status': 'timeout',
+        'request_id': request_id,
+        'message': '審批請求已過期',
+        'waited_seconds': timeout
+    }
+
+
+def execute_upload(request_id: str, approver: str) -> dict:
+    """執行已審批的上傳"""
+    import base64
+
+    try:
+        result = table.get_item(Key={'request_id': request_id})
+        item = result.get('Item')
+
+        if not item:
+            return {'success': False, 'error': 'Request not found'}
+
+        bucket = item.get('bucket')
+        key = item.get('key')
+        content_b64 = item.get('content')
+        content_type = item.get('content_type', 'application/octet-stream')
+        assume_role_arn = item.get('assume_role_arn')
+
+        # 解碼內容
+        content_bytes = base64.b64decode(content_b64)
+
+        # 建立 S3 client
+        if assume_role_arn:
+            sts = boto3.client('sts')
+            assumed = sts.assume_role(
+                RoleArn=assume_role_arn,
+                RoleSessionName='bouncer-upload',
+                DurationSeconds=900
+            )
+            creds = assumed['Credentials']
+            s3 = boto3.client(
+                's3',
+                aws_access_key_id=creds['AccessKeyId'],
+                aws_secret_access_key=creds['SecretAccessKey'],
+                aws_session_token=creds['SessionToken']
+            )
+        else:
+            s3 = boto3.client('s3')
+
+        # 上傳
+        s3.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=content_bytes,
+            ContentType=content_type
+        )
+
+        # 產生 S3 URL
+        region = s3.meta.region_name or 'us-east-1'
+        if region == 'us-east-1':
+            s3_url = f"https://{bucket}.s3.amazonaws.com/{key}"
+        else:
+            s3_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+
+        # 更新 DB
+        table.update_item(
+            Key={'request_id': request_id},
+            UpdateExpression='SET #status = :status, approver = :approver, s3_url = :url, approved_at = :at',
+            ExpressionAttributeNames={'#status': 'status'},
+            ExpressionAttributeValues={
+                ':status': 'approved',
+                ':approver': approver,
+                ':url': s3_url,
+                ':at': int(time.time())
+            }
+        )
+
+        return {
+            'success': True,
+            's3_uri': f"s3://{bucket}/{key}",
+            's3_url': s3_url
+        }
+
+    except Exception as e:
+        # 記錄失敗
+        table.update_item(
+            Key={'request_id': request_id},
+            UpdateExpression='SET #status = :status, error = :error',
+            ExpressionAttributeNames={'#status': 'status'},
+            ExpressionAttributeValues={
+                ':status': 'error',
+                ':error': str(e)
+            }
+        )
+        return {'success': False, 'error': str(e)}
+
+
 def wait_for_result_mcp(request_id: str, timeout: int = 840) -> dict:
     """MCP 模式的長輪詢，最多 timeout 秒"""
     interval = 2  # 每 2 秒查一次
@@ -1881,6 +2216,8 @@ def handle_telegram_webhook(event):
         return handle_account_remove_callback(action, request_id, item, message_id, callback['id'], user_id)
     elif request_action == 'deploy':
         return handle_deploy_callback(action, request_id, item, message_id, callback['id'], user_id)
+    elif request_action == 'upload':
+        return handle_upload_callback(action, request_id, item, message_id, callback['id'], user_id)
     else:
         return handle_command_callback(action, request_id, item, message_id, callback['id'], user_id)
 
@@ -2215,6 +2552,84 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
             f"🌿 *分支：* {branch}\n"
             f"📋 *Stack：* {stack_name}\n\n"
             f"💬 *原因：* {reason}"
+        )
+        answer_callback(callback_id, '❌ 已拒絕')
+
+    return response(200, {'ok': True})
+
+
+def handle_upload_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str):
+    """處理上傳的審批 callback"""
+    bucket = item.get('bucket', '')
+    key = item.get('key', '')
+    content_size = int(item.get('content_size', 0))
+    source = item.get('source', '')
+    reason = item.get('reason', '')
+    account_id = item.get('account_id')
+
+    s3_uri = f"s3://{bucket}/{key}"
+    source_line = f"🤖 來源： {source}\n" if source else ""
+    account_line = f"🏢 帳號： {account_id}\n" if account_id else ""
+
+    # 格式化大小
+    if content_size >= 1024 * 1024:
+        size_str = f"{content_size / 1024 / 1024:.2f} MB"
+    elif content_size >= 1024:
+        size_str = f"{content_size / 1024:.2f} KB"
+    else:
+        size_str = f"{content_size} bytes"
+
+    if action == 'approve':
+        # 執行上傳
+        result = execute_upload(request_id, user_id)
+
+        if result.get('success'):
+            update_message(
+                message_id,
+                f"✅ 已上傳\n\n"
+                f"{source_line}"
+                f"{account_line}"
+                f"📁 目標： {s3_uri}\n"
+                f"📊 大小： {size_str}\n"
+                f"🔗 URL： {result.get('s3_url', '')}\n"
+                f"💬 原因： {reason}"
+            )
+            answer_callback(callback_id, '✅ 已上傳')
+        else:
+            # 上傳失敗
+            error = result.get('error', 'Unknown error')
+            update_message(
+                message_id,
+                f"❌ 上傳失敗\n\n"
+                f"{source_line}"
+                f"{account_line}"
+                f"📁 目標： {s3_uri}\n"
+                f"📊 大小： {size_str}\n"
+                f"❗ 錯誤： {error}\n"
+                f"💬 原因： {reason}"
+            )
+            answer_callback(callback_id, '❌ 上傳失敗')
+
+    elif action == 'deny':
+        table.update_item(
+            Key={'request_id': request_id},
+            UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
+            ExpressionAttributeNames={'#s': 'status'},
+            ExpressionAttributeValues={
+                ':s': 'denied',
+                ':t': int(time.time()),
+                ':a': user_id
+            }
+        )
+
+        update_message(
+            message_id,
+            f"❌ 已拒絕上傳\n\n"
+            f"{source_line}"
+            f"{account_line}"
+            f"📁 目標： {s3_uri}\n"
+            f"📊 大小： {size_str}\n"
+            f"💬 原因： {reason}"
         )
         answer_callback(callback_id, '❌ 已拒絕')
 
