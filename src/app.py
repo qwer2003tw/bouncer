@@ -87,11 +87,14 @@ def init_bot_commands():
         {"command": "help", "description": "顯示指令說明"}
     ]
 
+    # 直接呼叫 Telegram API（因為 _telegram_request 在後面定義）
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setMyCommands"
-    data = json.dumps({"commands": commands}).encode()
-
-    req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
     try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps({"commands": commands}).encode(),
+            headers={'Content-Type': 'application/json'}
+        )
         urllib.request.urlopen(req, timeout=5)
         _bot_commands_initialized = True
         print("Bot commands initialized")
@@ -1875,20 +1878,13 @@ def handle_help_command(chat_id: str) -> dict:
 
 def send_telegram_message_to(chat_id: str, text: str, parse_mode: str = None):
     """發送訊息到指定 chat"""
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
+    data = {
         'chat_id': chat_id,
         'text': text
     }
     if parse_mode:
-        payload['parse_mode'] = parse_mode
-    data = json.dumps(payload).encode()
-
-    req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
-    try:
-        urllib.request.urlopen(req, timeout=10)
-    except Exception as e:
-        print(f"Failed to send message: {e}")
+        data['parse_mode'] = parse_mode
+    _telegram_request('sendMessage', data, timeout=10, json_body=True)
 
 
 # ============================================================================
@@ -2565,8 +2561,49 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
 
 
 # ============================================================================
-# Telegram API
+# Telegram API - 統一封裝
 # ============================================================================
+
+TELEGRAM_API_BASE = "https://api.telegram.org/bot"
+
+
+def _telegram_request(method: str, data: dict, timeout: int = 5, json_body: bool = False) -> dict:
+    """統一的 Telegram API 請求函數
+
+    Args:
+        method: API 方法名（如 sendMessage, editMessageText）
+        data: 請求資料
+        timeout: 超時秒數
+        json_body: True 時用 JSON 格式發送
+
+    Returns:
+        API 回應或空 dict
+    """
+    if not TELEGRAM_TOKEN:
+        return {}
+
+    url = f"{TELEGRAM_API_BASE}{TELEGRAM_TOKEN}/{method}"
+
+    try:
+        if json_body:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(data).encode(),
+                headers={'Content-Type': 'application/json'},
+                method='POST'
+            )
+        else:
+            req = urllib.request.Request(
+                url,
+                data=urllib.parse.urlencode(data).encode(),
+                method='POST'
+            )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode())
+    except Exception as e:
+        print(f"Telegram {method} error: {e}")
+        return {}
+
 
 def send_approval_request(request_id: str, command: str, reason: str, timeout: int = 840,
                           source: str = None, account_id: str = None, account_name: str = None,
@@ -2708,35 +2745,21 @@ def send_trust_auto_approve_notification(command: str, trust_id: str, remaining:
 
 def send_telegram_message_silent(text: str, reply_markup: dict = None):
     """發送靜默 Telegram 消息（不響鈴）"""
-    if not TELEGRAM_TOKEN:
-        return
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     data = {
         'chat_id': APPROVED_CHAT_ID,
         'text': text,
         'parse_mode': 'Markdown',
-        'disable_notification': True  # 靜默
+        'disable_notification': True
     }
     if reply_markup:
         data['reply_markup'] = json.dumps(reply_markup)
-
-    try:
-        req = urllib.request.Request(
-            url,
-            data=urllib.parse.urlencode(data).encode(),
-            method='POST'
-        )
-        urllib.request.urlopen(req, timeout=5)
-    except Exception as e:
-        print(f"Telegram silent send error: {e}")
+    _telegram_request('sendMessage', data)
 
 
 def escape_markdown(text: str) -> str:
     """轉義 Telegram Markdown 特殊字元"""
     if not text:
         return text
-    # Markdown 特殊字元: * _ ` [
     for char in ['*', '_', '`', '[']:
         text = text.replace(char, '\\' + char)
     return text
@@ -2744,10 +2767,6 @@ def escape_markdown(text: str) -> str:
 
 def send_telegram_message(text: str, reply_markup: dict = None):
     """發送 Telegram 消息"""
-    if not TELEGRAM_TOKEN:
-        return
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     data = {
         'chat_id': APPROVED_CHAT_ID,
         'text': text,
@@ -2755,63 +2774,27 @@ def send_telegram_message(text: str, reply_markup: dict = None):
     }
     if reply_markup:
         data['reply_markup'] = json.dumps(reply_markup)
-
-    try:
-        req = urllib.request.Request(
-            url,
-            data=urllib.parse.urlencode(data).encode(),
-            method='POST'
-        )
-        urllib.request.urlopen(req, timeout=5)
-    except Exception as e:
-        print(f"Telegram send error: {e}")
+    _telegram_request('sendMessage', data)
 
 
 def update_message(message_id: int, text: str):
     """更新 Telegram 消息"""
-    if not TELEGRAM_TOKEN:
-        return
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/editMessageText"
     data = {
         'chat_id': APPROVED_CHAT_ID,
         'message_id': message_id,
         'text': text,
         'parse_mode': 'Markdown'
     }
-
-    try:
-        req = urllib.request.Request(
-            url,
-            data=urllib.parse.urlencode(data).encode(),
-            method='POST'
-        )
-        urllib.request.urlopen(req, timeout=5)
-    except Exception as e:
-        print(f"Telegram update error: {e}")
+    _telegram_request('editMessageText', data)
 
 
 def answer_callback(callback_id: str, text: str):
     """回應 Telegram callback"""
-    if not TELEGRAM_TOKEN:
-        return
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery"
     data = {
         'callback_query_id': callback_id,
         'text': text
     }
-
-    try:
-        req = urllib.request.Request(
-            url,
-            data=urllib.parse.urlencode(data).encode(),
-            method='POST'
-        )
-        urllib.request.urlopen(req, timeout=5)
-    except Exception as e:
-        print(f"Error: {e}")
-        pass
+    _telegram_request('answerCallbackQuery', data)
 
 
 # ============================================================================
