@@ -16,6 +16,7 @@ import time
 import urllib.request
 import urllib.parse
 import shlex
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import boto3
 from decimal import Decimal
 from typing import Optional, Dict
@@ -2261,16 +2262,17 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             truncate_notice = f"\n\n⚠️ 輸出已截斷 ({paged['output_length']} 字元，共 {paged['total_pages']} 頁)\n📄 下一頁：`{paged.get('next_page')}`"
         else:
             truncate_notice = ""
-        update_message(
+        update_and_answer(
             message_id,
             f"✅ *已批准並執行*\n\n"
             f"{source_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{command}`\n\n"
             f"💬 *原因：* {reason}\n\n"
-            f"📤 *結果：*\n```\n{result_preview}\n```{truncate_notice}"
+            f"📤 *結果：*\n```\n{result_preview}\n```{truncate_notice}",
+            callback_id,
+            '✅ 已執行'
         )
-        answer_callback(callback_id, '✅ 已執行')
 
     elif action == 'approve_trust':
         # 批准並建立信任時段
@@ -2309,7 +2311,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             truncate_notice = f"\n\n⚠️ 輸出已截斷 ({paged['output_length']} 字元，共 {paged['total_pages']} 頁)\n📄 下一頁：`{paged.get('next_page')}`"
         else:
             truncate_notice = ""
-        update_message(
+        update_and_answer(
             message_id,
             f"✅ *已批准並執行* + 🔓 *信任 10 分鐘*\n\n"
             f"{source_line}"
@@ -2317,9 +2319,10 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             f"📋 *命令：*\n`{command}`\n\n"
             f"💬 *原因：* {reason}\n\n"
             f"📤 *結果：*\n```\n{result_preview}\n```{truncate_notice}\n\n"
-            f"🔓 信任時段已啟動：`{trust_id}`"
+            f"🔓 信任時段已啟動：`{trust_id}`",
+            callback_id,
+            '✅ 已執行 + 🔓 信任啟動'
         )
-        answer_callback(callback_id, '✅ 已執行 + 🔓 信任啟動')
 
     elif action == 'deny':
         table.update_item(
@@ -2333,15 +2336,16 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             }
         )
 
-        update_message(
+        update_and_answer(
             message_id,
             f"❌ *已拒絕*\n\n"
             f"{source_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{command}`\n\n"
-            f"💬 *原因：* {reason}"
+            f"💬 *原因：* {reason}",
+            callback_id,
+            '❌ 已拒絕'
         )
-        answer_callback(callback_id, '❌ 已拒絕')
 
     return response(200, {'ok': True})
 
@@ -2944,6 +2948,34 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
 # ============================================================================
 
 
+def _telegram_requests_parallel(requests: list) -> list:
+    """並行發送多個 Telegram API 請求
+
+    Args:
+        requests: list of (method, data, timeout, json_body) tuples
+
+    Returns:
+        list of results in same order
+    """
+    if not requests:
+        return []
+
+    results = [None] * len(requests)
+
+    def do_request(idx, method, data, timeout, json_body):
+        return idx, _telegram_request(method, data, timeout, json_body)
+
+    with ThreadPoolExecutor(max_workers=len(requests)) as executor:
+        futures = [
+            executor.submit(do_request, i, method, data, timeout, json_body)
+            for i, (method, data, timeout, json_body) in enumerate(requests)
+        ]
+        for future in as_completed(futures):
+            idx, result = future.result()
+            results[idx] = result
+
+    return results
+
 
 def _telegram_request(method: str, data: dict, timeout: int = 5, json_body: bool = False) -> dict:
     """統一的 Telegram API 請求函數
@@ -3202,6 +3234,25 @@ def answer_callback(callback_id: str, text: str):
         'text': text
     }
     _telegram_request('answerCallbackQuery', data)
+
+
+def update_and_answer(message_id: int, text: str, callback_id: str, callback_text: str):
+    """並行更新訊息 + 回應 callback（省約 500ms）"""
+    requests = [
+        ('editMessageText', {
+            'chat_id': APPROVED_CHAT_ID,
+            'message_id': message_id,
+            'text': text,
+            'parse_mode': 'Markdown'
+        }, 5, False),
+        ('answerCallbackQuery', {
+            'callback_query_id': callback_id,
+            'text': callback_text
+        }, 5, False)
+    ]
+    start_time = time.time()
+    _telegram_requests_parallel(requests)
+    print(f"[TIMING] update_and_answer parallel: {(time.time() - start_time) * 1000:.0f}ms")
 
 
 # ============================================================================
