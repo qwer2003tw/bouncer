@@ -2265,6 +2265,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         update_and_answer(
             message_id,
             f"✅ *已批准並執行*\n\n"
+            f"🆔 *ID：* `{request_id}`\n"
             f"{source_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{command}`\n\n"
@@ -2314,6 +2315,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         update_and_answer(
             message_id,
             f"✅ *已批准並執行* + 🔓 *信任 10 分鐘*\n\n"
+            f"🆔 *ID：* `{request_id}`\n"
             f"{source_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{command}`\n\n"
@@ -2339,6 +2341,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         update_and_answer(
             message_id,
             f"❌ *已拒絕*\n\n"
+            f"🆔 *ID：* `{request_id}`\n"
             f"{source_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{command}`\n\n"
