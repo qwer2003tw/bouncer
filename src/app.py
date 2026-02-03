@@ -2362,35 +2362,77 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
         # 移除 'aws' 前綴，awscli.clidriver 不需要它
         cli_args = args[1:]
 
-        # 修復 JSON 參數：shlex.split 會把 {"key": "value"} 變成 {key: value}
-        # 需要從原始命令中重新提取 JSON 參數
-        json_params = ['--item', '--expression-attribute-values', '--expression-attribute-names',
-                       '--key', '--update-expression', '--cli-input-json', '--filter-expression',
-                       '--generate-secret-string', '--secret-string', '--tags', '--resource-tags']
-
+        # 修復 JSON/陣列參數：shlex.split 會移除引號導致 JSON 被破壞
+        # 策略：檢測任何看起來像 JSON 的參數值，從原始命令重新提取
         for i, arg in enumerate(cli_args):
-            if arg in json_params and i + 1 < len(cli_args):
-                # 從原始命令中找出這個參數的值
-                param_pos = command.find(arg)
-                if param_pos != -1:
-                    # 找參數後面的值（可能是 JSON）
-                    after_param = command[param_pos + len(arg):].lstrip()
-                    if after_param.startswith('{') or after_param.startswith("'{") or after_param.startswith('"{'):
-                        # 提取 JSON 字串
-                        after_param = after_param.lstrip("'\"")
-                        brace_count = 0
-                        json_end = 0
-                        for j, c in enumerate(after_param):
-                            if c == '{':
-                                brace_count += 1
-                            elif c == '}':
-                                brace_count -= 1
-                                if brace_count == 0:
-                                    json_end = j + 1
-                                    break
-                        if json_end > 0:
-                            json_str = after_param[:json_end]
-                            cli_args[i + 1] = json_str
+            if i + 1 >= len(cli_args):
+                continue
+            next_val = cli_args[i + 1]
+
+            # 檢查是否是被破壞的 JSON（shlex 會把 {"key":"val"} 變成 {key:val}）
+            # 或是陣列開頭
+            if not (next_val.startswith('{') or next_val.startswith('[')):
+                continue
+
+            # 從原始命令中找這個參數的正確值
+            # 找 "arg" 後面跟著 JSON 的模式
+            import re
+            # 匹配: --param '{"..."}' 或 --param "{'...'}" 或 --param {...}
+            pattern = re.escape(arg) + r'''\s+(['"]?)(\{[^}]*\}|\[[^\]]*\])\1'''
+            match = re.search(pattern, command)
+            if match:
+                cli_args[i + 1] = match.group(2)
+                continue
+
+            # 更複雜的 JSON（多層巢狀）：用括號計數
+            param_pos = command.find(arg)
+            if param_pos == -1:
+                continue
+            after_param = command[param_pos + len(arg):].lstrip()
+
+            # 移除開頭的引號
+            quote_char = None
+            if after_param and after_param[0] in "'\"":
+                quote_char = after_param[0]
+                after_param = after_param[1:]
+
+            if not after_param or after_param[0] not in '{[':
+                continue
+
+            # 計數括號找結尾
+            open_char = after_param[0]
+            close_char = '}' if open_char == '{' else ']'
+            depth = 0
+            in_string = False
+            escape_next = False
+            end_pos = 0
+
+            for j, c in enumerate(after_param):
+                if escape_next:
+                    escape_next = False
+                    continue
+                if c == '\\':
+                    escape_next = True
+                    continue
+                if c == '"' and not in_string:
+                    in_string = True
+                elif c == '"' and in_string:
+                    in_string = False
+                elif not in_string:
+                    if c == open_char:
+                        depth += 1
+                    elif c == close_char:
+                        depth -= 1
+                        if depth == 0:
+                            end_pos = j + 1
+                            break
+
+            if end_pos > 0:
+                json_str = after_param[:end_pos]
+                # 移除尾端引號
+                if quote_char and json_str.endswith(quote_char):
+                    json_str = json_str[:-1]
+                cli_args[i + 1] = json_str
 
         # 保存原始環境變數
         original_env = {}
