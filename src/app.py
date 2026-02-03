@@ -2157,7 +2157,9 @@ def handle_telegram_webhook(event):
         return response(200, {'ok': True})
 
     try:
+        db_start = time.time()
         item = table.get_item(Key={'request_id': request_id}).get('Item')
+        print(f"[TIMING] DynamoDB get_item: {(time.time() - db_start) * 1000:.0f}ms")
     except Exception as e:
         print(f"Error: {e}")
         item = None
@@ -2959,6 +2961,7 @@ def _telegram_request(method: str, data: dict, timeout: int = 5, json_body: bool
         return {}
 
     url = f"{TELEGRAM_API_BASE}{TELEGRAM_TOKEN}/{method}"
+    start_time = time.time()
 
     try:
         if json_body:
@@ -2975,9 +2978,13 @@ def _telegram_request(method: str, data: dict, timeout: int = 5, json_body: bool
                 method='POST'
             )
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
-            return json.loads(resp.read().decode())
+            result = json.loads(resp.read().decode())
+            elapsed = (time.time() - start_time) * 1000
+            print(f"[TIMING] Telegram {method}: {elapsed:.0f}ms")
+            return result
     except Exception as e:
-        print(f"Telegram {method} error: {e}")
+        elapsed = (time.time() - start_time) * 1000
+        print(f"[TIMING] Telegram {method} error ({elapsed:.0f}ms): {e}")
         return {}
 
 
