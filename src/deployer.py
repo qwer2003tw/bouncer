@@ -112,10 +112,22 @@ def release_lock(project_id: str) -> bool:
 
 
 def get_lock(project_id: str) -> dict:
-    """取得鎖資訊"""
+    """取得鎖資訊（檢查是否過期）"""
     try:
         result = locks_table.get_item(Key={'project_id': project_id})
-        return result.get('Item')
+        item = result.get('Item')
+        
+        if not item:
+            return None
+            
+        # 檢查 TTL 是否過期
+        ttl = item.get('ttl', 0)
+        if ttl and int(time.time()) > ttl:
+            # Lock 已過期，自動清理
+            release_lock(project_id)
+            return None
+            
+        return item
     except:
         return None
 
@@ -312,8 +324,14 @@ def get_deploy_status(deploy_id: str) -> dict:
             # 同步狀態
             if sfn_status in ['SUCCEEDED', 'FAILED', 'TIMED_OUT', 'ABORTED']:
                 new_status = 'SUCCESS' if sfn_status == 'SUCCEEDED' else 'FAILED'
-                update_deploy_record(deploy_id, {'status': new_status})
+                update_deploy_record(deploy_id, {
+                    'status': new_status,
+                    'finished_at': int(time.time())
+                })
                 record['status'] = new_status
+                
+                # 釋放鎖
+                release_lock(record.get('project_id'))
 
         except Exception as e:
             print(f"Error getting execution status: {e}")
