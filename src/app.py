@@ -1698,16 +1698,16 @@ def handle_accounts_command(chat_id: str) -> dict:
     accounts = list_accounts()
 
     if not accounts:
-        text = "📋 *AWS 帳號*\n\n尚未配置任何帳號"
+        text = "📋 AWS 帳號\n\n尚未配置任何帳號"
     else:
-        lines = ["📋 *AWS 帳號*\n"]
+        lines = ["📋 AWS 帳號\n"]
         for acc in accounts:
             status = "✅" if acc.get('enabled', True) else "❌"
-            default = " *(預設)*" if acc.get('is_default') else ""
-            lines.append(f"{status} `{acc['account_id']}` \\- {escape_markdown(acc.get('name', 'N/A'))}{default}")
+            default = " (預設)" if acc.get('is_default') else ""
+            lines.append(f"{status} {acc['account_id']} - {acc.get('name', 'N/A')}{default}")
         text = "\n".join(lines)
 
-    send_telegram_message_to(chat_id, text)
+    send_telegram_message_to(chat_id, text, parse_mode=None)
     return response(200, {'ok': True})
 
 
@@ -1729,18 +1729,18 @@ def handle_trust_command(chat_id: str) -> dict:
         items = []
 
     if not items:
-        text = "🔓 *信任時段*\n\n目前沒有活躍的信任時段"
+        text = "🔓 信任時段\n\n目前沒有活躍的信任時段"
     else:
-        lines = ["🔓 *信任時段*\n"]
+        lines = ["🔓 信任時段\n"]
         for item in items:
             remaining = int(item.get('expires_at', 0)) - now
             mins, secs = divmod(remaining, 60)
             count = int(item.get('command_count', 0))
-            source = escape_markdown(item.get('source', 'N/A'))
-            lines.append(f"• {source}\n  ⏱️ {mins}:{secs:02d} 剩餘 \\| 📊 {count}/20 命令")
+            source = item.get('source', 'N/A')
+            lines.append(f"• {source}\n  ⏱️ {mins}:{secs:02d} 剩餘 | 📊 {count}/20 命令")
         text = "\n".join(lines)
 
-    send_telegram_message_to(chat_id, text)
+    send_telegram_message_to(chat_id, text, parse_mode=None)
     return response(200, {'ok': True})
 
 
@@ -1757,44 +1757,45 @@ def handle_pending_command(chat_id: str) -> dict:
         items = []
 
     if not items:
-        text = "⏳ *待審批請求*\n\n目前沒有待審批的請求"
+        text = "⏳ 待審批請求\n\n目前沒有待審批的請求"
     else:
-        lines = ["⏳ *待審批請求*\n"]
+        lines = ["⏳ 待審批請求\n"]
         now = int(time.time())
         for item in items:
             age = now - int(item.get('created_at', now))
             mins, secs = divmod(age, 60)
             cmd = item.get('command', '')[:50]
-            cmd = escape_markdown(cmd)
-            source = escape_markdown(item.get('source', 'N/A'))
-            lines.append(f"• `{cmd}`\n  👤 {source} \\| ⏱️ {mins}m{secs}s ago")
+            source = item.get('source', 'N/A')
+            lines.append(f"• {cmd}\n  👤 {source} | ⏱️ {mins}m{secs}s ago")
         text = "\n".join(lines)
 
-    send_telegram_message_to(chat_id, text)
+    send_telegram_message_to(chat_id, text, parse_mode=None)
     return response(200, {'ok': True})
 
 
 def handle_help_command(chat_id: str) -> dict:
     """處理 /help 指令"""
-    text = """🔐 *Bouncer Commands*
+    text = """🔐 Bouncer Commands
 
-/accounts \\- 列出 AWS 帳號
-/trust \\- 列出信任時段
-/pending \\- 列出待審批請求
-/help \\- 顯示此說明"""
+/accounts - 列出 AWS 帳號
+/trust - 列出信任時段
+/pending - 列出待審批請求
+/help - 顯示此說明"""
 
-    send_telegram_message_to(chat_id, text)
+    send_telegram_message_to(chat_id, text, parse_mode=None)
     return response(200, {'ok': True})
 
 
-def send_telegram_message_to(chat_id: str, text: str):
+def send_telegram_message_to(chat_id: str, text: str, parse_mode: str = None):
     """發送訊息到指定 chat"""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    data = json.dumps({
+    payload = {
         'chat_id': chat_id,
-        'text': text,
-        'parse_mode': 'MarkdownV2'
-    }).encode()
+        'text': text
+    }
+    if parse_mode:
+        payload['parse_mode'] = parse_mode
+    data = json.dumps(payload).encode()
 
     req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
     try:
@@ -2160,12 +2161,14 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
             answer_callback(callback_id, '❌ 部署啟動失敗')
         else:
             deploy_id = result.get('deploy_id', '')
+            reason_line = f"📝 *原因：* {escape_markdown(reason)}\n" if reason else ""
             update_message(
                 message_id,
                 f"🚀 *部署已啟動*\n\n"
                 f"{source_line}"
                 f"📦 *專案：* {project_name}\n"
                 f"🌿 *分支：* {branch}\n"
+                f"{reason_line}"
                 f"📋 *Stack：* {stack_name}\n\n"
                 f"🆔 *部署 ID：* `{deploy_id}`\n\n"
                 f"⏳ 部署進行中..."
