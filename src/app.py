@@ -2535,10 +2535,14 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
                     else:
                         os.environ[key] = value
 
-        output = stdout_output or stderr_output or '(no output)'
+        output = stdout_output or stderr_output or ''
 
-        if exit_code != 0 and not output.strip():
-            output = f'(exit code: {exit_code})'
+        if exit_code == 0:
+            if not output.strip():
+                output = '✅ 命令執行成功（無輸出）'
+        else:
+            if not output.strip():
+                output = f'❌ 命令失敗 (exit code: {exit_code})'
 
         return output  # 不截斷，讓呼叫端用 store_paged_output 處理
 
