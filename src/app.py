@@ -2365,7 +2365,8 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
         # 修復 JSON 參數：shlex.split 會把 {"key": "value"} 變成 {key: value}
         # 需要從原始命令中重新提取 JSON 參數
         json_params = ['--item', '--expression-attribute-values', '--expression-attribute-names',
-                       '--key', '--update-expression', '--cli-input-json', '--filter-expression']
+                       '--key', '--update-expression', '--cli-input-json', '--filter-expression',
+                       '--generate-secret-string', '--secret-string', '--tags', '--resource-tags']
 
         for i, arg in enumerate(cli_args):
             if arg in json_params and i + 1 < len(cli_args):
