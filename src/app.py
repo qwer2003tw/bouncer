@@ -2169,12 +2169,27 @@ def handle_telegram_webhook(event):
         answer_callback(callback['id'], '❌ 請求已過期或不存在')
         return response(404, {'error': 'Request not found'})
 
-    if item['status'] not in ['pending_approval', 'pending']:
-        answer_callback(callback['id'], '⚠️ 此請求已處理過')
-        return response(200, {'ok': True})
-
     # 取得 message_id（用於更新訊息）
     message_id = callback.get('message', {}).get('message_id')
+
+    if item['status'] not in ['pending_approval', 'pending']:
+        answer_callback(callback['id'], '⚠️ 此請求已處理過')
+        # 更新訊息移除按鈕
+        if message_id:
+            status = item.get('status', 'unknown')
+            status_emoji = '✅' if status == 'approved' else '❌' if status == 'denied' else '⏰'
+            source = item.get('source', '')
+            command = item.get('command', '')[:200]
+            reason = item.get('reason', '')
+            source_line = f"🤖 *來源：* {escape_markdown(source)}\n" if source else ""
+            update_message(
+                message_id,
+                f"{status_emoji} *已處理* (狀態: {status})\n\n"
+                f"{source_line}"
+                f"📋 *命令：*\n`{escape_markdown(command)}`\n\n"
+                f"💬 *原因：* {escape_markdown(reason)}"
+            )
+        return response(200, {'ok': True})
 
     # 檢查是否過期
     ttl = item.get('ttl', 0)
