@@ -15,8 +15,6 @@ import hmac
 import time
 import urllib.request
 import urllib.parse
-import shlex
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import boto3
 from decimal import Decimal
 from typing import Optional, Dict
@@ -26,11 +24,11 @@ try:
     from telegram import (
         escape_markdown, send_telegram_message, send_telegram_message_silent,
         send_telegram_message_to, update_message, answer_callback, update_and_answer,
-        _telegram_request, _telegram_requests_parallel,
+        _telegram_request,
     )
     from paging import store_paged_output, get_paged_output, send_remaining_pages
     from trust import (
-        get_trust_session, create_trust_session, revoke_trust_session,
+        create_trust_session, revoke_trust_session,
         increment_trust_command_count, is_trust_excluded, should_trust_approve,
     )
     from commands import is_blocked, is_dangerous, is_auto_approve, execute_command, fix_json_args
@@ -38,47 +36,43 @@ except ImportError:
     from src.telegram import (
         escape_markdown, send_telegram_message, send_telegram_message_silent,
         send_telegram_message_to, update_message, answer_callback, update_and_answer,
-        _telegram_request, _telegram_requests_parallel,
+        _telegram_request,
     )
     from src.paging import store_paged_output, get_paged_output, send_remaining_pages
     from src.trust import (
-        get_trust_session, create_trust_session, revoke_trust_session,
-        increment_trust_command_count, is_trust_excluded, should_trust_approve,
+        create_trust_session, revoke_trust_session,
+        increment_trust_command_count, is_trust_excluded, should_trust_approve,  # noqa: F401 - re-exported for tests
     )
-    from src.commands import is_blocked, is_dangerous, is_auto_approve, execute_command, fix_json_args
+    from src.commands import is_blocked, is_dangerous, is_auto_approve, execute_command, fix_json_args  # noqa: F401 - re-exported for tests
 
 # 從 constants.py 導入所有常數
 try:
     # Lambda 環境
     from constants import (
         VERSION,
-        TELEGRAM_TOKEN, TELEGRAM_WEBHOOK_SECRET, TELEGRAM_API_BASE,
-        APPROVED_CHAT_IDS, APPROVED_CHAT_ID,
+        TELEGRAM_TOKEN, TELEGRAM_WEBHOOK_SECRET,
+        APPROVED_CHAT_IDS,
         TABLE_NAME, ACCOUNTS_TABLE_NAME,
         DEFAULT_ACCOUNT_ID,
         REQUEST_SECRET, ENABLE_HMAC,
         MCP_MAX_WAIT,
         RATE_LIMIT_WINDOW, RATE_LIMIT_MAX_REQUESTS, MAX_PENDING_PER_SOURCE, RATE_LIMIT_ENABLED,
-        TRUST_SESSION_DURATION, TRUST_SESSION_MAX_COMMANDS, TRUST_SESSION_ENABLED,
-        TRUST_EXCLUDED_SERVICES, TRUST_EXCLUDED_ACTIONS, TRUST_EXCLUDED_FLAGS,
-        OUTPUT_PAGE_SIZE, OUTPUT_MAX_INLINE, OUTPUT_PAGE_TTL,
-        BLOCKED_PATTERNS, DANGEROUS_PATTERNS, AUTO_APPROVE_PREFIXES,
+        TRUST_SESSION_MAX_COMMANDS,
+        BLOCKED_PATTERNS, AUTO_APPROVE_PREFIXES,
     )
 except ImportError:
     # 本地測試環境
     from src.constants import (
         VERSION,
-        TELEGRAM_TOKEN, TELEGRAM_WEBHOOK_SECRET, TELEGRAM_API_BASE,
-        APPROVED_CHAT_IDS, APPROVED_CHAT_ID,
+        TELEGRAM_TOKEN, TELEGRAM_WEBHOOK_SECRET,
+        APPROVED_CHAT_IDS,
         TABLE_NAME, ACCOUNTS_TABLE_NAME,
         DEFAULT_ACCOUNT_ID,
         REQUEST_SECRET, ENABLE_HMAC,
         MCP_MAX_WAIT,
         RATE_LIMIT_WINDOW, RATE_LIMIT_MAX_REQUESTS, MAX_PENDING_PER_SOURCE, RATE_LIMIT_ENABLED,
-        TRUST_SESSION_DURATION, TRUST_SESSION_MAX_COMMANDS, TRUST_SESSION_ENABLED,
-        TRUST_EXCLUDED_SERVICES, TRUST_EXCLUDED_ACTIONS, TRUST_EXCLUDED_FLAGS,
-        OUTPUT_PAGE_SIZE, OUTPUT_MAX_INLINE, OUTPUT_PAGE_TTL,
-        BLOCKED_PATTERNS, DANGEROUS_PATTERNS, AUTO_APPROVE_PREFIXES,
+        TRUST_SESSION_MAX_COMMANDS,
+        BLOCKED_PATTERNS, AUTO_APPROVE_PREFIXES,
     )
 
 
@@ -282,204 +276,6 @@ def check_rate_limit(source: str) -> None:
     except Exception as e:
         # GSI 不存在或其他錯誤，記錄但不阻擋（fail-open）
         print(f"Rate limit check error (allowing): {e}")
-
-# ============================================================================
-# Trust Session - 連續批准功能
-# (常數已移至 constants.py)
-# ============================================================================
-
-def get_trust_session(source: str, account_id: str) -> Optional[Dict]:
-    """
-    查詢有效的信任時段
-
-    Args:
-        source: 請求來源
-        account_id: AWS 帳號 ID
-
-    Returns:
-        信任時段記錄，或 None
-    """
-    if not TRUST_SESSION_ENABLED or not source:
-        return None
-
-    now = int(time.time())
-
-    try:
-        # 用 Scan 查詢（量小可接受，之後可加 GSI 優化）
-        response = table.scan(
-            FilterExpression='#type = :type AND #src = :source AND account_id = :account AND expires_at > :now',
-            ExpressionAttributeNames={
-                '#type': 'type',
-                '#src': 'source'
-            },
-            ExpressionAttributeValues={
-                ':type': 'trust_session',
-                ':source': source,
-                ':account': account_id,
-                ':now': now
-            }
-        )
-
-        items = response.get('Items', [])
-        if items:
-            return items[0]
-        return None
-
-    except Exception as e:
-        print(f"Trust session check error: {e}")
-        return None
-
-
-def create_trust_session(source: str, account_id: str, approved_by: str) -> str:
-    """
-    建立信任時段
-
-    Args:
-        source: 請求來源
-        account_id: AWS 帳號 ID
-        approved_by: 批准者 ID
-
-    Returns:
-        trust_id
-    """
-    import hashlib
-    source_hash = hashlib.md5(source.encode(), usedforsecurity=False).hexdigest()[:8]
-    trust_id = f"trust-{source_hash}-{account_id}"
-
-    now = int(time.time())
-    expires_at = now + TRUST_SESSION_DURATION
-
-    # 使用固定 ID，後來的會覆蓋（同 source+account 只有一個）
-    item = {
-        'request_id': trust_id,
-        'type': 'trust_session',
-        'source': source,
-        'account_id': account_id,
-        'approved_by': approved_by,
-        'created_at': now,
-        'expires_at': expires_at,
-        'command_count': 0,
-        'ttl': expires_at
-    }
-
-    table.put_item(Item=item)
-    return trust_id
-
-
-def revoke_trust_session(trust_id: str) -> bool:
-    """
-    撤銷信任時段
-
-    Args:
-        trust_id: 信任時段 ID
-
-    Returns:
-        是否成功
-    """
-    try:
-        table.delete_item(Key={'request_id': trust_id})
-        return True
-    except Exception as e:
-        print(f"Revoke trust session error: {e}")
-        return False
-
-
-def increment_trust_command_count(trust_id: str) -> int:
-    """
-    增加信任時段的命令計數
-
-    Returns:
-        新的計數值
-    """
-    try:
-        response = table.update_item(
-            Key={'request_id': trust_id},
-            UpdateExpression='SET command_count = if_not_exists(command_count, :zero) + :one',
-            ExpressionAttributeValues={
-                ':zero': 0,
-                ':one': 1
-            },
-            ReturnValues='UPDATED_NEW'
-        )
-        return response.get('Attributes', {}).get('command_count', 0)
-    except Exception as e:
-        print(f"Increment trust command count error: {e}")
-        return 0
-
-
-def is_trust_excluded(command: str) -> bool:
-    """
-    檢查命令是否被 Trust Session 排除（高危命令）
-
-    Args:
-        command: AWS CLI 命令
-
-    Returns:
-        True 如果命令被排除，False 如果可以信任
-    """
-    cmd_lower = command.lower()
-
-    # 檢查是否是高危服務
-    for service in TRUST_EXCLUDED_SERVICES:
-        if f'aws {service} ' in cmd_lower or f'aws {service}\t' in cmd_lower:
-            return True
-
-    # 檢查是否是高危操作
-    for action in TRUST_EXCLUDED_ACTIONS:
-        if action in cmd_lower:
-            return True
-
-    # 檢查是否有危險旗標
-    for flag in TRUST_EXCLUDED_FLAGS:
-        if flag in cmd_lower:
-            return True
-
-    return False
-
-
-def should_trust_approve(command: str, source: str, account_id: str) -> tuple:
-    """
-    檢查是否應該透過信任時段自動批准
-
-    Args:
-        command: AWS CLI 命令
-        source: 請求來源
-        account_id: AWS 帳號 ID
-
-    Returns:
-        (should_approve: bool, trust_session: dict or None, reason: str)
-    """
-    if not TRUST_SESSION_ENABLED or not source:
-        return False, None, "Trust session disabled or no source"
-
-    # 檢查是否有有效的信任時段
-    session = get_trust_session(source, account_id)
-    if not session:
-        return False, None, "No active trust session"
-
-    # 檢查命令計數
-    if session.get('command_count', 0) >= TRUST_SESSION_MAX_COMMANDS:
-        return False, session, f"Trust session command limit reached ({TRUST_SESSION_MAX_COMMANDS})"
-
-    # 使用統一的排除檢查
-    if is_trust_excluded(command):
-        return False, session, "Command excluded from trust"
-
-    # 計算剩餘時間
-    remaining = int(session.get('expires_at', 0)) - int(time.time())
-    if remaining <= 0:
-        return False, None, "Trust session expired"
-
-    return True, session, f"Trust session active ({remaining}s remaining)"
-
-
-# ============================================================================
-# 命令分類系統（四層）
-# ============================================================================
-
-# Layer 1: BLOCKED - 永遠拒絕
-
-# Layer 2: SAFELIST - 自動批准（Read-only）
 
 
 # ============================================================================
@@ -2693,32 +2489,6 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
 
 
 # ============================================================================
-# 命令分類函數
-# ============================================================================
-
-def is_blocked(command: str) -> bool:
-    """Layer 1: 檢查命令是否在黑名單（絕對禁止）"""
-    import re
-    # 移除 --query 參數內容（JMESPath 語法可能包含反引號）
-    cmd_sanitized = re.sub(r"--query\s+['\"].*?['\"]", "--query REDACTED", command)
-    cmd_sanitized = re.sub(r"--query\s+[^\s'\"]+", "--query REDACTED", cmd_sanitized)
-    cmd_lower = cmd_sanitized.lower()
-    return any(pattern in cmd_lower for pattern in BLOCKED_PATTERNS)
-
-
-def is_dangerous(command: str) -> bool:
-    """Layer 2: 檢查命令是否是高危操作（需特殊審批）"""
-    cmd_lower = command.lower()
-    return any(pattern in cmd_lower for pattern in DANGEROUS_PATTERNS)
-
-
-def is_auto_approve(command: str) -> bool:
-    """Layer 3: 檢查命令是否可自動批准"""
-    cmd_lower = command.lower()
-    return any(cmd_lower.startswith(prefix) for prefix in AUTO_APPROVE_PREFIXES)
-
-
-# ============================================================================
 # HMAC 驗證
 # ============================================================================
 
@@ -2747,353 +2517,6 @@ def verify_hmac(headers: dict, body: str) -> bool:
     ).hexdigest()
 
     return hmac.compare_digest(signature, expected)
-
-
-# ============================================================================
-# Output Paging - 長輸出分頁
-# ============================================================================
-
-def send_remaining_pages(request_id: str, total_pages: int):
-    """自動發送剩餘的分頁內容"""
-    if total_pages <= 1:
-        return
-
-    for page_num in range(2, total_pages + 1):
-        page_id = f"{request_id}:page:{page_num}"
-        try:
-            result = table.get_item(Key={'request_id': page_id}).get('Item')
-            if result and 'content' in result:
-                content = result['content']
-                send_telegram_message(
-                    f"📄 *第 {page_num}/{total_pages} 頁*\n\n"
-                    f"```\n{content}\n```"
-                )
-        except Exception as e:
-            print(f"Error sending page {page_num}: {e}")
-
-
-def store_paged_output(request_id: str, output: str) -> dict:
-    """存儲長輸出並分頁
-
-    Returns:
-        dict with page info and first page content
-    """
-    if len(output) <= OUTPUT_MAX_INLINE:
-        return {'paged': False, 'result': output}
-
-    # 分頁
-    chunks = [output[i:i+OUTPUT_PAGE_SIZE] for i in range(0, len(output), OUTPUT_PAGE_SIZE)]
-    total_pages = len(chunks)
-    ttl = int(time.time()) + OUTPUT_PAGE_TTL
-
-    # 存儲每一頁（跳過第一頁，會直接回傳）
-    for i, chunk in enumerate(chunks[1:], start=2):
-        table.put_item(Item={
-            'request_id': f"{request_id}:page:{i}",
-            'content': chunk,
-            'page': i,
-            'total_pages': total_pages,
-            'original_request': request_id,
-            'ttl': ttl
-        })
-
-    return {
-        'paged': True,
-        'result': chunks[0],
-        'page': 1,
-        'total_pages': total_pages,
-        'output_length': len(output),
-        'next_page': f"{request_id}:page:2" if total_pages > 1 else None
-    }
-
-
-def get_paged_output(page_request_id: str) -> dict:
-    """取得分頁輸出"""
-    try:
-        result = table.get_item(Key={'request_id': page_request_id})
-        item = result.get('Item')
-
-        if not item:
-            return {'error': '分頁不存在或已過期'}
-
-        page = int(item.get('page', 0))
-        total_pages = int(item.get('total_pages', 0))
-
-        return {
-            'result': item.get('content', ''),
-            'page': page,
-            'total_pages': total_pages,
-            'next_page': f"{item.get('original_request')}:page:{page+1}" if page < total_pages else None
-        }
-    except Exception as e:
-        return {'error': f'取得分頁失敗: {str(e)}'}
-
-
-# ============================================================================
-# 命令執行
-# ============================================================================
-
-def fix_json_args(command: str, cli_args: list) -> list:
-    """
-    修復被 shlex.split 破壞的 JSON/陣列參數
-
-    shlex.split 會移除引號，導致 {"key":"val"} 變成 {key:val}
-    此函數從原始命令中重新提取正確的 JSON
-
-    Args:
-        command: 原始命令字串
-        cli_args: shlex.split 後的參數列表（不含 'aws'）
-
-    Returns:
-        修復後的參數列表
-    """
-    import re
-
-    for i, arg in enumerate(cli_args):
-        if i + 1 >= len(cli_args):
-            continue
-        next_val = cli_args[i + 1]
-
-        # 檢查是否是 JSON 或陣列開頭
-        if not (next_val.startswith('{') or next_val.startswith('[')):
-            continue
-
-        # 簡單 JSON 匹配
-        pattern = re.escape(arg) + r'''\s+(['"]?)(\{[^}]*\}|\[[^\]]*\])\1'''
-        match = re.search(pattern, command)
-        if match:
-            cli_args[i + 1] = match.group(2)
-            continue
-
-        # 複雜 JSON（多層巢狀）：用括號計數
-        param_pos = command.find(arg)
-        if param_pos == -1:
-            continue
-        after_param = command[param_pos + len(arg):].lstrip()
-
-        # 移除開頭的引號
-        quote_char = None
-        if after_param and after_param[0] in "'\"":
-            quote_char = after_param[0]
-            after_param = after_param[1:]
-
-        if not after_param or after_param[0] not in '{[':
-            continue
-
-        # 計數括號找結尾
-        open_char = after_param[0]
-        close_char = '}' if open_char == '{' else ']'
-        depth = 0
-        in_string = False
-        escape_next = False
-        end_pos = 0
-
-        for j, c in enumerate(after_param):
-            if escape_next:
-                escape_next = False
-                continue
-            if c == '\\':
-                escape_next = True
-                continue
-            if c == '"' and not in_string:
-                in_string = True
-            elif c == '"' and in_string:
-                in_string = False
-            elif not in_string:
-                if c == open_char:
-                    depth += 1
-                elif c == close_char:
-                    depth -= 1
-                    if depth == 0:
-                        end_pos = j + 1
-                        break
-
-        if end_pos > 0:
-            json_str = after_param[:end_pos]
-            if quote_char and json_str.endswith(quote_char):
-                json_str = json_str[:-1]
-            cli_args[i + 1] = json_str
-
-    return cli_args
-
-
-def execute_command(command: str, assume_role_arn: str = None) -> str:
-    """執行 AWS CLI 命令
-
-    Args:
-        command: AWS CLI 命令
-        assume_role_arn: 可選，要 assume 的 role ARN
-    """
-    import sys
-    from io import StringIO
-
-    try:
-        # 使用 shlex.split 解析命令
-        try:
-            args = shlex.split(command)
-        except ValueError as e:
-            return f'❌ 命令格式錯誤: {str(e)}'
-
-        if not args or args[0] != 'aws':
-            return '❌ 只能執行 aws CLI 命令'
-
-        # 移除 'aws' 前綴，awscli.clidriver 不需要它
-        cli_args = args[1:]
-
-        # 修復被 shlex 破壞的 JSON 參數
-        cli_args = fix_json_args(command, cli_args)
-
-        # 保存原始環境變數
-        original_env = {}
-
-        # 如果需要 assume role，先取得臨時 credentials
-        if assume_role_arn:
-            try:
-                sts = boto3.client('sts')
-                assumed = sts.assume_role(
-                    RoleArn=assume_role_arn,
-                    RoleSessionName='bouncer-execution',
-                    DurationSeconds=900  # 15 分鐘
-                )
-                creds = assumed['Credentials']
-
-                # 設定環境變數讓 awscli 使用這些 credentials
-                original_env = {
-                    'AWS_ACCESS_KEY_ID': os.environ.get('AWS_ACCESS_KEY_ID'),
-                    'AWS_SECRET_ACCESS_KEY': os.environ.get('AWS_SECRET_ACCESS_KEY'),
-                    'AWS_SESSION_TOKEN': os.environ.get('AWS_SESSION_TOKEN'),
-                }
-                os.environ['AWS_ACCESS_KEY_ID'] = creds['AccessKeyId']
-                os.environ['AWS_SECRET_ACCESS_KEY'] = creds['SecretAccessKey']
-                os.environ['AWS_SESSION_TOKEN'] = creds['SessionToken']
-
-            except Exception as e:
-                return f'❌ Assume role 失敗: {str(e)}'
-
-        # 捕獲 stdout/stderr
-        old_stdout = sys.stdout
-        old_stderr = sys.stderr
-        sys.stdout = StringIO()
-        sys.stderr = StringIO()
-
-        try:
-            from awscli.clidriver import create_clidriver
-            driver = create_clidriver()
-
-            # 禁用 pager
-            os.environ['AWS_PAGER'] = ''
-
-            exit_code = driver.main(cli_args)
-
-            stdout_output = sys.stdout.getvalue()
-            stderr_output = sys.stderr.getvalue()
-
-        finally:
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
-
-            # 還原環境變數
-            if assume_role_arn and original_env:
-                for key, value in original_env.items():
-                    if value is None:
-                        os.environ.pop(key, None)
-                    else:
-                        os.environ[key] = value
-
-        output = stdout_output or stderr_output or ''
-
-        if exit_code == 0:
-            if not output.strip():
-                output = '✅ 命令執行成功（無輸出）'
-        else:
-            if not output.strip():
-                output = f'❌ 命令失敗 (exit code: {exit_code})'
-
-        return output  # 不截斷，讓呼叫端用 store_paged_output 處理
-
-    except ImportError:
-        return '❌ awscli 模組未安裝'
-    except ValueError as e:
-        return f'❌ 命令格式錯誤: {str(e)}'
-    except Exception as e:
-        return f'❌ 執行錯誤: {str(e)}'
-
-
-# ============================================================================
-# Telegram API - 統一封裝
-# ============================================================================
-
-
-def _telegram_requests_parallel(requests: list) -> list:
-    """並行發送多個 Telegram API 請求
-
-    Args:
-        requests: list of (method, data, timeout, json_body) tuples
-
-    Returns:
-        list of results in same order
-    """
-    if not requests:
-        return []
-
-    results = [None] * len(requests)
-
-    def do_request(idx, method, data, timeout, json_body):
-        return idx, _telegram_request(method, data, timeout, json_body)
-
-    with ThreadPoolExecutor(max_workers=len(requests)) as executor:
-        futures = [
-            executor.submit(do_request, i, method, data, timeout, json_body)
-            for i, (method, data, timeout, json_body) in enumerate(requests)
-        ]
-        for future in as_completed(futures):
-            idx, result = future.result()
-            results[idx] = result
-
-    return results
-
-
-def _telegram_request(method: str, data: dict, timeout: int = 5, json_body: bool = False) -> dict:
-    """統一的 Telegram API 請求函數
-
-    Args:
-        method: API 方法名（如 sendMessage, editMessageText）
-        data: 請求資料
-        timeout: 超時秒數
-        json_body: True 時用 JSON 格式發送
-
-    Returns:
-        API 回應或空 dict
-    """
-    if not TELEGRAM_TOKEN:
-        return {}
-
-    url = f"{TELEGRAM_API_BASE}{TELEGRAM_TOKEN}/{method}"
-    start_time = time.time()
-
-    try:
-        if json_body:
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(data).encode(),
-                headers={'Content-Type': 'application/json'},
-                method='POST'
-            )
-        else:
-            req = urllib.request.Request(
-                url,
-                data=urllib.parse.urlencode(data).encode(),
-                method='POST'
-            )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
-            result = json.loads(resp.read().decode())
-            elapsed = (time.time() - start_time) * 1000
-            print(f"[TIMING] Telegram {method}: {elapsed:.0f}ms")
-            return result
-    except Exception as e:
-        elapsed = (time.time() - start_time) * 1000
-        print(f"[TIMING] Telegram {method} error ({elapsed:.0f}ms): {e}")
-        return {}
 
 
 def send_approval_request(request_id: str, command: str, reason: str, timeout: int = 840,
@@ -3256,79 +2679,6 @@ def send_trust_auto_approve_notification(command: str, trust_id: str, remaining:
 
     # 靜默通知
     send_telegram_message_silent(text, keyboard)
-
-
-def send_telegram_message_silent(text: str, reply_markup: dict = None):
-    """發送靜默 Telegram 消息（不響鈴）"""
-    data = {
-        'chat_id': APPROVED_CHAT_ID,
-        'text': text,
-        'parse_mode': 'Markdown',
-        'disable_notification': True
-    }
-    if reply_markup:
-        data['reply_markup'] = json.dumps(reply_markup)
-    _telegram_request('sendMessage', data)
-
-
-def escape_markdown(text: str) -> str:
-    """轉義 Telegram Markdown 特殊字元"""
-    if not text:
-        return text
-    for char in ['*', '_', '`', '[']:
-        text = text.replace(char, '\\' + char)
-    return text
-
-
-def send_telegram_message(text: str, reply_markup: dict = None):
-    """發送 Telegram 消息"""
-    data = {
-        'chat_id': APPROVED_CHAT_ID,
-        'text': text,
-        'parse_mode': 'Markdown'
-    }
-    if reply_markup:
-        data['reply_markup'] = json.dumps(reply_markup)
-    _telegram_request('sendMessage', data)
-
-
-def update_message(message_id: int, text: str):
-    """更新 Telegram 消息"""
-    data = {
-        'chat_id': APPROVED_CHAT_ID,
-        'message_id': message_id,
-        'text': text,
-        'parse_mode': 'Markdown'
-    }
-    _telegram_request('editMessageText', data)
-
-
-def answer_callback(callback_id: str, text: str):
-    """回應 Telegram callback"""
-    data = {
-        'callback_query_id': callback_id,
-        'text': text
-    }
-    _telegram_request('answerCallbackQuery', data)
-
-
-def update_and_answer(message_id: int, text: str, callback_id: str, callback_text: str):
-    """並行更新訊息 + 回應 callback（省約 500ms）"""
-    requests = [
-        ('editMessageText', {
-            'chat_id': APPROVED_CHAT_ID,
-            'message_id': message_id,
-            'text': text,
-            'parse_mode': 'Markdown'
-        }, 5, False),
-        ('answerCallbackQuery', {
-            'callback_query_id': callback_id,
-            'text': callback_text
-        }, 5, False)
-    ]
-    start_time = time.time()
-    _telegram_requests_parallel(requests)
-    print(f"[TIMING] update_and_answer parallel: {(time.time() - start_time) * 1000:.0f}ms")
 
 
 # ============================================================================
