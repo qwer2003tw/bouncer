@@ -285,16 +285,16 @@ TOOLS = [
 def http_request(method: str, path: str, data: dict = None) -> dict:
     """發送 HTTP 請求到 Bouncer API"""
     url = f"{API_URL.rstrip('/')}{path}"
-    
+
     headers = {
         'Content-Type': 'application/json',
         'X-Approval-Secret': SECRET
     }
-    
+
     body = json.dumps(data).encode() if data else None
-    
+
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
-    
+
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read().decode())
@@ -320,13 +320,13 @@ def tool_execute(arguments: dict) -> dict:
     if account:
         account = str(account).strip()
     timeout = int(arguments.get('timeout', DEFAULT_TIMEOUT))
-    
+
     if not command:
         return {'error': 'Missing required parameter: command'}
-    
+
     if not SECRET:
         return {'error': 'BOUNCER_SECRET not configured'}
-    
+
     # 使用 async 模式讓 Lambda 立即返回
     mcp_args = {
         'command': command,
@@ -337,7 +337,7 @@ def tool_execute(arguments: dict) -> dict:
     }
     if account:
         mcp_args['account'] = account
-    
+
     payload = {
         'jsonrpc': '2.0',
         'id': 'execute',
@@ -347,9 +347,9 @@ def tool_execute(arguments: dict) -> dict:
             'arguments': mcp_args
         }
     }
-    
+
     result = http_request('POST', '/mcp', payload)
-    
+
     # 解析 MCP 回應
     inner_result = None
     if 'result' in result:
@@ -359,33 +359,33 @@ def tool_execute(arguments: dict) -> dict:
                 inner_result = json.loads(content[0]['text'])
             except:
                 return result
-    
+
     if not inner_result:
         return result
-    
+
     # 如果是 auto_approved、blocked、error，直接返回
     status = inner_result.get('status', '')
     if status in ('auto_approved', 'blocked', 'error'):
         return inner_result
-    
+
     # 如果不是 pending_approval，直接返回
     if status != 'pending_approval':
         return inner_result
-    
+
     # 開始本地輪詢
     request_id = inner_result.get('request_id')
     if not request_id:
         return {'error': 'No request_id returned', 'response': inner_result}
-    
+
     log(f"Waiting for approval: {request_id} (timeout: {timeout}s)")
     start_time = time.time()
-    
+
     while (time.time() - start_time) < timeout:
         time.sleep(POLL_INTERVAL)
-        
+
         status_result = http_request('GET', f'/status/{request_id}')
         current_status = status_result.get('status', '')
-        
+
         if current_status == 'approved':
             return {
                 'status': 'approved',
@@ -396,7 +396,7 @@ def tool_execute(arguments: dict) -> dict:
                 'approved_by': status_result.get('approver'),
                 'waited_seconds': int(time.time() - start_time)
             }
-        
+
         elif current_status == 'denied':
             return {
                 'status': 'denied',
@@ -406,14 +406,14 @@ def tool_execute(arguments: dict) -> dict:
                 'denied_by': status_result.get('approver'),
                 'waited_seconds': int(time.time() - start_time)
             }
-        
+
         elif current_status == 'timeout':
             return {
                 'status': 'timeout',
                 'request_id': request_id,
                 'message': 'Request expired on server'
             }
-    
+
     # Client 端超時
     return {
         'status': 'timeout',
@@ -426,10 +426,10 @@ def tool_execute(arguments: dict) -> dict:
 def tool_status(arguments: dict) -> dict:
     """查詢請求狀態"""
     request_id = arguments.get('request_id', '')
-    
+
     if not request_id:
         return {'error': 'Missing required parameter: request_id'}
-    
+
     return http_request('GET', f'/status/{request_id}')
 
 
@@ -437,13 +437,13 @@ def poll_for_result(request_id: str, timeout: int, action: str) -> dict:
     """共用的輪詢邏輯"""
     start_time = time.time()
     log(f"Waiting for approval: {request_id} ({action}, timeout: {timeout}s)")
-    
+
     while (time.time() - start_time) < timeout:
         time.sleep(POLL_INTERVAL)
-        
+
         status_result = http_request('GET', f'/status/{request_id}')
         current_status = status_result.get('status', '')
-        
+
         if current_status == 'approved':
             return {
                 'status': 'approved',
@@ -451,7 +451,7 @@ def poll_for_result(request_id: str, timeout: int, action: str) -> dict:
                 'action': action,
                 'waited_seconds': int(time.time() - start_time)
             }
-        
+
         elif current_status == 'denied':
             return {
                 'status': 'denied',
@@ -459,16 +459,16 @@ def poll_for_result(request_id: str, timeout: int, action: str) -> dict:
                 'action': action,
                 'waited_seconds': int(time.time() - start_time)
             }
-        
+
         elif current_status == 'timeout':
             return {
                 'status': 'timeout',
                 'request_id': request_id,
                 'message': 'Request expired on server'
             }
-        
+
         # pending_approval → 繼續等待
-    
+
     return {
         'status': 'timeout',
         'request_id': request_id,
@@ -481,13 +481,13 @@ def tool_add_account(arguments: dict) -> dict:
     """新增帳號（使用 async 模式 + 本地輪詢）"""
     if not SECRET:
         return {'error': 'BOUNCER_SECRET not configured'}
-    
+
     timeout = arguments.get('timeout', DEFAULT_TIMEOUT)
-    
+
     # 加上 async=true 讓 Lambda 立即返回
     args_with_async = dict(arguments)
     args_with_async['async'] = True
-    
+
     payload = {
         'jsonrpc': '2.0',
         'id': 'add-account',
@@ -497,9 +497,9 @@ def tool_add_account(arguments: dict) -> dict:
             'arguments': args_with_async
         }
     }
-    
+
     result = http_request('POST', '/mcp', payload)
-    
+
     # 解析 MCP 回應
     inner_result = None
     if 'result' in result:
@@ -509,20 +509,20 @@ def tool_add_account(arguments: dict) -> dict:
                 inner_result = json.loads(content[0]['text'])
             except:
                 return result
-    
+
     if not inner_result:
         return result
-    
+
     # 如果是 error 或其他終態，直接返回
     status = inner_result.get('status', '')
     if status != 'pending_approval':
         return inner_result
-    
+
     # 開始本地輪詢
     request_id = inner_result.get('request_id')
     if not request_id:
         return {'error': 'No request_id returned', 'response': inner_result}
-    
+
     return poll_for_result(request_id, timeout, 'add_account')
 
 
@@ -530,7 +530,7 @@ def tool_list_accounts(arguments: dict) -> dict:
     """列出帳號（走 MCP 端點）"""
     if not SECRET:
         return {'error': 'BOUNCER_SECRET not configured'}
-    
+
     payload = {
         'jsonrpc': '2.0',
         'id': 'list-accounts',
@@ -540,9 +540,9 @@ def tool_list_accounts(arguments: dict) -> dict:
             'arguments': arguments
         }
     }
-    
+
     result = http_request('POST', '/mcp', payload)
-    
+
     if 'result' in result:
         content = result['result'].get('content', [])
         if content and content[0].get('type') == 'text':
@@ -557,12 +557,12 @@ def tool_remove_account(arguments: dict) -> dict:
     """移除帳號（使用 async 模式 + 本地輪詢）"""
     if not SECRET:
         return {'error': 'BOUNCER_SECRET not configured'}
-    
+
     timeout = arguments.get('timeout', DEFAULT_TIMEOUT)
-    
+
     args_with_async = dict(arguments)
     args_with_async['async'] = True
-    
+
     payload = {
         'jsonrpc': '2.0',
         'id': 'remove-account',
@@ -572,9 +572,9 @@ def tool_remove_account(arguments: dict) -> dict:
             'arguments': args_with_async
         }
     }
-    
+
     result = http_request('POST', '/mcp', payload)
-    
+
     inner_result = None
     if 'result' in result:
         content = result['result'].get('content', [])
@@ -583,18 +583,18 @@ def tool_remove_account(arguments: dict) -> dict:
                 inner_result = json.loads(content[0]['text'])
             except:
                 return result
-    
+
     if not inner_result:
         return result
-    
+
     status = inner_result.get('status', '')
     if status != 'pending_approval':
         return inner_result
-    
+
     request_id = inner_result.get('request_id')
     if not request_id:
         return {'error': 'No request_id returned', 'response': inner_result}
-    
+
     return poll_for_result(request_id, timeout, 'remove_account')
 
 
@@ -606,12 +606,12 @@ def tool_deploy(arguments: dict) -> dict:
     """部署專案（使用 async 模式 + 本地輪詢）"""
     if not SECRET:
         return {'error': 'BOUNCER_SECRET not configured'}
-    
+
     timeout = arguments.get('timeout', DEFAULT_TIMEOUT)
-    
+
     args_with_async = dict(arguments)
     args_with_async['async'] = True
-    
+
     payload = {
         'jsonrpc': '2.0',
         'id': 'deploy',
@@ -621,21 +621,21 @@ def tool_deploy(arguments: dict) -> dict:
             'arguments': args_with_async
         }
     }
-    
+
     result = http_request('POST', '/mcp', payload)
     inner_result = parse_mcp_result(result)
-    
+
     if not inner_result:
         return result
-    
+
     status = inner_result.get('status', '')
     if status != 'pending_approval':
         return inner_result
-    
+
     request_id = inner_result.get('request_id')
     if not request_id:
         return {'error': 'No request_id returned', 'response': inner_result}
-    
+
     return poll_for_result(request_id, timeout, 'deploy')
 
 
@@ -643,7 +643,7 @@ def tool_deploy_status(arguments: dict) -> dict:
     """查詢部署狀態"""
     if not SECRET:
         return {'error': 'BOUNCER_SECRET not configured'}
-    
+
     payload = {
         'jsonrpc': '2.0',
         'id': 'deploy-status',
@@ -653,7 +653,7 @@ def tool_deploy_status(arguments: dict) -> dict:
             'arguments': arguments
         }
     }
-    
+
     result = http_request('POST', '/mcp', payload)
     return parse_mcp_result(result) or result
 
@@ -662,7 +662,7 @@ def tool_deploy_cancel(arguments: dict) -> dict:
     """取消部署"""
     if not SECRET:
         return {'error': 'BOUNCER_SECRET not configured'}
-    
+
     payload = {
         'jsonrpc': '2.0',
         'id': 'deploy-cancel',
@@ -672,7 +672,7 @@ def tool_deploy_cancel(arguments: dict) -> dict:
             'arguments': arguments
         }
     }
-    
+
     result = http_request('POST', '/mcp', payload)
     return parse_mcp_result(result) or result
 
@@ -681,7 +681,7 @@ def tool_deploy_history(arguments: dict) -> dict:
     """查詢部署歷史"""
     if not SECRET:
         return {'error': 'BOUNCER_SECRET not configured'}
-    
+
     payload = {
         'jsonrpc': '2.0',
         'id': 'deploy-history',
@@ -691,7 +691,7 @@ def tool_deploy_history(arguments: dict) -> dict:
             'arguments': arguments
         }
     }
-    
+
     result = http_request('POST', '/mcp', payload)
     return parse_mcp_result(result) or result
 
@@ -736,7 +736,20 @@ def tool_list_safelist(arguments: dict) -> dict:
 
 def tool_get_page(arguments: dict) -> dict:
     """取得長輸出的下一頁"""
-    result = call_mcp_tool('bouncer_get_page', arguments)
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 1,
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_get_page',
+            'arguments': arguments
+        }
+    }
+
+    result = http_request('POST', '/mcp', payload)
     return parse_mcp_result(result) or result
 
 
@@ -822,27 +835,27 @@ def handle_request(request: dict) -> dict:
     method = request.get('method', '')
     params = request.get('params', {})
     req_id = request.get('id')
-    
+
     if request.get('jsonrpc') != '2.0':
         return error_response(req_id, -32600, 'Invalid Request')
-    
+
     if method == 'initialize':
         return success_response(req_id, {
             'protocolVersion': '2024-11-05',
             'serverInfo': {'name': 'bouncer-client', 'version': VERSION},
             'capabilities': {'tools': {}}
         })
-    
+
     elif method == 'notifications/initialized':
         return success_response(req_id, {})
-    
+
     elif method == 'tools/list':
         return success_response(req_id, {'tools': TOOLS})
-    
+
     elif method == 'tools/call':
         tool_name = params.get('name', '')
         arguments = params.get('arguments', {})
-        
+
         if tool_name == 'bouncer_execute':
             result = tool_execute(arguments)
         elif tool_name == 'bouncer_status':
@@ -876,14 +889,14 @@ def handle_request(request: dict) -> dict:
             result = tool_trust_revoke(arguments)
         else:
             return error_response(req_id, -32602, f'Unknown tool: {tool_name}')
-        
+
         is_error = 'error' in result or result.get('status') in ('denied', 'timeout', 'blocked')
-        
+
         return success_response(req_id, {
             'content': [{'type': 'text', 'text': json.dumps(result, indent=2, ensure_ascii=False)}],
             'isError': is_error
         })
-    
+
     else:
         return error_response(req_id, -32601, f'Method not found: {method}')
 
@@ -900,12 +913,12 @@ def main():
     log(f"MCP Client Wrapper v{VERSION} started")
     log(f"API: {API_URL}")
     log(f"Secret configured: {'Yes' if SECRET else 'No'}")
-    
+
     for line in sys.stdin:
         line = line.strip()
         if not line:
             continue
-        
+
         try:
             request = json.loads(line)
             response = handle_request(request)
