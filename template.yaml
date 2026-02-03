@@ -60,6 +60,8 @@ Resources:
           AttributeType: S
         - AttributeName: created_at
           AttributeType: N
+        - AttributeName: status
+          AttributeType: S
       KeySchema:
         - AttributeName: request_id
           KeyType: HASH
@@ -74,6 +76,14 @@ Resources:
             ProjectionType: INCLUDE
             NonKeyAttributes:
               - status
+        - IndexName: status-created-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
       TimeToLiveSpecification:
         AttributeName: ttl
         Enabled: true

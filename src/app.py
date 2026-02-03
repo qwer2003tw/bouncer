@@ -1318,22 +1318,27 @@ def mcp_tool_list_pending(req_id, arguments: dict) -> dict:
 
     try:
         if source:
-            # 查詢特定 source 的 pending 請求
-            response = table.scan(
-                FilterExpression='#status = :status AND #src = :source',
-                ExpressionAttributeNames={'#status': 'status', '#src': 'source'},
+            # 查詢特定 source 的 pending 請求 (用 source-created-index + filter)
+            response = table.query(
+                IndexName='source-created-index',
+                KeyConditionExpression='#src = :source',
+                FilterExpression='#status = :status',
+                ExpressionAttributeNames={'#src': 'source', '#status': 'status'},
                 ExpressionAttributeValues={
-                    ':status': 'pending',
-                    ':source': source
+                    ':source': source,
+                    ':status': 'pending'
                 },
+                ScanIndexForward=False,
                 Limit=limit
             )
         else:
-            # 查詢所有 pending 請求
-            response = table.scan(
-                FilterExpression='#status = :status',
+            # 查詢所有 pending 請求 (用 status-created-index)
+            response = table.query(
+                IndexName='status-created-index',
+                KeyConditionExpression='#status = :status',
                 ExpressionAttributeNames={'#status': 'status'},
                 ExpressionAttributeValues={':status': 'pending'},
+                ScanIndexForward=False,
                 Limit=limit
             )
 
