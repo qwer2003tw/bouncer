@@ -73,9 +73,10 @@ jobs:
           echo "Code changed: $CODE_CHANGED"
           echo "Docs changed: $DOCS_CHANGED"
           
-          # 如果程式碼有改但文件沒改，發出警告（不阻擋，只提醒）
+          # 如果程式碼有改但文件沒改，強制失敗
           if [ -n "$CODE_CHANGED" ] && [ -z "$DOCS_CHANGED" ]; then
-            echo "::warning::程式碼有改動但 SKILL.md/README.md 沒有更新。如果新增/修改/刪除了功能，請更新文件！"
+            echo "::error::程式碼有改動但 SKILL.md/README.md 沒有更新！新增/修改/刪除功能必須更新文件。"
+            exit 1
           fi
 
   test:
