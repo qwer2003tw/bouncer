@@ -1750,8 +1750,8 @@ def execute_upload(request_id: str, approver: str) -> dict:
         # 記錄失敗
         table.update_item(
             Key={'request_id': request_id},
-            UpdateExpression='SET #status = :status, error = :error',
-            ExpressionAttributeNames={'#status': 'status'},
+            UpdateExpression='SET #status = :status, #error = :error',
+            ExpressionAttributeNames={'#status': 'status', '#error': 'error'},
             ExpressionAttributeValues={
                 ':status': 'error',
                 ':error': str(e)
