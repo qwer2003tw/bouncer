@@ -70,6 +70,35 @@ accounts_table = dynamodb.Table(ACCOUNTS_TABLE_NAME)
 # 帳號管理
 # ============================================================================
 
+# Bot commands 初始化標記（避免每次 invoke 都呼叫 API）
+_bot_commands_initialized = False
+
+
+def init_bot_commands():
+    """初始化 Telegram Bot 指令選單（cold start 時執行一次）"""
+    global _bot_commands_initialized
+    if _bot_commands_initialized or not TELEGRAM_TOKEN:
+        return
+
+    commands = [
+        {"command": "accounts", "description": "列出 AWS 帳號"},
+        {"command": "trust", "description": "列出信任時段"},
+        {"command": "pending", "description": "列出待審批請求"},
+        {"command": "help", "description": "顯示指令說明"}
+    ]
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setMyCommands"
+    data = json.dumps({"commands": commands}).encode()
+
+    req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+    try:
+        urllib.request.urlopen(req, timeout=5)
+        _bot_commands_initialized = True
+        print("Bot commands initialized")
+    except Exception as e:
+        print(f"Failed to set bot commands: {e}")
+
+
 def init_default_account():
     """初始化預設帳號（如果不存在）"""
     try:
@@ -721,6 +750,9 @@ MCP_TOOLS = {
 
 def lambda_handler(event, context):
     """主入口 - 路由請求"""
+    # 初始化 Bot commands（cold start 時執行一次）
+    init_bot_commands()
+
     # 支援 Function URL (rawPath) 和 API Gateway (path)
     path = event.get('rawPath') or event.get('path') or '/'
 
