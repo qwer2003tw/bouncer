@@ -39,7 +39,7 @@ VERSION = '2.0.0'
 TOOLS = [
     {
         'name': 'bouncer_execute',
-        'description': '執行 AWS CLI 命令。安全命令自動執行，危險命令需要 Telegram 審批後執行。',
+        'description': '執行 AWS CLI 命令。安全命令自動執行，危險命令需要 Telegram 審批。預設異步返回 request_id，用 bouncer_status 查詢結果。',
         'inputSchema': {
             'type': 'object',
             'properties': {
@@ -59,9 +59,9 @@ TOOLS = [
                     'type': 'string',
                     'description': '來源標識（例如：Clawdbot、Steven 的 OpenClaw）'
                 },
-                'timeout': {
-                    'type': 'integer',
-                    'description': f'審批等待超時秒數，預設 {DEFAULT_TIMEOUT}'
+                'sync': {
+                    'type': 'boolean',
+                    'description': '同步模式：等待審批結果（可能超時），預設 false'
                 }
             },
             'required': ['command', 'reason']
@@ -69,7 +69,7 @@ TOOLS = [
     },
     {
         'name': 'bouncer_status',
-        'description': '查詢審批請求狀態',
+        'description': '查詢審批請求狀態（用於異步模式輪詢結果）',
         'inputSchema': {
             'type': 'object',
             'properties': {
@@ -278,7 +278,7 @@ TOOLS = [
     },
     {
         'name': 'bouncer_upload',
-        'description': '上傳檔案到固定 S3 桶（需要 Telegram 審批）。檔案會上傳到 bouncer-uploads 桶，30 天後自動刪除。檔案大小限制 4.5 MB。',
+        'description': '上傳檔案到固定 S3 桶（需要 Telegram 審批）。預設異步返回 request_id，用 bouncer_status 查詢結果。檔案大小限制 4.5 MB。',
         'inputSchema': {
             'type': 'object',
             'properties': {
@@ -301,6 +301,10 @@ TOOLS = [
                 'source': {
                     'type': 'string',
                     'description': '請求來源標識'
+                },
+                'sync': {
+                    'type': 'boolean',
+                    'description': '同步模式：等待審批結果（可能超時），預設 false'
                 }
             },
             'required': ['filename', 'content', 'reason', 'source']

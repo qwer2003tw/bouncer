@@ -12,6 +12,24 @@ Use `mcporter` to execute AWS CLI commands through the Bouncer approval system.
 **GitHub:** https://github.com/qwer2003tw/bouncer
 **MCP Source:** `/home/ec2-user/projects/bouncer/bouncer_mcp.py`
 
+## 異步設計
+
+所有需要審批的操作**預設異步**返回，避免 API Gateway 29 秒超時：
+
+```bash
+# 1. 發送請求（立即返回 request_id）
+mcporter call bouncer bouncer_execute command="aws s3 mb s3://test" reason="建桶" source="Clawd"
+# 返回: {"status": "pending_approval", "request_id": "abc123", ...}
+
+# 2. 查詢結果
+mcporter call bouncer bouncer_status request_id="abc123"
+# 返回: {"status": "approved", "result": "..."} 或 {"status": "pending_approval"}
+```
+
+mcporter 會自動輪詢直到超時（預設 60 秒），所以一般使用時感覺像同步。
+
+如需強制同步等待（不推薦），加 `sync=true`。
+
 ## Available Tools
 
 ### bouncer_execute
@@ -26,10 +44,10 @@ mcporter call bouncer bouncer_execute command="<aws command>" reason="<why>" sou
 - `reason` (required): 執行原因，會顯示在審批請求中
 - `source` (required): 來源標識（例如：`Steven's Private Bot`）
 - `account` (optional): 目標 AWS 帳號 ID（12 位數字），不填使用預設帳號
-- `timeout` (optional): 審批等待超時秒數（預設 300）
+- `sync` (optional): 同步模式，等待審批結果（預設 false，不推薦）
 
 ### bouncer_status
-查詢審批請求狀態。
+查詢審批請求狀態（用於異步模式輪詢）。
 
 ```bash
 mcporter call bouncer bouncer_status request_id="<id>"

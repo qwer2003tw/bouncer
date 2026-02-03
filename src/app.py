@@ -461,7 +461,7 @@ def should_trust_approve(command: str, source: str, account_id: str) -> tuple:
 
 MCP_TOOLS = {
     'bouncer_execute': {
-        'description': '執行 AWS CLI 命令。安全命令自動執行，危險命令需要 Telegram 審批。',
+        'description': '執行 AWS CLI 命令。安全命令自動執行，危險命令需要 Telegram 審批。預設異步返回 request_id，用 bouncer_status 查詢結果。',
         'parameters': {
             'type': 'object',
             'properties': {
@@ -478,18 +478,21 @@ MCP_TOOLS = {
                     'description': '執行原因（用於審批記錄）',
                     'default': 'No reason provided'
                 },
-                'timeout': {
-                    'type': 'integer',
-                    'description': '最大等待時間（秒），預設 840（14分鐘）',
-                    'default': 840,
-                    'maximum': 840
+                'source': {
+                    'type': 'string',
+                    'description': '請求來源標識（哪個 agent/系統發的）'
+                },
+                'sync': {
+                    'type': 'boolean',
+                    'description': '同步模式：等待審批結果（可能超時），預設 false',
+                    'default': False
                 }
             },
             'required': ['command']
         }
     },
     'bouncer_status': {
-        'description': '查詢請求狀態',
+        'description': '查詢請求狀態（用於異步模式輪詢結果）',
         'parameters': {
             'type': 'object',
             'properties': {
@@ -702,6 +705,11 @@ MCP_TOOLS = {
                 'source': {
                     'type': 'string',
                     'description': '請求來源標識'
+                },
+                'sync': {
+                    'type': 'boolean',
+                    'description': '同步模式：等待審批結果（可能超時），預設 false',
+                    'default': False
                 }
             },
             'required': ['filename', 'content', 'reason', 'source']
@@ -882,7 +890,7 @@ def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
 
 
 def mcp_tool_execute(req_id, arguments: dict) -> dict:
-    """MCP tool: bouncer_execute"""
+    """MCP tool: bouncer_execute（預設異步，立即返回 request_id）"""
     command = str(arguments.get('command', '')).strip()
     reason = str(arguments.get('reason', 'No reason provided'))
     source = arguments.get('source', None)
@@ -890,7 +898,8 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
     if account_id:
         account_id = str(account_id).strip()
     timeout = min(int(arguments.get('timeout', MCP_MAX_WAIT)), MCP_MAX_WAIT)
-    async_mode = arguments.get('async', False)  # 如果 True，立即返回 pending
+    # 預設異步（避免 API Gateway 29s 超時）
+    sync_mode = arguments.get('sync', False)  # 明確要求同步才等待
 
     if not command:
         return mcp_error(req_id, -32602, 'Missing required parameter: command')
@@ -1076,8 +1085,8 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
     # 發送 Telegram 審批請求
     send_approval_request(request_id, command, reason, timeout, source, account_id, account_name)
 
-    # 如果是 async 模式，立即返回讓 client 輪詢
-    if async_mode:
+    # 預設異步：立即返回讓 client 用 bouncer_status 輪詢
+    if not sync_mode:
         return mcp_result(req_id, {
             'content': [{
                 'type': 'text',
@@ -1087,13 +1096,13 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
                     'command': command,
                     'account': account_id,
                     'account_name': account_name,
-                    'message': '請求已發送，等待 Telegram 確認',
+                    'message': '請求已發送，用 bouncer_status 查詢結果',
                     'expires_in': f'{timeout} seconds'
                 })
             }]
         })
 
-    # 同步模式：長輪詢等待結果（會被 API Gateway 29s 超時）
+    # 同步模式（sync=True）：長輪詢等待結果（可能被 API Gateway 29s 超時）
     result = wait_for_result_mcp(request_id, timeout=timeout)
 
     return mcp_result(req_id, {
@@ -1472,7 +1481,8 @@ def mcp_tool_upload(req_id, arguments: dict) -> dict:
     content_type = str(arguments.get('content_type', 'application/octet-stream')).strip()
     reason = str(arguments.get('reason', 'No reason provided'))
     source = arguments.get('source', None)
-    async_mode = arguments.get('async', False)
+    # 預設異步（避免 API Gateway 29s 超時）
+    sync_mode = arguments.get('sync', False)
 
     # 向後相容：如果有 bucket/key 就用舊邏輯
     legacy_bucket = arguments.get('bucket', None)
@@ -1591,20 +1601,20 @@ def mcp_tool_upload(req_id, arguments: dict) -> dict:
 
     send_telegram_message(message, keyboard)
 
-    # 如果是 async 模式，立即返回
-    if async_mode:
+    # 預設異步：立即返回讓 client 用 bouncer_status 輪詢
+    if not sync_mode:
         return mcp_result(req_id, {
             'content': [{'type': 'text', 'text': json.dumps({
                 'status': 'pending_approval',
                 'request_id': request_id,
                 's3_uri': s3_uri,
                 'size': size_str,
-                'message': '請求已發送，等待 Telegram 確認',
+                'message': '請求已發送，用 bouncer_status 查詢結果',
                 'expires_in': '300 seconds'
             })}]
         })
 
-    # 同步模式：等待結果
+    # 同步模式（sync=True）：等待結果（可能被 API Gateway 29s 超時）
     result = wait_for_upload_result(request_id, timeout=300)
 
     return mcp_result(req_id, {

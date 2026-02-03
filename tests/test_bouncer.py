@@ -195,8 +195,8 @@ class TestMCPExecuteApproval:
     """MCP bouncer_execute APPROVAL 測試"""
     
     @patch('app.send_telegram_message')
-    def test_execute_needs_approval_timeout(self, mock_telegram, app_module):
-        """測試需要審批的命令（超時）"""
+    def test_execute_needs_approval_async(self, mock_telegram, app_module):
+        """測試需要審批的命令（預設異步，立即返回 pending_approval）"""
         event = {
             'rawPath': '/mcp',
             'headers': {'x-approval-secret': 'test-secret'},
@@ -208,8 +208,7 @@ class TestMCPExecuteApproval:
                     'name': 'bouncer_execute',
                     'arguments': {
                         'command': 'aws ec2 start-instances --instance-ids i-123',
-                        'reason': 'Test start',
-                        'timeout': 3  # 3 秒超時
+                        'reason': 'Test start'
                     }
                 }
             }),
@@ -219,9 +218,10 @@ class TestMCPExecuteApproval:
         result = app_module.lambda_handler(event, None)
         body = json.loads(result['body'])
         
-        # 應該超時（因為沒有審批）
+        # 預設異步：立即返回 pending_approval
         content = json.loads(body['result']['content'][0]['text'])
-        assert content['status'] == 'timeout'
+        assert content['status'] == 'pending_approval'
+        assert 'request_id' in content
         assert mock_telegram.called
     
     @patch('app.send_telegram_message')
