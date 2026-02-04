@@ -798,17 +798,13 @@ class TestRateLimiting:
             app_module.check_rate_limit('test-source-1')
         except (app_module.RateLimitExceeded, app_module.PendingLimitExceeded):
             pytest.fail("Rate limit should not be exceeded on first request")
-    
+
     def test_rate_limit_disabled(self, app_module):
         """停用 rate limit 時應該跳過檢查"""
-        original = app_module.RATE_LIMIT_ENABLED
-        try:
-            app_module.RATE_LIMIT_ENABLED = False
+        with patch('rate_limit.RATE_LIMIT_ENABLED', False):
             # 即使呼叫多次也不應該觸發
             for _ in range(20):
                 app_module.check_rate_limit('test-source-2')
-        finally:
-            app_module.RATE_LIMIT_ENABLED = original
 
 
 # ============================================================================
