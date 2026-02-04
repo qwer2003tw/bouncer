@@ -980,5 +980,107 @@ class TestJsonParameterFix:
         assert fixed == cli_args  # 應該完全相同
 
 
+# ============================================================================
+# Accounts 模組測試
+# ============================================================================
+
+class TestAccounts:
+    """帳號管理模組測試"""
+    
+    def test_validate_account_id_valid(self, app_module):
+        """有效的 12 位帳號 ID"""
+        valid, error = app_module.validate_account_id('123456789012')
+        assert valid is True
+        assert error is None
+    
+    def test_validate_account_id_empty(self, app_module):
+        """空帳號 ID"""
+        valid, error = app_module.validate_account_id('')
+        assert valid is False
+        assert '不能為空' in error
+    
+    def test_validate_account_id_not_digit(self, app_module):
+        """非數字帳號 ID"""
+        valid, error = app_module.validate_account_id('abc123456789')
+        assert valid is False
+        assert '數字' in error
+    
+    def test_validate_account_id_wrong_length(self, app_module):
+        """長度不對的帳號 ID"""
+        valid, error = app_module.validate_account_id('12345')
+        assert valid is False
+        assert '12 位' in error
+    
+    def test_validate_role_arn_empty(self, app_module):
+        """空 Role ARN（允許）"""
+        valid, error = app_module.validate_role_arn('')
+        assert valid is True
+        assert error is None
+    
+    def test_validate_role_arn_none(self, app_module):
+        """None Role ARN（允許）"""
+        valid, error = app_module.validate_role_arn(None)
+        assert valid is True
+        assert error is None
+    
+    def test_validate_role_arn_valid(self, app_module):
+        """有效的 Role ARN"""
+        valid, error = app_module.validate_role_arn('arn:aws:iam::123456789012:role/MyRole')
+        assert valid is True
+        assert error is None
+    
+    def test_validate_role_arn_invalid_prefix(self, app_module):
+        """無效前綴"""
+        valid, error = app_module.validate_role_arn('invalid:arn')
+        assert valid is False
+        assert 'arn:aws:iam' in error
+    
+    def test_validate_role_arn_missing_role(self, app_module):
+        """缺少 :role/"""
+        valid, error = app_module.validate_role_arn('arn:aws:iam::123456789012:user/MyUser')
+        assert valid is False
+        assert ':role/' in error
+
+
+# ============================================================================
+# Trust 模組測試（補充）
+# ============================================================================
+
+class TestTrustExcluded:
+    """Trust 排除規則測試"""
+    
+    def test_is_trust_excluded_iam(self, app_module):
+        """IAM 命令應被排除"""
+        from trust import is_trust_excluded
+        assert is_trust_excluded('aws iam create-user --user-name test') is True
+    
+    def test_is_trust_excluded_kms(self, app_module):
+        """KMS 命令應被排除"""
+        from trust import is_trust_excluded
+        assert is_trust_excluded('aws kms create-key') is True
+    
+    def test_is_trust_excluded_delete(self, app_module):
+        """delete 操作應被排除"""
+        from trust import is_trust_excluded
+        assert is_trust_excluded('aws s3 rm s3://bucket/key') is True
+        assert is_trust_excluded('aws ec2 delete-security-group --group-id sg-123') is True
+    
+    def test_is_trust_excluded_terminate(self, app_module):
+        """terminate 操作應被排除"""
+        from trust import is_trust_excluded
+        assert is_trust_excluded('aws ec2 terminate-instances --instance-ids i-123') is True
+    
+    def test_is_trust_excluded_force_flag(self, app_module):
+        """--force 旗標應被排除"""
+        from trust import is_trust_excluded
+        assert is_trust_excluded('aws s3 rb s3://bucket --force') is True
+    
+    def test_is_trust_excluded_safe_command(self, app_module):
+        """安全命令不應被排除"""
+        from trust import is_trust_excluded
+        assert is_trust_excluded('aws s3 ls') is False
+        assert is_trust_excluded('aws ec2 describe-instances') is False
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
