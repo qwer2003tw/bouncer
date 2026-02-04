@@ -1082,5 +1082,105 @@ class TestTrustExcluded:
         assert is_trust_excluded('aws ec2 describe-instances') is False
 
 
+# ============================================================================
+# Telegram 模組測試
+# ============================================================================
+
+class TestTelegramModule:
+    """Telegram 模組測試"""
+    
+    def test_escape_markdown_special_chars(self, app_module):
+        """Markdown 特殊字元跳脫"""
+        from telegram import escape_markdown
+        assert escape_markdown('*bold*') == '\\*bold\\*'
+        assert escape_markdown('_italic_') == '\\_italic\\_'
+        assert escape_markdown('`code`') == '\\`code\\`'
+        assert escape_markdown('[link') == '\\[link'  # 只跳脫 [
+    
+    def test_escape_markdown_none(self, app_module):
+        """None 輸入應返回 None"""
+        from telegram import escape_markdown
+        assert escape_markdown(None) is None
+    
+    def test_escape_markdown_empty(self, app_module):
+        """空字串應返回空字串"""
+        from telegram import escape_markdown
+        assert escape_markdown('') == ''
+    
+    def test_escape_markdown_no_special(self, app_module):
+        """無特殊字元不變"""
+        from telegram import escape_markdown
+        assert escape_markdown('hello world') == 'hello world'
+    
+    def test_telegram_requests_parallel_empty(self, app_module):
+        """空請求列表"""
+        from telegram import _telegram_requests_parallel
+        result = _telegram_requests_parallel([])
+        assert result == []
+
+
+# ============================================================================
+# Paging 模組測試（補充）
+# ============================================================================
+
+class TestPagingModule:
+    """Paging 模組測試"""
+    
+    def test_store_paged_output_short(self, app_module):
+        """短輸出不分頁"""
+        result = app_module.store_paged_output('test-req-1', 'short output')
+        assert result['paged'] is False
+        assert result['result'] == 'short output'
+    
+    def test_store_paged_output_long(self, app_module):
+        """長輸出分頁"""
+        long_output = 'x' * 5000  # 超過 OUTPUT_MAX_INLINE
+        result = app_module.store_paged_output('test-req-2', long_output)
+        assert result['paged'] is True
+        assert result['page'] == 1
+        assert result['total_pages'] >= 2
+
+
+# ============================================================================
+# Commands 模組測試（補充）
+# ============================================================================
+
+class TestCommandsModule:
+    """Commands 模組測試"""
+    
+    def test_is_blocked_iam_delete(self, app_module):
+        """IAM 刪除應被封鎖"""
+        from commands import is_blocked
+        assert is_blocked('aws iam delete-user --user-name test') is True
+    
+    def test_is_blocked_query_safe(self, app_module):
+        """--query 參數中的特殊字元不應觸發封鎖"""
+        from commands import is_blocked
+        # 這個查詢包含反引號但不應被封鎖
+        assert is_blocked("aws ec2 describe-instances --query 'Reservations[*].Instances[*]'") is False
+    
+    def test_is_dangerous_s3_rb(self, app_module):
+        """s3 rb 應是高危"""
+        from commands import is_dangerous
+        assert is_dangerous('aws s3 rb s3://bucket') is True
+    
+    def test_is_dangerous_terminate(self, app_module):
+        """terminate-instances 應是高危"""
+        from commands import is_dangerous
+        assert is_dangerous('aws ec2 terminate-instances --instance-ids i-123') is True
+    
+    def test_is_auto_approve_describe(self, app_module):
+        """describe 命令應自動批准"""
+        from commands import is_auto_approve
+        assert is_auto_approve('aws ec2 describe-instances') is True
+        assert is_auto_approve('aws rds describe-db-instances') is True
+    
+    def test_is_auto_approve_write(self, app_module):
+        """寫入命令不應自動批准"""
+        from commands import is_auto_approve
+        assert is_auto_approve('aws ec2 run-instances') is False
+        assert is_auto_approve('aws s3 cp file s3://bucket/') is False
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
