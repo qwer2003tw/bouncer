@@ -143,14 +143,22 @@ def send_telegram_message_to(chat_id: str, text: str, parse_mode: str = None):
     _telegram_request('sendMessage', data)
 
 
-def update_message(message_id: int, text: str):
-    """更新 Telegram 消息"""
+def update_message(message_id: int, text: str, remove_buttons: bool = False):
+    """更新 Telegram 消息
+
+    Args:
+        message_id: 訊息 ID
+        text: 新的訊息內容
+        remove_buttons: 是否移除按鈕
+    """
     data = {
         'chat_id': APPROVED_CHAT_ID,
         'message_id': message_id,
         'text': text,
         'parse_mode': 'Markdown'
     }
+    if remove_buttons:
+        data['reply_markup'] = json.dumps({'inline_keyboard': []})
     _telegram_request('editMessageText', data)
 
 

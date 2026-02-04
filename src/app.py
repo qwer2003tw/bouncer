@@ -1980,7 +1980,7 @@ def handle_telegram_webhook(event):
         success = revoke_trust_session(request_id)
         message_id = callback.get('message', {}).get('message_id')
         if success:
-            update_message(message_id, f"🛑 *信任時段已結束*\n\n`{request_id}`")
+            update_message(message_id, f"🛑 *信任時段已結束*\n\n`{request_id}`", remove_buttons=True)
             answer_callback(callback['id'], '🛑 信任已結束')
         else:
             answer_callback(callback['id'], '❌ 撤銷失敗')
@@ -2016,7 +2016,8 @@ def handle_telegram_webhook(event):
                 f"{status_emoji} *已處理* (狀態: {status})\n\n"
                 f"{source_line}"
                 f"📋 *命令：*\n`{escape_markdown(command)}`\n\n"
-                f"💬 *原因：* {escape_markdown(reason)}"
+                f"💬 *原因：* {escape_markdown(reason)}",
+                remove_buttons=True
             )
         return response(200, {'ok': True})
 
@@ -2042,7 +2043,8 @@ def handle_telegram_webhook(event):
                 f"⏰ *已過期*\n\n"
                 f"{source_line}"
                 f"📋 *命令：*\n`{escape_markdown(cmd_preview)}`\n\n"
-                f"💬 *原因：* {escape_markdown(reason)}"
+                f"💬 *原因：* {escape_markdown(reason)}",
+                remove_buttons=True
             )
         return response(200, {'ok': True, 'expired': True})
 
