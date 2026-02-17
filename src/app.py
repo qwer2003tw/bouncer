@@ -14,63 +14,79 @@ import hashlib
 import hmac
 import time
 import boto3
-from decimal import Decimal
 from typing import Optional
 
 # 從模組導入（逐步遷移中）
 try:
-    from telegram import (
+    from telegram import (  # noqa: F401
         escape_markdown, send_telegram_message, send_telegram_message_silent,
-        send_telegram_message_to, update_message, answer_callback, update_and_answer,
+        update_message, answer_callback,
         _telegram_request,
     )
-    from paging import store_paged_output, get_paged_output, send_remaining_pages
-    from trust import (
-        create_trust_session, revoke_trust_session,
-        increment_trust_command_count, is_trust_excluded, should_trust_approve,  # noqa: F401
-    )
+    from paging import store_paged_output, get_paged_output  # noqa: F401
+    from trust import revoke_trust_session, create_trust_session, increment_trust_command_count, should_trust_approve, is_trust_excluded  # noqa: F401
     from commands import is_blocked, is_dangerous, is_auto_approve, execute_command, fix_json_args  # noqa: F401
-    from accounts import (
+    from accounts import (  # noqa: F401
         init_bot_commands, init_default_account, get_account, list_accounts,
         validate_account_id, validate_role_arn,
     )
-    from rate_limit import RateLimitExceeded, PendingLimitExceeded, check_rate_limit
+    from rate_limit import RateLimitExceeded, PendingLimitExceeded, check_rate_limit  # noqa: F401
+    from utils import response, generate_request_id, decimal_to_native, mcp_result, mcp_error, get_header
+    # 新模組
+    from mcp_tools import (
+        mcp_tool_execute, mcp_tool_status, mcp_tool_trust_status, mcp_tool_trust_revoke,
+        mcp_tool_add_account, mcp_tool_list_accounts, mcp_tool_get_page,
+        mcp_tool_list_pending, mcp_tool_remove_account, mcp_tool_upload,
+    )
+    from callbacks import (
+        handle_command_callback, handle_account_add_callback, handle_account_remove_callback,
+        handle_deploy_callback, handle_upload_callback,
+    )
+    from telegram_commands import handle_telegram_command
 except ImportError:
-    from src.telegram import (
+    from src.telegram import (  # noqa: F401
         escape_markdown, send_telegram_message, send_telegram_message_silent,
-        send_telegram_message_to, update_message, answer_callback, update_and_answer,
-        _telegram_request,
+        update_message, answer_callback,
     )
-    from src.paging import store_paged_output, get_paged_output, send_remaining_pages
-    from src.trust import (
-        create_trust_session, revoke_trust_session,
-        increment_trust_command_count, should_trust_approve,
-    )
-    from src.commands import is_blocked, is_dangerous, is_auto_approve, execute_command
-    from src.accounts import (
+    from src.paging import store_paged_output, get_paged_output  # noqa: F401
+    from src.trust import revoke_trust_session, create_trust_session, increment_trust_command_count, should_trust_approve, is_trust_excluded  # noqa: F401
+    from src.commands import is_blocked, is_dangerous, is_auto_approve, execute_command  # noqa: F401
+    from src.accounts import (  # noqa: F401
         init_bot_commands, init_default_account, get_account, list_accounts,
         validate_account_id, validate_role_arn,
     )
-    from src.rate_limit import RateLimitExceeded, PendingLimitExceeded, check_rate_limit
+    from src.rate_limit import RateLimitExceeded, PendingLimitExceeded, check_rate_limit  # noqa: F401
+    from src.utils import response, generate_request_id, decimal_to_native, mcp_result, mcp_error, get_header
+    # 新模組
+    from src.mcp_tools import (
+        mcp_tool_execute, mcp_tool_status, mcp_tool_trust_status, mcp_tool_trust_revoke,
+        mcp_tool_add_account, mcp_tool_list_accounts, mcp_tool_get_page,
+        mcp_tool_list_pending, mcp_tool_remove_account, mcp_tool_upload,
+    )
+    from src.callbacks import (
+        handle_command_callback, handle_account_add_callback, handle_account_remove_callback,
+        handle_deploy_callback, handle_upload_callback,
+    )
+    from src.telegram_commands import handle_telegram_command
 
 # 從 constants.py 導入所有常數
 try:
     # Lambda 環境
-    from constants import (
+    from constants import (  # noqa: F401
         VERSION,
-        TELEGRAM_TOKEN, TELEGRAM_WEBHOOK_SECRET,  # noqa: F401
+        TELEGRAM_TOKEN, TELEGRAM_WEBHOOK_SECRET,
         APPROVED_CHAT_IDS,
         TABLE_NAME, ACCOUNTS_TABLE_NAME,
         DEFAULT_ACCOUNT_ID,
         REQUEST_SECRET, ENABLE_HMAC,
         MCP_MAX_WAIT,
-        RATE_LIMIT_WINDOW,  # noqa: F401
+        RATE_LIMIT_WINDOW,
         TRUST_SESSION_MAX_COMMANDS,
         BLOCKED_PATTERNS, AUTO_APPROVE_PREFIXES,
     )
 except ImportError:
     # 本地測試環境
-    from src.constants import (
+    from src.constants import (  # noqa: F401
         VERSION,
         TELEGRAM_WEBHOOK_SECRET,
         APPROVED_CHAT_IDS,
@@ -78,7 +94,8 @@ except ImportError:
         DEFAULT_ACCOUNT_ID,
         REQUEST_SECRET, ENABLE_HMAC,
         MCP_MAX_WAIT,
-        RATE_LIMIT_WINDOW, TRUST_SESSION_MAX_COMMANDS,
+        RATE_LIMIT_WINDOW,
+        TRUST_SESSION_MAX_COMMANDS,
         BLOCKED_PATTERNS, AUTO_APPROVE_PREFIXES,
     )
 
@@ -538,745 +555,12 @@ def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
         return mcp_error(req_id, -32602, f'Unknown tool: {tool_name}')
 
 
-def mcp_tool_execute(req_id, arguments: dict) -> dict:
-    """MCP tool: bouncer_execute（預設異步，立即返回 request_id）"""
-    command = str(arguments.get('command', '')).strip()
-    reason = str(arguments.get('reason', 'No reason provided'))
-    source = arguments.get('source', None)
-    account_id = arguments.get('account', None)
-    if account_id:
-        account_id = str(account_id).strip()
-    timeout = min(int(arguments.get('timeout', MCP_MAX_WAIT)), MCP_MAX_WAIT)
-    # 預設異步（避免 API Gateway 29s 超時）
-    sync_mode = arguments.get('sync', False)  # 明確要求同步才等待
-
-    if not command:
-        return mcp_error(req_id, -32602, 'Missing required parameter: command')
-
-    # 初始化預設帳號
-    init_default_account()
-
-    # 解析帳號配置
-    if account_id:
-        # 驗證帳號 ID 格式
-        valid, error = validate_account_id(account_id)
-        if not valid:
-            return mcp_result(req_id, {
-                'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': error})}],
-                'isError': True
-            })
-
-        # 查詢帳號配置
-        account = get_account(account_id)
-        if not account:
-            available = [a['account_id'] for a in list_accounts()]
-            return mcp_result(req_id, {
-                'content': [{'type': 'text', 'text': json.dumps({
-                    'status': 'error',
-                    'error': f'帳號 {account_id} 未配置',
-                    'available_accounts': available
-                })}],
-                'isError': True
-            })
-
-        if not account.get('enabled', True):
-            return mcp_result(req_id, {
-                'content': [{'type': 'text', 'text': json.dumps({
-                    'status': 'error',
-                    'error': f'帳號 {account_id} 已停用'
-                })}],
-                'isError': True
-            })
-
-        assume_role = account.get('role_arn')
-        account_name = account.get('name', account_id)
-    else:
-        # 使用預設帳號
-        account_id = DEFAULT_ACCOUNT_ID
-        assume_role = None
-        account_name = 'Default'
-
-    # Layer 1: BLOCKED
-    if is_blocked(command):
-        return mcp_result(req_id, {
-            'content': [{
-                'type': 'text',
-                'text': json.dumps({
-                    'status': 'blocked',
-                    'error': 'Command blocked for security',
-                    'command': command
-                })
-            }],
-            'isError': True
-        })
-
-    # Layer 2: SAFELIST (auto-approve)
-    if is_auto_approve(command):
-        result = execute_command(command, assume_role)
-        paged = store_paged_output(generate_request_id(command), result)
-
-        response_data = {
-            'status': 'auto_approved',
-            'command': command,
-            'account': account_id,
-            'account_name': account_name,
-            'result': paged['result']
-        }
-
-        if paged.get('paged'):
-            response_data['paged'] = True
-            response_data['page'] = paged['page']
-            response_data['total_pages'] = paged['total_pages']
-            response_data['output_length'] = paged['output_length']
-            response_data['next_page'] = paged.get('next_page')
-
-        return mcp_result(req_id, {
-            'content': [{
-                'type': 'text',
-                'text': json.dumps(response_data)
-            }]
-        })
-
-    # Rate Limit 檢查（只對需要審批的命令）
-    try:
-        check_rate_limit(source)
-    except RateLimitExceeded as e:
-        return mcp_result(req_id, {
-            'content': [{
-                'type': 'text',
-                'text': json.dumps({
-                    'status': 'rate_limited',
-                    'error': str(e),
-                    'command': command,
-                    'retry_after': RATE_LIMIT_WINDOW
-                })
-            }],
-            'isError': True
-        })
-    except PendingLimitExceeded as e:
-        return mcp_result(req_id, {
-            'content': [{
-                'type': 'text',
-                'text': json.dumps({
-                    'status': 'pending_limit_exceeded',
-                    'error': str(e),
-                    'command': command,
-                    'hint': '請等待 pending 請求處理後再試'
-                })
-            }],
-            'isError': True
-        })
-
-    # Trust Session 檢查（連續批准功能）
-    should_trust, trust_session, trust_reason = should_trust_approve(command, source, account_id)
-    if should_trust and trust_session:
-        # 增加命令計數
-        new_count = increment_trust_command_count(trust_session['request_id'])
-
-        # 執行命令
-        result = execute_command(command, assume_role)
-        paged = store_paged_output(generate_request_id(command), result)
-
-        # 計算剩餘時間
-        remaining = int(trust_session.get('expires_at', 0)) - int(time.time())
-        remaining_str = f"{remaining // 60}:{remaining % 60:02d}" if remaining > 0 else "0:00"
-
-        # 發送靜默通知
-        send_trust_auto_approve_notification(
-            command, trust_session['request_id'], remaining_str, new_count, result
-        )
-
-        response_data = {
-            'status': 'trust_auto_approved',
-            'command': command,
-            'account': account_id,
-            'account_name': account_name,
-            'result': paged['result'],
-            'trust_session': trust_session['request_id'],
-            'remaining': remaining_str,
-            'command_count': f"{new_count}/{TRUST_SESSION_MAX_COMMANDS}"
-        }
-
-        if paged.get('paged'):
-            response_data['paged'] = True
-            response_data['page'] = paged['page']
-            response_data['total_pages'] = paged['total_pages']
-            response_data['output_length'] = paged['output_length']
-            response_data['next_page'] = paged.get('next_page')
-
-        return mcp_result(req_id, {
-            'content': [{
-                'type': 'text',
-                'text': json.dumps(response_data)
-            }]
-        })
-
-    # Layer 3: APPROVAL (human review)
-    request_id = generate_request_id(command)
-    ttl = int(time.time()) + timeout + 60
-
-    # 存入 DynamoDB
-    item = {
-        'request_id': request_id,
-        'command': command,
-        'reason': reason,
-        'source': source or '__anonymous__',  # GSI 需要有值
-        'account_id': account_id,
-        'account_name': account_name,
-        'assume_role': assume_role,
-        'status': 'pending_approval',
-        'created_at': int(time.time()),
-        'ttl': ttl,
-        'mode': 'mcp'
-    }
-    table.put_item(Item=item)
-
-    # 發送 Telegram 審批請求
-    send_approval_request(request_id, command, reason, timeout, source, account_id, account_name)
-
-    # 預設異步：立即返回讓 client 用 bouncer_status 輪詢
-    if not sync_mode:
-        return mcp_result(req_id, {
-            'content': [{
-                'type': 'text',
-                'text': json.dumps({
-                    'status': 'pending_approval',
-                    'request_id': request_id,
-                    'command': command,
-                    'account': account_id,
-                    'account_name': account_name,
-                    'message': '請求已發送，用 bouncer_status 查詢結果',
-                    'expires_in': f'{timeout} seconds'
-                })
-            }]
-        })
-
-    # 同步模式（sync=True）：長輪詢等待結果（可能被 API Gateway 29s 超時）
-    result = wait_for_result_mcp(request_id, timeout=timeout)
-
-    return mcp_result(req_id, {
-        'content': [{
-            'type': 'text',
-            'text': json.dumps(result)
-        }],
-        'isError': result.get('status') in ['denied', 'timeout', 'error']
-    })
-
-
-def mcp_tool_status(req_id, arguments: dict) -> dict:
-    """MCP tool: bouncer_status"""
-    request_id = arguments.get('request_id', '')
-
-    if not request_id:
-        return mcp_error(req_id, -32602, 'Missing required parameter: request_id')
-
-    try:
-        result = table.get_item(Key={'request_id': request_id})
-        item = result.get('Item')
-
-        if not item:
-            return mcp_result(req_id, {
-                'content': [{
-                    'type': 'text',
-                    'text': json.dumps({
-                        'error': 'Request not found',
-                        'request_id': request_id
-                    })
-                }],
-                'isError': True
-            })
-
-        return mcp_result(req_id, {
-            'content': [{
-                'type': 'text',
-                'text': json.dumps(decimal_to_native(item))
-            }]
-        })
-
-    except Exception as e:
-        return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
-
-
-def mcp_tool_trust_status(req_id, arguments: dict) -> dict:
-    """MCP tool: bouncer_trust_status"""
-    source = arguments.get('source')
-    now = int(time.time())
-
-    try:
-        if source:
-            # 查詢特定 source 的信任時段
-            response = table.scan(
-                FilterExpression='#type = :type AND #src = :source AND expires_at > :now',
-                ExpressionAttributeNames={'#type': 'type', '#src': 'source'},
-                ExpressionAttributeValues={
-                    ':type': 'trust_session',
-                    ':source': source,
-                    ':now': now
-                }
-            )
-        else:
-            # 查詢所有活躍的信任時段
-            response = table.scan(
-                FilterExpression='#type = :type AND expires_at > :now',
-                ExpressionAttributeNames={'#type': 'type'},
-                ExpressionAttributeValues={
-                    ':type': 'trust_session',
-                    ':now': now
-                }
-            )
-
-        items = response.get('Items', [])
-
-        # 格式化輸出
-        sessions = []
-        for item in items:
-            remaining = item.get('expires_at', 0) - now
-            remaining = int(item.get('expires_at', 0)) - now
-            sessions.append({
-                'trust_id': item.get('request_id'),
-                'source': item.get('source'),
-                'account_id': item.get('account_id'),
-                'remaining_seconds': remaining,
-                'remaining': f"{remaining // 60}:{remaining % 60:02d}",
-                'command_count': int(item.get('command_count', 0)),
-                'approved_by': item.get('approved_by')
-            })
-
-        return mcp_result(req_id, {
-            'content': [{
-                'type': 'text',
-                'text': json.dumps({
-                    'active_sessions': len(sessions),
-                    'sessions': sessions
-                }, indent=2)
-            }]
-        })
-
-    except Exception as e:
-        return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
-
-
-def mcp_tool_trust_revoke(req_id, arguments: dict) -> dict:
-    """MCP tool: bouncer_trust_revoke"""
-    trust_id = arguments.get('trust_id', '')
-
-    if not trust_id:
-        return mcp_error(req_id, -32602, 'Missing required parameter: trust_id')
-
-    success = revoke_trust_session(trust_id)
-
-    return mcp_result(req_id, {
-        'content': [{
-            'type': 'text',
-            'text': json.dumps({
-                'success': success,
-                'trust_id': trust_id,
-                'message': '信任時段已撤銷' if success else '撤銷失敗'
-            })
-        }],
-        'isError': not success
-    })
-
-
-def mcp_tool_add_account(req_id, arguments: dict) -> dict:
-    """MCP tool: bouncer_add_account（需要 Telegram 審批）"""
-    account_id = str(arguments.get('account_id', '')).strip()
-    name = str(arguments.get('name', '')).strip()
-    role_arn = str(arguments.get('role_arn', '')).strip()
-    source = arguments.get('source', None)
-    async_mode = arguments.get('async', False)  # 如果 True，立即返回 pending
-
-    # 驗證
-    valid, error = validate_account_id(account_id)
-    if not valid:
-        return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': error})}],
-            'isError': True
-        })
-
-    if not name:
-        return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': '名稱不能為空'})}],
-            'isError': True
-        })
-
-    valid, error = validate_role_arn(role_arn)
-    if not valid:
-        return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': error})}],
-            'isError': True
-        })
-
-    # 建立審批請求
-    request_id = generate_request_id(f"add_account:{account_id}")
-    ttl = int(time.time()) + 300 + 60
-
-    item = {
-        'request_id': request_id,
-        'action': 'add_account',
-        'account_id': account_id,
-        'account_name': name,
-        'role_arn': role_arn,
-        'source': source or '__anonymous__',
-        'status': 'pending_approval',
-        'created_at': int(time.time()),
-        'ttl': ttl,
-        'mode': 'mcp'
-    }
-    table.put_item(Item=item)
-
-    # 發送 Telegram 審批
-    send_account_approval_request(request_id, 'add', account_id, name, role_arn, source)
-
-    # 如果是 async 模式，立即返回讓 client 輪詢
-    if async_mode:
-        return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps({
-                'status': 'pending_approval',
-                'request_id': request_id,
-                'message': '請求已發送，等待 Telegram 確認',
-                'expires_in': '300 seconds'
-            })}]
-        })
-
-    # 同步模式：等待結果（會被 API Gateway 29s 超時）
-    result = wait_for_result_mcp(request_id, timeout=300)
-
-    return mcp_result(req_id, {
-        'content': [{'type': 'text', 'text': json.dumps(result)}],
-        'isError': result.get('status') != 'approved'
-    })
-
-
-def mcp_tool_list_accounts(req_id, arguments: dict) -> dict:
-    """MCP tool: bouncer_list_accounts"""
-    init_default_account()
-    accounts = list_accounts()
-    return mcp_result(req_id, {
-        'content': [{
-            'type': 'text',
-            'text': json.dumps({
-                'accounts': [decimal_to_native(a) for a in accounts],
-                'default_account': DEFAULT_ACCOUNT_ID
-            }, indent=2, ensure_ascii=False)
-        }]
-    })
-
-
-def mcp_tool_get_page(req_id, arguments: dict) -> dict:
-    """MCP tool: bouncer_get_page - 取得長輸出的下一頁"""
-    page_id = str(arguments.get('page_id', '')).strip()
-
-    if not page_id:
-        return mcp_error(req_id, -32602, 'Missing required parameter: page_id')
-
-    result = get_paged_output(page_id)
-
-    if 'error' in result:
-        return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps(result)}],
-            'isError': True
-        })
-
-    return mcp_result(req_id, {
-        'content': [{'type': 'text', 'text': json.dumps(result)}]
-    })
-
-
-def mcp_tool_list_pending(req_id, arguments: dict) -> dict:
-    """MCP tool: bouncer_list_pending - 列出待審批請求"""
-    source = arguments.get('source')
-    limit = min(int(arguments.get('limit', 20)), 100)
-
-    try:
-        if source:
-            # 查詢特定 source 的 pending 請求 (用 source-created-index + filter)
-            response = table.query(
-                IndexName='source-created-index',
-                KeyConditionExpression='#src = :source',
-                FilterExpression='#status = :status',
-                ExpressionAttributeNames={'#src': 'source', '#status': 'status'},
-                ExpressionAttributeValues={
-                    ':source': source,
-                    ':status': 'pending'
-                },
-                ScanIndexForward=False,
-                Limit=limit
-            )
-        else:
-            # 查詢所有 pending 請求 (用 status-created-index)
-            response = table.query(
-                IndexName='status-created-index',
-                KeyConditionExpression='#status = :status',
-                ExpressionAttributeNames={'#status': 'status'},
-                ExpressionAttributeValues={':status': 'pending'},
-                ScanIndexForward=False,
-                Limit=limit
-            )
-
-        items = response.get('Items', [])
-
-        # 格式化輸出
-        pending = []
-        for item in items:
-            created = item.get('created_at', 0)
-            age_seconds = int(time.time()) - int(created) if created else 0
-            pending.append({
-                'request_id': item.get('request_id'),
-                'command': item.get('command', '')[:100],  # 截斷長命令
-                'source': item.get('source'),
-                'account_id': item.get('account_id'),
-                'reason': item.get('reason'),
-                'age_seconds': age_seconds,
-                'age': f"{age_seconds // 60}m {age_seconds % 60}s"
-            })
-
-        # 按時間排序（最舊的先）
-        pending.sort(key=lambda x: x.get('age_seconds', 0), reverse=True)
-
-        return mcp_result(req_id, {
-            'content': [{
-                'type': 'text',
-                'text': json.dumps({
-                    'pending_count': len(pending),
-                    'requests': pending
-                }, indent=2, ensure_ascii=False)
-            }]
-        })
-
-    except Exception as e:
-        return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
-
-
-def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
-    """MCP tool: bouncer_remove_account（需要 Telegram 審批）"""
-    account_id = str(arguments.get('account_id', '')).strip()
-    source = arguments.get('source', None)
-    async_mode = arguments.get('async', False)
-
-    # 驗證
-    valid, error = validate_account_id(account_id)
-    if not valid:
-        return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': error})}],
-            'isError': True
-        })
-
-    # 不能刪除預設帳號
-    if account_id == DEFAULT_ACCOUNT_ID:
-        return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': '不能移除預設帳號'})}],
-            'isError': True
-        })
-
-    # 檢查帳號是否存在
-    account = get_account(account_id)
-    if not account:
-        return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': f'帳號 {account_id} 不存在'})}],
-            'isError': True
-        })
-
-    # 建立審批請求
-    request_id = generate_request_id(f"remove_account:{account_id}")
-    ttl = int(time.time()) + 300 + 60
-
-    item = {
-        'request_id': request_id,
-        'action': 'remove_account',
-        'account_id': account_id,
-        'account_name': account.get('name', account_id),
-        'source': source or '__anonymous__',
-        'status': 'pending_approval',
-        'created_at': int(time.time()),
-        'ttl': ttl,
-        'mode': 'mcp'
-    }
-    table.put_item(Item=item)
-
-    # 發送 Telegram 審批
-    send_account_approval_request(request_id, 'remove', account_id, account.get('name', ''), None, source)
-
-    # 如果是 async 模式，立即返回讓 client 輪詢
-    if async_mode:
-        return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps({
-                'status': 'pending_approval',
-                'request_id': request_id,
-                'message': '請求已發送，等待 Telegram 確認',
-                'expires_in': '300 seconds'
-            })}]
-        })
-
-    # 同步模式：等待結果
-    result = wait_for_result_mcp(request_id, timeout=300)
-
-    return mcp_result(req_id, {
-        'content': [{'type': 'text', 'text': json.dumps(result)}],
-        'isError': result.get('status') != 'approved'
-    })
-
+# ============================================================================
+# Upload 相關函數（被 callbacks 呼叫）
+# ============================================================================
 
 # 固定上傳桶
 UPLOAD_BUCKET = 'bouncer-uploads-111111111111'
-
-
-def mcp_tool_upload(req_id, arguments: dict) -> dict:
-    """MCP tool: bouncer_upload（上傳檔案到固定 S3 桶，需要 Telegram 審批）"""
-    import base64
-
-    filename = str(arguments.get('filename', '')).strip()
-    content_b64 = str(arguments.get('content', '')).strip()
-    content_type = str(arguments.get('content_type', 'application/octet-stream')).strip()
-    reason = str(arguments.get('reason', 'No reason provided'))
-    source = arguments.get('source', None)
-    # 預設異步（避免 API Gateway 29s 超時）
-    sync_mode = arguments.get('sync', False)
-
-    # 向後相容：如果有 bucket/key 就用舊邏輯
-    legacy_bucket = arguments.get('bucket', None)
-    legacy_key = arguments.get('key', None)
-
-    # 驗證必要參數
-    if not filename and not legacy_key:
-        return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': 'filename is required'})}],
-            'isError': True
-        })
-    if not content_b64:
-        return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': 'content is required'})}],
-            'isError': True
-        })
-
-    # 解碼 base64 驗證格式
-    try:
-        content_bytes = base64.b64decode(content_b64)
-        content_size = len(content_bytes)
-    except Exception as e:
-        return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': f'Invalid base64 content: {str(e)}'})}],
-            'isError': True
-        })
-
-    # 檢查大小（4.5 MB 限制）
-    max_size = 4.5 * 1024 * 1024
-    if content_size > max_size:
-        return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps({
-                'status': 'error',
-                'error': f'Content too large: {content_size} bytes (max {int(max_size)} bytes)'
-            })}],
-            'isError': True
-        })
-
-    # 決定 bucket 和 key
-    if legacy_bucket and legacy_key:
-        # 向後相容模式
-        bucket = legacy_bucket
-        key = legacy_key
-    else:
-        # 固定桶模式：自動產生路徑
-        # 格式: {date}/{request_id}/{filename}
-        bucket = UPLOAD_BUCKET
-        date_str = time.strftime('%Y-%m-%d')
-        # request_id 在這裡先產生，後面會用到
-        request_id = generate_request_id(f"upload:{filename}")
-        key = f"{date_str}/{request_id}/{filename or legacy_key}"
-
-    # Rate limit 檢查
-    if source:
-        try:
-            check_rate_limit(source)
-        except RateLimitExceeded as e:
-            return mcp_result(req_id, {
-                'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': str(e)})}],
-                'isError': True
-            })
-        except PendingLimitExceeded as e:
-            return mcp_result(req_id, {
-                'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': str(e)})}],
-                'isError': True
-            })
-
-    # 建立審批請求（固定桶模式已在上面產生 request_id）
-    if legacy_bucket and legacy_key:
-        request_id = generate_request_id(f"upload:{bucket}:{key}")
-    ttl = int(time.time()) + 300 + 60
-
-    # 格式化大小顯示
-    if content_size >= 1024 * 1024:
-        size_str = f"{content_size / 1024 / 1024:.2f} MB"
-    elif content_size >= 1024:
-        size_str = f"{content_size / 1024:.2f} KB"
-    else:
-        size_str = f"{content_size} bytes"
-
-    item = {
-        'request_id': request_id,
-        'action': 'upload',
-        'bucket': bucket,
-        'key': key,
-        'content': content_b64,  # 存 base64，審批後再上傳
-        'content_type': content_type,
-        'content_size': content_size,
-        'reason': reason,
-        'source': source or '__anonymous__',
-        'status': 'pending_approval',
-        'created_at': int(time.time()),
-        'ttl': ttl,
-        'mode': 'mcp'
-    }
-    table.put_item(Item=item)
-
-    # 發送 Telegram 審批
-    s3_uri = f"s3://{bucket}/{key}"
-
-    # 跳脫 Markdown 特殊字元
-    safe_s3_uri = escape_markdown(s3_uri)
-    safe_reason = escape_markdown(reason)
-    safe_source = escape_markdown(source or 'Unknown')
-    safe_content_type = escape_markdown(content_type)
-
-    message = (
-        f"📤 *上傳檔案請求*\n\n"
-        f"🤖 *來源：* {safe_source}\n"
-        f"📁 *目標：* `{safe_s3_uri}`\n"
-        f"📊 *大小：* {size_str}\n"
-        f"📝 *類型：* {safe_content_type}\n"
-        f"💬 *原因：* {safe_reason}\n\n"
-        f"🆔 *ID：* `{request_id}`"
-    )
-
-    keyboard = {
-        'inline_keyboard': [[
-            {'text': '✅ 批准', 'callback_data': f'approve:{request_id}'},
-            {'text': '❌ 拒絕', 'callback_data': f'deny:{request_id}'}
-        ]]
-    }
-
-    send_telegram_message(message, keyboard)
-
-    # 預設異步：立即返回讓 client 用 bouncer_status 輪詢
-    if not sync_mode:
-        return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps({
-                'status': 'pending_approval',
-                'request_id': request_id,
-                's3_uri': s3_uri,
-                'size': size_str,
-                'message': '請求已發送，用 bouncer_status 查詢結果',
-                'expires_in': '300 seconds'
-            })}]
-        })
-
-    # 同步模式（sync=True）：等待結果（可能被 API Gateway 29s 超時）
-    result = wait_for_upload_result(request_id, timeout=300)
-
-    return mcp_result(req_id, {
-        'content': [{'type': 'text', 'text': json.dumps(result)}],
-        'isError': result.get('status') != 'approved'
-    })
 
 
 def wait_for_upload_result(request_id: str, timeout: int = 300) -> dict:
@@ -1408,7 +692,7 @@ def wait_for_result_mcp(request_id: str, timeout: int = 840) -> dict:
             if item:
                 status = item.get('status', '')
                 if status == 'approved':
-                    response = {
+                    response_data = {
                         'status': 'approved',
                         'request_id': request_id,
                         'command': item.get('command'),
@@ -1418,12 +702,12 @@ def wait_for_result_mcp(request_id: str, timeout: int = 840) -> dict:
                     }
                     # 加入分頁資訊
                     if item.get('paged'):
-                        response['paged'] = True
-                        response['page'] = 1
-                        response['total_pages'] = int(item.get('total_pages', 1))
-                        response['output_length'] = int(item.get('output_length', 0))
-                        response['next_page'] = item.get('next_page')
-                    return response
+                        response_data['paged'] = True
+                        response_data['page'] = 1
+                        response_data['total_pages'] = int(item.get('total_pages', 1))
+                        response_data['output_length'] = int(item.get('output_length', 0))
+                        response_data['next_page'] = item.get('next_page')
+                    return response_data
                 elif status == 'denied':
                     return {
                         'status': 'denied',
@@ -1444,41 +728,6 @@ def wait_for_result_mcp(request_id: str, timeout: int = 840) -> dict:
         'request_id': request_id,
         'message': f'等待 {timeout} 秒後仍未審批',
         'waited_seconds': timeout
-    }
-
-
-def mcp_result(req_id, result: dict) -> dict:
-    """構造 MCP JSON-RPC 成功回應"""
-    return {
-        'statusCode': 200,
-        'headers': {
-            'Content-Type': 'application/json',
-            'X-Bouncer-Version': VERSION
-        },
-        'body': json.dumps({
-            'jsonrpc': '2.0',
-            'id': req_id,
-            'result': result
-        }, default=str)
-    }
-
-
-def mcp_error(req_id, code: int, message: str) -> dict:
-    """構造 MCP JSON-RPC 錯誤回應"""
-    return {
-        'statusCode': 200,  # JSON-RPC 錯誤仍返回 200
-        'headers': {
-            'Content-Type': 'application/json',
-            'X-Bouncer-Version': VERSION
-        },
-        'body': json.dumps({
-            'jsonrpc': '2.0',
-            'id': req_id,
-            'error': {
-                'code': code,
-                'message': message
-            }
-        })
     }
 
 
@@ -1623,146 +872,6 @@ def wait_for_result_rest(request_id: str, timeout: int = 50) -> dict:
 
 
 # ============================================================================
-# Telegram Command Handler
-# ============================================================================
-
-def handle_telegram_command(message: dict) -> dict:
-    """處理 Telegram 文字指令"""
-    user_id = str(message.get('from', {}).get('id', ''))
-    chat_id = str(message.get('chat', {}).get('id', ''))
-    text = message.get('text', '').strip()
-
-    # 權限檢查
-    if user_id not in APPROVED_CHAT_IDS:
-        return response(200, {'ok': True})  # 忽略非授權用戶
-
-    # /accounts - 列出帳號
-    if text == '/accounts' or text.startswith('/accounts@'):
-        return handle_accounts_command(chat_id)
-
-    # /trust - 列出信任時段
-    if text == '/trust' or text.startswith('/trust@'):
-        return handle_trust_command(chat_id)
-
-    # /pending - 列出待審批
-    if text == '/pending' or text.startswith('/pending@'):
-        return handle_pending_command(chat_id)
-
-    # /help - 顯示指令列表
-    if text == '/help' or text.startswith('/help@') or text == '/start' or text.startswith('/start@'):
-        return handle_help_command(chat_id)
-
-    return response(200, {'ok': True})
-
-
-def handle_accounts_command(chat_id: str) -> dict:
-    """處理 /accounts 指令"""
-    init_default_account()
-    accounts = list_accounts()
-
-    if not accounts:
-        text = "📋 AWS 帳號\n\n尚未配置任何帳號"
-    else:
-        lines = ["📋 AWS 帳號\n"]
-        for acc in accounts:
-            status = "✅" if acc.get('enabled', True) else "❌"
-            default = " (預設)" if acc.get('is_default') else ""
-            lines.append(f"{status} {acc['account_id']} - {acc.get('name', 'N/A')}{default}")
-        text = "\n".join(lines)
-
-    send_telegram_message_to(chat_id, text, parse_mode=None)
-    return response(200, {'ok': True})
-
-
-def handle_trust_command(chat_id: str) -> dict:
-    """處理 /trust 指令"""
-    now = int(time.time())
-
-    try:
-        resp = table.scan(
-            FilterExpression='#type = :type AND expires_at > :now',
-            ExpressionAttributeNames={'#type': 'type'},
-            ExpressionAttributeValues={
-                ':type': 'trust_session',
-                ':now': now
-            }
-        )
-        items = resp.get('Items', [])
-    except Exception as e:
-        print(f"Error: {e}")
-        items = []
-
-    if not items:
-        text = "🔓 信任時段\n\n目前沒有活躍的信任時段"
-    else:
-        lines = ["🔓 信任時段\n"]
-        for item in items:
-            remaining = int(item.get('expires_at', 0)) - now
-            mins, secs = divmod(remaining, 60)
-            count = int(item.get('command_count', 0))
-            source = item.get('source', 'N/A')
-            lines.append(f"• {source}\n  ⏱️ {mins}:{secs:02d} 剩餘 | 📊 {count}/20 命令")
-        text = "\n".join(lines)
-
-    send_telegram_message_to(chat_id, text, parse_mode=None)
-    return response(200, {'ok': True})
-
-
-def handle_pending_command(chat_id: str) -> dict:
-    """處理 /pending 指令"""
-    try:
-        resp = table.scan(
-            FilterExpression='#status = :status',
-            ExpressionAttributeNames={'#status': 'status'},
-            ExpressionAttributeValues={':status': 'pending'}
-        )
-        items = resp.get('Items', [])
-    except Exception as e:
-        print(f"Error: {e}")
-        items = []
-
-    if not items:
-        text = "⏳ 待審批請求\n\n目前沒有待審批的請求"
-    else:
-        lines = ["⏳ 待審批請求\n"]
-        now = int(time.time())
-        for item in items:
-            age = now - int(item.get('created_at', now))
-            mins, secs = divmod(age, 60)
-            cmd = item.get('command', '')[:50]
-            source = item.get('source', 'N/A')
-            lines.append(f"• {cmd}\n  👤 {source} | ⏱️ {mins}m{secs}s ago")
-        text = "\n".join(lines)
-
-    send_telegram_message_to(chat_id, text, parse_mode=None)
-    return response(200, {'ok': True})
-
-
-def handle_help_command(chat_id: str) -> dict:
-    """處理 /help 指令"""
-    text = """🔐 Bouncer Commands
-
-/accounts - 列出 AWS 帳號
-/trust - 列出信任時段
-/pending - 列出待審批請求
-/help - 顯示此說明"""
-
-    send_telegram_message_to(chat_id, text, parse_mode=None)
-    return response(200, {'ok': True})
-
-
-def send_telegram_message_to(chat_id: str, text: str, parse_mode: str = None):
-    """發送訊息到指定 chat"""
-    data = {
-        'chat_id': chat_id,
-        'text': text
-    }
-    if parse_mode:
-        data['parse_mode'] = parse_mode
-    _telegram_request('sendMessage', data, timeout=10, json_body=True)
-
-
-# ============================================================================
 # Telegram Webhook Handler
 # ============================================================================
 
@@ -1887,433 +996,6 @@ def handle_telegram_webhook(event):
         return handle_upload_callback(action, request_id, item, message_id, callback['id'], user_id)
     else:
         return handle_command_callback(action, request_id, item, message_id, callback['id'], user_id)
-
-
-def handle_command_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str):
-    """處理命令執行的審批 callback"""
-    command = item.get('command', '')
-    assume_role = item.get('assume_role')
-    source = item.get('source', '')
-    reason = item.get('reason', '')
-    account_id = item.get('account_id', DEFAULT_ACCOUNT_ID)
-    account_name = item.get('account_name', 'Default')
-
-    source_line = f"🤖 *來源：* {source}\n" if source else ""
-    account_line = f"🏢 *帳號：* `{account_id}` ({account_name})\n"
-
-    if action == 'approve':
-        result = execute_command(command, assume_role)
-        paged = store_paged_output(request_id, result)
-
-        # 存入 DynamoDB（包含分頁資訊）
-        update_expr = 'SET #s = :s, #r = :r, approved_at = :t, approver = :a'
-        expr_names = {'#s': 'status', '#r': 'result'}
-        expr_values = {
-            ':s': 'approved',
-            ':r': paged['result'],
-            ':t': int(time.time()),
-            ':a': user_id
-        }
-
-        if paged.get('paged'):
-            update_expr += ', paged = :p, total_pages = :tp, output_length = :ol, next_page = :np'
-            expr_values[':p'] = True
-            expr_values[':tp'] = paged['total_pages']
-            expr_values[':ol'] = paged['output_length']
-            expr_values[':np'] = paged.get('next_page')
-
-        table.update_item(
-            Key={'request_id': request_id},
-            UpdateExpression=update_expr,
-            ExpressionAttributeNames=expr_names,
-            ExpressionAttributeValues=expr_values
-        )
-
-        result_preview = result[:1000] if len(result) > 1000 else result
-        if paged.get('paged'):
-            truncate_notice = f"\n\n⚠️ 輸出較長 ({paged['output_length']} 字元，共 {paged['total_pages']} 頁)"
-        else:
-            truncate_notice = ""
-        update_and_answer(
-            message_id,
-            f"✅ *已批准並執行*\n\n"
-            f"🆔 *ID：* `{request_id}`\n"
-            f"{source_line}"
-            f"{account_line}"
-            f"📋 *命令：*\n`{command}`\n\n"
-            f"💬 *原因：* {reason}\n\n"
-            f"📤 *結果：*\n```\n{result_preview}\n```{truncate_notice}",
-            callback_id,
-            '✅ 已執行'
-        )
-        # 自動發送剩餘頁面
-        if paged.get('paged'):
-            send_remaining_pages(request_id, paged['total_pages'])
-
-    elif action == 'approve_trust':
-        # 批准並建立信任時段
-        result = execute_command(command, assume_role)
-        paged = store_paged_output(request_id, result)
-
-        # 存入 DynamoDB（包含分頁資訊）
-        update_expr = 'SET #s = :s, #r = :r, approved_at = :t, approver = :a'
-        expr_names = {'#s': 'status', '#r': 'result'}
-        expr_values = {
-            ':s': 'approved',
-            ':r': paged['result'],
-            ':t': int(time.time()),
-            ':a': user_id
-        }
-
-        if paged.get('paged'):
-            update_expr += ', paged = :p, total_pages = :tp, output_length = :ol, next_page = :np'
-            expr_values[':p'] = True
-            expr_values[':tp'] = paged['total_pages']
-            expr_values[':ol'] = paged['output_length']
-            expr_values[':np'] = paged.get('next_page')
-
-        table.update_item(
-            Key={'request_id': request_id},
-            UpdateExpression=update_expr,
-            ExpressionAttributeNames=expr_names,
-            ExpressionAttributeValues=expr_values
-        )
-
-        # 建立信任時段
-        trust_id = create_trust_session(source, account_id, user_id)
-
-        result_preview = result[:800] if len(result) > 800 else result
-        if paged.get('paged'):
-            truncate_notice = f"\n\n⚠️ 輸出較長 ({paged['output_length']} 字元，共 {paged['total_pages']} 頁)"
-        else:
-            truncate_notice = ""
-        update_and_answer(
-            message_id,
-            f"✅ *已批准並執行* + 🔓 *信任 10 分鐘*\n\n"
-            f"🆔 *ID：* `{request_id}`\n"
-            f"{source_line}"
-            f"{account_line}"
-            f"📋 *命令：*\n`{command}`\n\n"
-            f"💬 *原因：* {reason}\n\n"
-            f"📤 *結果：*\n```\n{result_preview}\n```{truncate_notice}\n\n"
-            f"🔓 信任時段已啟動：`{trust_id}`",
-            callback_id,
-            '✅ 已執行 + 🔓 信任啟動'
-        )
-        # 自動發送剩餘頁面
-        if paged.get('paged'):
-            send_remaining_pages(request_id, paged['total_pages'])
-
-    elif action == 'deny':
-        table.update_item(
-            Key={'request_id': request_id},
-            UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
-            ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={
-                ':s': 'denied',
-                ':t': int(time.time()),
-                ':a': user_id
-            }
-        )
-
-        update_and_answer(
-            message_id,
-            f"❌ *已拒絕*\n\n"
-            f"🆔 *ID：* `{request_id}`\n"
-            f"{source_line}"
-            f"{account_line}"
-            f"📋 *命令：*\n`{command}`\n\n"
-            f"💬 *原因：* {reason}",
-            callback_id,
-            '❌ 已拒絕'
-        )
-
-    return response(200, {'ok': True})
-
-
-def handle_account_add_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str):
-    """處理新增帳號的審批 callback"""
-    account_id = item.get('account_id', '')
-    account_name = item.get('account_name', '')
-    role_arn = item.get('role_arn', '')
-    source = item.get('source', '')
-
-    source_line = f"🤖 *來源：* {source}\n" if source else ""
-
-    if action == 'approve':
-        # 寫入帳號配置
-        try:
-            accounts_table.put_item(Item={
-                'account_id': account_id,
-                'name': account_name,
-                'role_arn': role_arn if role_arn else None,
-                'is_default': False,
-                'enabled': True,
-                'created_at': int(time.time()),
-                'created_by': user_id
-            })
-
-            table.update_item(
-                Key={'request_id': request_id},
-                UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
-                ExpressionAttributeNames={'#s': 'status'},
-                ExpressionAttributeValues={
-                    ':s': 'approved',
-                    ':t': int(time.time()),
-                    ':a': user_id
-                }
-            )
-
-            update_message(
-                message_id,
-                f"✅ *已新增帳號*\n\n"
-                f"{source_line}"
-                f"🆔 *帳號 ID：* `{account_id}`\n"
-                f"📛 *名稱：* {account_name}\n"
-                f"🔗 *Role：* `{role_arn}`"
-            )
-            answer_callback(callback_id, '✅ 帳號已新增')
-
-        except Exception as e:
-            answer_callback(callback_id, f'❌ 新增失敗: {str(e)[:50]}')
-            return response(500, {'error': str(e)})
-
-    elif action == 'deny':
-        table.update_item(
-            Key={'request_id': request_id},
-            UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
-            ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={
-                ':s': 'denied',
-                ':t': int(time.time()),
-                ':a': user_id
-            }
-        )
-
-        update_message(
-            message_id,
-            f"❌ *已拒絕新增帳號*\n\n"
-            f"{source_line}"
-            f"🆔 *帳號 ID：* `{account_id}`\n"
-            f"📛 *名稱：* {account_name}"
-        )
-        answer_callback(callback_id, '❌ 已拒絕')
-
-    return response(200, {'ok': True})
-
-
-def handle_account_remove_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str):
-    """處理移除帳號的審批 callback"""
-    account_id = item.get('account_id', '')
-    account_name = item.get('account_name', '')
-    source = item.get('source', '')
-
-    source_line = f"🤖 *來源：* {source}\n" if source else ""
-
-    if action == 'approve':
-        try:
-            accounts_table.delete_item(Key={'account_id': account_id})
-
-            table.update_item(
-                Key={'request_id': request_id},
-                UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
-                ExpressionAttributeNames={'#s': 'status'},
-                ExpressionAttributeValues={
-                    ':s': 'approved',
-                    ':t': int(time.time()),
-                    ':a': user_id
-                }
-            )
-
-            update_message(
-                message_id,
-                f"✅ *已移除帳號*\n\n"
-                f"{source_line}"
-                f"🆔 *帳號 ID：* `{account_id}`\n"
-                f"📛 *名稱：* {account_name}"
-            )
-            answer_callback(callback_id, '✅ 帳號已移除')
-
-        except Exception as e:
-            answer_callback(callback_id, f'❌ 移除失敗: {str(e)[:50]}')
-            return response(500, {'error': str(e)})
-
-    elif action == 'deny':
-        table.update_item(
-            Key={'request_id': request_id},
-            UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
-            ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={
-                ':s': 'denied',
-                ':t': int(time.time()),
-                ':a': user_id
-            }
-        )
-
-        update_message(
-            message_id,
-            f"❌ *已拒絕移除帳號*\n\n"
-            f"{source_line}"
-            f"🆔 *帳號 ID：* `{account_id}`\n"
-            f"📛 *名稱：* {account_name}"
-        )
-        answer_callback(callback_id, '❌ 已拒絕')
-
-    return response(200, {'ok': True})
-
-
-def handle_deploy_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str):
-    """處理部署的審批 callback"""
-    from deployer import start_deploy
-
-    project_id = item.get('project_id', '')
-    project_name = item.get('project_name', project_id)
-    branch = item.get('branch', 'master')
-    stack_name = item.get('stack_name', '')
-    source = item.get('source', '')
-    reason = item.get('reason', '')
-
-    source_line = f"🤖 *來源：* {source}\n" if source else ""
-
-    if action == 'approve':
-        # 更新審批狀態
-        table.update_item(
-            Key={'request_id': request_id},
-            UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
-            ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={
-                ':s': 'approved',
-                ':t': int(time.time()),
-                ':a': user_id
-            }
-        )
-
-        # 啟動部署
-        result = start_deploy(project_id, branch, user_id, reason)
-
-        if 'error' in result:
-            update_message(
-                message_id,
-                f"❌ *部署啟動失敗*\n\n"
-                f"{source_line}"
-                f"📦 *專案：* {project_name}\n"
-                f"🌿 *分支：* {branch}\n\n"
-                f"❗ *錯誤：* {result['error']}"
-            )
-            answer_callback(callback_id, '❌ 部署啟動失敗')
-        else:
-            deploy_id = result.get('deploy_id', '')
-            reason_line = f"📝 *原因：* {escape_markdown(reason)}\n" if reason else ""
-            update_message(
-                message_id,
-                f"🚀 *部署已啟動*\n\n"
-                f"{source_line}"
-                f"📦 *專案：* {project_name}\n"
-                f"🌿 *分支：* {branch}\n"
-                f"{reason_line}"
-                f"📋 *Stack：* {stack_name}\n\n"
-                f"🆔 *部署 ID：* `{deploy_id}`\n\n"
-                f"⏳ 部署進行中..."
-            )
-            answer_callback(callback_id, '🚀 部署已啟動')
-
-    elif action == 'deny':
-        table.update_item(
-            Key={'request_id': request_id},
-            UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
-            ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={
-                ':s': 'denied',
-                ':t': int(time.time()),
-                ':a': user_id
-            }
-        )
-
-        update_message(
-            message_id,
-            f"❌ *已拒絕部署*\n\n"
-            f"{source_line}"
-            f"📦 *專案：* {project_name}\n"
-            f"🌿 *分支：* {branch}\n"
-            f"📋 *Stack：* {stack_name}\n\n"
-            f"💬 *原因：* {reason}"
-        )
-        answer_callback(callback_id, '❌ 已拒絕')
-
-    return response(200, {'ok': True})
-
-
-def handle_upload_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str):
-    """處理上傳的審批 callback"""
-    bucket = item.get('bucket', '')
-    key = item.get('key', '')
-    content_size = int(item.get('content_size', 0))
-    source = item.get('source', '')
-    reason = item.get('reason', '')
-
-    s3_uri = f"s3://{bucket}/{key}"
-    source_line = f"🤖 來源： {source}\n" if source else ""
-
-    # 格式化大小
-    if content_size >= 1024 * 1024:
-        size_str = f"{content_size / 1024 / 1024:.2f} MB"
-    elif content_size >= 1024:
-        size_str = f"{content_size / 1024:.2f} KB"
-    else:
-        size_str = f"{content_size} bytes"
-
-    if action == 'approve':
-        # 執行上傳
-        result = execute_upload(request_id, user_id)
-
-        if result.get('success'):
-            update_message(
-                message_id,
-                f"✅ 已上傳\n\n"
-                f"{source_line}"
-                f"📁 目標： {s3_uri}\n"
-                f"📊 大小： {size_str}\n"
-                f"🔗 URL： {result.get('s3_url', '')}\n"
-                f"💬 原因： {reason}"
-            )
-            answer_callback(callback_id, '✅ 已上傳')
-        else:
-            # 上傳失敗
-            error = result.get('error', 'Unknown error')
-            update_message(
-                message_id,
-                f"❌ 上傳失敗\n\n"
-                f"{source_line}"
-                f"📁 目標： {s3_uri}\n"
-                f"📊 大小： {size_str}\n"
-                f"❗ 錯誤： {error}\n"
-                f"💬 原因： {reason}"
-            )
-            answer_callback(callback_id, '❌ 上傳失敗')
-
-    elif action == 'deny':
-        table.update_item(
-            Key={'request_id': request_id},
-            UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
-            ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={
-                ':s': 'denied',
-                ':t': int(time.time()),
-                ':a': user_id
-            }
-        )
-
-        update_message(
-            message_id,
-            f"❌ 已拒絕上傳\n\n"
-            f"{source_line}"
-            f"📁 目標： {s3_uri}\n"
-            f"📊 大小： {size_str}\n"
-            f"💬 原因： {reason}"
-        )
-        answer_callback(callback_id, '❌ 已拒絕')
-
-    return response(200, {'ok': True})
 
 
 # ============================================================================
@@ -2526,34 +1208,23 @@ def send_trust_auto_approve_notification(command: str, trust_id: str, remaining:
 
 
 # ============================================================================
-# Utilities
+# 向後兼容 - re-export 移到子模組的函數 (測試用)
 # ============================================================================
 
-def generate_request_id(command: str) -> str:
-    """產生唯一請求 ID"""
-    data = f"{command}{time.time()}{os.urandom(8).hex()}"
-    return hashlib.sha256(data.encode()).hexdigest()[:12]
-
-
-def decimal_to_native(obj):
-    """轉換 DynamoDB Decimal 為 Python native types"""
-    if isinstance(obj, dict):
-        return {k: decimal_to_native(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [decimal_to_native(v) for v in obj]
-    elif isinstance(obj, Decimal):
-        return int(obj) if obj % 1 == 0 else float(obj)
-    return obj
-
-
-def response(status_code: int, body: dict) -> dict:
-    """構造 HTTP response"""
-    return {
-        'statusCode': status_code,
-        'headers': {
-            'Content-Type': 'application/json',
-            'X-Bouncer-Version': VERSION
-        },
-        'body': json.dumps(body, default=str)
-    }
-# test
+# 從 telegram_commands 模組 re-export (for tests)
+try:
+    from telegram_commands import (  # noqa: F401
+        send_telegram_message_to,
+        handle_accounts_command,
+        handle_trust_command,
+        handle_pending_command,
+        handle_help_command,
+    )
+except ImportError:
+    from src.telegram_commands import (  # noqa: F401
+        send_telegram_message_to,
+        handle_accounts_command,
+        handle_trust_command,
+        handle_pending_command,
+        handle_help_command,
+    )

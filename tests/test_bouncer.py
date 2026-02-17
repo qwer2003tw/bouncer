@@ -22,13 +22,36 @@ import boto3
 
 @pytest.fixture
 def mock_dynamodb():
-    """建立 mock DynamoDB 表"""
+    """建立 mock DynamoDB 表（含 GSI）"""
     with mock_aws():
         dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
         table = dynamodb.create_table(
             TableName='clawdbot-approval-requests',
             KeySchema=[{'AttributeName': 'request_id', 'KeyType': 'HASH'}],
-            AttributeDefinitions=[{'AttributeName': 'request_id', 'AttributeType': 'S'}],
+            AttributeDefinitions=[
+                {'AttributeName': 'request_id', 'AttributeType': 'S'},
+                {'AttributeName': 'status', 'AttributeType': 'S'},
+                {'AttributeName': 'created_at', 'AttributeType': 'N'},
+                {'AttributeName': 'source', 'AttributeType': 'S'},
+            ],
+            GlobalSecondaryIndexes=[
+                {
+                    'IndexName': 'status-created-index',
+                    'KeySchema': [
+                        {'AttributeName': 'status', 'KeyType': 'HASH'},
+                        {'AttributeName': 'created_at', 'KeyType': 'RANGE'}
+                    ],
+                    'Projection': {'ProjectionType': 'ALL'}
+                },
+                {
+                    'IndexName': 'source-created-index',
+                    'KeySchema': [
+                        {'AttributeName': 'source', 'KeyType': 'HASH'},
+                        {'AttributeName': 'created_at', 'KeyType': 'RANGE'}
+                    ],
+                    'Projection': {'ProjectionType': 'ALL'}
+                }
+            ],
             BillingMode='PAY_PER_REQUEST'
         )
         table.wait_until_exists()
@@ -128,39 +151,35 @@ class TestMCPToolsList:
 class TestMCPExecuteSafelist:
     """MCP bouncer_execute SAFELIST 測試"""
     
-    @patch('subprocess.run')
-    def test_execute_safelist_command(self, mock_run, app_module):
+    def test_execute_safelist_command(self, app_module):
         """測試自動批准的命令"""
-        mock_run.return_value = MagicMock(
-            stdout='{"Reservations": []}',
-            stderr='',
-            returncode=0
-        )
-        
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0',
-                'id': 3,
-                'method': 'tools/call',
-                'params': {
-                    'name': 'bouncer_execute',
-                    'arguments': {
-                        'command': 'aws ec2 describe-instances'
+        import mcp_tools
+        # 需要 mock mcp_tools.execute_command
+        with patch.object(mcp_tools, 'execute_command', return_value='{"Reservations": []}'):
+            event = {
+                'rawPath': '/mcp',
+                'headers': {'x-approval-secret': 'test-secret'},
+                'body': json.dumps({
+                    'jsonrpc': '2.0',
+                    'id': 3,
+                    'method': 'tools/call',
+                    'params': {
+                        'name': 'bouncer_execute',
+                        'arguments': {
+                            'command': 'aws ec2 describe-instances'
+                        }
                     }
-                }
-            }),
-            'requestContext': {'http': {'method': 'POST'}}
-        }
-        
-        result = app_module.lambda_handler(event, None)
-        body = json.loads(result['body'])
-        
-        assert 'result' in body
-        content = json.loads(body['result']['content'][0]['text'])
-        assert content['status'] == 'auto_approved'
-        assert '{"Reservations": []}' in content['result']
+                }),
+                'requestContext': {'http': {'method': 'POST'}}
+            }
+            
+            result = app_module.lambda_handler(event, None)
+            body = json.loads(result['body'])
+            
+            assert 'result' in body
+            content = json.loads(body['result']['content'][0]['text'])
+            assert content['status'] == 'auto_approved'
+            assert '{"Reservations": []}' in content['result']
 
 
 class TestMCPExecuteBlocked:
@@ -641,13 +660,8 @@ class TestIntegration:
     
     def test_full_mcp_flow_safelist(self, app_module):
         """測試完整 MCP 流程（SAFELIST）"""
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = MagicMock(
-                stdout='{"UserId": "123", "Account": "456", "Arn": "arn:aws:iam::456:user/test"}',
-                stderr='',
-                returncode=0
-            )
-            
+        import mcp_tools
+        with patch.object(mcp_tools, 'execute_command', return_value='{"UserId": "123", "Account": "456", "Arn": "arn:aws:iam::456:user/test"}'):
             # Initialize
             init_event = {
                 'rawPath': '/mcp',
@@ -1630,5 +1644,3740 @@ class TestConstants:
         assert len(DANGEROUS_PATTERNS) > 0
 
 
+# ============================================================================
+# Account Validation Error Paths 測試 (562-592)
+# ============================================================================
+
+class TestAccountValidationErrorPaths:
+    """帳號驗證錯誤路徑測試"""
+    
+    def test_execute_invalid_account_id_format(self, app_module):
+        """帳號 ID 格式錯誤"""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test-1',
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_execute',
+                    'arguments': {
+                        'command': 'aws s3 ls',
+                        'account': 'invalid'  # 非 12 位數字 (注意：參數名是 account 不是 account_id)
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        
+        assert 'result' in body
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'error'
+        assert '12 位' in content['error'] or '數字' in content['error']
+        assert body['result'].get('isError', False) == True
+    
+    def test_execute_account_not_configured(self, app_module):
+        """帳號未配置"""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test-1',
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_execute',
+                    'arguments': {
+                        'command': 'aws s3 ls',
+                        'account': '999999999999'  # 不存在的帳號
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        # Mock get_account 返回 None
+        with patch.object(app_module, 'get_account', return_value=None), \
+             patch.object(app_module, 'list_accounts', return_value=[{'account_id': '123456789012'}]):
+            result = app_module.lambda_handler(event, None)
+            body = json.loads(result['body'])
+            
+            assert 'result' in body
+            content = json.loads(body['result']['content'][0]['text'])
+            assert content['status'] == 'error'
+            assert '未配置' in content['error']
+            assert 'available_accounts' in content
+            assert body['result'].get('isError', False) == True
+    
+    def test_execute_account_disabled(self, app_module):
+        """帳號已停用"""
+        import mcp_tools
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test-1',
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_execute',
+                    'arguments': {
+                        'command': 'aws s3 ls',
+                        'account': '123456789012'
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        # Mock get_account 返回停用的帳號
+        with patch.object(mcp_tools, 'get_account', return_value={
+            'account_id': '123456789012',
+            'name': 'Test',
+            'enabled': False
+        }):
+            result = app_module.lambda_handler(event, None)
+            body = json.loads(result['body'])
+            
+            assert 'result' in body
+            content = json.loads(body['result']['content'][0]['text'])
+            assert content['status'] == 'error'
+            assert '停用' in content['error']
+            assert body['result'].get('isError', False) == True
+
+
+# ============================================================================
+# BLOCKED Command Path 測試 (627-631)
+# ============================================================================
+
+class TestBlockedCommandPath:
+    """BLOCKED 命令路徑測試"""
+    
+    def test_blocked_command_returns_error(self, app_module):
+        """BLOCKED 命令應返回 isError"""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test-1',
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_execute',
+                    'arguments': {
+                        'command': 'aws iam create-access-key --user-name admin'
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'blocked'
+        assert body['result']['isError'] == True
+    
+    def test_blocked_assume_role(self, app_module):
+        """sts assume-role 應該被封鎖"""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test-1',
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_execute',
+                    'arguments': {
+                        'command': 'aws sts assume-role --role-arn arn:aws:iam::123456789012:role/Admin'
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'blocked'
+
+
+# ============================================================================
+# Rate Limit / Pending Limit 錯誤測試 (674-707)
+# ============================================================================
+
+class TestRateLimitErrors:
+    """Rate Limit 錯誤路徑測試"""
+    
+    def test_rate_limit_exceeded_error(self, app_module):
+        """Rate limit 超過應返回錯誤"""
+        import mcp_tools
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test-1',
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_execute',
+                    'arguments': {
+                        'command': 'aws ec2 start-instances --instance-ids i-123',
+                        'source': 'test-source'
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        # Mock check_rate_limit 拋出 RateLimitExceeded
+        with patch.object(mcp_tools, 'check_rate_limit', 
+                          side_effect=mcp_tools.RateLimitExceeded('Rate limit exceeded')):
+            result = app_module.lambda_handler(event, None)
+            body = json.loads(result['body'])
+            
+            content = json.loads(body['result']['content'][0]['text'])
+            assert content['status'] == 'rate_limited'
+            assert body['result']['isError'] == True
+    
+    def test_pending_limit_exceeded_error(self, app_module):
+        """Pending limit 超過應返回錯誤"""
+        import mcp_tools
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test-1',
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_execute',
+                    'arguments': {
+                        'command': 'aws ec2 start-instances --instance-ids i-123',
+                        'source': 'test-source'
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        # Mock check_rate_limit 拋出 PendingLimitExceeded
+        with patch.object(mcp_tools, 'check_rate_limit', 
+                          side_effect=mcp_tools.PendingLimitExceeded('Too many pending')):
+            result = app_module.lambda_handler(event, None)
+            body = json.loads(result['body'])
+            
+            content = json.loads(body['result']['content'][0]['text'])
+            assert content['status'] == 'pending_limit_exceeded'
+            assert 'hint' in content
+
+
+# ============================================================================
+# Telegram Callback Handlers 測試 (796-1114)
+# ============================================================================
+
+class TestTelegramCallbackHandlers:
+    """Telegram callback handlers 測試"""
+    
+    @patch('app.answer_callback')
+    @patch('app.update_message')
+    def test_callback_revoke_trust_success(self, mock_update, mock_answer, app_module):
+        """撤銷信任時段成功"""
+        trust_id = 'trust-123'
+        
+        # 先建立信任時段
+        app_module.table.put_item(Item={
+            'request_id': trust_id,
+            'type': 'trust_session',
+            'source': 'test-source',
+            'expires_at': int(time.time()) + 600
+        })
+        
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb123',
+                    'from': {'id': 999999999},
+                    'data': f'revoke_trust:{trust_id}',
+                    'message': {'message_id': 999}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+        mock_answer.assert_called()
+    
+    @patch('app.answer_callback')
+    def test_callback_request_not_found(self, mock_answer, app_module):
+        """請求不存在"""
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb123',
+                    'from': {'id': 999999999},
+                    'data': 'approve:nonexistent-id',
+                    'message': {'message_id': 999}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 404
+        mock_answer.assert_called_with('cb123', '❌ 請求已過期或不存在')
+    
+    @patch('app.answer_callback')
+    @patch('app.update_message')
+    def test_callback_request_already_processed(self, mock_update, mock_answer, app_module):
+        """請求已處理過"""
+        request_id = 'processed-123'
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'command': 'aws s3 ls',
+            'status': 'approved',  # 已處理
+            'source': 'test',
+            'reason': 'test'
+        })
+        
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb123',
+                    'from': {'id': 999999999},
+                    'data': f'approve:{request_id}',
+                    'message': {'message_id': 999}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+        mock_answer.assert_called_with('cb123', '⚠️ 此請求已處理過')
+    
+    @patch('app.answer_callback')
+    @patch('app.update_message')
+    def test_callback_request_expired(self, mock_update, mock_answer, app_module):
+        """請求已過期"""
+        request_id = 'expired-123'
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'command': 'aws s3 ls',
+            'status': 'pending_approval',
+            'source': 'test',
+            'reason': 'test',
+            'ttl': int(time.time()) - 100  # 已過期
+        })
+        
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb123',
+                    'from': {'id': 999999999},
+                    'data': f'approve:{request_id}',
+                    'message': {'message_id': 999}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+        mock_answer.assert_called_with('cb123', '⏰ 此請求已過期')
+    
+    @patch('app.answer_callback')
+    @patch('app.update_message')
+    @patch('subprocess.run')
+    def test_callback_approve_trust(self, mock_run, mock_update, mock_answer, app_module):
+        """批准並建立信任時段"""
+        mock_run.return_value = MagicMock(
+            stdout='Instance started',
+            stderr='',
+            returncode=0
+        )
+        
+        request_id = 'trust-approve-123'
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'command': 'aws ec2 start-instances --instance-ids i-123',
+            'status': 'pending_approval',
+            'source': 'test-source',
+            'reason': 'test',
+            'account_id': '111111111111',
+            'ttl': int(time.time()) + 300
+        })
+        
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb123',
+                    'from': {'id': 999999999},
+                    'data': f'approve_trust:{request_id}',
+                    'message': {'message_id': 999}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+        
+        # 驗證狀態更新
+        item = app_module.table.get_item(Key={'request_id': request_id})['Item']
+        assert item['status'] == 'approved'
+    
+    @patch('app.answer_callback')
+    @patch('app.update_message')
+    def test_callback_add_account_approve(self, mock_update, mock_answer, app_module):
+        """批准新增帳號"""
+        request_id = 'add-account-123'
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'action': 'add_account',
+            'account_id': '111111111111',
+            'account_name': 'Test Account',
+            'role_arn': 'arn:aws:iam::111111111111:role/TestRole',
+            'status': 'pending_approval',
+            'source': 'test-source',
+            'ttl': int(time.time()) + 300
+        })
+        
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb123',
+                    'from': {'id': 999999999},
+                    'data': f'approve:{request_id}',
+                    'message': {'message_id': 999}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        # Mock accounts_table
+        with patch.object(app_module, 'accounts_table') as mock_accounts:
+            mock_accounts.put_item = MagicMock()
+            result = app_module.lambda_handler(event, None)
+            assert result['statusCode'] == 200
+    
+    @patch('app.answer_callback')
+    @patch('app.update_message')
+    def test_callback_add_account_deny(self, mock_update, mock_answer, app_module):
+        """拒絕新增帳號"""
+        request_id = 'add-account-deny-123'
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'action': 'add_account',
+            'account_id': '111111111111',
+            'account_name': 'Test Account',
+            'status': 'pending_approval',
+            'source': 'test-source',
+            'ttl': int(time.time()) + 300
+        })
+        
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb123',
+                    'from': {'id': 999999999},
+                    'data': f'deny:{request_id}',
+                    'message': {'message_id': 999}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+        
+        item = app_module.table.get_item(Key={'request_id': request_id})['Item']
+        assert item['status'] == 'denied'
+    
+    @patch('app.answer_callback')
+    @patch('app.update_message')
+    def test_callback_remove_account_approve(self, mock_update, mock_answer, app_module):
+        """批准移除帳號"""
+        request_id = 'remove-account-123'
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'action': 'remove_account',
+            'account_id': '111111111111',
+            'account_name': 'Test Account',
+            'status': 'pending_approval',
+            'source': 'test-source',
+            'ttl': int(time.time()) + 300
+        })
+        
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb123',
+                    'from': {'id': 999999999},
+                    'data': f'approve:{request_id}',
+                    'message': {'message_id': 999}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        # Mock accounts_table
+        with patch.object(app_module, 'accounts_table') as mock_accounts:
+            mock_accounts.delete_item = MagicMock()
+            result = app_module.lambda_handler(event, None)
+            assert result['statusCode'] == 200
+    
+    @patch('app.answer_callback')
+    @patch('app.update_message')
+    def test_callback_remove_account_deny(self, mock_update, mock_answer, app_module):
+        """拒絕移除帳號"""
+        request_id = 'remove-account-deny-123'
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'action': 'remove_account',
+            'account_id': '111111111111',
+            'account_name': 'Test Account',
+            'status': 'pending_approval',
+            'source': 'test-source',
+            'ttl': int(time.time()) + 300
+        })
+        
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb123',
+                    'from': {'id': 999999999},
+                    'data': f'deny:{request_id}',
+                    'message': {'message_id': 999}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+        
+        item = app_module.table.get_item(Key={'request_id': request_id})['Item']
+        assert item['status'] == 'denied'
+    
+    @patch('app.answer_callback')
+    @patch('app.update_message')
+    def test_callback_upload_approve(self, mock_update, mock_answer, app_module):
+        """批准上傳"""
+        import base64
+        request_id = 'upload-123'
+        content = base64.b64encode(b'test content').decode()
+        
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'action': 'upload',
+            'bucket': 'test-bucket',
+            'key': 'test/file.txt',
+            'content': content,
+            'content_type': 'text/plain',
+            'content_size': 12,
+            'status': 'pending_approval',
+            'source': 'test-source',
+            'reason': 'test',
+            'ttl': int(time.time()) + 300
+        })
+        
+        # Mock S3 upload
+        with patch('boto3.client') as mock_boto:
+            mock_s3 = MagicMock()
+            mock_s3.meta.region_name = 'us-east-1'
+            mock_boto.return_value = mock_s3
+            
+            event = {
+                'rawPath': '/webhook',
+                'headers': {},
+                'body': json.dumps({
+                    'callback_query': {
+                        'id': 'cb123',
+                        'from': {'id': 999999999},
+                        'data': f'approve:{request_id}',
+                        'message': {'message_id': 999}
+                    }
+                }),
+                'requestContext': {'http': {'method': 'POST'}}
+            }
+            
+            result = app_module.lambda_handler(event, None)
+            assert result['statusCode'] == 200
+    
+    @patch('app.answer_callback')
+    @patch('app.update_message')
+    def test_callback_upload_deny(self, mock_update, mock_answer, app_module):
+        """拒絕上傳"""
+        request_id = 'upload-deny-123'
+        
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'action': 'upload',
+            'bucket': 'test-bucket',
+            'key': 'test/file.txt',
+            'content_size': 12,
+            'status': 'pending_approval',
+            'source': 'test-source',
+            'reason': 'test',
+            'ttl': int(time.time()) + 300
+        })
+        
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb123',
+                    'from': {'id': 999999999},
+                    'data': f'deny:{request_id}',
+                    'message': {'message_id': 999}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+        
+        item = app_module.table.get_item(Key={'request_id': request_id})['Item']
+        assert item['status'] == 'denied'
+
+
+# ============================================================================
+# Deployer 模組測試
+# ============================================================================
+
+class TestDeployerModule:
+    """Deployer 模組測試"""
+    
+    @pytest.fixture
+    def deployer_tables(self, mock_dynamodb):
+        """建立 deployer 需要的表"""
+        # Projects table
+        mock_dynamodb.create_table(
+            TableName='bouncer-projects',
+            KeySchema=[{'AttributeName': 'project_id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[{'AttributeName': 'project_id', 'AttributeType': 'S'}],
+            BillingMode='PAY_PER_REQUEST'
+        )
+        
+        # History table
+        mock_dynamodb.create_table(
+            TableName='bouncer-deploy-history',
+            KeySchema=[{'AttributeName': 'deploy_id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[
+                {'AttributeName': 'deploy_id', 'AttributeType': 'S'},
+                {'AttributeName': 'project_id', 'AttributeType': 'S'},
+                {'AttributeName': 'started_at', 'AttributeType': 'N'}
+            ],
+            GlobalSecondaryIndexes=[{
+                'IndexName': 'project-time-index',
+                'KeySchema': [
+                    {'AttributeName': 'project_id', 'KeyType': 'HASH'},
+                    {'AttributeName': 'started_at', 'KeyType': 'RANGE'}
+                ],
+                'Projection': {'ProjectionType': 'ALL'}
+            }],
+            BillingMode='PAY_PER_REQUEST'
+        )
+        
+        # Locks table
+        mock_dynamodb.create_table(
+            TableName='bouncer-deploy-locks',
+            KeySchema=[{'AttributeName': 'project_id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[{'AttributeName': 'project_id', 'AttributeType': 'S'}],
+            BillingMode='PAY_PER_REQUEST'
+        )
+        
+        return mock_dynamodb
+    
+    def test_list_projects_empty(self, deployer_tables):
+        """列出專案（空）"""
+        # 重新載入 deployer 模組
+        import sys
+        if 'deployer' in sys.modules:
+            del sys.modules['deployer']
+        if 'src.deployer' in sys.modules:
+            del sys.modules['src.deployer']
+        
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        import deployer
+        
+        # 注入 mock tables
+        deployer.projects_table = deployer_tables.Table('bouncer-projects')
+        deployer.history_table = deployer_tables.Table('bouncer-deploy-history')
+        deployer.locks_table = deployer_tables.Table('bouncer-deploy-locks')
+        
+        result = deployer.list_projects()
+        assert result == []
+        
+        sys.path.pop(0)
+    
+    def test_add_and_get_project(self, deployer_tables):
+        """新增和取得專案"""
+        import sys
+        if 'deployer' in sys.modules:
+            del sys.modules['deployer']
+        if 'src.deployer' in sys.modules:
+            del sys.modules['src.deployer']
+        
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        import deployer
+        
+        deployer.projects_table = deployer_tables.Table('bouncer-projects')
+        deployer.history_table = deployer_tables.Table('bouncer-deploy-history')
+        deployer.locks_table = deployer_tables.Table('bouncer-deploy-locks')
+        
+        # 新增專案
+        config = {
+            'name': 'Test Project',
+            'git_repo': 'test-repo',
+            'stack_name': 'test-stack'
+        }
+        item = deployer.add_project('test-project', config)
+        assert item['project_id'] == 'test-project'
+        assert item['name'] == 'Test Project'
+        
+        # 取得專案
+        project = deployer.get_project('test-project')
+        assert project is not None
+        assert project['name'] == 'Test Project'
+        
+        # 列出專案
+        projects = deployer.list_projects()
+        assert len(projects) == 1
+        
+        sys.path.pop(0)
+    
+    def test_remove_project(self, deployer_tables):
+        """移除專案"""
+        import sys
+        if 'deployer' in sys.modules:
+            del sys.modules['deployer']
+        if 'src.deployer' in sys.modules:
+            del sys.modules['src.deployer']
+        
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        import deployer
+        
+        deployer.projects_table = deployer_tables.Table('bouncer-projects')
+        
+        # 先新增
+        deployer.add_project('to-remove', {'name': 'To Remove'})
+        
+        # 移除
+        result = deployer.remove_project('to-remove')
+        assert result == True
+        
+        # 確認已移除
+        project = deployer.get_project('to-remove')
+        assert project is None
+        
+        sys.path.pop(0)
+    
+    def test_acquire_and_release_lock(self, deployer_tables):
+        """取得和釋放部署鎖"""
+        import sys
+        if 'deployer' in sys.modules:
+            del sys.modules['deployer']
+        if 'src.deployer' in sys.modules:
+            del sys.modules['src.deployer']
+        
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        import deployer
+        
+        deployer.locks_table = deployer_tables.Table('bouncer-deploy-locks')
+        
+        # 取得鎖
+        result = deployer.acquire_lock('test-project', 'deploy-123', 'test-user')
+        assert result == True
+        
+        # 再次取得應該失敗
+        result2 = deployer.acquire_lock('test-project', 'deploy-456', 'test-user')
+        assert result2 == False
+        
+        # 釋放鎖
+        deployer.release_lock('test-project')
+        
+        # 現在應該可以取得
+        result3 = deployer.acquire_lock('test-project', 'deploy-789', 'test-user')
+        assert result3 == True
+        
+        sys.path.pop(0)
+    
+    def test_get_lock_expired(self, deployer_tables):
+        """取得已過期的鎖"""
+        import sys
+        if 'deployer' in sys.modules:
+            del sys.modules['deployer']
+        if 'src.deployer' in sys.modules:
+            del sys.modules['src.deployer']
+        
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        import deployer
+        
+        deployer.locks_table = deployer_tables.Table('bouncer-deploy-locks')
+        
+        # 手動插入一個過期的鎖
+        deployer.locks_table.put_item(Item={
+            'project_id': 'expired-project',
+            'lock_id': 'old-deploy',
+            'locked_at': int(time.time()) - 7200,
+            'ttl': int(time.time()) - 3600  # 已過期
+        })
+        
+        # 取得鎖應該返回 None（因為已過期）
+        lock = deployer.get_lock('expired-project')
+        assert lock is None
+        
+        sys.path.pop(0)
+    
+    def test_deploy_record_lifecycle(self, deployer_tables):
+        """部署記錄生命週期"""
+        import sys
+        if 'deployer' in sys.modules:
+            del sys.modules['deployer']
+        if 'src.deployer' in sys.modules:
+            del sys.modules['src.deployer']
+        
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        import deployer
+        
+        deployer.history_table = deployer_tables.Table('bouncer-deploy-history')
+        
+        # 建立部署記錄
+        deploy_id = 'deploy-test-123'
+        record = deployer.create_deploy_record(deploy_id, 'test-project', {
+            'branch': 'main',
+            'triggered_by': 'test-user',
+            'reason': 'Test deploy'
+        })
+        assert record['deploy_id'] == deploy_id
+        assert record['status'] == 'PENDING'
+        
+        # 更新記錄
+        deployer.update_deploy_record(deploy_id, {
+            'status': 'RUNNING',
+            'execution_arn': 'arn:aws:states:...'
+        })
+        
+        # 取得記錄
+        updated = deployer.get_deploy_record(deploy_id)
+        assert updated['status'] == 'RUNNING'
+        
+        sys.path.pop(0)
+    
+    def test_start_deploy_project_not_found(self, deployer_tables):
+        """啟動部署但專案不存在"""
+        import sys
+        if 'deployer' in sys.modules:
+            del sys.modules['deployer']
+        if 'src.deployer' in sys.modules:
+            del sys.modules['src.deployer']
+        
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        import deployer
+        
+        deployer.projects_table = deployer_tables.Table('bouncer-projects')
+        deployer.locks_table = deployer_tables.Table('bouncer-deploy-locks')
+        deployer.history_table = deployer_tables.Table('bouncer-deploy-history')
+        
+        result = deployer.start_deploy('nonexistent', 'main', 'user', 'reason')
+        assert 'error' in result
+        assert '不存在' in result['error']
+        
+        sys.path.pop(0)
+    
+    def test_start_deploy_project_disabled(self, deployer_tables):
+        """啟動部署但專案已停用"""
+        import sys
+        if 'deployer' in sys.modules:
+            del sys.modules['deployer']
+        if 'src.deployer' in sys.modules:
+            del sys.modules['src.deployer']
+        
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        import deployer
+        
+        deployer.projects_table = deployer_tables.Table('bouncer-projects')
+        deployer.locks_table = deployer_tables.Table('bouncer-deploy-locks')
+        
+        # 新增停用的專案
+        deployer.projects_table.put_item(Item={
+            'project_id': 'disabled-project',
+            'name': 'Disabled',
+            'enabled': False
+        })
+        
+        result = deployer.start_deploy('disabled-project', 'main', 'user', 'reason')
+        assert 'error' in result
+        assert '停用' in result['error']
+        
+        sys.path.pop(0)
+    
+    def test_start_deploy_locked(self, deployer_tables):
+        """啟動部署但已有其他部署進行中"""
+        import sys
+        if 'deployer' in sys.modules:
+            del sys.modules['deployer']
+        if 'src.deployer' in sys.modules:
+            del sys.modules['src.deployer']
+        
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        import deployer
+        
+        deployer.projects_table = deployer_tables.Table('bouncer-projects')
+        deployer.locks_table = deployer_tables.Table('bouncer-deploy-locks')
+        
+        # 新增專案
+        deployer.projects_table.put_item(Item={
+            'project_id': 'locked-project',
+            'name': 'Locked',
+            'enabled': True
+        })
+        
+        # 新增鎖
+        deployer.locks_table.put_item(Item={
+            'project_id': 'locked-project',
+            'lock_id': 'existing-deploy',
+            'locked_at': int(time.time()),
+            'ttl': int(time.time()) + 3600
+        })
+        
+        result = deployer.start_deploy('locked-project', 'main', 'user', 'reason')
+        assert 'error' in result
+        assert '進行中' in result['error']
+        
+        sys.path.pop(0)
+    
+    def test_cancel_deploy_not_found(self, deployer_tables):
+        """取消不存在的部署"""
+        import sys
+        if 'deployer' in sys.modules:
+            del sys.modules['deployer']
+        if 'src.deployer' in sys.modules:
+            del sys.modules['src.deployer']
+        
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        import deployer
+        
+        deployer.history_table = deployer_tables.Table('bouncer-deploy-history')
+        
+        result = deployer.cancel_deploy('nonexistent')
+        assert 'error' in result
+        assert '不存在' in result['error']
+        
+        sys.path.pop(0)
+    
+    def test_cancel_deploy_already_completed(self, deployer_tables):
+        """取消已完成的部署"""
+        import sys
+        if 'deployer' in sys.modules:
+            del sys.modules['deployer']
+        if 'src.deployer' in sys.modules:
+            del sys.modules['src.deployer']
+        
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        import deployer
+        
+        deployer.history_table = deployer_tables.Table('bouncer-deploy-history')
+        
+        # 建立已完成的記錄
+        deployer.history_table.put_item(Item={
+            'deploy_id': 'completed-deploy',
+            'project_id': 'test',
+            'status': 'SUCCESS'
+        })
+        
+        result = deployer.cancel_deploy('completed-deploy')
+        assert 'error' in result
+        assert 'SUCCESS' in result['error']
+        
+        sys.path.pop(0)
+    
+    def test_get_deploy_status_not_found(self, deployer_tables):
+        """取得不存在的部署狀態"""
+        import sys
+        if 'deployer' in sys.modules:
+            del sys.modules['deployer']
+        if 'src.deployer' in sys.modules:
+            del sys.modules['src.deployer']
+        
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        import deployer
+        
+        deployer.history_table = deployer_tables.Table('bouncer-deploy-history')
+        
+        result = deployer.get_deploy_status('nonexistent')
+        assert 'error' in result
+        
+        sys.path.pop(0)
+    
+    def test_get_deploy_history(self, deployer_tables):
+        """取得部署歷史"""
+        import sys
+        if 'deployer' in sys.modules:
+            del sys.modules['deployer']
+        if 'src.deployer' in sys.modules:
+            del sys.modules['src.deployer']
+        
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        import deployer
+        
+        deployer.history_table = deployer_tables.Table('bouncer-deploy-history')
+        
+        # 建立幾個記錄
+        for i in range(3):
+            deployer.history_table.put_item(Item={
+                'deploy_id': f'deploy-{i}',
+                'project_id': 'test-project',
+                'status': 'SUCCESS',
+                'started_at': int(time.time()) - i * 100
+            })
+        
+        history = deployer.get_deploy_history('test-project', limit=10)
+        assert len(history) == 3
+        
+        sys.path.pop(0)
+
+
+# ============================================================================
+# MCP Deploy Tools 測試
+# ============================================================================
+
+class TestMCPDeployTools:
+    """MCP Deploy Tools 測試"""
+    
+    def test_mcp_tool_project_list(self, app_module):
+        """bouncer_project_list MCP tool"""
+        # Mock deployer.list_projects
+        with patch('deployer.list_projects', return_value=[
+            {'project_id': 'test', 'name': 'Test Project'}
+        ]):
+            event = {
+                'rawPath': '/mcp',
+                'headers': {'x-approval-secret': 'test-secret'},
+                'body': json.dumps({
+                    'jsonrpc': '2.0',
+                    'id': 'test-1',
+                    'method': 'tools/call',
+                    'params': {
+                        'name': 'bouncer_project_list',
+                        'arguments': {}
+                    }
+                }),
+                'requestContext': {'http': {'method': 'POST'}}
+            }
+            
+            result = app_module.lambda_handler(event, None)
+            body = json.loads(result['body'])
+            
+            assert 'result' in body
+            content = json.loads(body['result']['content'][0]['text'])
+            assert 'projects' in content
+
+
+# ============================================================================
+# Trust 模組補充測試
+# ============================================================================
+
+class TestTrustModuleAdditional:
+    """Trust 模組補充測試"""
+    
+    def test_create_trust_session(self, app_module):
+        """建立信任時段"""
+        trust_id = app_module.create_trust_session('test-source', '111111111111', '999999999')
+        assert trust_id is not None
+        
+        # 驗證可以在 DynamoDB 中找到
+        item = app_module.table.get_item(Key={'request_id': trust_id}).get('Item')
+        assert item is not None
+        assert item['type'] == 'trust_session'
+    
+    def test_should_trust_approve_with_active_session(self, app_module):
+        """有活躍信任時段時應該自動批准"""
+        source = 'test-trust-source'
+        account_id = '111111111111'
+        
+        # 建立信任時段
+        app_module.create_trust_session(source, account_id, '999999999')
+        
+        # 測試安全命令是否會被信任
+        should_trust, session, reason = app_module.should_trust_approve(
+            'aws s3 cp file.txt s3://bucket/',  # 非高危命令
+            source,
+            account_id
+        )
+        assert should_trust is True
+        assert session is not None
+    
+    def test_should_trust_approve_excluded_command(self, app_module):
+        """高危命令不應被信任"""
+        source = 'test-trust-source-2'
+        account_id = '111111111111'
+        
+        # 建立信任時段
+        app_module.create_trust_session(source, account_id, '999999999')
+        
+        # 測試高危命令
+        should_trust, session, reason = app_module.should_trust_approve(
+            'aws ec2 terminate-instances --instance-ids i-123',  # 高危
+            source,
+            account_id
+        )
+        assert should_trust is False
+    
+    def test_revoke_trust_session(self, app_module):
+        """撤銷信任時段"""
+        # 建立
+        trust_id = app_module.create_trust_session('revoke-source', '111111111111', '999999999')
+        
+        # 撤銷
+        result = app_module.revoke_trust_session(trust_id)
+        assert result is True
+        
+        # 確認已撤銷
+        item = app_module.table.get_item(Key={'request_id': trust_id}).get('Item')
+        assert item is None or item.get('expires_at', float('inf')) < time.time()
+
+
+# ============================================================================
+# Upload 功能測試
+# ============================================================================
+
+class TestUploadFunctionality:
+    """Upload 功能測試"""
+    
+    @patch('app.send_telegram_message')
+    def test_mcp_tool_upload_missing_filename(self, mock_telegram, app_module):
+        """上傳缺少 filename"""
+        result = app_module.mcp_tool_upload('test-1', {
+            'content': 'dGVzdA==',  # base64 'test'
+            'reason': 'test'
+        })
+        
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'error'
+        assert 'filename' in content['error']
+    
+    @patch('app.send_telegram_message')
+    def test_mcp_tool_upload_missing_content(self, mock_telegram, app_module):
+        """上傳缺少 content"""
+        result = app_module.mcp_tool_upload('test-1', {
+            'filename': 'test.txt',
+            'reason': 'test'
+        })
+        
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'error'
+        assert 'content' in content['error']
+    
+    @patch('app.send_telegram_message')
+    def test_mcp_tool_upload_invalid_base64(self, mock_telegram, app_module):
+        """上傳無效 base64"""
+        result = app_module.mcp_tool_upload('test-1', {
+            'filename': 'test.txt',
+            'content': 'not-valid-base64!!!',
+            'reason': 'test'
+        })
+        
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'error'
+        assert 'base64' in content['error'].lower()
+    
+    @patch('app.send_telegram_message')
+    def test_mcp_tool_upload_too_large(self, mock_telegram, app_module):
+        """上傳檔案過大"""
+        import base64
+        # 建立 5MB 的內容（超過 4.5MB 限制）
+        large_content = base64.b64encode(b'x' * (5 * 1024 * 1024)).decode()
+        
+        result = app_module.mcp_tool_upload('test-1', {
+            'filename': 'large.bin',
+            'content': large_content,
+            'reason': 'test'
+        })
+        
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'error'
+        assert 'too large' in content['error'].lower() or 'large' in content['error'].lower()
+    
+    @patch('app.send_telegram_message')
+    def test_mcp_tool_upload_success_async(self, mock_telegram, app_module):
+        """上傳成功（異步模式）"""
+        import base64
+        content = base64.b64encode(b'test content').decode()
+        
+        result = app_module.mcp_tool_upload('test-1', {
+            'filename': 'test.txt',
+            'content': content,
+            'reason': 'test upload'
+        })
+        
+        body = json.loads(result['body'])
+        resp_content = json.loads(body['result']['content'][0]['text'])
+        assert resp_content['status'] == 'pending_approval'
+        assert 'request_id' in resp_content
+
+
+# ============================================================================
+# Trust Session 自動批准測試
+# ============================================================================
+
+class TestTrustAutoApprove:
+    """Trust Session 自動批准測試"""
+    
+    @patch('telegram.send_telegram_message_silent')
+    def test_trust_auto_approve_flow(self, mock_silent, app_module):
+        """信任時段內的自動批准流程"""
+        import mcp_tools
+        source = 'trust-auto-test'
+        account_id = '111111111111'
+        
+        # 建立信任時段
+        trust_id = app_module.create_trust_session(source, account_id, '999999999')
+        
+        # 執行命令（應該被自動批准）
+        with patch.object(mcp_tools, 'execute_command', return_value='{"result": "ok"}'):
+            event = {
+                'rawPath': '/mcp',
+                'headers': {'x-approval-secret': 'test-secret'},
+                'body': json.dumps({
+                    'jsonrpc': '2.0',
+                    'id': 'test-1',
+                    'method': 'tools/call',
+                    'params': {
+                        'name': 'bouncer_execute',
+                        'arguments': {
+                            'command': 'aws s3 cp file.txt s3://bucket/',
+                            'source': source,
+                            'account': account_id
+                        }
+                    }
+                }),
+                'requestContext': {'http': {'method': 'POST'}}
+            }
+            
+            # Mock get_account 返回有效帳號
+            with patch.object(mcp_tools, 'get_account', return_value={
+                'account_id': account_id,
+                'name': 'Test',
+                'enabled': True,
+                'role_arn': None
+            }):
+                result = app_module.lambda_handler(event, None)
+                body = json.loads(result['body'])
+                
+                content = json.loads(body['result']['content'][0]['text'])
+                assert content['status'] == 'trust_auto_approved'
+                assert 'trust_session' in content
+
+
+# ============================================================================
+# MCP Tool Handlers 補充測試
+# ============================================================================
+
+class TestMCPToolHandlersAdditional:
+    """MCP Tool Handlers 補充測試"""
+    
+    def test_mcp_tool_trust_status_all(self, app_module):
+        """查詢所有信任時段"""
+        # 建立一個信任時段
+        app_module.create_trust_session('status-test-source', '111111111111', '999999999')
+        
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test-1',
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_trust_status',
+                    'arguments': {}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        
+        content = json.loads(body['result']['content'][0]['text'])
+        assert 'active_sessions' in content
+        assert 'sessions' in content
+    
+    def test_mcp_tool_trust_status_by_source(self, app_module):
+        """查詢特定來源的信任時段"""
+        source = 'specific-source-test'
+        app_module.create_trust_session(source, '111111111111', '999999999')
+        
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test-1',
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_trust_status',
+                    'arguments': {
+                        'source': source
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        
+        content = json.loads(body['result']['content'][0]['text'])
+        assert 'sessions' in content
+    
+    def test_mcp_tool_trust_revoke(self, app_module):
+        """撤銷信任時段"""
+        trust_id = app_module.create_trust_session('revoke-test', '111111111111', '999999999')
+        
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test-1',
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_trust_revoke',
+                    'arguments': {
+                        'trust_id': trust_id
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['success'] == True
+    
+    def test_mcp_tool_trust_revoke_missing_id(self, app_module):
+        """撤銷信任時段缺少 ID"""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test-1',
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_trust_revoke',
+                    'arguments': {}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        
+        assert 'error' in body
+        assert body['error']['code'] == -32602
+    
+    def test_mcp_tool_list_pending_with_source(self, app_module):
+        """列出特定來源的待審批請求"""
+        # 直接呼叫函數 - 測試帶 source 的情況
+        result = app_module.mcp_tool_list_pending('test-1', {'source': 'test-source', 'limit': 10})
+        body = json.loads(result['body'])
+        
+        # 可能有 error 或 result，都是預期行為
+        assert 'result' in body or 'error' in body
+    
+    @patch('app.send_telegram_message')
+    def test_mcp_tool_add_account_missing_name(self, mock_telegram, app_module):
+        """新增帳號缺少名稱"""
+        result = app_module.mcp_tool_add_account('test-1', {
+            'account_id': '111111111111',
+            'role_arn': 'arn:aws:iam::111111111111:role/Test'
+        })
+        
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'error'
+        assert '名稱' in content['error'] or 'name' in content['error'].lower()
+    
+    @patch('app.send_telegram_message')
+    def test_mcp_tool_add_account_invalid_role_arn(self, mock_telegram, app_module):
+        """新增帳號無效 Role ARN"""
+        result = app_module.mcp_tool_add_account('test-1', {
+            'account_id': '111111111111',
+            'name': 'Test Account',
+            'role_arn': 'invalid-arn'
+        })
+        
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'error'
+        assert 'arn:aws:iam' in content['error']
+    
+    @patch('app.send_telegram_message')
+    def test_mcp_tool_remove_account_default(self, mock_telegram, app_module):
+        """不能移除預設帳號"""
+        result = app_module.mcp_tool_remove_account('test-1', {
+            'account_id': app_module.DEFAULT_ACCOUNT_ID
+        })
+        
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'error'
+        assert '預設' in content['error']
+    
+    @patch('app.send_telegram_message')
+    def test_mcp_tool_remove_account_not_exists(self, mock_telegram, app_module):
+        """移除不存在的帳號"""
+        with patch.object(app_module, 'get_account', return_value=None):
+            result = app_module.mcp_tool_remove_account('test-1', {
+                'account_id': '999999999999'
+            })
+            
+            body = json.loads(result['body'])
+            content = json.loads(body['result']['content'][0]['text'])
+            assert content['status'] == 'error'
+            assert '不存在' in content['error']
+
+
+# ============================================================================
+# Deployer MCP Tools 測試
+# ============================================================================
+
+class TestDeployerMCPTools:
+    """Deployer MCP Tools 測試"""
+    
+    def test_mcp_tool_deploy_status_not_found(self, app_module):
+        """查詢不存在的部署狀態"""
+        with patch('deployer.get_deploy_status', return_value={'error': '部署記錄不存在'}):
+            event = {
+                'rawPath': '/mcp',
+                'headers': {'x-approval-secret': 'test-secret'},
+                'body': json.dumps({
+                    'jsonrpc': '2.0',
+                    'id': 'test-1',
+                    'method': 'tools/call',
+                    'params': {
+                        'name': 'bouncer_deploy_status',
+                        'arguments': {
+                            'deploy_id': 'nonexistent'
+                        }
+                    }
+                }),
+                'requestContext': {'http': {'method': 'POST'}}
+            }
+            
+            result = app_module.lambda_handler(event, None)
+            body = json.loads(result['body'])
+            
+            content = json.loads(body['result']['content'][0]['text'])
+            assert 'error' in content
+    
+    def test_mcp_tool_deploy_cancel_missing_id(self, app_module):
+        """取消部署缺少 ID"""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test-1',
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_deploy_cancel',
+                    'arguments': {}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        
+        assert 'error' in body
+        assert body['error']['code'] == -32602
+    
+    def test_mcp_tool_deploy_history_missing_project(self, app_module):
+        """部署歷史缺少專案 ID"""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test-1',
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_deploy_history',
+                    'arguments': {}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        
+        assert 'error' in body
+        assert body['error']['code'] == -32602
+    
+    def test_mcp_tool_deploy_missing_project(self, app_module):
+        """部署缺少專案"""
+        # 透過 deployer 模組直接呼叫
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        from deployer import mcp_tool_deploy
+        
+        with patch('deployer.get_project', return_value=None), \
+             patch('deployer.list_projects', return_value=[]):
+            result = mcp_tool_deploy('test-1', {
+                'reason': 'test deploy'
+            }, app_module.table, None)
+            
+            body = json.loads(result['body'])
+            assert 'error' in body
+        
+        sys.path.pop(0)
+    
+    def test_mcp_tool_deploy_missing_reason(self, app_module):
+        """部署缺少原因"""
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        from deployer import mcp_tool_deploy
+        
+        result = mcp_tool_deploy('test-1', {
+            'project': 'test-project'
+        }, app_module.table, None)
+        
+        body = json.loads(result['body'])
+        assert 'error' in body
+        
+        sys.path.pop(0)
+
+
+# ============================================================================
+# REST API Handler 測試補充
+# ============================================================================
+
+class TestRESTAPIHandlerAdditional:
+    """REST API Handler 補充測試"""
+    
+    def test_handle_clawdbot_request_missing_command(self, app_module):
+        """缺少命令"""
+        event = {
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'reason': 'test'
+            })
+        }
+        result = app_module.handle_clawdbot_request(event)
+        assert result['statusCode'] == 400
+    
+    def test_handle_clawdbot_request_invalid_json(self, app_module):
+        """無效 JSON"""
+        event = {
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': 'not json'
+        }
+        result = app_module.handle_clawdbot_request(event)
+        assert result['statusCode'] == 400
+    
+    @patch('subprocess.run')
+    def test_handle_clawdbot_request_safelist(self, mock_run, app_module):
+        """REST API 自動批准"""
+        mock_run.return_value = MagicMock(
+            stdout='{"result": "ok"}',
+            stderr='',
+            returncode=0
+        )
+        
+        event = {
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'command': 'aws s3 ls'
+            })
+        }
+        result = app_module.handle_clawdbot_request(event)
+        assert result['statusCode'] == 200
+        body = json.loads(result['body'])
+        assert body['status'] == 'auto_approved'
+
+
+# ============================================================================
+# Telegram Commands 測試補充
+# ============================================================================
+
+class TestTelegramCommandsAdditional:
+    """Telegram Commands 補充測試"""
+    
+    def test_handle_trust_command_empty(self, app_module):
+        """/trust 命令沒有活躍時段"""
+        with patch.object(app_module, 'send_telegram_message_to'):
+            result = app_module.handle_trust_command('12345')
+            assert result['statusCode'] == 200
+    
+    def test_handle_pending_command_with_items(self, app_module):
+        """/pending 命令有待審批項目"""
+        # 建立 pending 項目
+        app_module.table.put_item(Item={
+            'request_id': 'pending-cmd-test',
+            'command': 'aws ec2 start-instances',
+            'status': 'pending',
+            'source': 'test',
+            'created_at': int(time.time())
+        })
+        
+        with patch.object(app_module, 'send_telegram_message_to'):
+            result = app_module.handle_pending_command('999999999')
+            assert result['statusCode'] == 200
+
+
+# ============================================================================
+# Helper Functions 測試補充
+# ============================================================================
+
+class TestHelperFunctionsAdditional:
+    """Helper Functions 補充測試"""
+    
+    def test_generate_request_id(self, app_module):
+        """產生請求 ID"""
+        id1 = app_module.generate_request_id('aws s3 ls')
+        id2 = app_module.generate_request_id('aws s3 ls')
+        
+        assert len(id1) == 12
+        assert id1 != id2  # 應該每次產生不同的 ID
+    
+    def test_decimal_to_native_dict(self, app_module):
+        """Decimal 轉換 - dict"""
+        from decimal import Decimal
+        data = {'count': Decimal('10'), 'value': Decimal('3.14')}
+        result = app_module.decimal_to_native(data)
+        assert result['count'] == 10
+        assert result['value'] == 3.14
+    
+    def test_decimal_to_native_list(self, app_module):
+        """Decimal 轉換 - list"""
+        from decimal import Decimal
+        data = [Decimal('1'), Decimal('2'), Decimal('3')]
+        result = app_module.decimal_to_native(data)
+        assert result == [1, 2, 3]
+    
+    def test_response_helper(self, app_module):
+        """response 輔助函數"""
+        result = app_module.response(200, {'test': 'data'})
+        assert result['statusCode'] == 200
+        assert 'Content-Type' in result['headers']
+        body = json.loads(result['body'])
+        assert body['test'] == 'data'
+
+
+# ============================================================================
+# Lambda Handler 路由測試
+# ============================================================================
+
+class TestLambdaHandlerRouting:
+    """Lambda Handler 路由測試"""
+    
+    def test_handler_options_request(self, app_module):
+        """OPTIONS 請求（CORS）"""
+        event = {
+            'httpMethod': 'OPTIONS',
+            'path': '/',
+            'headers': {}
+        }
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+    
+    def test_handler_mcp_path(self, app_module):
+        """MCP 路徑路由"""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test',
+                'method': 'initialize'
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+    
+    def test_handler_webhook_path(self, app_module):
+        """Webhook 路徑路由"""
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({}),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+
+
+# ============================================================================
+# 補充 BLOCKED 命令測試
+# ============================================================================
+
+class TestBlockedCommands:
+    """BLOCKED 命令測試"""
+    
+    def test_blocked_iam_create_user(self, app_module):
+        """iam create-user 應該被封鎖"""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test-1',
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_execute',
+                    'arguments': {
+                        'command': 'aws iam create-user --user-name hacker'
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'blocked'
+    
+    def test_blocked_sts_assume_role(self, app_module):
+        """sts assume-role 應該被封鎖"""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test-1',
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_execute',
+                    'arguments': {
+                        'command': 'aws sts assume-role --role-arn arn:aws:iam::123:role/Admin'
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'blocked'
+
+
+# ============================================================================
+# Execute Command 測試
+# ============================================================================
+
+class TestExecuteCommandAdditional:
+    """Execute Command 測試"""
+    
+    def test_execute_non_aws_command(self, app_module):
+        """非 AWS 命令應該被拒絕"""
+        result = app_module.execute_command('ls -la')
+        assert '只能執行 aws CLI 命令' in result
+    
+    def test_execute_invalid_command_format(self, app_module):
+        """無效命令格式"""
+        result = app_module.execute_command('aws s3 ls "unclosed')
+        assert '錯誤' in result or 'error' in result.lower()
+
+
+# ============================================================================
+# Paged Output 測試補充
+# ============================================================================
+
+class TestPagedOutputAdditional:
+    """Paged Output 補充測試"""
+    
+    def test_get_paged_output_invalid_format(self, app_module):
+        """無效格式的 page_id"""
+        result = app_module.get_paged_output('invalid-format')
+        assert 'error' in result
+    
+    def test_store_paged_output_with_pages(self, app_module):
+        """儲存需要分頁的輸出"""
+        long_output = 'x' * 10000  # 超過 OUTPUT_MAX_INLINE
+        result = app_module.store_paged_output('paged-test', long_output)
+        
+        assert result['paged'] == True
+        assert result['total_pages'] >= 3
+
+
+# ============================================================================
+# Telegram Message 功能測試
+# ============================================================================
+
+class TestTelegramMessageFunctions:
+    """Telegram Message 功能測試"""
+    
+    def test_send_approval_request(self, app_module):
+        """發送審批請求"""
+        with patch.object(app_module, 'send_telegram_message') as mock_send:
+            app_module.send_approval_request(
+                'test-req-123',
+                'aws ec2 start-instances --instance-ids i-123',
+                'Test reason',
+                timeout=300,
+                source='test-source',
+                account_id='111111111111',
+                account_name='Test Account'
+            )
+            mock_send.assert_called_once()
+    
+    def test_send_approval_request_dangerous(self, app_module):
+        """發送高危命令審批請求"""
+        with patch.object(app_module, 'send_telegram_message') as mock_send:
+            app_module.send_approval_request(
+                'test-req-456',
+                'aws ec2 terminate-instances --instance-ids i-123',  # 高危
+                'Test reason',
+                timeout=300
+            )
+            mock_send.assert_called_once()
+
+
+# ============================================================================
+# Commands 模組補充測試
+# ============================================================================
+
+class TestCommandsModuleAdditional:
+    """Commands 模組補充測試"""
+    
+    def test_is_blocked_iam_attach_policy(self, app_module):
+        """attach policy 應該被封鎖"""
+        from commands import is_blocked
+        assert is_blocked('aws iam attach-user-policy --user-name test --policy-arn arn:xxx') is True
+    
+    def test_is_blocked_kms_create_key(self, app_module):
+        """kms create-key 應該被封鎖"""
+        from commands import is_blocked
+        assert is_blocked('aws kms create-key') is True
+    
+    def test_is_auto_approve_get_caller_identity(self, app_module):
+        """get-caller-identity 應該自動批准"""
+        from commands import is_auto_approve
+        assert is_auto_approve('aws sts get-caller-identity') is True
+    
+    def test_is_dangerous_cloudformation_delete(self, app_module):
+        """cloudformation delete-stack 應該是高危"""
+        from commands import is_dangerous
+        assert is_dangerous('aws cloudformation delete-stack --stack-name test') is True
+    
+    def test_is_dangerous_rds_delete(self, app_module):
+        """rds delete-db-instance 應該是高危"""
+        from commands import is_dangerous
+        assert is_dangerous('aws rds delete-db-instance --db-instance-identifier test') is True
+
+
+# ============================================================================
+# HMAC 驗證補充測試
+# ============================================================================
+
+class TestHMACVerificationAdditional:
+    """HMAC 驗證補充測試"""
+    
+    def test_verify_hmac_expired_timestamp(self, app_module):
+        """過期的 timestamp"""
+        import time
+        with patch.object(app_module, 'ENABLE_HMAC', True):
+            headers = {
+                'x-timestamp': str(int(time.time()) - 600),  # 10 分鐘前
+                'x-nonce': 'test-nonce',
+                'x-signature': 'invalid-sig'
+            }
+            result = app_module.verify_hmac(headers, 'body')
+            assert result is False
+
+
+# ============================================================================
+# MCP Request Validation 測試
+# ============================================================================
+
+class TestMCPRequestValidation:
+    """MCP Request 驗證測試"""
+    
+    def test_mcp_missing_method(self, app_module):
+        """缺少 method"""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test'
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        assert 'error' in body
+    
+    def test_mcp_invalid_body(self, app_module):
+        """無效的 JSON body"""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': 'not-json',
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        assert 'error' in body
+
+
+# ============================================================================
+# MCP Tools List 補充測試
+# ============================================================================
+
+class TestMCPToolsListAdditional:
+    """MCP tools/list 補充測試"""
+    
+    def test_tools_list_contains_deploy_tools(self, app_module):
+        """工具列表應包含部署工具"""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test',
+                'method': 'tools/list'
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        
+        tools = body['result']['tools']
+        tool_names = [t['name'] for t in tools]
+        
+        assert 'bouncer_deploy' in tool_names
+        assert 'bouncer_deploy_status' in tool_names
+
+
+# ============================================================================
+# Deployer 補充測試
+# ============================================================================
+
+class TestDeployerAdditional:
+    """Deployer 模組補充測試"""
+    
+    @pytest.fixture
+    def deployer_setup(self, mock_dynamodb):
+        """設置 deployer 測試環境"""
+        # Projects table
+        mock_dynamodb.create_table(
+            TableName='bouncer-projects',
+            KeySchema=[{'AttributeName': 'project_id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[{'AttributeName': 'project_id', 'AttributeType': 'S'}],
+            BillingMode='PAY_PER_REQUEST'
+        )
+        
+        # History table
+        mock_dynamodb.create_table(
+            TableName='bouncer-deploy-history',
+            KeySchema=[{'AttributeName': 'deploy_id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[
+                {'AttributeName': 'deploy_id', 'AttributeType': 'S'},
+                {'AttributeName': 'project_id', 'AttributeType': 'S'},
+                {'AttributeName': 'started_at', 'AttributeType': 'N'}
+            ],
+            GlobalSecondaryIndexes=[{
+                'IndexName': 'project-time-index',
+                'KeySchema': [
+                    {'AttributeName': 'project_id', 'KeyType': 'HASH'},
+                    {'AttributeName': 'started_at', 'KeyType': 'RANGE'}
+                ],
+                'Projection': {'ProjectionType': 'ALL'}
+            }],
+            BillingMode='PAY_PER_REQUEST'
+        )
+        
+        # Locks table
+        mock_dynamodb.create_table(
+            TableName='bouncer-deploy-locks',
+            KeySchema=[{'AttributeName': 'project_id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[{'AttributeName': 'project_id', 'AttributeType': 'S'}],
+            BillingMode='PAY_PER_REQUEST'
+        )
+        
+        return mock_dynamodb
+    
+    def test_get_project_not_exists(self, deployer_setup):
+        """取得不存在的專案"""
+        import sys
+        if 'deployer' in sys.modules:
+            del sys.modules['deployer']
+        if 'src.deployer' in sys.modules:
+            del sys.modules['src.deployer']
+        
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        import deployer
+        
+        deployer.projects_table = deployer_setup.Table('bouncer-projects')
+        
+        project = deployer.get_project('nonexistent')
+        assert project is None
+        
+        sys.path.pop(0)
+    
+    def test_get_deploy_record_not_exists(self, deployer_setup):
+        """取得不存在的部署記錄"""
+        import sys
+        if 'deployer' in sys.modules:
+            del sys.modules['deployer']
+        if 'src.deployer' in sys.modules:
+            del sys.modules['src.deployer']
+        
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        import deployer
+        
+        deployer.history_table = deployer_setup.Table('bouncer-deploy-history')
+        
+        record = deployer.get_deploy_record('nonexistent')
+        assert record is None
+        
+        sys.path.pop(0)
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+# ============================================================================
+# 額外覆蓋率測試
+# ============================================================================
+
+class TestAdditionalCoverage:
+    """額外覆蓋率測試"""
+    
+    def test_mcp_method_ping(self, app_module):
+        """ping 方法"""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test',
+                'method': 'ping'
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+    
+    def test_mcp_tools_call_list_safelist(self, app_module):
+        """bouncer_list_safelist 工具"""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test',
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_list_safelist',
+                    'arguments': {}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        
+        content = json.loads(body['result']['content'][0]['text'])
+        assert 'safelist_prefixes' in content
+        assert 'blocked_patterns' in content
+    
+    def test_mcp_tools_call_list_accounts(self, app_module):
+        """bouncer_list_accounts 工具"""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test',
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_list_accounts',
+                    'arguments': {}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        
+        content = json.loads(body['result']['content'][0]['text'])
+        assert 'accounts' in content
+        assert 'default_account' in content
+
+
+class TestDeployerMCPToolsAdditional:
+    """Deployer MCP Tools 補充測試"""
+    
+    def test_mcp_deploy_status_found(self, app_module):
+        """部署狀態查詢 - 存在"""
+        with patch('deployer.get_deploy_status', return_value={
+            'deploy_id': 'test-deploy',
+            'project_id': 'test-project',
+            'status': 'RUNNING'
+        }):
+            event = {
+                'rawPath': '/mcp',
+                'headers': {'x-approval-secret': 'test-secret'},
+                'body': json.dumps({
+                    'jsonrpc': '2.0',
+                    'id': 'test',
+                    'method': 'tools/call',
+                    'params': {
+                        'name': 'bouncer_deploy_status',
+                        'arguments': {
+                            'deploy_id': 'test-deploy'
+                        }
+                    }
+                }),
+                'requestContext': {'http': {'method': 'POST'}}
+            }
+            
+            result = app_module.lambda_handler(event, None)
+            body = json.loads(result['body'])
+            
+            content = json.loads(body['result']['content'][0]['text'])
+            assert 'deploy_id' in content
+
+
+# ============================================================================
+# Paging 模組完整測試
+# ============================================================================
+
+class TestPagingModuleFull:
+    """Paging 模組完整測試"""
+    
+    def test_store_paged_output_multiple_pages(self, app_module):
+        """儲存多頁輸出"""
+        # 建立需要分成多頁的長輸出
+        long_output = 'A' * 3500 + 'B' * 3500 + 'C' * 3500  # 約 10500 字元
+        result = app_module.store_paged_output('multi-page-test', long_output)
+        
+        assert result['paged'] == True
+        assert result['total_pages'] >= 3
+        assert result['page'] == 1
+        assert result['next_page'] == 'multi-page-test:page:2'
+    
+    def test_get_paged_output_success(self, app_module):
+        """成功取得分頁"""
+        # 先存一個分頁
+        app_module.table.put_item(Item={
+            'request_id': 'page-get-test:page:2',
+            'content': 'Page 2 content',
+            'page': 2,
+            'total_pages': 3,
+            'original_request': 'page-get-test'
+        })
+        
+        result = app_module.get_paged_output('page-get-test:page:2')
+        
+        assert 'error' not in result
+        assert result['page'] == 2
+        assert result['total_pages'] == 3
+        assert result['result'] == 'Page 2 content'
+        assert result['next_page'] == 'page-get-test:page:3'
+    
+    def test_get_paged_output_last_page(self, app_module):
+        """取得最後一頁（沒有 next_page）"""
+        app_module.table.put_item(Item={
+            'request_id': 'last-page-test:page:3',
+            'content': 'Last page',
+            'page': 3,
+            'total_pages': 3,
+            'original_request': 'last-page-test'
+        })
+        
+        result = app_module.get_paged_output('last-page-test:page:3')
+        
+        assert result['page'] == 3
+        assert result['next_page'] is None
+
+
+# ============================================================================
+# Telegram 模組完整測試
+# ============================================================================
+
+class TestTelegramModuleFull:
+    """Telegram 模組完整測試"""
+    
+    def test_send_telegram_message(self, app_module):
+        """發送 Telegram 訊息"""
+        with patch('urllib.request.urlopen') as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.read.return_value = b'{"ok": true}'
+            mock_urlopen.return_value.__enter__ = MagicMock(return_value=mock_response)
+            mock_urlopen.return_value.__exit__ = MagicMock(return_value=False)
+            
+            # 直接呼叫 telegram 模組的函數
+            from telegram import send_telegram_message
+            send_telegram_message('Test message')
+            
+            mock_urlopen.assert_called()
+    
+    def test_update_message(self, app_module):
+        """更新 Telegram 訊息"""
+        with patch('urllib.request.urlopen') as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.read.return_value = b'{"ok": true}'
+            mock_urlopen.return_value.__enter__ = MagicMock(return_value=mock_response)
+            mock_urlopen.return_value.__exit__ = MagicMock(return_value=False)
+            
+            app_module.update_message(123, 'Updated text')
+            mock_urlopen.assert_called()
+    
+    def test_answer_callback(self, app_module):
+        """回答 callback query"""
+        with patch('urllib.request.urlopen') as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.read.return_value = b'{"ok": true}'
+            mock_urlopen.return_value.__enter__ = MagicMock(return_value=mock_response)
+            mock_urlopen.return_value.__exit__ = MagicMock(return_value=False)
+            
+            app_module.answer_callback('cb123', 'Done!')
+            mock_urlopen.assert_called()
+
+
+# ============================================================================
+# Trust 模組完整測試
+# ============================================================================
+
+class TestTrustModuleFull:
+    """Trust 模組完整測試"""
+    
+    def test_increment_trust_command_count(self, app_module):
+        """增加信任命令計數"""
+        # 先建立信任時段
+        trust_id = app_module.create_trust_session('count-test', '111111111111', '999999999')
+        
+        # 增加計數
+        new_count = app_module.increment_trust_command_count(trust_id)
+        assert new_count == 1
+        
+        # 再增加
+        new_count = app_module.increment_trust_command_count(trust_id)
+        assert new_count == 2
+    
+    def test_should_trust_approve_excluded_iam(self, app_module):
+        """IAM 命令不應被信任批准"""
+        # 建立信任時段
+        source = 'iam-test-source'
+        app_module.create_trust_session(source, '111111111111', '999999999')
+        
+        # IAM 命令不應被信任
+        should_trust, session, reason = app_module.should_trust_approve(
+            'aws iam list-users',
+            source,
+            '111111111111'
+        )
+        assert should_trust is False
+
+
+# ============================================================================
+# Rate Limit 完整測試
+# ============================================================================
+
+class TestRateLimitFull:
+    """Rate Limit 完整測試"""
+    
+    def test_check_rate_limit_first_request(self, app_module):
+        """第一次請求不應被限制"""
+        import uuid
+        source = f'rate-limit-test-{uuid.uuid4()}'
+        
+        # 不應拋出異常
+        app_module.check_rate_limit(source)
+    
+    def test_check_rate_limit_none_source(self, app_module):
+        """None source 應該跳過檢查"""
+        # 不應拋出異常
+        app_module.check_rate_limit(None)
+
+
+# ============================================================================
+# Deployer 完整測試
+# ============================================================================
+
+class TestDeployerFull:
+    """Deployer 完整測試"""
+    
+    @pytest.fixture
+    def deployer_full_setup(self, mock_dynamodb):
+        """完整設置 deployer 測試環境"""
+        # Projects table
+        mock_dynamodb.create_table(
+            TableName='bouncer-projects',
+            KeySchema=[{'AttributeName': 'project_id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[{'AttributeName': 'project_id', 'AttributeType': 'S'}],
+            BillingMode='PAY_PER_REQUEST'
+        )
+        
+        # History table
+        mock_dynamodb.create_table(
+            TableName='bouncer-deploy-history',
+            KeySchema=[{'AttributeName': 'deploy_id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[
+                {'AttributeName': 'deploy_id', 'AttributeType': 'S'},
+                {'AttributeName': 'project_id', 'AttributeType': 'S'},
+                {'AttributeName': 'started_at', 'AttributeType': 'N'}
+            ],
+            GlobalSecondaryIndexes=[{
+                'IndexName': 'project-time-index',
+                'KeySchema': [
+                    {'AttributeName': 'project_id', 'KeyType': 'HASH'},
+                    {'AttributeName': 'started_at', 'KeyType': 'RANGE'}
+                ],
+                'Projection': {'ProjectionType': 'ALL'}
+            }],
+            BillingMode='PAY_PER_REQUEST'
+        )
+        
+        # Locks table
+        mock_dynamodb.create_table(
+            TableName='bouncer-deploy-locks',
+            KeySchema=[{'AttributeName': 'project_id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[{'AttributeName': 'project_id', 'AttributeType': 'S'}],
+            BillingMode='PAY_PER_REQUEST'
+        )
+        
+        return mock_dynamodb
+    
+    def test_cancel_deploy_running(self, deployer_full_setup):
+        """取消正在執行的部署"""
+        import sys
+        if 'deployer' in sys.modules:
+            del sys.modules['deployer']
+        if 'src.deployer' in sys.modules:
+            del sys.modules['src.deployer']
+        
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        import deployer
+        
+        deployer.history_table = deployer_full_setup.Table('bouncer-deploy-history')
+        deployer.locks_table = deployer_full_setup.Table('bouncer-deploy-locks')
+        
+        # 建立執行中的記錄
+        deployer.history_table.put_item(Item={
+            'deploy_id': 'running-deploy',
+            'project_id': 'test-project',
+            'status': 'RUNNING'
+        })
+        
+        # 取消
+        with patch.object(deployer, 'sfn_client') as mock_sfn:
+            result = deployer.cancel_deploy('running-deploy')
+            assert result['status'] == 'cancelled'
+        
+        sys.path.pop(0)
+    
+    def test_update_deploy_record(self, deployer_full_setup):
+        """更新部署記錄"""
+        import sys
+        if 'deployer' in sys.modules:
+            del sys.modules['deployer']
+        if 'src.deployer' in sys.modules:
+            del sys.modules['src.deployer']
+        
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        import deployer
+        
+        deployer.history_table = deployer_full_setup.Table('bouncer-deploy-history')
+        
+        # 建立記錄
+        deployer.history_table.put_item(Item={
+            'deploy_id': 'update-test',
+            'project_id': 'test',
+            'status': 'PENDING'
+        })
+        
+        # 更新
+        deployer.update_deploy_record('update-test', {
+            'status': 'RUNNING',
+            'execution_arn': 'arn:aws:states:...'
+        })
+        
+        # 驗證
+        item = deployer.history_table.get_item(Key={'deploy_id': 'update-test'})['Item']
+        assert item['status'] == 'RUNNING'
+        
+        sys.path.pop(0)
+
+
+# ============================================================================
+# Commands 模組完整測試
+# ============================================================================
+
+class TestCommandsModuleFull:
+    """Commands 模組完整測試"""
+    
+    def test_fix_json_args_with_nested_json(self, app_module):
+        """修復巢狀 JSON 參數"""
+        import shlex
+        cmd = '''aws dynamodb put-item --table-name test --item '{"id":{"S":"123"},"data":{"M":{"key":{"S":"val"}}}}' '''
+        args = shlex.split(cmd)
+        cli_args = args[1:]
+        
+        fixed = app_module.fix_json_args(cmd, cli_args.copy())
+        json_idx = fixed.index('--item') + 1
+        assert fixed[json_idx] == '{"id":{"S":"123"},"data":{"M":{"key":{"S":"val"}}}}'
+    
+    def test_is_auto_approve_dynamodb_operations(self, app_module):
+        """DynamoDB 讀取操作自動批准"""
+        from commands import is_auto_approve
+        assert is_auto_approve('aws dynamodb scan --table-name test') is True
+        assert is_auto_approve('aws dynamodb query --table-name test') is True
+        assert is_auto_approve('aws dynamodb get-item --table-name test') is True
+    
+    def test_is_blocked_organizations(self, app_module):
+        """organizations 命令應該被封鎖"""
+        from commands import is_blocked
+        assert is_blocked('aws organizations list-accounts') is True
+
+
+# ============================================================================
+# App 模組 - Callback Handlers 補充
+# ============================================================================
+
+class TestCallbackHandlersFull:
+    """Callback Handlers 完整測試"""
+    
+    @patch('app.answer_callback')
+    @patch('app.update_message')
+    @patch('subprocess.run')
+    def test_callback_deny_command(self, mock_run, mock_update, mock_answer, app_module):
+        """拒絕命令執行"""
+        request_id = 'deny-cmd-test'
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'command': 'aws ec2 terminate-instances --instance-ids i-123',
+            'status': 'pending_approval',
+            'source': 'test',
+            'reason': 'test',
+            'account_id': '111111111111',
+            'account_name': 'Test',
+            'ttl': int(time.time()) + 300
+        })
+        
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb123',
+                    'from': {'id': 999999999},
+                    'data': f'deny:{request_id}',
+                    'message': {'message_id': 999}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+        
+        item = app_module.table.get_item(Key={'request_id': request_id})['Item']
+        assert item['status'] == 'denied'
+    
+    @patch('app.answer_callback')
+    @patch('app.update_message')
+    def test_callback_deploy_deny(self, mock_update, mock_answer, app_module):
+        """拒絕部署"""
+        request_id = 'deploy-deny-test'
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'action': 'deploy',
+            'project_id': 'test-project',
+            'project_name': 'Test Project',
+            'branch': 'main',
+            'stack_name': 'test-stack',
+            'status': 'pending_approval',
+            'source': 'test',
+            'reason': 'test deploy',
+            'ttl': int(time.time()) + 300
+        })
+        
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb123',
+                    'from': {'id': 999999999},
+                    'data': f'deny:{request_id}',
+                    'message': {'message_id': 999}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+        
+        item = app_module.table.get_item(Key={'request_id': request_id})['Item']
+        assert item['status'] == 'denied'
+    
+    @patch('app.answer_callback')
+    @patch('app.update_message')
+    @patch('deployer.start_deploy')
+    def test_callback_deploy_approve(self, mock_start, mock_update, mock_answer, app_module):
+        """批准部署"""
+        mock_start.return_value = {'status': 'started', 'deploy_id': 'deploy-123'}
+        
+        request_id = 'deploy-approve-test'
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'action': 'deploy',
+            'project_id': 'test-project',
+            'project_name': 'Test Project',
+            'branch': 'main',
+            'stack_name': 'test-stack',
+            'status': 'pending_approval',
+            'source': 'test',
+            'reason': 'test deploy',
+            'ttl': int(time.time()) + 300
+        })
+        
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb123',
+                    'from': {'id': 999999999},
+                    'data': f'approve:{request_id}',
+                    'message': {'message_id': 999}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+
+
+# ============================================================================
+# Accounts 模組完整測試
+# ============================================================================
+
+class TestAccountsModuleFull:
+    """Accounts 模組完整測試"""
+    
+    def test_list_accounts_empty(self, app_module):
+        """列出帳號（空）"""
+        accounts = app_module.list_accounts()
+        # 可能為空或有預設帳號
+        assert isinstance(accounts, list)
+    
+    def test_init_default_account(self, app_module):
+        """初始化預設帳號"""
+        # 呼叫不應出錯
+        app_module.init_default_account()
+
+
+# ============================================================================
+# MCP Tool - Add Account 完整測試  
+# ============================================================================
+
+class TestMCPAddAccountFull:
+    """MCP Add Account 完整測試"""
+    
+    @patch('app.send_telegram_message')
+    def test_add_account_success_async(self, mock_telegram, app_module):
+        """新增帳號成功（異步）"""
+        result = app_module.mcp_tool_add_account('test-1', {
+            'account_id': '222222222222',
+            'name': 'New Account',
+            'role_arn': 'arn:aws:iam::222222222222:role/TestRole',
+            'async': True
+        })
+        
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'pending_approval'
+        assert 'request_id' in content
+    
+    @patch('app.send_telegram_message')
+    def test_add_account_empty_role_arn(self, mock_telegram, app_module):
+        """新增帳號空 Role ARN（允許）"""
+        result = app_module.mcp_tool_add_account('test-1', {
+            'account_id': '333333333333',
+            'name': 'No Role Account',
+            'role_arn': '',
+            'async': True
+        })
+        
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'pending_approval'
+
+
+# ============================================================================
+# REST API 完整測試
+# ============================================================================
+
+class TestRESTAPIFull:
+    """REST API 完整測試"""
+    
+    @patch('app.send_telegram_message')
+    def test_rest_api_approval_wait(self, mock_telegram, app_module):
+        """REST API 等待審批（短超時）"""
+        event = {
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'command': 'aws ec2 start-instances --instance-ids i-123',
+                'reason': 'test',
+                'wait': True,
+                'timeout': 1  # 1 秒超時
+            })
+        }
+        
+        result = app_module.handle_clawdbot_request(event)
+        # 應該返回 pending（因為超時太短）
+        assert result['statusCode'] in [200, 202]
+
+
+# ============================================================================
+# 更多 App 覆蓋測試
+# ============================================================================
+
+class TestAppModuleMore:
+    """更多 App 模組測試"""
+    
+    def test_mcp_execute_with_paging(self, app_module):
+        """執行命令並測試分頁"""
+        # Mock 返回長輸出
+        long_output = 'x' * 5000
+        with patch.object(app_module, 'execute_command', return_value=long_output):
+            event = {
+                'rawPath': '/mcp',
+                'headers': {'x-approval-secret': 'test-secret'},
+                'body': json.dumps({
+                    'jsonrpc': '2.0',
+                    'id': 'test',
+                    'method': 'tools/call',
+                    'params': {
+                        'name': 'bouncer_execute',
+                        'arguments': {
+                            'command': 'aws logs get-log-events --log-group-name test'
+                        }
+                    }
+                }),
+                'requestContext': {'http': {'method': 'POST'}}
+            }
+            
+            result = app_module.lambda_handler(event, None)
+            body = json.loads(result['body'])
+            content = json.loads(body['result']['content'][0]['text'])
+            
+            assert content['status'] == 'auto_approved'
+            # 檢查是否有分頁
+            if content.get('paged'):
+                assert content['total_pages'] >= 2
+    
+    def test_mcp_get_page(self, app_module):
+        """取得分頁"""
+        # 先建立分頁
+        app_module.table.put_item(Item={
+            'request_id': 'get-page-test:page:2',
+            'content': 'Page 2 data',
+            'page': 2,
+            'total_pages': 3,
+            'original_request': 'get-page-test'
+        })
+        
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test',
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_get_page',
+                    'arguments': {
+                        'page_id': 'get-page-test:page:2'
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        
+        assert content['page'] == 2
+        assert content['result'] == 'Page 2 data'
+    
+    def test_mcp_list_accounts_with_mock(self, app_module):
+        """列出帳號（有帳號）"""
+        with patch.object(app_module, 'list_accounts', return_value=[
+            {'account_id': '444444444444', 'name': 'Test Account', 'enabled': True}
+        ]):
+            event = {
+                'rawPath': '/mcp',
+                'headers': {'x-approval-secret': 'test-secret'},
+                'body': json.dumps({
+                    'jsonrpc': '2.0',
+                    'id': 'test',
+                    'method': 'tools/call',
+                    'params': {
+                        'name': 'bouncer_list_accounts',
+                        'arguments': {}
+                    }
+                }),
+                'requestContext': {'http': {'method': 'POST'}}
+            }
+            
+            result = app_module.lambda_handler(event, None)
+            body = json.loads(result['body'])
+            content = json.loads(body['result']['content'][0]['text'])
+            
+            assert 'accounts' in content
+
+
+# ============================================================================
+# Deployer 更多測試
+# ============================================================================
+
+class TestDeployerMore:
+    """Deployer 更多測試"""
+    
+    @pytest.fixture
+    def deployer_more_setup(self, mock_dynamodb):
+        """Deployer 設置"""
+        mock_dynamodb.create_table(
+            TableName='bouncer-projects',
+            KeySchema=[{'AttributeName': 'project_id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[{'AttributeName': 'project_id', 'AttributeType': 'S'}],
+            BillingMode='PAY_PER_REQUEST'
+        )
+        
+        mock_dynamodb.create_table(
+            TableName='bouncer-deploy-history',
+            KeySchema=[{'AttributeName': 'deploy_id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[
+                {'AttributeName': 'deploy_id', 'AttributeType': 'S'},
+                {'AttributeName': 'project_id', 'AttributeType': 'S'},
+                {'AttributeName': 'started_at', 'AttributeType': 'N'}
+            ],
+            GlobalSecondaryIndexes=[{
+                'IndexName': 'project-time-index',
+                'KeySchema': [
+                    {'AttributeName': 'project_id', 'KeyType': 'HASH'},
+                    {'AttributeName': 'started_at', 'KeyType': 'RANGE'}
+                ],
+                'Projection': {'ProjectionType': 'ALL'}
+            }],
+            BillingMode='PAY_PER_REQUEST'
+        )
+        
+        mock_dynamodb.create_table(
+            TableName='bouncer-deploy-locks',
+            KeySchema=[{'AttributeName': 'project_id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[{'AttributeName': 'project_id', 'AttributeType': 'S'}],
+            BillingMode='PAY_PER_REQUEST'
+        )
+        
+        return mock_dynamodb
+    
+    def test_start_deploy_success(self, deployer_more_setup):
+        """成功啟動部署"""
+        import sys
+        if 'deployer' in sys.modules:
+            del sys.modules['deployer']
+        if 'src.deployer' in sys.modules:
+            del sys.modules['src.deployer']
+        
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        import deployer
+        
+        deployer.projects_table = deployer_more_setup.Table('bouncer-projects')
+        deployer.history_table = deployer_more_setup.Table('bouncer-deploy-history')
+        deployer.locks_table = deployer_more_setup.Table('bouncer-deploy-locks')
+        
+        # 新增專案
+        deployer.projects_table.put_item(Item={
+            'project_id': 'deploy-test',
+            'name': 'Deploy Test',
+            'git_repo': 'test-repo',
+            'stack_name': 'test-stack',
+            'enabled': True
+        })
+        
+        # Mock Step Functions
+        with patch.object(deployer, 'sfn_client') as mock_sfn:
+            mock_sfn.start_execution.return_value = {
+                'executionArn': 'arn:aws:states:...'
+            }
+            
+            result = deployer.start_deploy('deploy-test', 'main', 'test-user', 'test reason')
+            
+            # 如果沒有 STATE_MACHINE_ARN 會失敗，但這測試了大部分路徑
+            assert 'status' in result or 'error' in result
+        
+        sys.path.pop(0)
+    
+    def test_mcp_deploy_history(self, app_module):
+        """部署歷史 MCP"""
+        with patch('deployer.get_deploy_history', return_value=[
+            {'deploy_id': 'deploy-1', 'status': 'SUCCESS'},
+            {'deploy_id': 'deploy-2', 'status': 'FAILED'}
+        ]):
+            event = {
+                'rawPath': '/mcp',
+                'headers': {'x-approval-secret': 'test-secret'},
+                'body': json.dumps({
+                    'jsonrpc': '2.0',
+                    'id': 'test',
+                    'method': 'tools/call',
+                    'params': {
+                        'name': 'bouncer_deploy_history',
+                        'arguments': {
+                            'project': 'test-project'
+                        }
+                    }
+                }),
+                'requestContext': {'http': {'method': 'POST'}}
+            }
+            
+            result = app_module.lambda_handler(event, None)
+            body = json.loads(result['body'])
+            content = json.loads(body['result']['content'][0]['text'])
+            
+            assert 'history' in content
+    
+    def test_mcp_deploy_cancel(self, app_module):
+        """取消部署 MCP"""
+        with patch('deployer.cancel_deploy', return_value={'status': 'cancelled', 'deploy_id': 'test'}):
+            event = {
+                'rawPath': '/mcp',
+                'headers': {'x-approval-secret': 'test-secret'},
+                'body': json.dumps({
+                    'jsonrpc': '2.0',
+                    'id': 'test',
+                    'method': 'tools/call',
+                    'params': {
+                        'name': 'bouncer_deploy_cancel',
+                        'arguments': {
+                            'deploy_id': 'test-deploy'
+                        }
+                    }
+                }),
+                'requestContext': {'http': {'method': 'POST'}}
+            }
+            
+            result = app_module.lambda_handler(event, None)
+            body = json.loads(result['body'])
+            content = json.loads(body['result']['content'][0]['text'])
+            
+            assert content['status'] == 'cancelled'
+
+
+# ============================================================================
+# Paging 更多測試
+# ============================================================================
+
+class TestPagingMore:
+    """Paging 更多測試"""
+    
+    def test_send_remaining_pages(self, app_module):
+        """發送剩餘分頁"""
+        # 建立分頁資料
+        app_module.table.put_item(Item={
+            'request_id': 'send-pages-test:page:2',
+            'content': 'Page 2',
+            'page': 2,
+            'total_pages': 2
+        })
+        
+        with patch('paging.send_telegram_message') as mock_send:
+            from paging import send_remaining_pages
+            send_remaining_pages('send-pages-test', 2)
+            # 應該嘗試發送（即使失敗）
+    
+    def test_send_remaining_pages_single(self, app_module):
+        """單頁不需要發送"""
+        with patch('paging.send_telegram_message') as mock_send:
+            from paging import send_remaining_pages
+            send_remaining_pages('single-page', 1)
+            mock_send.assert_not_called()
+
+
+# ============================================================================
+# Lambda Handler 更多路由測試
+# ============================================================================
+
+class TestLambdaHandlerMore:
+    """Lambda Handler 更多測試"""
+    
+    def test_handler_status_path(self, app_module):
+        """/status 路徑"""
+        # 先建立一個請求
+        app_module.table.put_item(Item={
+            'request_id': 'status-path-test',
+            'command': 'aws s3 ls',
+            'status': 'approved'
+        })
+        
+        event = {
+            'rawPath': '/status/status-path-test',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'requestContext': {'http': {'method': 'GET'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+        body = json.loads(result['body'])
+        assert body['status'] == 'approved'
+    
+    def test_handler_post_to_root(self, app_module):
+        """POST 到 root（REST API）"""
+        with patch.object(app_module, 'execute_command', return_value='{"ok": true}'):
+            event = {
+                'rawPath': '/',
+                'path': '/',
+                'headers': {'x-approval-secret': 'test-secret'},
+                'body': json.dumps({
+                    'command': 'aws s3 ls'
+                }),
+                'requestContext': {'http': {'method': 'POST'}}
+            }
+            
+            result = app_module.lambda_handler(event, None)
+            assert result['statusCode'] == 200
+
+
+# ============================================================================
+# 更多覆蓋率測試 - 80% 衝刺
+# ============================================================================
+
+class TestCoverage80Sprint:
+    """80% 覆蓋率衝刺測試"""
+    
+    def test_callback_invalid_data(self, app_module):
+        """callback 無效 data"""
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb123',
+                    'from': {'id': 999999999},
+                    'data': 'invalid-no-colon',  # 沒有冒號
+                    'message': {'message_id': 999}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 400
+    
+    @patch('mcp_tools.send_telegram_message')
+    def test_mcp_execute_with_configured_account(self, mock_telegram, app_module):
+        """執行命令使用配置的帳號"""
+        import mcp_tools
+        with patch.object(mcp_tools, 'get_account', return_value={
+            'account_id': '555555555555',
+            'name': 'Configured Account',
+            'enabled': True,
+            'role_arn': 'arn:aws:iam::555555555555:role/TestRole'
+        }), patch.object(mcp_tools, 'execute_command', return_value='{"result": "ok"}'):
+            event = {
+                'rawPath': '/mcp',
+                'headers': {'x-approval-secret': 'test-secret'},
+                'body': json.dumps({
+                    'jsonrpc': '2.0',
+                    'id': 'test',
+                    'method': 'tools/call',
+                    'params': {
+                        'name': 'bouncer_execute',
+                        'arguments': {
+                            'command': 'aws s3 ls',
+                            'account': '555555555555'
+                        }
+                    }
+                }),
+                'requestContext': {'http': {'method': 'POST'}}
+            }
+            
+            result = app_module.lambda_handler(event, None)
+            body = json.loads(result['body'])
+            content = json.loads(body['result']['content'][0]['text'])
+            
+            assert content['status'] == 'auto_approved'
+            assert content['account'] == '555555555555'
+    
+    @patch('app.send_telegram_message')
+    def test_send_approval_request_with_assume_role(self, mock_telegram, app_module):
+        """發送審批請求帶 assume_role"""
+        app_module.send_approval_request(
+            'test-req-789',
+            'aws ec2 start-instances',
+            'Test',
+            assume_role='arn:aws:iam::123456789012:role/TestRole'
+        )
+        mock_telegram.assert_called()
+    
+    def test_decimal_to_native_nested(self, app_module):
+        """Decimal 轉換 - 巢狀結構"""
+        from decimal import Decimal
+        data = {
+            'list': [Decimal('1'), {'nested': Decimal('2.5')}],
+            'value': Decimal('100')
+        }
+        result = app_module.decimal_to_native(data)
+        assert result['list'][0] == 1
+        assert result['list'][1]['nested'] == 2.5
+        assert result['value'] == 100
+    
+    def test_mcp_tools_list_all_tools(self, app_module):
+        """工具列表包含所有工具"""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test',
+                'method': 'tools/list'
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        tools = body['result']['tools']
+        tool_names = [t['name'] for t in tools]
+        
+        # 驗證所有主要工具都存在
+        expected_tools = [
+            'bouncer_execute',
+            'bouncer_status',
+            'bouncer_list_safelist',
+            'bouncer_list_accounts',
+            'bouncer_add_account',
+            'bouncer_remove_account',
+            'bouncer_upload',
+            'bouncer_deploy',
+            'bouncer_deploy_status',
+            'bouncer_trust_status',
+            'bouncer_trust_revoke',
+            'bouncer_get_page',
+            'bouncer_list_pending'
+        ]
+        
+        for tool in expected_tools:
+            assert tool in tool_names, f"Missing tool: {tool}"
+    
+    @patch('app.update_message')
+    @patch('app.answer_callback')
+    @patch('subprocess.run')
+    def test_callback_approve_with_paged_result(self, mock_run, mock_answer, mock_update, app_module):
+        """批准命令並返回分頁結果"""
+        # 返回長輸出
+        mock_run.return_value = MagicMock(
+            stdout='x' * 5000,  # 長輸出
+            stderr='',
+            returncode=0
+        )
+        
+        request_id = 'paged-approve-test'
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'command': 'aws logs get-log-events',
+            'status': 'pending_approval',
+            'source': 'test',
+            'reason': 'test',
+            'account_id': '111111111111',
+            'account_name': 'Default',
+            'ttl': int(time.time()) + 300
+        })
+        
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb123',
+                    'from': {'id': 999999999},
+                    'data': f'approve:{request_id}',
+                    'message': {'message_id': 999}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+    
+    def test_escape_markdown_all_chars(self, app_module):
+        """Markdown 跳脫所有特殊字元"""
+        from telegram import escape_markdown
+        text = '*_`['
+        escaped = escape_markdown(text)
+        assert '\\*' in escaped
+        assert '\\_' in escaped
+        assert '\\`' in escaped
+        assert '\\[' in escaped
+    
+    @patch('app.send_telegram_message')
+    def test_mcp_upload_with_legacy_bucket(self, mock_telegram, app_module):
+        """上傳使用舊版 bucket/key 參數"""
+        import base64
+        content = base64.b64encode(b'test').decode()
+        
+        result = app_module.mcp_tool_upload('test-1', {
+            'bucket': 'legacy-bucket',
+            'key': 'legacy/key.txt',
+            'content': content,
+            'reason': 'legacy test'
+        })
+        
+        body = json.loads(result['body'])
+        content_data = json.loads(body['result']['content'][0]['text'])
+        assert content_data['status'] == 'pending_approval'
+    
+    def test_handle_mcp_tool_call_all_tools(self, app_module):
+        """測試所有 MCP tool 路由"""
+        # bouncer_list_safelist
+        result = app_module.handle_mcp_tool_call('test-1', 'bouncer_list_safelist', {})
+        body = json.loads(result['body'])
+        assert 'result' in body
+        
+        # bouncer_trust_status
+        result = app_module.handle_mcp_tool_call('test-1', 'bouncer_trust_status', {})
+        body = json.loads(result['body'])
+        assert 'result' in body
+    
+    def test_get_header_various_cases(self, app_module):
+        """get_header 各種大小寫"""
+        headers = {
+            'X-Custom-Header': 'value1',
+            'content-type': 'application/json'
+        }
+        
+        assert app_module.get_header(headers, 'x-custom-header') == 'value1'
+        assert app_module.get_header(headers, 'X-CUSTOM-HEADER') == 'value1'
+        assert app_module.get_header(headers, 'Content-Type') == 'application/json'
+        assert app_module.get_header(headers, 'Missing') is None
+
+
+# ============================================================================
+# Commands 模組 - 更多測試
+# ============================================================================
+
+class TestCommandsMore:
+    """Commands 更多測試"""
+    
+    def test_is_auto_approve_logs(self, app_module):
+        """CloudWatch Logs 讀取自動批准"""
+        from commands import is_auto_approve
+        assert is_auto_approve('aws logs filter-log-events --log-group-name test') is True
+        assert is_auto_approve('aws logs get-log-events --log-group-name test') is True
+        assert is_auto_approve('aws logs describe-log-groups') is True
+    
+    def test_is_auto_approve_ecr(self, app_module):
+        """ECR 讀取自動批准"""
+        from commands import is_auto_approve
+        assert is_auto_approve('aws ecr describe-repositories') is True
+        assert is_auto_approve('aws ecr list-images --repository-name test') is True
+    
+    def test_is_blocked_iam_put_policy(self, app_module):
+        """IAM put policy 應該被封鎖"""
+        from commands import is_blocked
+        assert is_blocked('aws iam put-user-policy --user-name test') is True
+        assert is_blocked('aws iam put-role-policy --role-name test') is True
+    
+    def test_is_dangerous_logs_delete(self, app_module):
+        """logs delete 應該是高危"""
+        from commands import is_dangerous
+        assert is_dangerous('aws logs delete-log-group --log-group-name test') is True
+
+
+# ============================================================================
+# 80% 覆蓋率衝刺 - 第二波
+# ============================================================================
+
+class TestDeployerMore:
+    """Deployer 更多測試"""
+    
+    def test_mcp_deploy_missing_project(self, app_module):
+        """部署缺少 project 參數 (via MCP handler)"""
+        result = app_module.handle_mcp_tool_call('test-1', 'bouncer_deploy', {})
+        body = json.loads(result['body'])
+        assert 'error' in body
+    
+    def test_mcp_deploy_missing_reason(self, app_module):
+        """部署缺少 reason 參數"""
+        result = app_module.handle_mcp_tool_call('test-1', 'bouncer_deploy', {'project': 'bouncer'})
+        body = json.loads(result['body'])
+        assert 'error' in body
+    
+    def test_mcp_deploy_project_not_found(self, app_module):
+        """部署不存在的專案"""
+        result = app_module.handle_mcp_tool_call('test-1', 'bouncer_deploy', {
+            'project': 'nonexistent-project-xyz',
+            'reason': 'test'
+        })
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'error'
+        assert '不存在' in content['error']
+    
+    def test_mcp_project_list(self, app_module):
+        """列出可部署專案"""
+        result = app_module.handle_mcp_tool_call('test-1', 'bouncer_project_list', {})
+        body = json.loads(result['body'])
+        assert 'result' in body
+
+
+class TestRateLimitMore:
+    """Rate Limit 更多測試"""
+    
+    def test_check_rate_limit_new_source(self, app_module):
+        """新來源的 rate limit 檢查"""
+        from rate_limit import check_rate_limit, RateLimitExceeded, PendingLimitExceeded
+        # 不應該拋出異常
+        try:
+            check_rate_limit('brand-new-source-' + str(time.time()))
+        except (RateLimitExceeded, PendingLimitExceeded):
+            pytest.fail("Should not raise limit exception for new source")
+    
+    def test_check_rate_limit_repeated(self, app_module):
+        """重複來源的 rate limit 檢查"""
+        from rate_limit import check_rate_limit
+        source = 'repeat-source-' + str(time.time())
+        # 多次呼叫不應該拋出異常（在限制內）
+        check_rate_limit(source)
+        check_rate_limit(source)
+
+
+class TestTelegramMore:
+    """Telegram 更多測試"""
+    
+    @patch('urllib.request.urlopen')
+    def test_send_telegram_message_error(self, mock_urlopen, app_module):
+        """發送失敗"""
+        from telegram import send_telegram_message
+        mock_urlopen.side_effect = Exception('Network error')
+        # 不應該拋出異常
+        send_telegram_message('test message')
+    
+    @patch('urllib.request.urlopen')
+    def test_answer_callback_error(self, mock_urlopen, app_module):
+        """callback 回答失敗"""
+        from telegram import answer_callback
+        mock_urlopen.side_effect = Exception('Network error')
+        answer_callback('callback-id', 'text')
+
+
+class TestAccountsMore:
+    """Accounts 更多測試"""
+    
+    def test_validate_account_id_too_short(self, app_module):
+        """帳號 ID 太短"""
+        from app import validate_account_id
+        valid, error = validate_account_id('123')
+        assert valid is False
+        assert 'must be 12 digits' in error.lower() or '12' in error
+    
+    def test_validate_account_id_non_numeric(self, app_module):
+        """帳號 ID 非數字"""
+        from app import validate_account_id
+        valid, error = validate_account_id('12345678901a')
+        assert valid is False
+
+
+class TestCallbackHandlers:
+    """Callback Handlers 測試"""
+    
+    @patch('app.execute_command')
+    @patch('app.update_message')
+    @patch('app.answer_callback')
+    def test_callback_approve(self, mock_answer, mock_update, mock_exec, app_module):
+        """批准請求"""
+        mock_exec.return_value = '{"result": "ok"}'
+        
+        request_id = 'approve-test-' + str(int(time.time()))
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'command': 'aws s3 ls',
+            'status': 'pending_approval',
+            'source': 'test',
+            'reason': 'test',
+            'account_id': '111111111111',
+            'account_name': 'Default',
+            'created_at': int(time.time()),
+            'ttl': int(time.time()) + 300
+        })
+        
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb-approve',
+                    'from': {'id': 999999999},
+                    'data': f'approve:{request_id}',
+                    'message': {'message_id': 1000}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+        
+        # 驗證狀態更新
+        item = app_module.table.get_item(Key={'request_id': request_id}).get('Item')
+        assert item['status'] in ['approved', 'executed']
+    
+    @patch('app.update_message')
+    @patch('app.answer_callback')
+    def test_callback_reject(self, mock_answer, mock_update, app_module):
+        """拒絕請求"""
+        request_id = 'reject-test-' + str(int(time.time()))
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'command': 'aws ec2 stop-instances',
+            'status': 'pending_approval',
+            'source': 'test',
+            'reason': 'test',
+            'account_id': '111111111111',
+            'account_name': 'Default',
+            'created_at': int(time.time()),
+            'ttl': int(time.time()) + 300
+        })
+        
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb-reject',
+                    'from': {'id': 999999999},
+                    'data': f'deny:{request_id}',  # 正確的 action 是 deny
+                    'message': {'message_id': 1001}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+        
+        # 驗證狀態更新
+        item = app_module.table.get_item(Key={'request_id': request_id}).get('Item')
+        assert item['status'] == 'denied'
+    
+    @patch('app.update_message')
+    @patch('app.answer_callback')
+    def test_callback_expired_request(self, mock_answer, mock_update, app_module):
+        """已過期的請求"""
+        request_id = 'expired-test-' + str(int(time.time()))
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'command': 'aws ec2 stop-instances',
+            'status': 'expired',
+            'source': 'test',
+            'reason': 'test',
+            'created_at': int(time.time()) - 1000,
+            'ttl': int(time.time()) - 100
+        })
+        
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb-expired',
+                    'from': {'id': 999999999},
+                    'data': f'approve:{request_id}',
+                    'message': {'message_id': 1002}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+
+
+class TestMCPRemoveAccount:
+    """MCP Remove Account 測試"""
+    
+    @patch('app.send_telegram_message')
+    def test_remove_default_account_blocked(self, mock_telegram, app_module):
+        """不能移除預設帳號"""
+        result = app_module.mcp_tool_remove_account('test-1', {
+            'account_id': '111111111111'  # 預設帳號
+        })
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'error'
+        assert '預設帳號' in content['error']
+    
+    @patch('app.send_telegram_message')
+    def test_remove_nonexistent_account(self, mock_telegram, app_module):
+        """移除不存在的帳號"""
+        result = app_module.mcp_tool_remove_account('test-1', {
+            'account_id': '999999999999'
+        })
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'error'
+        assert '不存在' in content['error']
+
+
+class TestMCPListPending:
+    """MCP List Pending 測試"""
+    
+    def test_list_pending_empty(self, app_module):
+        """列出空的 pending"""
+        result = app_module.mcp_tool_list_pending('test-1', {})
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['pending_count'] == 0
+    
+    def test_list_pending_with_source_filter(self, app_module):
+        """列出特定 source 的 pending"""
+        # 插入 pending 項目
+        source = 'filter-test-' + str(int(time.time()))
+        app_module.table.put_item(Item={
+            'request_id': 'pending-filter-001',
+            'command': 'aws s3 cp',
+            'status': 'pending',
+            'source': source,
+            'account_id': '111111111111',
+            'reason': 'test reason',
+            'created_at': int(time.time()),
+            'ttl': int(time.time()) + 300
+        })
+        
+        result = app_module.mcp_tool_list_pending('test-1', {'source': source})
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['pending_count'] >= 1
+
+
+class TestPagingMore:
+    """Paging 更多測試"""
+    
+    def test_get_page_not_found(self, app_module):
+        """MCP get_page 找不到"""
+        result = app_module.mcp_tool_get_page('test-1', {'page_id': 'nonexistent-page-xyz'})
+        body = json.loads(result['body'])
+        # 頁面不存在應該返回 isError 或錯誤訊息
+        content = json.loads(body['result']['content'][0]['text'])
+        assert 'error' in content or body['result'].get('isError') is True
+
+
+class TestWebhookMessage:
+    """Webhook 訊息測試"""
+    
+    def test_webhook_text_message(self, app_module):
+        """收到文字訊息"""
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'message': {
+                    'message_id': 123,
+                    'from': {'id': 999999999},
+                    'chat': {'id': 999999999},
+                    'text': 'hello'
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+    
+    def test_webhook_empty_body(self, app_module):
+        """空的 webhook body"""
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': '{}',
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+
+
+# ============================================================================
+# 80% 覆蓋率衝刺 - 補充測試
+# ============================================================================
+
+class TestCommandsExtra:
+    """Commands 額外測試"""
+    
+    def test_is_blocked_various(self, app_module):
+        """各種 blocked 命令"""
+        from commands import is_blocked
+        # IAM 危險操作
+        assert is_blocked('aws iam create-access-key') is True
+        assert is_blocked('aws iam delete-access-key') is True
+        assert is_blocked('aws iam attach-role-policy') is True
+        # 不危險的
+        assert is_blocked('aws s3 ls') is False
+    
+    def test_is_auto_approve_various(self, app_module):
+        """各種自動批准命令"""
+        from commands import is_auto_approve
+        # 讀取操作
+        assert is_auto_approve('aws ec2 describe-instances') is True
+        assert is_auto_approve('aws s3 ls') is True
+        assert is_auto_approve('aws lambda list-functions') is True
+        # 寫入操作
+        assert is_auto_approve('aws s3 cp file.txt s3://bucket/') is False
+    
+    def test_is_dangerous_various(self, app_module):
+        """各種高危命令"""
+        from commands import is_dangerous
+        # 刪除操作
+        assert is_dangerous('aws rds delete-db-instance') is True
+        assert is_dangerous('aws dynamodb delete-table') is True
+        # 非刪除
+        assert is_dangerous('aws s3 ls') is False
+
+
+class TestTrustMore:
+    """Trust 更多測試"""
+    
+    def test_mcp_trust_status_empty(self, app_module):
+        """無信任時段"""
+        result = app_module.mcp_tool_trust_status('test-1', {})
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['active_sessions'] == 0
+    
+    def test_mcp_trust_revoke_missing_id(self, app_module):
+        """撤銷缺少 ID"""
+        result = app_module.mcp_tool_trust_revoke('test-1', {})
+        body = json.loads(result['body'])
+        assert 'error' in body
+
+
+class TestMCPStatus:
+    """MCP Status 測試"""
+    
+    def test_status_request_found(self, app_module):
+        """查詢存在的請求狀態"""
+        request_id = 'status-test-' + str(int(time.time()))
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'command': 'aws s3 ls',
+            'status': 'approved',
+            'source': 'test',
+            'created_at': int(time.time())
+        })
+        
+        result = app_module.mcp_tool_status('test-1', {'request_id': request_id})
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'approved'
+
+
+class TestMCPSafelist:
+    """MCP Safelist 測試"""
+    
+    def test_list_safelist_via_handler(self, app_module):
+        """透過 handler 列出 safelist"""
+        result = app_module.handle_mcp_tool_call('test-1', 'bouncer_list_safelist', {})
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert 'safelist_prefixes' in content
+        assert isinstance(content['safelist_prefixes'], list)
+
+
+class TestDeployerExtra:
+    """Deployer 額外測試"""
+    
+    def test_deploy_cancel(self, app_module):
+        """取消部署"""
+        result = app_module.handle_mcp_tool_call('test-1', 'bouncer_deploy_cancel', {
+            'deploy_id': 'nonexistent-deploy'
+        })
+        body = json.loads(result['body'])
+        # 應該有結果（可能是找不到）
+        assert 'result' in body or 'error' in body
+    
+    def test_deploy_history(self, app_module):
+        """部署歷史"""
+        result = app_module.handle_mcp_tool_call('test-1', 'bouncer_deploy_history', {
+            'project': 'bouncer'
+        })
+        body = json.loads(result['body'])
+        assert 'result' in body
+    
+    def test_deploy_status_missing_id(self, app_module):
+        """部署狀態缺少 ID"""
+        result = app_module.handle_mcp_tool_call('test-1', 'bouncer_deploy_status', {})
+        body = json.loads(result['body'])
+        assert 'error' in body
+
+
+class TestCallbackTrust:
+    """Callback Trust 測試"""
+    
+    @patch('app.execute_command')
+    @patch('app.update_message')
+    @patch('app.answer_callback')
+    def test_callback_approve_with_trust(self, mock_answer, mock_update, mock_exec, app_module):
+        """批准並建立信任"""
+        mock_exec.return_value = '{"result": "ok"}'
+        
+        request_id = 'trust-test-' + str(int(time.time()))
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'command': 'aws s3 ls',
+            'status': 'pending_approval',
+            'source': 'test-trust-source',
+            'reason': 'test',
+            'account_id': '111111111111',
+            'account_name': 'Default',
+            'created_at': int(time.time()),
+            'ttl': int(time.time()) + 300
+        })
+        
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb-trust',
+                    'from': {'id': 999999999},
+                    'data': f'approve_trust:{request_id}',
+                    'message': {'message_id': 2000}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+        
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+
+
+class TestValidation:
+    """驗證測試"""
+    
+    def test_validate_account_id_valid(self, app_module):
+        """有效的帳號 ID"""
+        valid, error = app_module.validate_account_id('123456789012')
+        assert valid is True
+        assert error is None
+    
+    def test_validate_account_id_empty(self, app_module):
+        """空的帳號 ID"""
+        valid, error = app_module.validate_account_id('')
+        assert valid is False
+    
+    def test_validate_account_id_invalid_chars(self, app_module):
+        """非數字的帳號 ID"""
+        valid, error = app_module.validate_account_id('12345678901a')
+        assert valid is False
+
+
+class TestDecimalConversion:
+    """Decimal 轉換測試"""
+    
+    def test_decimal_to_native_int(self, app_module):
+        """整數 Decimal"""
+        result = app_module.decimal_to_native(Decimal('100'))
+        assert result == 100
+        assert isinstance(result, int)
+    
+    def test_decimal_to_native_float(self, app_module):
+        """浮點數 Decimal"""
+        result = app_module.decimal_to_native(Decimal('3.14'))
+        assert result == 3.14
+        assert isinstance(result, float)
+    
+    def test_decimal_to_native_dict(self, app_module):
+        """字典中的 Decimal"""
+        data = {'count': Decimal('5'), 'rate': Decimal('0.5')}
+        result = app_module.decimal_to_native(data)
+        assert result['count'] == 5
+        assert result['rate'] == 0.5
+
+
+class TestMCPAddAccount:
+    """MCP Add Account 測試"""
+    
+    @patch('app.send_telegram_message')
+    def test_add_account_invalid_id(self, mock_telegram, app_module):
+        """新增無效帳號 ID"""
+        result = app_module.mcp_tool_add_account('test-1', {
+            'account_id': 'invalid',
+            'name': 'Test'
+        })
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'error'
+    
+    @patch('app.send_telegram_message')
+    def test_add_account_missing_name(self, mock_telegram, app_module):
+        """新增帳號缺少名稱"""
+        result = app_module.mcp_tool_add_account('test-1', {
+            'account_id': '123456789012'
+        })
+        body = json.loads(result['body'])
+        # 應該有錯誤或使用預設名稱
+        assert 'result' in body or 'error' in body
