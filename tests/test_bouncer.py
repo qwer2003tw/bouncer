@@ -1182,5 +1182,154 @@ class TestCommandsModule:
         assert is_auto_approve('aws s3 cp file s3://bucket/') is False
 
 
+# ============================================================================
+# MCP Tool Handlers 測試（補充）
+# ============================================================================
+
+class TestMCPToolStatus:
+    """bouncer_status MCP tool 測試"""
+    
+    def test_status_missing_request_id(self, app_module):
+        """缺少 request_id"""
+        result = app_module.mcp_tool_status('test-1', {})
+        assert 'error' in str(result).lower() or 'missing' in str(result).lower()
+
+
+class TestMCPToolGetPage:
+    """bouncer_get_page MCP tool 測試"""
+    
+    def test_get_page_missing_request_id(self, app_module):
+        """缺少 request_id"""
+        result = app_module.mcp_tool_get_page('test-1', {'page': 2})
+        assert 'error' in str(result).lower() or 'missing' in str(result).lower()
+
+
+class TestMCPToolExecuteEdgeCases:
+    """bouncer_execute 邊界情況測試"""
+    
+    def test_execute_empty_command(self, app_module):
+        """空命令"""
+        result = app_module.mcp_tool_execute('test-1', {'command': ''})
+        assert 'error' in str(result).lower()
+    
+    def test_execute_whitespace_command(self, app_module):
+        """只有空白的命令"""
+        result = app_module.mcp_tool_execute('test-1', {'command': '   '})
+        assert 'error' in str(result).lower()
+
+
+# ============================================================================
+# Telegram Command Handlers 測試
+# ============================================================================
+
+class TestTelegramCommands:
+    """Telegram 命令處理測試"""
+    
+    def test_handle_accounts_command(self, app_module):
+        """測試 /accounts 命令"""
+        with patch.object(app_module, 'list_accounts', return_value=[
+            {'account_id': '123456789012', 'name': 'Test', 'enabled': True}
+        ]), patch.object(app_module, 'send_telegram_message_to'):
+            result = app_module.handle_accounts_command('12345')
+            assert result['statusCode'] == 200
+    
+    def test_handle_help_command(self, app_module):
+        """測試 /help 命令"""
+        with patch.object(app_module, 'send_telegram_message_to'):
+            result = app_module.handle_help_command('12345')
+            assert result['statusCode'] == 200
+
+
+# ============================================================================
+# HMAC 驗證測試
+# ============================================================================
+
+class TestHMACVerification:
+    """HMAC 驗證測試"""
+    
+    def test_verify_hmac_missing_header(self, app_module):
+        """缺少 HMAC header"""
+        with patch('app.ENABLE_HMAC', True):
+            result = app_module.verify_hmac({}, 'body')
+            assert result is False
+    
+    def test_verify_hmac_with_empty_timestamp(self, app_module):
+        """空 timestamp"""
+        with patch('app.ENABLE_HMAC', True):
+            result = app_module.verify_hmac({'x-timestamp': ''}, 'body')
+            assert result is False
+
+
+# ============================================================================
+# Lambda Handler 測試
+# ============================================================================
+
+class TestLambdaHandler:
+    """Lambda handler 測試"""
+    
+    def test_handler_health_check(self, app_module):
+        """健康檢查"""
+        event = {'httpMethod': 'GET', 'path': '/prod/health'}
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+    
+    def test_handler_unknown_path(self, app_module):
+        """未知路徑"""
+        event = {'httpMethod': 'GET', 'path': '/unknown/path', 'headers': {}}
+        result = app_module.lambda_handler(event, None)
+        # 可能返回 404 或其他錯誤
+        assert 'statusCode' in result
+
+
+# ============================================================================
+# Helper Functions 測試
+# ============================================================================
+
+class TestHelperFunctions:
+    """輔助函數測試"""
+    
+    def test_get_header_case_insensitive(self, app_module):
+        """get_header 大小寫不敏感"""
+        headers = {'Content-Type': 'application/json'}
+        assert app_module.get_header(headers, 'content-type') == 'application/json'
+        assert app_module.get_header(headers, 'CONTENT-TYPE') == 'application/json'
+    
+    def test_get_header_not_found(self, app_module):
+        """get_header 找不到返回 None"""
+        headers = {'X-Custom': 'value'}
+        assert app_module.get_header(headers, 'X-Missing') is None
+    
+    def test_get_header_empty_dict(self, app_module):
+        """get_header 空 dict"""
+        assert app_module.get_header({}, 'any') is None
+
+
+# ============================================================================
+# MCP Result/Error 格式測試
+# ============================================================================
+
+class TestMCPFormatting:
+    """MCP 結果格式測試"""
+    
+    def test_mcp_result_format(self, app_module):
+        """mcp_result 格式正確"""
+        result = app_module.mcp_result('test-123', {'test': 'data'})
+        assert result['statusCode'] == 200
+        body = json.loads(result['body'])
+        assert body['jsonrpc'] == '2.0'
+        assert body['id'] == 'test-123'
+        assert 'result' in body
+    
+    def test_mcp_error_format(self, app_module):
+        """mcp_error 格式正確"""
+        result = app_module.mcp_error('test-123', -32600, 'Invalid request')
+        assert result['statusCode'] == 200
+        body = json.loads(result['body'])
+        assert body['jsonrpc'] == '2.0'
+        assert body['id'] == 'test-123'
+        assert body['error']['code'] == -32600
+        assert body['error']['message'] == 'Invalid request'
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
