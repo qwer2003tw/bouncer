@@ -118,6 +118,60 @@ Resources:
           Value: "no"
 
   # ============================================================
+  # DynamoDB - 命令歷史記錄（序列分析用）
+  # ============================================================
+  CommandHistoryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "bouncer-${Environment}-command-history"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: Bouncer
+        - Key: auto-delete
+          Value: "no"
+
+  # ============================================================
+  # DynamoDB - Shadow Approval 記錄（智慧審批數據收集）
+  # ============================================================
+  ShadowApprovalsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "bouncer-${Environment}-shadow-approvals"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: request_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: request_id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Project
+          Value: Bouncer
+        - Key: auto-delete
+          Value: "no"
+        - Key: Purpose
+          Value: "Smart approval shadow mode data collection"
+
+  # ============================================================
   # Lambda - 主函數
   # ============================================================
   ApprovalFunction:
@@ -169,6 +223,8 @@ Resources:
           TELEGRAM_WEBHOOK_SECRET: !Ref TelegramWebhookSecret
           TABLE_NAME: !Ref RequestsTable
           ACCOUNTS_TABLE_NAME: !Ref AccountsTable
+          COMMAND_HISTORY_TABLE: !Ref CommandHistoryTable
+          SHADOW_TABLE: !Ref ShadowApprovalsTable
           ENABLE_HMAC: !Ref EnableHmac
           MCP_MAX_WAIT: !Ref McpMaxWait
           DEFAULT_ACCOUNT_ID: '111111111111'
@@ -182,6 +238,10 @@ Resources:
             TableName: !Ref RequestsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref AccountsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CommandHistoryTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ShadowApprovalsTable
         # Deployer tables
         - DynamoDBCrudPolicy:
             TableName: bouncer-projects

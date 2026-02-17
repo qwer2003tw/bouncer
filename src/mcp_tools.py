@@ -5,6 +5,7 @@ Bouncer - MCP Tool 實作模組
 """
 
 import json
+import os
 import time
 
 # 延遲 import 避免循環依賴
@@ -67,6 +68,49 @@ except ImportError:
 # 固定上傳桶
 UPLOAD_BUCKET = 'bouncer-uploads-111111111111'
 
+# Shadow mode 表名（用於收集智慧審批數據）
+SHADOW_TABLE_NAME = os.environ.get('SHADOW_TABLE', 'bouncer-shadow-approvals')
+
+
+def _log_smart_approval_shadow(
+    req_id: str,
+    command: str,
+    reason: str,
+    source: str,
+    account_id: str,
+    smart_decision,
+) -> None:
+    """
+    記錄智慧審批決策到 DynamoDB（Shadow Mode）
+    用於收集數據，評估準確率後再啟用
+    """
+    import time
+    import boto3 as boto3_shadow  # 避免與頂層 import 衝突
+    try:
+        dynamodb = boto3_shadow.resource('dynamodb')
+        table = dynamodb.Table(SHADOW_TABLE_NAME)
+
+        item = {
+            'request_id': req_id,
+            'timestamp': int(time.time()),
+            'command': command[:500],  # 截斷過長命令
+            'reason': reason[:200],
+            'source': source or 'unknown',
+            'account_id': account_id,
+            'smart_decision': smart_decision.decision,
+            'smart_score': smart_decision.final_score,
+            'smart_category': smart_decision.risk_result.category.value,
+            'smart_factors': [f.__dict__ for f in smart_decision.risk_result.factors[:5]],  # 只記錄前 5 個因素
+            # 30 天後自動刪除
+            'ttl': int(time.time()) + 30 * 24 * 60 * 60,
+        }
+
+        table.put_item(Item=item)
+        print(f"[SHADOW] Logged: {req_id} -> {smart_decision.decision} (score={smart_decision.final_score})")
+    except Exception as e:
+        # Shadow 記錄失敗不影響主流程
+        print(f"[SHADOW] Failed to log: {e}")
+
 
 def mcp_tool_execute(req_id, arguments: dict) -> dict:
     """MCP tool: bouncer_execute（預設異步，立即返回 request_id）"""
@@ -128,6 +172,32 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
         account_id = DEFAULT_ACCOUNT_ID
         assume_role = None
         account_name = 'Default'
+
+    # ========== Smart Approval Shadow Mode ==========
+    # 記錄風險評分但不影響現有決策（收集 100 樣本後評估）
+    smart_decision = None
+    try:
+        from smart_approval import evaluate_command as smart_evaluate
+        smart_decision = smart_evaluate(
+            command=command,
+            reason=reason,
+            source=source or 'unknown',
+            account_id=account_id,
+            enable_sequence_analysis=False  # 先不啟用序列分析
+        )
+        # 記錄到 DynamoDB（異步，不阻塞主流程）
+        _log_smart_approval_shadow(
+            req_id=req_id,
+            command=command,
+            reason=reason,
+            source=source,
+            account_id=account_id,
+            smart_decision=smart_decision,
+        )
+    except Exception as e:
+        # Shadow mode 失敗不影響主流程
+        print(f"[SHADOW] Smart approval error: {e}")
+    # ========== End Shadow Mode ==========
 
     # Layer 1: BLOCKED
     if is_blocked(command):

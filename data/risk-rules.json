@@ -1,0 +1,259 @@
+{
+  "version": "1.0.0",
+  "description": "Bouncer Risk Scoring Rules",
+  "last_updated": "2026-02-17",
+  
+  "weights": {
+    "verb": 0.40,
+    "parameter": 0.30,
+    "context": 0.20,
+    "account": 0.10
+  },
+  
+  "verb_scores": {
+    "describe": 0,
+    "list": 0,
+    "get": 5,
+    "head": 0,
+    "scan": 10,
+    "query": 10,
+    "tail": 5,
+    "filter": 5,
+    "ls": 10,
+    "create": 65,
+    "put": 70,
+    "update": 75,
+    "modify": 80,
+    "set": 70,
+    "add": 65,
+    "attach": 75,
+    "associate": 70,
+    "register": 65,
+    "enable": 70,
+    "start": 55,
+    "invoke": 60,
+    "run": 65,
+    "execute": 70,
+    "cp": 60,
+    "mv": 70,
+    "sync": 75,
+    "delete": 90,
+    "remove": 85,
+    "rm": 85,
+    "rb": 95,
+    "terminate": 95,
+    "destroy": 100,
+    "deregister": 80,
+    "detach": 75,
+    "dissociate": 70,
+    "disable": 75,
+    "stop": 70,
+    "revoke": 80,
+    "cancel": 60,
+    "import": 85,
+    "export": 80,
+    "assume": 95,
+    "schedule": 75
+  },
+  
+  "service_scores": {
+    "iam": 95,
+    "sts": 85,
+    "organizations": 100,
+    "sso": 90,
+    "sso-admin": 95,
+    "kms": 90,
+    "secretsmanager": 75,
+    "acm": 65,
+    "waf": 70,
+    "wafv2": 70,
+    "guardduty": 65,
+    "securityhub": 65,
+    "cloudformation": 80,
+    "cloudtrail": 85,
+    "config": 70,
+    "ec2": 40,
+    "lambda": 35,
+    "ecs": 40,
+    "eks": 50,
+    "batch": 40,
+    "s3": 30,
+    "dynamodb": 30,
+    "rds": 50,
+    "elasticache": 45,
+    "redshift": 50,
+    "vpc": 55,
+    "route53": 60,
+    "cloudfront": 50,
+    "apigateway": 40,
+    "apigatewayv2": 40,
+    "elb": 45,
+    "elbv2": 45,
+    "sns": 25,
+    "sqs": 25,
+    "events": 30,
+    "eventbridge": 30,
+    "logs": 15,
+    "cloudwatch": 20,
+    "xray": 15,
+    "ssm": 40,
+    "codebuild": 35,
+    "codepipeline": 45,
+    "codecommit": 30,
+    "ecr": 30,
+    "stepfunctions": 30,
+    "states": 30
+  },
+  
+  "parameter_patterns": [
+    {
+      "pattern": "--policy-document",
+      "score": 70,
+      "description": "IAM Policy 修改"
+    },
+    {
+      "pattern": "--assume-role-policy-document",
+      "score": 80,
+      "description": "Trust Policy 修改"
+    },
+    {
+      "pattern": "--role-arn",
+      "score": 60,
+      "description": "指定 IAM Role"
+    },
+    {
+      "pattern": "--access-key",
+      "score": 85,
+      "description": "Access Key 操作"
+    },
+    {
+      "pattern": "--secret",
+      "score": 70,
+      "description": "Secret 操作"
+    },
+    {
+      "pattern": "--password",
+      "score": 75,
+      "description": "Password 操作"
+    },
+    {
+      "pattern": "--security-group",
+      "score": 55,
+      "description": "Security Group 操作"
+    },
+    {
+      "pattern": "--cidr",
+      "score": 50,
+      "description": "CIDR 設定"
+    },
+    {
+      "pattern": "--public",
+      "score": 60,
+      "description": "公開存取設定"
+    },
+    {
+      "pattern": "--grant",
+      "score": 65,
+      "description": "權限授予"
+    },
+    {
+      "pattern": "--acl\\s+(public|authenticated)",
+      "score": 75,
+      "description": "公開 ACL 設定"
+    },
+    {
+      "pattern": "--key-id",
+      "score": 70,
+      "description": "KMS Key 操作"
+    },
+    {
+      "pattern": "--user-name",
+      "score": 65,
+      "description": "IAM User 操作"
+    },
+    {
+      "pattern": "--principal",
+      "score": 60,
+      "description": "Principal 設定"
+    }
+  ],
+  
+  "dangerous_flags": {
+    "--force": 30,
+    "--yes": 20,
+    "-y": 20,
+    "--no-wait": 15,
+    "--no-verify-ssl": 35,
+    "--recursive": 35,
+    "-r": 35,
+    "--include-all-instances": 30,
+    "--skip-final-snapshot": 40,
+    "--delete-automated-backups": 45,
+    "--no-preserve-deleted-files": 30,
+    "--delete": 35,
+    "--exact-timestamps": 5,
+    "--only-show-errors": 0,
+    "--quiet": 0,
+    "-q": 0
+  },
+  
+  "blocked_patterns": [
+    "iam\\s+delete-user",
+    "iam\\s+delete-role",
+    "iam\\s+create-user",
+    "iam\\s+create-access-key",
+    "iam\\s+attach-user-policy",
+    "iam\\s+attach-role-policy",
+    "iam\\s+put-user-policy",
+    "iam\\s+put-role-policy",
+    "sts\\s+assume-role",
+    "sts\\s+get-session-token",
+    "organizations\\s+",
+    "ec2\\s+modify-instance-attribute",
+    "ec2\\s+create-key-pair",
+    "ec2\\s+import-key-pair",
+    "kms\\s+schedule-key-deletion"
+  ],
+  
+  "account_sensitivity": {
+    "111111111111": 50,
+    "222222222222": 30,
+    "333333333333": 40
+  },
+  
+  "context_rules": [
+    {
+      "condition": "reason_empty",
+      "score_modifier": 15,
+      "description": "Reason 為空增加風險"
+    },
+    {
+      "condition": "reason_short",
+      "threshold": 10,
+      "score_modifier": 10,
+      "description": "Reason 過短增加風險"
+    },
+    {
+      "condition": "source_unknown",
+      "score_modifier": 20,
+      "description": "未知來源增加風險"
+    },
+    {
+      "condition": "after_hours",
+      "score_modifier": 10,
+      "description": "非工作時間增加風險"
+    },
+    {
+      "condition": "reason_contains_keywords",
+      "keywords": ["test", "debug", "try", "experiment"],
+      "score_modifier": -5,
+      "description": "測試/除錯關鍵字降低風險"
+    },
+    {
+      "condition": "reason_contains_keywords",
+      "keywords": ["urgent", "emergency", "hotfix"],
+      "score_modifier": 5,
+      "description": "緊急關鍵字略微增加風險"
+    }
+  ]
+}
