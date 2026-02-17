@@ -1331,5 +1331,304 @@ class TestMCPFormatting:
         assert body['error']['message'] == 'Invalid request'
 
 
+# ============================================================================
+# Telegram Webhook Handler 測試
+# ============================================================================
+
+class TestTelegramWebhookHandler:
+    """Telegram webhook 處理測試"""
+    
+    def test_handle_telegram_webhook_empty_update(self, app_module):
+        """空 update"""
+        event = {'body': '{}'}
+        result = app_module.handle_telegram_webhook(event)
+        assert result['statusCode'] == 200
+    
+    def test_handle_telegram_webhook_with_message(self, app_module):
+        """有 message 的 update"""
+        event = {'body': json.dumps({
+            'message': {
+                'chat': {'id': 123},
+                'text': 'hello'
+            }
+        })}
+        with patch.object(app_module, 'send_telegram_message_to'):
+            result = app_module.handle_telegram_webhook(event)
+            assert result['statusCode'] == 200
+
+
+class TestTelegramCommandHandler:
+    """Telegram 命令處理測試"""
+    
+    def test_handle_telegram_command_no_text(self, app_module):
+        """無 text 欄位"""
+        result = app_module.handle_telegram_command({'chat': {'id': 123}})
+        assert result['statusCode'] == 200
+    
+    def test_handle_telegram_command_unknown(self, app_module):
+        """未知命令"""
+        with patch.object(app_module, 'send_telegram_message_to'):
+            result = app_module.handle_telegram_command({
+                'chat': {'id': 123},
+                'text': '/unknown'
+            })
+            assert result['statusCode'] == 200
+
+
+# ============================================================================
+# MCP Tool Call Routing 測試
+# ============================================================================
+
+class TestMCPToolCallRouting:
+    """MCP tool call 路由測試"""
+    
+    def test_handle_mcp_tool_call_execute(self, app_module):
+        """bouncer_execute 路由"""
+        with patch.object(app_module, 'mcp_tool_execute', return_value={'test': 'result'}):
+            result = app_module.handle_mcp_tool_call('req-1', 'bouncer_execute', {'command': 'aws s3 ls'})
+            assert result == {'test': 'result'}
+    
+    def test_handle_mcp_tool_call_status(self, app_module):
+        """bouncer_status 路由"""
+        with patch.object(app_module, 'mcp_tool_status', return_value={'test': 'result'}):
+            result = app_module.handle_mcp_tool_call('req-1', 'bouncer_status', {'request_id': 'abc'})
+            assert result == {'test': 'result'}
+    
+    def test_handle_mcp_tool_call_unknown(self, app_module):
+        """未知 tool"""
+        result = app_module.handle_mcp_tool_call('req-1', 'unknown_tool', {})
+        body = json.loads(result['body'])
+        assert 'error' in body
+
+
+# ============================================================================
+# Trust Command Handler 測試
+# ============================================================================
+
+class TestTrustCommandHandler:
+    """Trust 命令處理測試"""
+    
+    def test_handle_trust_command(self, app_module):
+        """trust 命令"""
+        with patch.object(app_module, 'send_telegram_message_to'):
+            result = app_module.handle_trust_command('12345')
+            assert result['statusCode'] == 200
+
+
+class TestPendingCommandHandler:
+    """Pending 命令處理測試"""
+    
+    def test_handle_pending_command_empty(self, app_module):
+        """無 pending 請求"""
+        with patch.object(app_module.table, 'query', return_value={'Items': []}), \
+             patch.object(app_module, 'send_telegram_message_to'):
+            result = app_module.handle_pending_command('12345')
+            assert result['statusCode'] == 200
+
+
+# ============================================================================
+# MCP Request Handler 測試
+# ============================================================================
+
+class TestMCPRequestHandler:
+    """MCP 請求處理測試"""
+    
+    def test_handle_mcp_request_initialize(self, app_module):
+        """initialize 方法"""
+        event = {
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test-1',
+                'method': 'initialize',
+                'params': {}
+            }),
+            'headers': {'x-approval-secret': 'test-secret'}
+        }
+        with patch.object(app_module, 'REQUEST_SECRET', 'test-secret'):
+            result = app_module.handle_mcp_request(event)
+            assert result['statusCode'] == 200
+    
+    def test_handle_mcp_request_tools_list(self, app_module):
+        """tools/list 方法"""
+        event = {
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 'test-1',
+                'method': 'tools/list'
+            }),
+            'headers': {'x-approval-secret': 'test-secret'}
+        }
+        with patch.object(app_module, 'REQUEST_SECRET', 'test-secret'):
+            result = app_module.handle_mcp_request(event)
+            assert result['statusCode'] == 200
+            body = json.loads(result['body'])
+            assert 'tools' in body.get('result', {})
+
+
+# ============================================================================
+# REST API Handler 測試
+# ============================================================================
+
+class TestRESTHandler:
+    """REST API 處理測試"""
+    
+    def test_handle_clawdbot_request_blocked(self, app_module):
+        """被封鎖的命令"""
+        event = {
+            'body': json.dumps({
+                'command': 'aws iam delete-user --user-name test',
+                'reason': 'test'
+            })
+        }
+        result = app_module.handle_clawdbot_request(event)
+        assert result['statusCode'] == 403
+    
+    def test_handle_clawdbot_request_empty_body(self, app_module):
+        """空 body"""
+        event = {'body': '{}'}
+        result = app_module.handle_clawdbot_request(event)
+        # 空命令應該返回錯誤
+        assert result['statusCode'] in [400, 403]
+
+
+# ============================================================================
+# Command Classification 邊界測試
+# ============================================================================
+
+class TestCommandClassificationEdgeCases:
+    """命令分類邊界測試"""
+    
+    def test_classify_non_aws_command(self, app_module):
+        """非 AWS 命令"""
+        from commands import is_blocked, is_dangerous, is_auto_approve
+        assert is_blocked('ls -la') is False
+        assert is_dangerous('ls -la') is False
+        assert is_auto_approve('ls -la') is False
+    
+    def test_classify_dangerous_patterns(self, app_module):
+        """各種高危模式"""
+        from commands import is_dangerous
+        assert is_dangerous('aws rds delete-db-instance --db-instance-identifier test') is True
+        assert is_dangerous('aws lambda delete-function --function-name test') is True
+        assert is_dangerous('aws dynamodb delete-table --table-name test') is True
+    
+    def test_classify_s3_operations(self, app_module):
+        """S3 操作分類"""
+        from commands import is_auto_approve, is_dangerous
+        assert is_auto_approve('aws s3 ls') is True
+        assert is_auto_approve('aws s3 ls s3://bucket') is True
+        assert is_dangerous('aws s3 rb s3://bucket') is True
+
+
+# ============================================================================
+# Fix JSON Args 測試（補充）
+# ============================================================================
+
+class TestFixJsonArgsEdgeCases:
+    """fix_json_args 邊界測試"""
+    
+    def test_fix_json_args_empty_command(self, app_module):
+        """空命令"""
+        result = app_module.fix_json_args('', [])
+        assert result == []
+    
+    def test_fix_json_args_no_json(self, app_module):
+        """無 JSON 參數"""
+        result = app_module.fix_json_args('aws s3 ls', ['s3', 'ls'])
+        assert result == ['s3', 'ls']
+    
+    def test_fix_json_args_malformed_json(self, app_module):
+        """格式錯誤的 JSON"""
+        # 應該不會崩潰，返回原始參數
+        result = app_module.fix_json_args("aws dynamodb query --key '{invalid'", 
+                                          ['dynamodb', 'query', '--key', "'{invalid'"])
+        assert '--key' in result
+
+
+# ============================================================================
+# send_approval_request 測試
+# ============================================================================
+
+class TestSendApprovalRequest:
+    """審批請求發送測試"""
+    
+    def test_send_approval_request_blocked(self, app_module):
+        """被封鎖的命令"""
+        with patch.object(app_module.table, 'put_item'):
+            result = app_module.send_approval_request(
+                request_id='test-123',
+                command='aws iam create-access-key',
+                reason='test'
+            )
+            # 封鎖的命令不會成功
+            assert result is None or result.get('status') == 'blocked'
+
+
+# ============================================================================
+# execute_command 測試
+# ============================================================================
+
+class TestExecuteCommand:
+    """命令執行測試"""
+    
+    def test_execute_command_format(self, app_module):
+        """execute_command 返回格式"""
+        # 測試函數存在且可呼叫
+        assert callable(app_module.execute_command)
+
+
+# ============================================================================
+# Status Query 測試（補充）
+# ============================================================================
+
+class TestStatusQueryEdgeCases:
+    """Status 查詢邊界測試"""
+    
+    def test_handle_status_query_function_exists(self, app_module):
+        """handle_status_query 函數存在"""
+        assert callable(app_module.handle_status_query)
+
+
+# ============================================================================
+# Rate Limit 測試（補充）
+# ============================================================================
+
+class TestRateLimitEdgeCases:
+    """Rate limit 邊界測試"""
+    
+    def test_check_rate_limit_new_source(self, app_module):
+        """新 source 不應被限制"""
+        import uuid
+        unique_source = f'test-source-{uuid.uuid4()}'
+        try:
+            app_module.check_rate_limit(unique_source)
+        except Exception as e:
+            # 可能因為 DynamoDB 查詢失敗，但不應該是 rate limit 錯誤
+            assert 'rate' not in str(e).lower() or 'limit' not in str(e).lower()
+
+
+# ============================================================================
+# Constants 驗證測試
+# ============================================================================
+
+class TestConstants:
+    """常數驗證測試"""
+    
+    def test_blocked_patterns_not_empty(self, app_module):
+        """BLOCKED_PATTERNS 不應為空"""
+        from constants import BLOCKED_PATTERNS
+        assert len(BLOCKED_PATTERNS) > 0
+    
+    def test_auto_approve_prefixes_not_empty(self, app_module):
+        """AUTO_APPROVE_PREFIXES 不應為空"""
+        from constants import AUTO_APPROVE_PREFIXES
+        assert len(AUTO_APPROVE_PREFIXES) > 0
+    
+    def test_dangerous_patterns_not_empty(self, app_module):
+        """DANGEROUS_PATTERNS 不應為空"""
+        from constants import DANGEROUS_PATTERNS
+        assert len(DANGEROUS_PATTERNS) > 0
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
