@@ -445,6 +445,40 @@ def mcp_tool_status(req_id, arguments: dict) -> dict:
         return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
 
 
+def mcp_tool_help(req_id, arguments: dict) -> dict:
+    """MCP tool: bouncer_help - 查詢 AWS CLI 命令說明"""
+    try:
+        from help_command import get_command_help, get_service_operations, format_help_text
+    except ImportError:
+        try:
+            from src.help_command import get_command_help, get_service_operations, format_help_text
+        except ImportError:
+            return mcp_error(req_id, -32603, 'help_command module not found')
+
+    command = arguments.get('command', '').strip()
+    service = arguments.get('service', '').strip()
+
+    if service:
+        # 列出服務的所有操作
+        result = get_service_operations(service)
+    elif command:
+        # 查詢特定命令的參數
+        result = get_command_help(command)
+    else:
+        return mcp_error(req_id, -32602, 'Missing parameter: command or service')
+
+    # 加入格式化文字版本
+    if 'error' not in result or 'similar_operations' in result:
+        result['formatted'] = format_help_text(result)
+
+    return mcp_result(req_id, {
+        'content': [{
+            'type': 'text',
+            'text': json.dumps(result, ensure_ascii=False, indent=2)
+        }]
+    })
+
+
 def mcp_tool_trust_status(req_id, arguments: dict) -> dict:
     """MCP tool: bouncer_trust_status"""
     table = _get_table()

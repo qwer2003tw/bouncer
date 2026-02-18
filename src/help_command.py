@@ -1,0 +1,227 @@
+"""
+Bouncer Help Command
+使用 botocore 提供 AWS CLI 命令說明
+"""
+import re
+from typing import Optional
+
+
+def get_command_help(command: str) -> dict:
+    """
+    取得 AWS CLI 命令的參數說明
+
+    Args:
+        command: AWS CLI 命令（例如：ec2 modify-instance-attribute）
+
+    Returns:
+        包含參數說明的 dict
+    """
+    try:
+        import botocore.session
+    except ImportError:
+        return {'error': 'botocore not available'}
+
+    # 解析命令
+    parts = command.strip().split()
+
+    # 移除 'aws' 前綴
+    if parts and parts[0] == 'aws':
+        parts = parts[1:]
+
+    if len(parts) < 2:
+        return {'error': f'無效命令格式，需要: aws <service> <action>，收到: {command}'}
+
+    service_name = parts[0]
+    action_raw = parts[1]
+
+    # 轉換 CLI action 格式為 API 格式
+    # 例如: modify-instance-attribute -> ModifyInstanceAttribute
+    action_name = ''.join(word.capitalize() for word in action_raw.split('-'))
+
+    try:
+        session = botocore.session.get_session()
+        service_model = session.get_service_model(service_name)
+    except Exception as e:
+        return {'error': f'找不到服務: {service_name}', 'detail': str(e)}
+
+    # 尋找操作
+    try:
+        operation_model = service_model.operation_model(action_name)
+    except Exception:
+        # 列出可用的操作
+        available_ops = list(service_model.operation_names)
+
+        # 找相似的
+        similar = find_similar_operations(action_name, available_ops)
+
+        return {
+            'error': f'找不到操作: {action_name}',
+            'service': service_name,
+            'similar_operations': similar[:5],
+            'hint': f'試試: aws {service_name} help 查看所有操作'
+        }
+
+    # 建立參數說明
+    result = {
+        'service': service_name,
+        'operation': action_raw,
+        'api_name': action_name,
+        'description': operation_model.documentation or 'No description',
+        'parameters': {},
+        'required': [],
+    }
+
+    # 解析輸入參數
+    input_shape = operation_model.input_shape
+    if input_shape:
+        for param_name, param_shape in input_shape.members.items():
+            cli_name = camel_to_kebab(param_name)
+            param_info = {
+                'cli_name': f'--{cli_name}',
+                'type': get_type_name(param_shape),
+                'description': clean_description(param_shape.documentation),
+            }
+
+            # 檢查是否必填
+            if hasattr(input_shape, 'required_members') and param_name in input_shape.required_members:
+                result['required'].append(cli_name)
+                param_info['required'] = True
+
+            result['parameters'][cli_name] = param_info
+
+    return result
+
+
+def get_service_operations(service_name: str) -> dict:
+    """
+    列出服務的所有操作
+    """
+    try:
+        import botocore.session
+        session = botocore.session.get_session()
+        service_model = session.get_service_model(service_name)
+
+        operations = []
+        for op_name in sorted(service_model.operation_names):
+            cli_name = camel_to_kebab(op_name)
+            operations.append(cli_name)
+
+        return {
+            'service': service_name,
+            'operation_count': len(operations),
+            'operations': operations
+        }
+    except Exception as e:
+        return {'error': f'找不到服務: {service_name}', 'detail': str(e)}
+
+
+def find_similar_operations(target: str, operations: list) -> list:
+    """找相似的操作名稱"""
+    target_lower = target.lower()
+    scored = []
+
+    for op in operations:
+        op_lower = op.lower()
+        # 簡單的相似度計算
+        score = 0
+
+        # 包含關鍵字
+        target_words = set(re.findall(r'[A-Z][a-z]+', target))
+        op_words = set(re.findall(r'[A-Z][a-z]+', op))
+        common = target_words & op_words
+        score += len(common) * 10
+
+        # 開頭相同
+        if op_lower.startswith(target_lower[:3]):
+            score += 5
+
+        if score > 0:
+            scored.append((score, camel_to_kebab(op)))
+
+    scored.sort(reverse=True)
+    return [op for _, op in scored]
+
+
+def camel_to_kebab(name: str) -> str:
+    """CamelCase -> kebab-case"""
+    s1 = re.sub('(.)([A-Z][a-z]+)', r'\1-\2', name)
+    return re.sub('([a-z0-9])([A-Z])', r'\1-\2', s1).lower()
+
+
+def get_type_name(shape) -> str:
+    """取得參數類型名稱"""
+    type_name = shape.type_name
+
+    if type_name == 'structure':
+        return 'JSON object'
+    elif type_name == 'list':
+        member = getattr(shape, 'member', None)
+        if member:
+            return f'list of {get_type_name(member)}'
+        return 'list'
+    elif type_name == 'map':
+        return 'JSON map'
+    elif type_name == 'boolean':
+        return 'boolean'
+    elif type_name == 'integer':
+        return 'integer'
+    elif type_name == 'timestamp':
+        return 'timestamp'
+    else:
+        return type_name
+
+
+def clean_description(doc: Optional[str]) -> str:
+    """清理文檔字串"""
+    if not doc:
+        return ''
+
+    # 移除 HTML tags
+    doc = re.sub(r'<[^>]+>', '', doc)
+    # 移除多餘空白
+    doc = ' '.join(doc.split())
+    # 截斷過長的描述
+    if len(doc) > 200:
+        doc = doc[:197] + '...'
+
+    return doc
+
+
+def format_help_text(help_data: dict) -> str:
+    """格式化為可讀文字"""
+    if 'error' in help_data:
+        lines = [f"❌ {help_data['error']}"]
+        if 'similar_operations' in help_data:
+            lines.append("\n類似的操作:")
+            for op in help_data['similar_operations'][:5]:
+                lines.append(f"  • aws {help_data.get('service', '?')} {op}")
+        if 'hint' in help_data:
+            lines.append(f"\n💡 {help_data['hint']}")
+        return '\n'.join(lines)
+
+    lines = [
+        f"📖 aws {help_data['service']} {help_data['operation']}",
+        "",
+        clean_description(help_data.get('description', ''))[:300],
+        "",
+        "參數:",
+    ]
+
+    # 先顯示必填參數
+    for name in help_data.get('required', []):
+        if name in help_data['parameters']:
+            param = help_data['parameters'][name]
+            lines.append(f"  --{name} (必填)")
+            lines.append(f"      類型: {param['type']}")
+            if param.get('description'):
+                lines.append(f"      {param['description'][:100]}")
+
+    # 再顯示選填參數
+    for name, param in help_data['parameters'].items():
+        if name not in help_data.get('required', []):
+            lines.append(f"  --{name}")
+            lines.append(f"      類型: {param['type']}")
+            if param.get('description'):
+                lines.append(f"      {param['description'][:100]}")
+
+    return '\n'.join(lines)

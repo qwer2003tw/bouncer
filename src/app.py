@@ -34,7 +34,7 @@ try:
     from utils import response, generate_request_id, decimal_to_native, mcp_result, mcp_error, get_header
     # 新模組
     from mcp_tools import (
-        mcp_tool_execute, mcp_tool_status, mcp_tool_trust_status, mcp_tool_trust_revoke,
+        mcp_tool_execute, mcp_tool_status, mcp_tool_help, mcp_tool_trust_status, mcp_tool_trust_revoke,
         mcp_tool_add_account, mcp_tool_list_accounts, mcp_tool_get_page,
         mcp_tool_list_pending, mcp_tool_remove_account, mcp_tool_upload,
     )
@@ -59,7 +59,7 @@ except ImportError:
     from src.utils import response, generate_request_id, decimal_to_native, mcp_result, mcp_error, get_header
     # 新模組
     from src.mcp_tools import (
-        mcp_tool_execute, mcp_tool_status, mcp_tool_trust_status, mcp_tool_trust_revoke,
+        mcp_tool_execute, mcp_tool_status, mcp_tool_help, mcp_tool_trust_status, mcp_tool_trust_revoke,
         mcp_tool_add_account, mcp_tool_list_accounts, mcp_tool_get_page,
         mcp_tool_list_pending, mcp_tool_remove_account, mcp_tool_upload,
     )
@@ -168,6 +168,22 @@ MCP_TOOLS = {
                 }
             },
             'required': ['request_id']
+        }
+    },
+    'bouncer_help': {
+        'description': '查詢 AWS CLI 命令的參數說明，不需要執行命令',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'command': {
+                    'type': 'string',
+                    'description': 'AWS CLI 命令（例如：ec2 modify-instance-attribute）'
+                },
+                'service': {
+                    'type': 'string',
+                    'description': '只列出服務的所有操作（例如：ec2）'
+                }
+            }
         }
     },
     'bouncer_list_safelist': {
@@ -494,6 +510,9 @@ def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
 
     elif tool_name == 'bouncer_status':
         return mcp_tool_status(req_id, arguments)
+
+    elif tool_name == 'bouncer_help':
+        return mcp_tool_help(req_id, arguments)
 
     elif tool_name == 'bouncer_list_safelist':
         return mcp_result(req_id, {

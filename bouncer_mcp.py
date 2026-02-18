@@ -81,6 +81,23 @@ TOOLS = [
         }
     },
     {
+        'name': 'bouncer_help',
+        'description': '查詢 AWS CLI 命令的參數說明。不需要執行命令，直接返回參數文檔。',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'command': {
+                    'type': 'string',
+                    'description': 'AWS CLI 命令（例如：ec2 modify-instance-attribute 或 aws ec2 describe-instances）'
+                },
+                'service': {
+                    'type': 'string',
+                    'description': '只列出服務的所有操作（例如：ec2）'
+                }
+            }
+        }
+    },
+    {
         'name': 'bouncer_add_account',
         'description': '新增或更新 AWS 帳號配置（需要 Telegram 審批）',
         'inputSchema': {
@@ -410,6 +427,34 @@ def tool_status(arguments: dict) -> dict:
 
     return http_request('GET', f'/status/{request_id}')
 
+
+def tool_help(arguments: dict) -> dict:
+    """查詢 AWS CLI 命令說明"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'help',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_help',
+            'arguments': arguments
+        }
+    }
+
+    result = http_request('POST', '/mcp', payload)
+
+    # 解析 MCP 回應
+    if 'result' in result:
+        content = result['result'].get('content', [])
+        if content and content[0].get('type') == 'text':
+            try:
+                return json.loads(content[0]['text'])
+            except Exception:
+                return result
+
+    return result
 
 
 def tool_add_account(arguments: dict) -> dict:
@@ -775,6 +820,8 @@ def handle_request(request: dict) -> dict:
             result = tool_execute(arguments)
         elif tool_name == 'bouncer_status':
             result = tool_status(arguments)
+        elif tool_name == 'bouncer_help':
+            result = tool_help(arguments)
         elif tool_name == 'bouncer_add_account':
             result = tool_add_account(arguments)
         elif tool_name == 'bouncer_list_accounts':

@@ -5381,3 +5381,57 @@ class TestMCPAddAccount:
         body = json.loads(result['body'])
         # 應該有錯誤或使用預設名稱
         assert 'result' in body or 'error' in body
+
+
+class TestHelpCommand:
+    """bouncer_help 測試"""
+
+    def test_help_ec2_describe(self):
+        """測試 EC2 describe 命令說明"""
+        from src.help_command import get_command_help
+
+        result = get_command_help('aws ec2 describe-instances')
+        assert 'error' not in result
+        assert result['service'] == 'ec2'
+        assert result['operation'] == 'describe-instances'
+        assert 'parameters' in result
+        assert 'instance-ids' in result['parameters']
+
+    def test_help_invalid_command(self):
+        """測試無效命令"""
+        from src.help_command import get_command_help
+
+        result = get_command_help('aws ec2 invalid-command')
+        assert 'error' in result
+        assert 'similar_operations' in result
+
+    def test_help_service_operations(self):
+        """測試列出服務操作"""
+        from src.help_command import get_service_operations
+
+        result = get_service_operations('s3')
+        assert 'error' not in result
+        assert result['service'] == 's3'
+        assert len(result['operations']) > 0
+
+    def test_help_format_text(self):
+        """測試格式化輸出"""
+        from src.help_command import get_command_help, format_help_text
+
+        result = get_command_help('aws s3 ls')
+        # s3 ls 可能沒有 input shape，測試不會報錯
+        formatted = format_help_text(result)
+        assert isinstance(formatted, str)
+
+    def test_mcp_tool_help(self, mock_dynamodb):
+        """測試 MCP tool 呼叫"""
+        from src.mcp_tools import mcp_tool_help
+        import json
+
+        result = mcp_tool_help('test-req', {'command': 'ec2 describe-instances'})
+        # mcp_tool_help 返回 Lambda response 格式
+        assert 'body' in result
+        body = json.loads(result['body'])
+        content = body['result']['content'][0]['text']
+        data = json.loads(content)
+        assert data['service'] == 'ec2'
