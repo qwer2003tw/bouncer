@@ -145,7 +145,7 @@ BLOCKED_PATTERNS = [
     'sts get-session-token',
     'organizations',
     # 其他絕對禁止
-    'ec2 modify-instance-attribute',
+    # 'ec2 modify-instance-attribute',  # 移到 compliance_checker 做細粒度控制
     'ec2 create-key-pair',
     'ec2 import-key-pair',
     'kms create-key',

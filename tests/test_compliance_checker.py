@@ -245,6 +245,69 @@ class TestSecurityGroupRules:
         assert is_compliant
 
 
+class TestEC2InstanceAttribute:
+    """EC2 modify-instance-attribute 細粒度控制測試 (B-EC2)"""
+
+    def test_user_data_blocked(self):
+        """B-EC2-01: 禁止修改 User Data"""
+        cmd = "aws ec2 modify-instance-attribute --instance-id i-123 --user-data file://script.sh"
+        is_compliant, violation = check_compliance(cmd)
+        assert not is_compliant
+        assert violation.rule_id == "B-EC2-01"
+
+    def test_iam_instance_profile_blocked(self):
+        """B-EC2-02: 禁止直接修改 Instance Profile"""
+        cmd = "aws ec2 modify-instance-attribute --instance-id i-123 --iam-instance-profile Name=AdminRole"
+        is_compliant, violation = check_compliance(cmd)
+        assert not is_compliant
+        assert violation.rule_id == "B-EC2-02"
+
+    def test_source_dest_check_false_blocked(self):
+        """B-EC2-03: 禁止關閉 Source/Dest Check"""
+        cmd = "aws ec2 modify-instance-attribute --instance-id i-123 --source-dest-check false"
+        is_compliant, violation = check_compliance(cmd)
+        assert not is_compliant
+        assert violation.rule_id == "B-EC2-03"
+
+    def test_kernel_blocked(self):
+        """B-EC2-04: 禁止修改 Kernel"""
+        cmd = "aws ec2 modify-instance-attribute --instance-id i-123 --kernel aki-12345"
+        is_compliant, violation = check_compliance(cmd)
+        assert not is_compliant
+        assert violation.rule_id == "B-EC2-04"
+
+    def test_ramdisk_blocked(self):
+        """B-EC2-05: 禁止修改 Ramdisk"""
+        cmd = "aws ec2 modify-instance-attribute --instance-id i-123 --ramdisk ari-12345"
+        is_compliant, violation = check_compliance(cmd)
+        assert not is_compliant
+        assert violation.rule_id == "B-EC2-05"
+
+    def test_instance_type_ok(self):
+        """允許修改 Instance Type"""
+        cmd = "aws ec2 modify-instance-attribute --instance-id i-123 --instance-type m8i.xlarge"
+        is_compliant, violation = check_compliance(cmd)
+        assert is_compliant
+
+    def test_cpu_options_ok(self):
+        """允許修改 CPU Options (nested virtualization)"""
+        cmd = "aws ec2 modify-instance-attribute --instance-id i-123 --cpu-options AmdSevSnp=enabled"
+        is_compliant, violation = check_compliance(cmd)
+        assert is_compliant
+
+    def test_disable_api_termination_ok(self):
+        """允許修改 Disable API Termination"""
+        cmd = "aws ec2 modify-instance-attribute --instance-id i-123 --disable-api-termination"
+        is_compliant, violation = check_compliance(cmd)
+        assert is_compliant
+
+    def test_ebs_optimized_ok(self):
+        """允許修改 EBS Optimized"""
+        cmd = "aws ec2 modify-instance-attribute --instance-id i-123 --ebs-optimized"
+        is_compliant, violation = check_compliance(cmd)
+        assert is_compliant
+
+
 class TestSafeCommands:
     """安全命令測試 - 應該通過"""
 

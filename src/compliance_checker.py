@@ -225,6 +225,48 @@ COMPLIANCE_RULES = [
         "SSH/RDP/資料庫端口不可對所有 IP 開放",
         "使用 VPN 或 Bastion Host，限制來源 IP",
     ),
+
+    # -------------------------------------------------------------------------
+    # EC2 Instance Attribute - 細粒度控制 (B-EC2)
+    # -------------------------------------------------------------------------
+    # 禁止危險的 attribute 修改
+    (
+        r"ec2\s+modify-instance-attribute.*--user-data",
+        "B-EC2-01",
+        "禁止修改 User Data",
+        "修改 User Data 可注入啟動腳本執行任意代碼",
+        "使用 SSM Run Command 或重建 instance",
+    ),
+    (
+        r"ec2\s+modify-instance-attribute.*(--iam-instance-profile|--instance-profile)",
+        "B-EC2-02",
+        "禁止直接修改 Instance Profile",
+        "修改 Instance Profile 可能導致權限提升",
+        "透過 associate-iam-instance-profile 並需要審批",
+    ),
+    (
+        r"ec2\s+modify-instance-attribute.*--source-dest-check\s+false",
+        "B-EC2-03",
+        "禁止關閉 Source/Dest Check",
+        "關閉 Source/Dest Check 可讓 instance 成為網路跳板",
+        "只有 NAT instance 需要關閉，請提供具體理由",
+    ),
+    (
+        r"ec2\s+modify-instance-attribute.*--kernel",
+        "B-EC2-04",
+        "禁止修改 Kernel",
+        "修改 Kernel 可能影響系統安全性",
+        "使用標準 AMI",
+    ),
+    (
+        r"ec2\s+modify-instance-attribute.*--ramdisk",
+        "B-EC2-05",
+        "禁止修改 Ramdisk",
+        "修改 Ramdisk 可能影響系統安全性",
+        "使用標準 AMI",
+    ),
+    # 允許的 attribute（不在此列表中的會被審批流程處理）：
+    # --instance-type, --cpu-options, --disable-api-termination, --ebs-optimized, etc.
 ]
 
 
