@@ -199,6 +199,50 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
         print(f"[SHADOW] Smart approval error: {e}")
     # ========== End Shadow Mode ==========
 
+    # Layer 0: 合規檢查（最高優先，違反安規直接攔截）
+    try:
+        from compliance_checker import check_compliance
+        is_compliant, violation = check_compliance(command)
+        if not is_compliant:
+            print(f"[COMPLIANCE] Blocked: {violation.rule_id} - {violation.rule_name}")
+            return mcp_result(req_id, {
+                'content': [{
+                    'type': 'text',
+                    'text': json.dumps({
+                        'status': 'compliance_violation',
+                        'rule_id': violation.rule_id,
+                        'rule_name': violation.rule_name,
+                        'description': violation.description,
+                        'remediation': violation.remediation,
+                        'command': command[:200],
+                    })
+                }],
+                'isError': True
+            })
+    except ImportError:
+        # compliance_checker 模組不存在時跳過（向後兼容）
+        try:
+            from src.compliance_checker import check_compliance
+            is_compliant, violation = check_compliance(command)
+            if not is_compliant:
+                print(f"[COMPLIANCE] Blocked: {violation.rule_id} - {violation.rule_name}")
+                return mcp_result(req_id, {
+                    'content': [{
+                        'type': 'text',
+                        'text': json.dumps({
+                            'status': 'compliance_violation',
+                            'rule_id': violation.rule_id,
+                            'rule_name': violation.rule_name,
+                            'description': violation.description,
+                            'remediation': violation.remediation,
+                            'command': command[:200],
+                        })
+                    }],
+                    'isError': True
+                })
+        except ImportError:
+            pass  # 向後兼容
+
     # Layer 1: BLOCKED
     if is_blocked(command):
         return mcp_result(req_id, {
