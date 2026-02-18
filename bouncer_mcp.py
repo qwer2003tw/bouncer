@@ -46,10 +46,6 @@ TOOLS = [
                     'type': 'string',
                     'description': 'AWS CLI 命令（例如：aws ec2 describe-instances）'
                 },
-                'account': {
-                    'type': 'string',
-                    'description': '目標 AWS 帳號 ID（12 位數字），不填則使用預設帳號'
-                },
                 'reason': {
                     'type': 'string',
                     'description': '執行原因，會顯示在審批請求中，讓審批者了解用途'
@@ -57,6 +53,10 @@ TOOLS = [
                 'source': {
                     'type': 'string',
                     'description': '來源標識（例如：Clawdbot、Steven 的 OpenClaw）'
+                },
+                'account': {
+                    'type': 'string',
+                    'description': '目標 AWS 帳號 ID（12 位數字），不填則使用預設帳號'
                 },
                 'sync': {
                     'type': 'boolean',
