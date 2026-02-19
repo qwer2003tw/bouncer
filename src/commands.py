@@ -4,7 +4,6 @@ Bouncer - 命令分類與執行模組
 """
 import os
 import re
-import shlex
 from io import StringIO
 
 import boto3
@@ -19,111 +18,183 @@ __all__ = [
     'is_dangerous',
     'is_auto_approve',
     'execute_command',
-    'fix_json_args',
+    'aws_cli_split',
+    '_normalize_whitespace',
 ]
+
+
+def _normalize_whitespace(command: str) -> str:
+    """正規化命令中的空白（多空格 → 單空格、strip 前後空白）"""
+    return re.sub(r'\s+', ' ', command).strip()
 
 
 def is_blocked(command: str) -> bool:
     """Layer 1: 檢查命令是否在黑名單（絕對禁止）"""
+    # 正規化空白（防止雙空格繞過）
+    cmd_normalized = _normalize_whitespace(command)
     # 移除 --query 參數內容（JMESPath 語法可能包含反引號）
-    cmd_sanitized = re.sub(r"--query\s+['\"].*?['\"]", "--query REDACTED", command)
+    cmd_sanitized = re.sub(r"--query\s+['\"].*?['\"]", "--query REDACTED", cmd_normalized)
     cmd_sanitized = re.sub(r"--query\s+[^\s'\"]+", "--query REDACTED", cmd_sanitized)
     cmd_lower = cmd_sanitized.lower()
+    # 檢查危險旗標
+    if _has_blocked_flag(cmd_lower):
+        return True
+    # 檢查 file:// 協議
+    if _has_file_protocol(cmd_lower):
+        return True
     return any(pattern in cmd_lower for pattern in BLOCKED_PATTERNS)
+
+
+def _has_blocked_flag(cmd_lower: str) -> bool:
+    """檢查命令是否包含危險的全域旗標"""
+    blocked_flags = [
+        '--endpoint-url ',   # 重定向 API 請求到外部
+        '--profile ',        # 切換到未授權的 AWS profile
+        '--no-verify-ssl',   # 禁用 SSL 驗證（MITM 風險）
+        '--ca-bundle ',      # 使用自訂 CA 證書
+    ]
+    return any(flag in cmd_lower for flag in blocked_flags)
+
+
+def _has_file_protocol(cmd_lower: str) -> bool:
+    """檢查命令是否使用 file:// 或 fileb:// 協議讀取本地檔案"""
+    return 'file://' in cmd_lower or 'fileb://' in cmd_lower
 
 
 def is_dangerous(command: str) -> bool:
     """Layer 2: 檢查命令是否是高危操作（需特殊審批）"""
-    cmd_lower = command.lower()
+    cmd_lower = _normalize_whitespace(command).lower()
     return any(pattern in cmd_lower for pattern in DANGEROUS_PATTERNS)
 
 
 def is_auto_approve(command: str) -> bool:
     """Layer 3: 檢查命令是否可自動批准"""
-    cmd_lower = command.lower()
+    cmd_lower = _normalize_whitespace(command).lower()
     return any(cmd_lower.startswith(prefix) for prefix in AUTO_APPROVE_PREFIXES)
 
 
-def fix_json_args(command: str, cli_args: list) -> list:
+def aws_cli_split(command: str) -> list:
     """
-    修復被 shlex.split 破壞的 JSON/陣列參數
+    把 AWS CLI 命令字串拆成 argv list。
 
-    shlex.split 會移除引號，導致 {"key":"val"} 變成 {key:val}
-    此函數從原始命令中重新提取正確的 JSON
+    不依賴 shell 語法（shlex），理解 AWS CLI 常見結構：
+    - 引號字串："..." 或 '...'（去引號，空引號 → 空字串 token）
+    - JSON/陣列：{...} 或 [...]（巢狀安全）
+    - 函數/JMESPath：(...)（巢狀安全）
+    - 反引號：`...`（保留，JMESPath 字面值）
 
-    Args:
-        command: 原始命令字串
-        cli_args: shlex.split 後的參數列表（不含 'aws'）
-
-    Returns:
-        修復後的參數列表
+    空格是分隔符，除非在上述結構內部。
     """
-    for i, arg in enumerate(cli_args):
-        if i + 1 >= len(cli_args):
-            continue
-        next_val = cli_args[i + 1]
+    tokens = []
+    i = 0
+    n = len(command)
 
-        # 檢查是否是 JSON 或陣列開頭
-        if not (next_val.startswith('{') or next_val.startswith('[')):
-            continue
+    OPEN_BRACKETS = {'(', '[', '{'}
+    CLOSE_MAP = {'(': ')', '[': ']', '{': '}'}
 
-        # 簡單 JSON 匹配
-        pattern = re.escape(arg) + r'''\s+(['"]?)(\{[^}]*\}|\[[^\]]*\])\1'''
-        match = re.search(pattern, command)
-        if match:
-            cli_args[i + 1] = match.group(2)
+    while i < n:
+        # 跳過空白
+        if command[i] == ' ':
+            i += 1
             continue
 
-        # 複雜 JSON（多層巢狀）：用括號計數
-        param_pos = command.find(arg)
-        if param_pos == -1:
-            continue
-        after_param = command[param_pos + len(arg):].lstrip()
+        # 開始收集一個 token
+        token_parts = []
+        has_content = False  # 追蹤是否有任何內容（包括空引號）
 
-        # 移除開頭的引號
-        quote_char = None
-        if after_param and after_param[0] in "'\"":
-            quote_char = after_param[0]
-            after_param = after_param[1:]
+        while i < n and command[i] != ' ':
+            c = command[i]
 
-        if not after_param or after_param[0] not in '{[':
-            continue
-
-        # 計數括號找結尾
-        open_char = after_param[0]
-        close_char = '}' if open_char == '{' else ']'
-        depth = 0
-        in_string = False
-        escape_next = False
-        end_pos = 0
-
-        for j, c in enumerate(after_param):
-            if escape_next:
-                escape_next = False
+            # 引號：收集到配對引號，去引號
+            if c in ('"', "'"):
+                has_content = True
+                quote = c
+                i += 1
+                part = []
+                while i < n and command[i] != quote:
+                    if command[i] == '\\' and i + 1 < n and command[i + 1] == quote:
+                        part.append(command[i + 1])
+                        i += 2
+                    else:
+                        part.append(command[i])
+                        i += 1
+                if i < n:
+                    i += 1  # 跳過結尾引號
+                token_parts.append(''.join(part))
                 continue
-            if c == '\\':
-                escape_next = True
+
+            # 反引號：收集到配對反引號（保留反引號本身，JMESPath 語法）
+            if c == '`':
+                has_content = True
+                part = [c]
+                i += 1
+                while i < n and command[i] != '`':
+                    part.append(command[i])
+                    i += 1
+                if i < n:
+                    part.append(command[i])
+                    i += 1
+                token_parts.append(''.join(part))
                 continue
-            if c == '"' and not in_string:
-                in_string = True
-            elif c == '"' and in_string:
-                in_string = False
-            elif not in_string:
-                if c == open_char:
-                    depth += 1
-                elif c == close_char:
-                    depth -= 1
-                    if depth == 0:
-                        end_pos = j + 1
-                        break
 
-        if end_pos > 0:
-            json_str = after_param[:end_pos]
-            if quote_char and json_str.endswith(quote_char):
-                json_str = json_str[:-1]
-            cli_args[i + 1] = json_str
+            # 開括號 { [ (：用堆疊追蹤配對（支援巢狀混合括號）
+            if c in OPEN_BRACKETS:
+                has_content = True
+                stack = [c]
+                part = [c]
+                i += 1
 
-    return cli_args
+                while i < n and stack:
+                    cc = command[i]
+                    part.append(cc)
+
+                    if cc in ('"', "'"):
+                        # 字串：跳到配對引號
+                        q = cc
+                        i += 1
+                        while i < n:
+                            sc = command[i]
+                            part.append(sc)
+                            if sc == '\\' and i + 1 < n:
+                                part.append(command[i + 1])
+                                i += 2
+                                continue
+                            if sc == q:
+                                i += 1
+                                break
+                            i += 1
+                        continue
+                    elif cc == '`':
+                        # 反引號內容
+                        i += 1
+                        while i < n and command[i] != '`':
+                            part.append(command[i])
+                            i += 1
+                        if i < n:
+                            part.append(command[i])
+                            i += 1
+                        continue
+                    elif cc in OPEN_BRACKETS:
+                        stack.append(cc)
+                    elif stack and cc == CLOSE_MAP.get(stack[-1]):
+                        stack.pop()
+                        if not stack:
+                            i += 1
+                            break
+
+                    i += 1
+                token_parts.append(''.join(part))
+                continue
+
+            # 普通字元
+            has_content = True
+            token_parts.append(c)
+            i += 1
+
+        if has_content:
+            tokens.append(''.join(token_parts))
+
+    return tokens
 
 
 def execute_command(command: str, assume_role_arn: str = None) -> str:
@@ -139,20 +210,14 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
     import sys
 
     try:
-        # 使用 shlex.split 解析命令
-        try:
-            args = shlex.split(command)
-        except ValueError as e:
-            return f'❌ 命令格式錯誤: {str(e)}'
+        # 解析命令字串為 argv list
+        args = aws_cli_split(command)
 
         if not args or args[0] != 'aws':
             return '❌ 只能執行 aws CLI 命令'
 
         # 移除 'aws' 前綴，awscli.clidriver 不需要它
         cli_args = args[1:]
-
-        # 修復被 shlex 破壞的 JSON 參數
-        cli_args = fix_json_args(command, cli_args)
 
         # 保存原始環境變數
         original_env = {}
