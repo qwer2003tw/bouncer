@@ -129,5 +129,5 @@ jobs:
           ACCOUNTS_TABLE_NAME: test-accounts
           REQUEST_SECRET: test-secret
           TELEGRAM_BOT_TOKEN: test-token
-          APPROVED_CHAT_ID: '999999999'
+          APPROVED_CHAT_ID: '123456789'
           MCP_MAX_WAIT: '5'

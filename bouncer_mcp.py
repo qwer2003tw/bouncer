@@ -24,7 +24,7 @@ import urllib.error
 # 配置
 # ============================================================================
 
-API_URL = os.environ.get('BOUNCER_API_URL', 'https://YOUR_API_GATEWAY_URL')
+API_URL = os.environ.get('BOUNCER_API_URL', '')
 SECRET = os.environ.get('BOUNCER_SECRET', '')
 DEFAULT_TIMEOUT = int(os.environ.get('BOUNCER_TIMEOUT', '300'))  # 5 分鐘
 POLL_INTERVAL = 2  # 輪詢間隔（秒）

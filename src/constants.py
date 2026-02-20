@@ -19,8 +19,8 @@ TELEGRAM_WEBHOOK_SECRET = os.environ.get('TELEGRAM_WEBHOOK_SECRET', '')
 TELEGRAM_API_BASE = "https://api.telegram.org/bot"
 
 # 審批者 Chat ID（支援多個，逗號分隔）
-APPROVED_CHAT_IDS = set(os.environ.get('APPROVED_CHAT_ID', '999999999').replace(' ', '').split(','))
-APPROVED_CHAT_ID = os.environ.get('APPROVED_CHAT_ID', '999999999').split(',')[0]
+APPROVED_CHAT_IDS = set(os.environ.get('APPROVED_CHAT_ID', '').replace(' ', '').split(','))
+APPROVED_CHAT_ID = os.environ.get('APPROVED_CHAT_ID', '').split(',')[0]
 
 # ============================================================================
 # 環境變數 - DynamoDB
@@ -33,7 +33,7 @@ ACCOUNTS_TABLE_NAME = os.environ.get('ACCOUNTS_TABLE_NAME', 'bouncer-accounts')
 # 環境變數 - AWS
 # ============================================================================
 
-DEFAULT_ACCOUNT_ID = os.environ.get('DEFAULT_ACCOUNT_ID', '111111111111')
+DEFAULT_ACCOUNT_ID = os.environ.get('DEFAULT_ACCOUNT_ID', '')
 
 # ============================================================================
 # 環境變數 - 安全

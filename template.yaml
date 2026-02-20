@@ -14,7 +14,7 @@ Parameters:
     Description: 審批專用 Telegram Bot Token
   ApprovedChatId:
     Type: String
-    Default: "999999999"
+    Default: ""
     Description: 允許審批的 Telegram Chat ID（支援多個，用逗號分隔，例如：999999999,-5177412711）
   RequestSecret:
     Type: String
@@ -227,12 +227,12 @@ Resources:
           SHADOW_TABLE: !Ref ShadowApprovalsTable
           ENABLE_HMAC: !Ref EnableHmac
           MCP_MAX_WAIT: !Ref McpMaxWait
-          DEFAULT_ACCOUNT_ID: '111111111111'
+          DEFAULT_ACCOUNT_ID: !Ref DefaultAccountId
           # Deployer 相關
           PROJECTS_TABLE: bouncer-projects
           HISTORY_TABLE: bouncer-deploy-history
           LOCKS_TABLE: bouncer-deploy-locks
-          DEPLOY_STATE_MACHINE_ARN: arn:aws:states:us-east-1:111111111111:stateMachine:sam-deployer-workflow
+          DEPLOY_STATE_MACHINE_ARN: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:sam-deployer-workflow'
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref RequestsTable
@@ -258,7 +258,7 @@ Resources:
                 - states:StartExecution
                 - states:DescribeExecution
                 - states:StopExecution
-              Resource: arn:aws:states:us-east-1:111111111111:stateMachine:sam-deployer-workflow
+              Resource: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:sam-deployer-workflow'
             # PowerUser: 可以做大部分事情，但不能動 IAM
             - Sid: PowerUserAccess
               Effect: Allow

@@ -176,11 +176,11 @@ COMPLIANCE_RULES = [
     # Palisade - 跨帳號信任 (P-S3)
     # -------------------------------------------------------------------------
     (
-        r"iam\s+(update-assume-role-policy|create-role).*arn:aws:iam::(?!111111111111|222222222222|333333333333)\d{12}:",
+        r"iam\s+(update-assume-role-policy|create-role).*arn:aws:iam::(?!" + "|".join(TRUSTED_ACCOUNT_IDS) + r")\d{12}:",
         "P-S3",
         "IAM Role 禁止信任外部帳號",
         "IAM Role 不可信任組織外的 AWS 帳號",
-        "只能信任組織內帳號 (111111111111, 222222222222, 333333333333)",
+        "只能信任組織內帳號 (" + ", ".join(TRUSTED_ACCOUNT_IDS) + ")",
     ),
 
     # -------------------------------------------------------------------------

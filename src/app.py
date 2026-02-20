@@ -579,7 +579,7 @@ def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
 # ============================================================================
 
 # 固定上傳桶
-UPLOAD_BUCKET = 'bouncer-uploads-111111111111'
+UPLOAD_BUCKET = os.environ.get('UPLOAD_BUCKET', 'bouncer-uploads')
 
 
 def wait_for_upload_result(request_id: str, timeout: int = 300) -> dict:
@@ -1097,7 +1097,7 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
             account_line = f"🏢 *Role：* `{assume_role}`\n"
     else:
         # 預設帳號
-        default_account = os.environ.get('AWS_ACCOUNT_ID', '111111111111')
+        default_account = os.environ.get('AWS_ACCOUNT_ID', '')
         account_line = f"🏢 *帳號：* `{default_account}` (預設)\n"
 
     # 根據是否高危決定訊息格式

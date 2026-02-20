@@ -66,7 +66,7 @@ except ImportError:
 
 
 # 固定上傳桶
-UPLOAD_BUCKET = 'bouncer-uploads-111111111111'
+UPLOAD_BUCKET = os.environ.get('UPLOAD_BUCKET', 'bouncer-uploads')
 
 # Shadow mode 表名（用於收集智慧審批數據）
 SHADOW_TABLE_NAME = os.environ.get('SHADOW_TABLE', 'bouncer-shadow-approvals')

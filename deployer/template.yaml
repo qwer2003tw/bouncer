@@ -11,7 +11,7 @@ Parameters:
   
   TelegramChatId:
     Type: String
-    Default: "999999999"
+    Default: ""
     Description: Telegram Chat ID
   
   GitHubPATSecretName:
