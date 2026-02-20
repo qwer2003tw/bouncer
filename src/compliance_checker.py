@@ -7,9 +7,13 @@ Compliance Checker - 三份安規合規檢查
 - P-S1~S5: Palisade 安全規則
 - CS: Code Scanning 規則
 """
+import os
 import re
 from dataclasses import dataclass
 from typing import Optional
+
+# 受信任的組織內 AWS 帳號 ID（用於合規檢查）
+TRUSTED_ACCOUNT_IDS = [x for x in os.environ.get('TRUSTED_ACCOUNT_IDS', '').split(',') if x]
 
 
 @dataclass
