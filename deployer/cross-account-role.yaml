@@ -1,0 +1,464 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Bouncer Deployer Cross-Account Role v1.0.0
+  在目標帳號建立 BouncerDeployerRole，讓主帳號的 Deployer 可以跨帳號部署 SAM 專案。
+
+  使用方式：
+    aws cloudformation deploy \
+      --template-file cross-account-role.yaml \
+      --stack-name bouncer-deployer-role \
+      --parameter-overrides \
+        BouncerAccountId=YOUR_BOUNCER_ACCOUNT_ID \
+        PermissionLevel=admin \
+      --capabilities CAPABILITY_NAMED_IAM
+
+Parameters:
+  BouncerAccountId:
+    Type: String
+    Description: 部署 Bouncer Deployer 的主帳號 ID（允許 AssumeRole 的來源）
+    AllowedPattern: "^[0-9]{12}$"
+    ConstraintDescription: 必須是 12 位數的 AWS 帳號 ID
+
+  PermissionLevel:
+    Type: String
+    Default: scoped
+    AllowedValues:
+      - admin
+      - scoped
+    Description: >
+      權限等級：
+      - admin: AdministratorAccess（簡單，適合信任的內部帳號）
+      - scoped: 最小權限（適合生產環境或需要嚴格控制的帳號）
+
+  ExternalId:
+    Type: String
+    Default: bouncer-deployer
+    Description: STS AssumeRole 的 External ID（防止 confused deputy 攻擊）
+
+Conditions:
+  IsAdmin: !Equals [!Ref PermissionLevel, "admin"]
+  IsScoped: !Equals [!Ref PermissionLevel, "scoped"]
+
+Resources:
+  # ============================================================
+  # Admin 模式 — AdministratorAccess
+  # ============================================================
+  AdminDeployerRole:
+    Type: AWS::IAM::Role
+    Condition: IsAdmin
+    Properties:
+      RoleName: BouncerDeployerRole
+      Description: "Bouncer Deployer cross-account role (admin mode)"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${BouncerAccountId}:role/CodeBuildSAMDeployerRole"
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref ExternalId
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      Tags:
+        - Key: Project
+          Value: BounceDeployer
+        - Key: ManagedBy
+          Value: bouncer-deployer-cross-account-role
+        - Key: PermissionLevel
+          Value: admin
+        - Key: auto-delete
+          Value: "no"
+
+  # ============================================================
+  # Scoped 模式 — 最小權限
+  # ============================================================
+  ScopedDeployerRole:
+    Type: AWS::IAM::Role
+    Condition: IsScoped
+    Properties:
+      RoleName: BouncerDeployerRole
+      Description: "Bouncer Deployer cross-account role (scoped mode)"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${BouncerAccountId}:role/CodeBuildSAMDeployerRole"
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref ExternalId
+      Tags:
+        - Key: Project
+          Value: BounceDeployer
+        - Key: ManagedBy
+          Value: bouncer-deployer-cross-account-role
+        - Key: PermissionLevel
+          Value: scoped
+        - Key: auto-delete
+          Value: "no"
+
+  ScopedDeployerPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: IsScoped
+    Properties:
+      ManagedPolicyName: BouncerDeployerScopedPolicy
+      Description: Bouncer Deployer 跨帳號部署所需的最小權限
+      Roles:
+        - !Ref ScopedDeployerRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # ---------------------------------------------------------
+          # CloudFormation — SAM 部署核心
+          # ---------------------------------------------------------
+          - Sid: CloudFormation
+            Effect: Allow
+            Action:
+              - cloudformation:CreateStack
+              - cloudformation:UpdateStack
+              - cloudformation:DeleteStack
+              - cloudformation:DescribeStacks
+              - cloudformation:DescribeStackEvents
+              - cloudformation:DescribeStackResources
+              - cloudformation:GetTemplate
+              - cloudformation:GetTemplateSummary
+              - cloudformation:ListStackResources
+              - cloudformation:CreateChangeSet
+              - cloudformation:DescribeChangeSet
+              - cloudformation:ExecuteChangeSet
+              - cloudformation:DeleteChangeSet
+              - cloudformation:ListChangeSets
+              - cloudformation:ValidateTemplate
+              - cloudformation:TagResource
+              - cloudformation:UntagResource
+            Resource: "*"
+
+          # ---------------------------------------------------------
+          # S3 — SAM artifact bucket + 應用程式 bucket
+          # ---------------------------------------------------------
+          - Sid: S3
+            Effect: Allow
+            Action:
+              - s3:CreateBucket
+              - s3:DeleteBucket
+              - s3:GetBucketLocation
+              - s3:GetBucketPolicy
+              - s3:PutBucketPolicy
+              - s3:DeleteBucketPolicy
+              - s3:GetBucketAcl
+              - s3:PutBucketAcl
+              - s3:GetBucketCORS
+              - s3:PutBucketCORS
+              - s3:GetBucketWebsite
+              - s3:PutBucketWebsite
+              - s3:DeleteBucketWebsite
+              - s3:GetBucketVersioning
+              - s3:PutBucketVersioning
+              - s3:GetBucketTagging
+              - s3:PutBucketTagging
+              - s3:GetEncryptionConfiguration
+              - s3:PutEncryptionConfiguration
+              - s3:GetBucketPublicAccessBlock
+              - s3:PutBucketPublicAccessBlock
+              - s3:GetLifecycleConfiguration
+              - s3:PutLifecycleConfiguration
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+              - s3:ListBucket
+            Resource: "*"
+
+          # ---------------------------------------------------------
+          # Lambda
+          # ---------------------------------------------------------
+          - Sid: Lambda
+            Effect: Allow
+            Action:
+              - lambda:CreateFunction
+              - lambda:UpdateFunctionCode
+              - lambda:UpdateFunctionConfiguration
+              - lambda:DeleteFunction
+              - lambda:GetFunction
+              - lambda:GetFunctionConfiguration
+              - lambda:ListFunctions
+              - lambda:ListVersionsByFunction
+              - lambda:PublishVersion
+              - lambda:CreateAlias
+              - lambda:UpdateAlias
+              - lambda:DeleteAlias
+              - lambda:AddPermission
+              - lambda:RemovePermission
+              - lambda:GetPolicy
+              - lambda:TagResource
+              - lambda:UntagResource
+              - lambda:ListTags
+              - lambda:PutFunctionEventInvokeConfig
+              - lambda:GetFunctionEventInvokeConfig
+              - lambda:DeleteFunctionEventInvokeConfig
+            Resource: "*"
+
+          # ---------------------------------------------------------
+          # API Gateway (REST + HTTP)
+          # ---------------------------------------------------------
+          - Sid: APIGateway
+            Effect: Allow
+            Action:
+              - apigateway:GET
+              - apigateway:POST
+              - apigateway:PUT
+              - apigateway:PATCH
+              - apigateway:DELETE
+              - apigateway:TagResource
+              - apigateway:UntagResource
+            Resource: "*"
+
+          # ---------------------------------------------------------
+          # DynamoDB
+          # ---------------------------------------------------------
+          - Sid: DynamoDB
+            Effect: Allow
+            Action:
+              - dynamodb:CreateTable
+              - dynamodb:DeleteTable
+              - dynamodb:DescribeTable
+              - dynamodb:UpdateTable
+              - dynamodb:DescribeTimeToLive
+              - dynamodb:UpdateTimeToLive
+              - dynamodb:DescribeContinuousBackups
+              - dynamodb:UpdateContinuousBackups
+              - dynamodb:ListTagsOfResource
+              - dynamodb:TagResource
+              - dynamodb:UntagResource
+            Resource: "*"
+
+          # ---------------------------------------------------------
+          # CloudFront
+          # ---------------------------------------------------------
+          - Sid: CloudFront
+            Effect: Allow
+            Action:
+              - cloudfront:CreateDistribution
+              - cloudfront:UpdateDistribution
+              - cloudfront:DeleteDistribution
+              - cloudfront:GetDistribution
+              - cloudfront:GetDistributionConfig
+              - cloudfront:TagResource
+              - cloudfront:UntagResource
+              - cloudfront:ListTagsForResource
+              - cloudfront:CreateFunction
+              - cloudfront:UpdateFunction
+              - cloudfront:DeleteFunction
+              - cloudfront:DescribeFunction
+              - cloudfront:GetFunction
+              - cloudfront:PublishFunction
+              - cloudfront:CreatePublicKey
+              - cloudfront:DeletePublicKey
+              - cloudfront:GetPublicKey
+              - cloudfront:GetPublicKeyConfig
+              - cloudfront:UpdatePublicKey
+              - cloudfront:CreateKeyGroup
+              - cloudfront:DeleteKeyGroup
+              - cloudfront:GetKeyGroup
+              - cloudfront:GetKeyGroupConfig
+              - cloudfront:UpdateKeyGroup
+              - cloudfront:CreateOriginAccessControl
+              - cloudfront:DeleteOriginAccessControl
+              - cloudfront:GetOriginAccessControl
+              - cloudfront:UpdateOriginAccessControl
+              - cloudfront:CreateResponseHeadersPolicy
+              - cloudfront:DeleteResponseHeadersPolicy
+              - cloudfront:GetResponseHeadersPolicy
+              - cloudfront:UpdateResponseHeadersPolicy
+              - cloudfront:CreateCachePolicy
+              - cloudfront:DeleteCachePolicy
+              - cloudfront:GetCachePolicy
+              - cloudfront:UpdateCachePolicy
+              - cloudfront:CreateOriginRequestPolicy
+              - cloudfront:DeleteOriginRequestPolicy
+              - cloudfront:GetOriginRequestPolicy
+              - cloudfront:UpdateOriginRequestPolicy
+              - cloudfront:CreateInvalidation
+              - cloudfront:GetInvalidation
+              - cloudfront:ListInvalidations
+              - cloudfront:ListDistributions
+            Resource: "*"
+
+          # ---------------------------------------------------------
+          # WAF v2
+          # ---------------------------------------------------------
+          - Sid: WAF
+            Effect: Allow
+            Action:
+              - wafv2:CreateWebACL
+              - wafv2:UpdateWebACL
+              - wafv2:DeleteWebACL
+              - wafv2:GetWebACL
+              - wafv2:ListWebACLs
+              - wafv2:AssociateWebACL
+              - wafv2:DisassociateWebACL
+              - wafv2:GetWebACLForResource
+              - wafv2:ListTagsForResource
+              - wafv2:TagResource
+              - wafv2:UntagResource
+              - wafv2:CreateIPSet
+              - wafv2:UpdateIPSet
+              - wafv2:DeleteIPSet
+              - wafv2:GetIPSet
+              - wafv2:CreateRuleGroup
+              - wafv2:UpdateRuleGroup
+              - wafv2:DeleteRuleGroup
+              - wafv2:GetRuleGroup
+            Resource: "*"
+
+          # ---------------------------------------------------------
+          # ACM (讀取 — cert 需事先建好)
+          # ---------------------------------------------------------
+          - Sid: ACM
+            Effect: Allow
+            Action:
+              - acm:DescribeCertificate
+              - acm:ListCertificates
+              - acm:GetCertificate
+              - acm:ListTagsForCertificate
+            Resource: "*"
+
+          # ---------------------------------------------------------
+          # Secrets Manager (讀取 — secret 需事先建好)
+          # ---------------------------------------------------------
+          - Sid: SecretsManager
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+              - secretsmanager:DescribeSecret
+            Resource: "*"
+
+          # ---------------------------------------------------------
+          # IAM — SAM 建立 Lambda execution role 等
+          # ---------------------------------------------------------
+          - Sid: IAMRoleManagement
+            Effect: Allow
+            Action:
+              - iam:CreateRole
+              - iam:DeleteRole
+              - iam:GetRole
+              - iam:GetRolePolicy
+              - iam:PutRolePolicy
+              - iam:DeleteRolePolicy
+              - iam:AttachRolePolicy
+              - iam:DetachRolePolicy
+              - iam:PassRole
+              - iam:TagRole
+              - iam:UntagRole
+              - iam:ListRolePolicies
+              - iam:ListAttachedRolePolicies
+              - iam:CreateServiceLinkedRole
+            Resource: "*"
+
+          # ---------------------------------------------------------
+          # IAM Deny — 防止權限提升
+          # ---------------------------------------------------------
+          - Sid: DenyDangerousIAM
+            Effect: Deny
+            Action:
+              - iam:CreateUser
+              - iam:DeleteUser
+              - iam:CreateAccessKey
+              - iam:DeleteAccessKey
+              - iam:UpdateAccessKey
+              - iam:AttachUserPolicy
+              - iam:DetachUserPolicy
+              - iam:PutUserPolicy
+              - iam:DeleteUserPolicy
+              - iam:CreateLoginProfile
+              - iam:UpdateLoginProfile
+              - iam:DeleteLoginProfile
+              - iam:AddUserToGroup
+              - iam:RemoveUserFromGroup
+              - organizations:*
+              - account:*
+            Resource: "*"
+
+          # ---------------------------------------------------------
+          # CloudWatch / Logs / Events
+          # ---------------------------------------------------------
+          - Sid: Observability
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:DeleteLogGroup
+              - logs:DescribeLogGroups
+              - logs:PutRetentionPolicy
+              - logs:DeleteRetentionPolicy
+              - logs:TagResource
+              - logs:UntagResource
+              - cloudwatch:PutMetricAlarm
+              - cloudwatch:DeleteAlarms
+              - cloudwatch:DescribeAlarms
+              - events:PutRule
+              - events:DeleteRule
+              - events:DescribeRule
+              - events:PutTargets
+              - events:RemoveTargets
+              - events:EnableRule
+              - events:DisableRule
+              - events:TagResource
+              - events:UntagResource
+            Resource: "*"
+
+          # ---------------------------------------------------------
+          # SQS / SNS (SAM 常用)
+          # ---------------------------------------------------------
+          - Sid: Messaging
+            Effect: Allow
+            Action:
+              - sqs:CreateQueue
+              - sqs:DeleteQueue
+              - sqs:GetQueueAttributes
+              - sqs:SetQueueAttributes
+              - sqs:TagQueue
+              - sqs:UntagQueue
+              - sns:CreateTopic
+              - sns:DeleteTopic
+              - sns:GetTopicAttributes
+              - sns:SetTopicAttributes
+              - sns:Subscribe
+              - sns:Unsubscribe
+              - sns:TagResource
+              - sns:UntagResource
+            Resource: "*"
+
+          # ---------------------------------------------------------
+          # KMS (加密相關)
+          # ---------------------------------------------------------
+          - Sid: KMS
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+              - kms:DescribeKey
+              - kms:CreateGrant
+            Resource: "*"
+
+Outputs:
+  RoleArn:
+    Description: BouncerDeployerRole ARN — 在 Bouncer 註冊帳號時使用
+    Value: !If
+      - IsAdmin
+      - !GetAtt AdminDeployerRole.Arn
+      - !GetAtt ScopedDeployerRole.Arn
+
+  PermissionLevel:
+    Description: 選擇的權限等級
+    Value: !Ref PermissionLevel
+
+  Usage:
+    Description: 使用方式
+    Value: !Sub >
+      在 Bouncer 主帳號執行：
+      mcporter call bouncer.bouncer_add_account
+        account_id="${AWS::AccountId}"
+        name="帳號別名"
+        role_arn="${!If [IsAdmin, !GetAtt AdminDeployerRole.Arn, !GetAtt ScopedDeployerRole.Arn]}"

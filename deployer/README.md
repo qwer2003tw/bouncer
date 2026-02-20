@@ -67,6 +67,49 @@ sam deploy \
 | `bouncer_project_list` | 列出專案 |
 | `bouncer_project_add` | 新增專案（需審批）|
 
+## Cross-Account 部署
+
+讓 Bouncer Deployer 可以部署到其他 AWS 帳號。
+
+### 在目標帳號建立 BouncerDeployerRole
+
+```bash
+# 方式一：Admin 權限（簡單，適合內部/開發帳號）
+aws cloudformation deploy \
+  --template-file cross-account-role.yaml \
+  --stack-name bouncer-deployer-role \
+  --parameter-overrides \
+    BouncerAccountId=YOUR_BOUNCER_ACCOUNT_ID \
+    PermissionLevel=admin \
+  --capabilities CAPABILITY_NAMED_IAM
+
+# 方式二：Scoped 權限（最小權限，適合生產環境）
+aws cloudformation deploy \
+  --template-file cross-account-role.yaml \
+  --stack-name bouncer-deployer-role \
+  --parameter-overrides \
+    BouncerAccountId=YOUR_BOUNCER_ACCOUNT_ID \
+    PermissionLevel=scoped \
+  --capabilities CAPABILITY_NAMED_IAM
+```
+
+| 模式 | 權限 | 適用場景 |
+|------|------|---------|
+| `admin` | AdministratorAccess | 內部開發帳號、快速上手 |
+| `scoped` | 最小權限（CloudFormation + Lambda + API Gateway + DynamoDB + CloudFront + WAF + IAM role 管理等） | 生產環境、需要嚴格控管 |
+
+兩種模式都有 **Deny 保護**：禁止建立 IAM User、Access Key、修改 Organizations 等危險操作。
+
+### 在 Bouncer 註冊帳號
+
+```bash
+mcporter call bouncer.bouncer_add_account \
+  account_id="TARGET_ACCOUNT_ID" \
+  name="帳號別名" \
+  role_arn="arn:aws:iam::TARGET_ACCOUNT_ID:role/BouncerDeployerRole" \
+  source="你的Bot名稱"
+```
+
 ## 安全
 
 - Permission Boundary 限制 SAM 建立的 Role
