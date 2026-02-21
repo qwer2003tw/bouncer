@@ -33,6 +33,10 @@ Parameters:
     Type: String
     Default: "840"
     Description: MCP 模式最大等待時間（秒），預設 840（14分鐘）
+  DefaultAccountId:
+    Type: String
+    Default: "190825685292"
+    Description: 預設 AWS 帳號 ID（用於上傳桶等資源）
 
 Globals:
   Function:
