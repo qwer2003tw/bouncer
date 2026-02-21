@@ -17,7 +17,7 @@ aws cloudformation deploy \
   --template-file template.yaml \
   --stack-name bouncer-target-account \
   --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides BouncerAccountId=190825685292
+  --parameter-overrides BouncerAccountId=YOUR_ACCOUNT_ID
 
 # Get the role ARN from outputs
 aws cloudformation describe-stacks \
@@ -36,7 +36,7 @@ mcporter call bouncer bouncer_add_account \
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `BouncerAccountId` | `190825685292` | Central Bouncer account ID |
+| `BouncerAccountId` | *(required)* | Central Bouncer account ID |
 | `RoleName` | `BouncerRole` | IAM role name |
 | `UploadBucketLifecycleDays` | `30` | Auto-delete uploads after N days (0 to disable) |
 

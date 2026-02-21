@@ -6,8 +6,8 @@ Description: >
 Parameters:
   BouncerAccountId:
     Type: String
-    Default: '190825685292'
-    Description: The AWS account ID where Bouncer (central) is deployed
+    Default: ''
+    Description: The AWS account ID where Bouncer (central) is deployed (required)
     AllowedPattern: '[0-9]{12}'
 
   RoleName:

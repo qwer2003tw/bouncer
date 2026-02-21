@@ -582,11 +582,6 @@ def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
 # Upload 相關函數（被 callbacks 呼叫）
 # ============================================================================
 
-# 固定上傳桶
-# 預設上傳帳號（Bouncer 所在帳號，向後相容）
-DEFAULT_UPLOAD_ACCOUNT_ID = '190825685292'
-
-
 def wait_for_upload_result(request_id: str, timeout: int = 300) -> dict:
     """等待上傳審批結果"""
     interval = 2

@@ -66,8 +66,6 @@ except ImportError:
 
 
 # 預設上傳帳號 ID（Bouncer 所在帳號）
-DEFAULT_UPLOAD_ACCOUNT_ID = '190825685292'
-
 # Shadow mode 表名（用於收集智慧審批數據）
 SHADOW_TABLE_NAME = os.environ.get('SHADOW_TABLE', 'bouncer-shadow-approvals')
 
@@ -863,7 +861,7 @@ def mcp_tool_upload(req_id, arguments: dict) -> dict:
 
     assume_role = None
     account_name = 'Default'
-    target_account_id = DEFAULT_UPLOAD_ACCOUNT_ID
+    target_account_id = DEFAULT_ACCOUNT_ID
 
     if account_id:
         # 驗證帳號 ID 格式

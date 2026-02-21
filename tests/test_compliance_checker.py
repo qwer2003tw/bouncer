@@ -9,7 +9,7 @@ import pytest
 # Set TRUSTED_ACCOUNT_IDS before importing compliance_checker so the regex
 # for P-S3 (external account detection) is built correctly.
 if not os.environ.get('TRUSTED_ACCOUNT_IDS'):
-    os.environ['TRUSTED_ACCOUNT_IDS'] = '190825685292,992382394211,841882238387'
+    os.environ['TRUSTED_ACCOUNT_IDS'] = '111111111111,222222222222,333333333333'
 
 import src.compliance_checker as _cc_mod
 # Reload to pick up the env var if it was imported before we set it
@@ -164,7 +164,7 @@ class TestIAMKMSRules:
 
     def test_iam_internal_account_ok(self):
         """P-S3: 組織內帳號應該通過"""
-        cmd = 'aws iam update-assume-role-policy --role-name test --policy-document \'{"Principal": {"AWS": "arn:aws:iam::190825685292:root"}}\''
+        cmd = 'aws iam update-assume-role-policy --role-name test --policy-document \'{"Principal": {"AWS": "arn:aws:iam::111111111111:root"}}\''
         is_compliant, violation = check_compliance(cmd)
         # 這個不會被 P-S3 攔截（是內部帳號），但可能被其他規則攔截
         # 主要測試 P-S3 的外部帳號檢測
