@@ -503,11 +503,44 @@ Resources:
                     echo "Assumed role successfully. Verifying identity..."
                     aws sts get-caller-identity
                   fi
-                  if [ -n "$SAM_PARAMS" ]; then
-                    sam deploy --stack-name "$STACK_NAME" --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM --resolve-s3 --no-confirm-changeset --no-fail-on-empty-changeset --parameter-overrides $SAM_PARAMS
-                  else
-                    sam deploy --stack-name "$STACK_NAME" --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM --resolve-s3 --no-confirm-changeset --no-fail-on-empty-changeset
-                  fi
+                  # Use Python to invoke sam deploy with proper argument handling
+                  # This avoids shell expansion issues with multi-line parameter values
+                  python3 -c "
+import subprocess, os, sys, json
+
+stack = os.environ.get('STACK_NAME', '')
+params_raw = os.environ.get('SAM_PARAMS', '').strip()
+
+cmd = [
+    'sam', 'deploy',
+    '--stack-name', stack,
+    '--capabilities', 'CAPABILITY_IAM', 'CAPABILITY_AUTO_EXPAND', 'CAPABILITY_NAMED_IAM',
+    '--resolve-s3',
+    '--no-confirm-changeset',
+    '--no-fail-on-empty-changeset',
+]
+
+if params_raw:
+    cmd.append('--parameter-overrides')
+    # Try JSON format first: {\"Key1\": \"Value1\", \"Key2\": \"multi-line\"}
+    try:
+        params = json.loads(params_raw)
+        if isinstance(params, dict):
+            for k, v in params.items():
+                cmd.append(f'{k}={v}')
+        else:
+            raise ValueError('not a dict')
+    except (json.JSONDecodeError, ValueError):
+        # Legacy format: Key1=Value1 Key2=Value2 (space-separated, single-line values)
+        import re
+        parts = re.split(r'\s+(?=\w+=)', params_raw)
+        cmd.extend(parts)
+
+print(f'Running: sam deploy --stack-name {stack} with {len(cmd)-9} param args')
+sys.stdout.flush()
+result = subprocess.run(cmd)
+sys.exit(result.returncode)
+"
             post_build:
               commands:
                 - echo "Deployment complete!"
