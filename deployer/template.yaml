@@ -496,11 +496,11 @@ Resources:
             build:
               commands:
                 - export WORK_DIR=$(pwd)/repo/${SAM_TEMPLATE_PATH}
+                - export REPO_ROOT=$(pwd)/repo
                 - echo "Building SAM application in $WORK_DIR..."
                 - cd $WORK_DIR && sam build --use-container
                 - echo "Deploying to stack $STACK_NAME..."
                 - |
-                  REPO_ROOT=$(pwd)/repo
                   cd $WORK_DIR
                   # Cross-account: assume role if TARGET_ROLE_ARN is set
                   if [ -n "$TARGET_ROLE_ARN" ]; then
