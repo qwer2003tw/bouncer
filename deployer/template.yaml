@@ -511,38 +511,9 @@ Resources:
                     echo "Assumed role successfully. Verifying identity..."
                     aws sts get-caller-identity
                   fi
-                  # Inline deploy script (no external file dependency)
-                  python3 - << 'DEPLOY_SCRIPT'
-                  import json, os, re, subprocess, sys, warnings
-                  _CFN_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
-                  stack = os.environ.get("STACK_NAME", "").strip()
-                  if not stack:
-                      print("ERROR: STACK_NAME is empty or not set.", file=sys.stderr)
-                      sys.exit(1)
-                  params_raw = os.environ.get("SAM_PARAMS", "").strip()
-                  cmd = ["sam", "deploy", "--stack-name", stack,
-                         "--capabilities", "CAPABILITY_IAM", "CAPABILITY_AUTO_EXPAND", "CAPABILITY_NAMED_IAM",
-                         "--resolve-s3", "--no-confirm-changeset", "--no-fail-on-empty-changeset"]
-                  base_len = len(cmd)
-                  if params_raw:
-                      cmd.append("--parameter-overrides")
-                      try:
-                          params = json.loads(params_raw)
-                          if not isinstance(params, dict):
-                              raise ValueError("SAM_PARAMS JSON must be an object")
-                          for k, v in params.items():
-                              if not _CFN_KEY_RE.match(k):
-                                  print(f"ERROR: Invalid param key '{k}'", file=sys.stderr); sys.exit(1)
-                              cmd.append(f"{k}={v}")
-                      except (json.JSONDecodeError, ValueError) as exc:
-                          if isinstance(exc, ValueError) and "must be an object" in str(exc):
-                              print(f"ERROR: {exc}", file=sys.stderr); sys.exit(1)
-                          warnings.warn("SAM_PARAMS not valid JSON; falling back to legacy format.", stacklevel=2)
-                          cmd.extend(re.split(r"\s+(?=\w+=)", params_raw))
-                  print(f"Running sam deploy --stack-name {stack} with {len(cmd)-base_len} param args")
-                  sys.stdout.flush()
-                  sys.exit(subprocess.run(cmd, timeout=1800).returncode)
-                  DEPLOY_SCRIPT
+                  # Deploy script (source: deployer/scripts/sam_deploy.py, base64 encoded)
+                  # To regenerate: cd bouncer && python3 -c "import base64; print(base64.b64encode(open('deployer/scripts/sam_deploy.py','rb').read()).decode())"
+                  echo IyEvdXNyL2Jpbi9lbnYgcHl0aG9uMwoiIiIKc2FtX2RlcGxveS5weSAtIFNBTSBkZXBsb3ltZW50IHNjcmlwdCBmb3IgQ29kZUJ1aWxkCgpSZWFkcyBlbnZpcm9ubWVudCB2YXJpYWJsZXMgc2V0IGJ5IHRoZSBDb2RlQnVpbGQgYnVpbGRzcGVjIGFuZCBpbnZva2VzCmBzYW0gZGVwbG95YCB3aXRoIHRoZSBhcHByb3ByaWF0ZSBwYXJhbWV0ZXJzLgoKU3VwcG9ydHMgdHdvIFNBTV9QQVJBTVMgZm9ybWF0czoKICAxLiBKU09OIG9iamVjdDogeyJLZXkxIjogIlZhbHVlMSIsICJLZXkyIjogIlZhbHVlMiJ9CiAgMi4gTGVnYWN5IHNwYWNlLXNlcGFyYXRlZDogS2V5MT1WYWx1ZTEgS2V5Mj1WYWx1ZTIKCkVudmlyb25tZW50IFZhcmlhYmxlczoKICBTVEFDS19OQU1FICAgLSBDbG91ZEZvcm1hdGlvbiBzdGFjayBuYW1lIChyZXF1aXJlZCkKICBTQU1fUEFSQU1TICAgLSBQYXJhbWV0ZXIgb3ZlcnJpZGVzIChvcHRpb25hbCwgSlNPTiBvciBsZWdhY3kgZm9ybWF0KQoiIiIKCmltcG9ydCBqc29uCmltcG9ydCBvcwppbXBvcnQgcmUKaW1wb3J0IHN1YnByb2Nlc3MKaW1wb3J0IHN5cwppbXBvcnQgd2FybmluZ3MKCiMgLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCiMgVmFsaWRhdGlvbiBoZWxwZXJzCiMgLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCgpfQ0ZOX0tFWV9SRSA9IHJlLmNvbXBpbGUociJeW0EtWmEtel1bQS1aYS16MC05XSokIikKCgpkZWYgX3ZhbGlkYXRlX3N0YWNrX25hbWUobmFtZTogc3RyKSAtPiBOb25lOgogICAgIiIiRW5zdXJlIFNUQUNLX05BTUUgaXMgc2V0IGFuZCBub24tZW1wdHkuIiIiCiAgICBpZiBub3QgbmFtZToKICAgICAgICBwcmludCgiRVJST1I6IFNUQUNLX05BTUUgZW52aXJvbm1lbnQgdmFyaWFibGUgaXMgZW1wdHkgb3Igbm90IHNldC4iLCBmaWxlPXN5cy5zdGRlcnIpCiAgICAgICAgc3lzLmV4aXQoMSkKCgpkZWYgX3ZhbGlkYXRlX3BhcmFtX2tleShrZXk6IHN0cikgLT4gTm9uZToKICAgICIiIlJlamVjdCBwYXJhbWV0ZXIga2V5cyB0aGF0IGRvbid0IGxvb2sgbGlrZSB2YWxpZCBDRk4gcGFyYW1ldGVyIG5hbWVzLgoKICAgIFRoaXMgZ3VhcmRzIGFnYWluc3QgYXJndW1lbnQtaW5qZWN0aW9uIHZpYSBjcmFmdGVkIGtleSBuYW1lcwogICAgKGUuZy4gYGAtLXNvbWUtZmxhZ2BgIG1hc3F1ZXJhZGluZyBhcyBhIGtleSkuCiAgICAiIiIKICAgIGlmIG5vdCBfQ0ZOX0tFWV9SRS5tYXRjaChrZXkpOgogICAgICAgIHByaW50KAogICAgICAgICAgICBmIkVSUk9SOiBJbnZhbGlkIHBhcmFtZXRlciBrZXkgJ3trZXl9Jy4gIgogICAgICAgICAgICAiS2V5cyBtdXN0IHN0YXJ0IHdpdGggYSBsZXR0ZXIgYW5kIGNvbnRhaW4gb25seSBhbHBoYW51bWVyaWMgY2hhcmFjdGVycy4iLAogICAgICAgICAgICBmaWxlPXN5cy5zdGRlcnIsCiAgICAgICAgKQogICAgICAgIHN5cy5leGl0KDEpCgoKIyAtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0KIyBNYWluCiMgLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCgpkZWYgbWFpbigpIC0+IE5vbmU6CiAgICBzdGFjayA9IG9zLmVudmlyb24uZ2V0KCJTVEFDS19OQU1FIiwgIiIpLnN0cmlwKCkKICAgIF92YWxpZGF0ZV9zdGFja19uYW1lKHN0YWNrKQoKICAgIHBhcmFtc19yYXcgPSBvcy5lbnZpcm9uLmdldCgiU0FNX1BBUkFNUyIsICIiKS5zdHJpcCgpCgogICAgY21kID0gWwogICAgICAgICJzYW0iLCAiZGVwbG95IiwKICAgICAgICAiLS1zdGFjay1uYW1lIiwgc3RhY2ssCiAgICAgICAgIi0tY2FwYWJpbGl0aWVzIiwgIkNBUEFCSUxJVFlfSUFNIiwgIkNBUEFCSUxJVFlfQVVUT19FWFBBTkQiLCAiQ0FQQUJJTElUWV9OQU1FRF9JQU0iLAogICAgICAgICItLXJlc29sdmUtczMiLAogICAgICAgICItLW5vLWNvbmZpcm0tY2hhbmdlc2V0IiwKICAgICAgICAiLS1uby1mYWlsLW9uLWVtcHR5LWNoYW5nZXNldCIsCiAgICBdCgogICAgYmFzZV9sZW4gPSBsZW4oY21kKSAgIyBsZW5ndGggYmVmb3JlIGFkZGluZyBwYXJhbWV0ZXIgb3ZlcnJpZGVzCgogICAgaWYgcGFyYW1zX3JhdzoKICAgICAgICBjbWQuYXBwZW5kKCItLXBhcmFtZXRlci1vdmVycmlkZXMiKQogICAgICAgIHRyeToKICAgICAgICAgICAgcGFyYW1zID0ganNvbi5sb2FkcyhwYXJhbXNfcmF3KQogICAgICAgICAgICBpZiBub3QgaXNpbnN0YW5jZShwYXJhbXMsIGRpY3QpOgogICAgICAgICAgICAgICAgcmFpc2UgVmFsdWVFcnJvcigiU0FNX1BBUkFNUyBKU09OIG11c3QgYmUgYW4gb2JqZWN0IikKICAgICAgICAgICAgZm9yIGssIHYgaW4gcGFyYW1zLml0ZW1zKCk6CiAgICAgICAgICAgICAgICBfdmFsaWRhdGVfcGFyYW1fa2V5KGspCiAgICAgICAgICAgICAgICBjbWQuYXBwZW5kKGYie2t9PXt2fSIpCiAgICAgICAgZXhjZXB0IChqc29uLkpTT05EZWNvZGVFcnJvciwgVmFsdWVFcnJvcikgYXMgZXhjOgogICAgICAgICAgICAjIExlZ2FjeSBmb3JtYXQ6IEtleTE9VmFsdWUxIEtleTI9VmFsdWUyCiAgICAgICAgICAgIGlmIGlzaW5zdGFuY2UoZXhjLCBWYWx1ZUVycm9yKSBhbmQgIm11c3QgYmUgYW4gb2JqZWN0IiBpbiBzdHIoZXhjKToKICAgICAgICAgICAgICAgIHByaW50KGYiRVJST1I6IHtleGN9IiwgZmlsZT1zeXMuc3RkZXJyKQogICAgICAgICAgICAgICAgc3lzLmV4aXQoMSkKICAgICAgICAgICAgd2FybmluZ3Mud2FybigKICAgICAgICAgICAgICAgICJTQU1fUEFSQU1TIGlzIG5vdCB2YWxpZCBKU09OOyBmYWxsaW5nIGJhY2sgdG8gbGVnYWN5ICIKICAgICAgICAgICAgICAgICJzcGFjZS1zZXBhcmF0ZWQgZm9ybWF0LiBDb25zaWRlciBtaWdyYXRpbmcgdG8gSlNPTi4iLAogICAgICAgICAgICAgICAgc3RhY2tsZXZlbD0yLAogICAgICAgICAgICApCiAgICAgICAgICAgIHBhcnRzID0gcmUuc3BsaXQociJccysoPz1cdys9KSIsIHBhcmFtc19yYXcpCiAgICAgICAgICAgIGNtZC5leHRlbmQocGFydHMpCgogICAgcGFyYW1fY291bnQgPSBsZW4oY21kKSAtIGJhc2VfbGVuCiAgICBwcmludChmIlJ1bm5pbmcgc2FtIGRlcGxveSAtLXN0YWNrLW5hbWUge3N0YWNrfSB3aXRoIHtwYXJhbV9jb3VudH0gcGFyYW0gYXJncyIpCiAgICBzeXMuc3Rkb3V0LmZsdXNoKCkKCiAgICByZXN1bHQgPSBzdWJwcm9jZXNzLnJ1bihjbWQsIHRpbWVvdXQ9MTgwMCkKICAgIHN5cy5leGl0KHJlc3VsdC5yZXR1cm5jb2RlKQoKCmlmIF9fbmFtZV9fID09ICJfX21haW5fXyI6CiAgICBtYWluKCkK | base64 -d | python3
             post_build:
               commands:
                 - echo "Deployment complete!"
