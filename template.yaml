@@ -386,7 +386,7 @@ Resources:
       Dimensions:
         - Name: FunctionName
           Value: !Ref ApprovalFunction
-      Statistic: p99
+      ExtendedStatistic: p99
       Period: 300
       EvaluationPeriods: 1
       Threshold: 600000
