@@ -3269,14 +3269,20 @@ class TestMCPToolHandlersAdditional:
     @patch('app.send_telegram_message')
     def test_mcp_tool_remove_account_default(self, mock_telegram, app_module):
         """不能移除預設帳號"""
-        result = app_module.mcp_tool_remove_account('test-1', {
-            'account_id': app_module.DEFAULT_ACCOUNT_ID
-        })
-        
-        body = json.loads(result['body'])
-        content = json.loads(body['result']['content'][0]['text'])
-        assert content['status'] == 'error'
-        assert '預設' in content['error']
+        import mcp_tools
+        original = mcp_tools.DEFAULT_ACCOUNT_ID
+        try:
+            mcp_tools.DEFAULT_ACCOUNT_ID = '190825685292'
+            result = app_module.mcp_tool_remove_account('test-1', {
+                'account_id': '190825685292'
+            })
+            
+            body = json.loads(result['body'])
+            content = json.loads(body['result']['content'][0]['text'])
+            assert content['status'] == 'error'
+            assert '預設' in content['error']
+        finally:
+            mcp_tools.DEFAULT_ACCOUNT_ID = original
     
     @patch('app.send_telegram_message')
     def test_mcp_tool_remove_account_not_exists(self, mock_telegram, app_module):
@@ -5275,13 +5281,19 @@ class TestMCPRemoveAccount:
     @patch('app.send_telegram_message')
     def test_remove_default_account_blocked(self, mock_telegram, app_module):
         """不能移除預設帳號"""
-        result = app_module.mcp_tool_remove_account('test-1', {
-            'account_id': '111111111111'  # 預設帳號
-        })
-        body = json.loads(result['body'])
-        content = json.loads(body['result']['content'][0]['text'])
-        assert content['status'] == 'error'
-        assert '預設帳號' in content['error']
+        import mcp_tools
+        original = mcp_tools.DEFAULT_ACCOUNT_ID
+        try:
+            mcp_tools.DEFAULT_ACCOUNT_ID = '190825685292'
+            result = app_module.mcp_tool_remove_account('test-1', {
+                'account_id': '190825685292'
+            })
+            body = json.loads(result['body'])
+            content = json.loads(body['result']['content'][0]['text'])
+            assert content['status'] == 'error'
+            assert '預設帳號' in content['error']
+        finally:
+            mcp_tools.DEFAULT_ACCOUNT_ID = original
     
     @patch('app.send_telegram_message')
     def test_remove_nonexistent_account(self, mock_telegram, app_module):

@@ -503,10 +503,7 @@ Resources:
                     echo "Assumed role successfully. Verifying identity..."
                     aws sts get-caller-identity
                   fi
-                  # Use Python to invoke sam deploy with proper argument handling
-                  # This avoids shell expansion issues with multi-line parameter values
-                  # Script supports both legacy (Key=Value) and JSON format sam_params
-                  echo aW1wb3J0IHN1YnByb2Nlc3Msb3Msc3lzLGpzb24scmUKc3RhY2s9b3MuZW52aXJvbi5nZXQoIlNUQUNLX05BTUUiLCIiKQpwYXJhbXNfcmF3PW9zLmVudmlyb24uZ2V0KCJTQU1fUEFSQU1TIiwiIikuc3RyaXAoKQpjbWQ9WyJzYW0iLCJkZXBsb3kiLCItLXN0YWNrLW5hbWUiLHN0YWNrLCItLWNhcGFiaWxpdGllcyIsIkNBUEFCSUxJVFlfSUFNIiwiQ0FQQUJJTElUWV9BVVRPX0VYUEFORCIsIkNBUEFCSUxJVFlfTkFNRURfSUFNIiwiLS1yZXNvbHZlLXMzIiwiLS1uby1jb25maXJtLWNoYW5nZXNldCIsIi0tbm8tZmFpbC1vbi1lbXB0eS1jaGFuZ2VzZXQiXQppZiBwYXJhbXNfcmF3OgogICAgY21kLmFwcGVuZCgiLS1wYXJhbWV0ZXItb3ZlcnJpZGVzIikKICAgIHRyeToKICAgICAgICBwYXJhbXM9anNvbi5sb2FkcyhwYXJhbXNfcmF3KQogICAgICAgIGlmIGlzaW5zdGFuY2UocGFyYW1zLGRpY3QpOgogICAgICAgICAgICBmb3Igayx2IGluIHBhcmFtcy5pdGVtcygpOgogICAgICAgICAgICAgICAgY21kLmFwcGVuZChmIntrfT17dn0iKQogICAgICAgIGVsc2U6CiAgICAgICAgICAgIHJhaXNlIFZhbHVlRXJyb3IoKQogICAgZXhjZXB0KGpzb24uSlNPTkRlY29kZUVycm9yLFZhbHVlRXJyb3IpOgogICAgICAgIHBhcnRzPXJlLnNwbGl0KHIiXHMrKD89XHcrPSkiLHBhcmFtc19yYXcpCiAgICAgICAgY21kLmV4dGVuZChwYXJ0cykKcHJpbnQoZiJSdW5uaW5nIHNhbSBkZXBsb3kgLS1zdGFjay1uYW1lIHtzdGFja30gd2l0aCB7bGVuKGNtZCktOX0gcGFyYW0gYXJncyIpCnN5cy5zdGRvdXQuZmx1c2goKQpyZXN1bHQ9c3VicHJvY2Vzcy5ydW4oY21kKQpzeXMuZXhpdChyZXN1bHQucmV0dXJuY29kZSkK | base64 -d | python3
+                  python3 $(pwd)/repo/deployer/scripts/sam_deploy.py
             post_build:
               commands:
                 - echo "Deployment complete!"
