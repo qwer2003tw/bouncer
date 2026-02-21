@@ -505,42 +505,8 @@ Resources:
                   fi
                   # Use Python to invoke sam deploy with proper argument handling
                   # This avoids shell expansion issues with multi-line parameter values
-                  python3 -c "
-import subprocess, os, sys, json
-
-stack = os.environ.get('STACK_NAME', '')
-params_raw = os.environ.get('SAM_PARAMS', '').strip()
-
-cmd = [
-    'sam', 'deploy',
-    '--stack-name', stack,
-    '--capabilities', 'CAPABILITY_IAM', 'CAPABILITY_AUTO_EXPAND', 'CAPABILITY_NAMED_IAM',
-    '--resolve-s3',
-    '--no-confirm-changeset',
-    '--no-fail-on-empty-changeset',
-]
-
-if params_raw:
-    cmd.append('--parameter-overrides')
-    # Try JSON format first: {\"Key1\": \"Value1\", \"Key2\": \"multi-line\"}
-    try:
-        params = json.loads(params_raw)
-        if isinstance(params, dict):
-            for k, v in params.items():
-                cmd.append(f'{k}={v}')
-        else:
-            raise ValueError('not a dict')
-    except (json.JSONDecodeError, ValueError):
-        # Legacy format: Key1=Value1 Key2=Value2 (space-separated, single-line values)
-        import re
-        parts = re.split(r'\s+(?=\w+=)', params_raw)
-        cmd.extend(parts)
-
-print(f'Running: sam deploy --stack-name {stack} with {len(cmd)-9} param args')
-sys.stdout.flush()
-result = subprocess.run(cmd)
-sys.exit(result.returncode)
-"
+                  # Script supports both legacy (Key=Value) and JSON format sam_params
+                  echo aW1wb3J0IHN1YnByb2Nlc3Msb3Msc3lzLGpzb24scmUKc3RhY2s9b3MuZW52aXJvbi5nZXQoIlNUQUNLX05BTUUiLCIiKQpwYXJhbXNfcmF3PW9zLmVudmlyb24uZ2V0KCJTQU1fUEFSQU1TIiwiIikuc3RyaXAoKQpjbWQ9WyJzYW0iLCJkZXBsb3kiLCItLXN0YWNrLW5hbWUiLHN0YWNrLCItLWNhcGFiaWxpdGllcyIsIkNBUEFCSUxJVFlfSUFNIiwiQ0FQQUJJTElUWV9BVVRPX0VYUEFORCIsIkNBUEFCSUxJVFlfTkFNRURfSUFNIiwiLS1yZXNvbHZlLXMzIiwiLS1uby1jb25maXJtLWNoYW5nZXNldCIsIi0tbm8tZmFpbC1vbi1lbXB0eS1jaGFuZ2VzZXQiXQppZiBwYXJhbXNfcmF3OgogICAgY21kLmFwcGVuZCgiLS1wYXJhbWV0ZXItb3ZlcnJpZGVzIikKICAgIHRyeToKICAgICAgICBwYXJhbXM9anNvbi5sb2FkcyhwYXJhbXNfcmF3KQogICAgICAgIGlmIGlzaW5zdGFuY2UocGFyYW1zLGRpY3QpOgogICAgICAgICAgICBmb3Igayx2IGluIHBhcmFtcy5pdGVtcygpOgogICAgICAgICAgICAgICAgY21kLmFwcGVuZChmIntrfT17dn0iKQogICAgICAgIGVsc2U6CiAgICAgICAgICAgIHJhaXNlIFZhbHVlRXJyb3IoKQogICAgZXhjZXB0KGpzb24uSlNPTkRlY29kZUVycm9yLFZhbHVlRXJyb3IpOgogICAgICAgIHBhcnRzPXJlLnNwbGl0KHIiXHMrKD89XHcrPSkiLHBhcmFtc19yYXcpCiAgICAgICAgY21kLmV4dGVuZChwYXJ0cykKcHJpbnQoZiJSdW5uaW5nIHNhbSBkZXBsb3kgLS1zdGFjay1uYW1lIHtzdGFja30gd2l0aCB7bGVuKGNtZCktOX0gcGFyYW0gYXJncyIpCnN5cy5zdGRvdXQuZmx1c2goKQpyZXN1bHQ9c3VicHJvY2Vzcy5ydW4oY21kKQpzeXMuZXhpdChyZXN1bHQucmV0dXJuY29kZSkK | base64 -d | python3
             post_build:
               commands:
                 - echo "Deployment complete!"
