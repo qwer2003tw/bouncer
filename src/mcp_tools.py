@@ -65,8 +65,8 @@ except ImportError:
     )
 
 
-# 固定上傳桶
-UPLOAD_BUCKET = os.environ.get('UPLOAD_BUCKET', 'bouncer-uploads')
+# 預設上傳帳號 ID（Bouncer 所在帳號）
+DEFAULT_UPLOAD_ACCOUNT_ID = '190825685292'
 
 # Shadow mode 表名（用於收集智慧審批數據）
 SHADOW_TABLE_NAME = os.environ.get('SHADOW_TABLE', 'bouncer-shadow-approvals')
@@ -808,7 +808,7 @@ def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
 
 
 def mcp_tool_upload(req_id, arguments: dict) -> dict:
-    """MCP tool: bouncer_upload（上傳檔案到固定 S3 桶，需要 Telegram 審批）"""
+    """MCP tool: bouncer_upload（上傳檔案到 S3 桶，支援跨帳號，需要 Telegram 審批）"""
     import base64
     app = _get_app_module()
     table = _get_table()
@@ -818,6 +818,9 @@ def mcp_tool_upload(req_id, arguments: dict) -> dict:
     content_type = str(arguments.get('content_type', 'application/octet-stream')).strip()
     reason = str(arguments.get('reason', 'No reason provided'))
     source = arguments.get('source', None)
+    account_id = arguments.get('account', None)
+    if account_id:
+        account_id = str(account_id).strip()
     # 預設異步（避免 API Gateway 29s 超時）
     sync_mode = arguments.get('sync', False)
 
@@ -858,15 +861,53 @@ def mcp_tool_upload(req_id, arguments: dict) -> dict:
             'isError': True
         })
 
+    assume_role = None
+    account_name = 'Default'
+    target_account_id = DEFAULT_UPLOAD_ACCOUNT_ID
+
+    if account_id:
+        # 驗證帳號 ID 格式
+        valid, error = validate_account_id(account_id)
+        if not valid:
+            return mcp_result(req_id, {
+                'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': error})}],
+                'isError': True
+            })
+
+        # 查詢帳號配置
+        account = get_account(account_id)
+        if not account:
+            available = [a['account_id'] for a in list_accounts()]
+            return mcp_result(req_id, {
+                'content': [{'type': 'text', 'text': json.dumps({
+                    'status': 'error',
+                    'error': f'帳號 {account_id} 未配置',
+                    'available_accounts': available
+                })}],
+                'isError': True
+            })
+
+        if not account.get('enabled', True):
+            return mcp_result(req_id, {
+                'content': [{'type': 'text', 'text': json.dumps({
+                    'status': 'error',
+                    'error': f'帳號 {account_id} 已停用'
+                })}],
+                'isError': True
+            })
+
+        assume_role = account.get('role_arn')
+        account_name = account.get('name', account_id)
+        target_account_id = account_id
+
     # 決定 bucket 和 key
     if legacy_bucket and legacy_key:
         # 向後相容模式
         bucket = legacy_bucket
         key = legacy_key
     else:
-        # 固定桶模式：自動產生路徑
-        # 格式: {date}/{request_id}/{filename}
-        bucket = UPLOAD_BUCKET
+        # 自動產生路徑: bouncer-uploads-{account_id}/{date}/{request_id}/{filename}
+        bucket = f"bouncer-uploads-{target_account_id}"
         date_str = time.strftime('%Y-%m-%d')
         # request_id 在這裡先產生，後面會用到
         request_id = generate_request_id(f"upload:{filename}")
@@ -910,11 +951,16 @@ def mcp_tool_upload(req_id, arguments: dict) -> dict:
         'content_size': content_size,
         'reason': reason,
         'source': source or '__anonymous__',
+        'account_id': target_account_id,
+        'account_name': account_name,
         'status': 'pending_approval',
         'created_at': int(time.time()),
         'ttl': ttl,
         'mode': 'mcp'
     }
+    # Only store assume_role if it has a value (DynamoDB doesn't accept None for strings)
+    if assume_role:
+        item['assume_role'] = assume_role
     table.put_item(Item=item)
 
     # 發送 Telegram 審批
@@ -925,10 +971,12 @@ def mcp_tool_upload(req_id, arguments: dict) -> dict:
     safe_reason = escape_markdown(reason)
     safe_source = escape_markdown(source or 'Unknown')
     safe_content_type = escape_markdown(content_type)
+    safe_account = escape_markdown(f"{target_account_id} ({account_name})")
 
     message = (
         f"📤 *上傳檔案請求*\n\n"
         f"🤖 *來源：* {safe_source}\n"
+        f"🏦 *帳號：* {safe_account}\n"
         f"📁 *目標：* `{safe_s3_uri}`\n"
         f"📊 *大小：* {size_str}\n"
         f"📝 *類型：* {safe_content_type}\n"

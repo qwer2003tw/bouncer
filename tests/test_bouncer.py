@@ -5647,3 +5647,612 @@ class TestHelpCommand:
         content = body['result']['content'][0]['text']
         data = json.loads(content)
         assert data['service'] == 'ec2'
+
+
+# ============================================================================
+# Cross-Account Upload Tests
+# ============================================================================
+
+class TestCrossAccountUpload:
+    """Upload 跨帳號功能測試"""
+
+    @pytest.fixture(autouse=True)
+    def setup_accounts_table(self, mock_dynamodb):
+        """建立 accounts 表"""
+        try:
+            mock_dynamodb.create_table(
+                TableName='bouncer-accounts',
+                KeySchema=[{'AttributeName': 'account_id', 'KeyType': 'HASH'}],
+                AttributeDefinitions=[{'AttributeName': 'account_id', 'AttributeType': 'S'}],
+                BillingMode='PAY_PER_REQUEST'
+            )
+        except Exception:
+            pass  # 表可能已存在
+
+    @patch('mcp_tools.send_telegram_message')
+    def test_upload_default_account_no_assume_role(self, mock_telegram, app_module):
+        """不帶 account 參數 → 使用預設帳號，不 assume role"""
+        import base64
+        content = base64.b64encode(b'test content').decode()
+
+        result = app_module.mcp_tool_upload('test-1', {
+            'filename': 'test.txt',
+            'content': content,
+            'reason': 'test upload',
+            'source': 'test-bot'
+        })
+
+        body = json.loads(result['body'])
+        resp = json.loads(body['result']['content'][0]['text'])
+        assert resp['status'] == 'pending_approval'
+        assert 'bouncer-uploads-190825685292' in resp['s3_uri']
+
+        # 檢查 DynamoDB item 沒有 assume_role
+        table = app_module.table
+        items = table.scan()['Items']
+        upload_item = [i for i in items if i.get('action') == 'upload'][-1]
+        assert 'assume_role' not in upload_item
+        assert upload_item['account_id'] == '190825685292'
+        assert upload_item['account_name'] == 'Default'
+
+    @patch('mcp_tools.send_telegram_message')
+    def test_upload_cross_account_with_role(self, mock_telegram, app_module):
+        """帶 account 參數 → 使用跨帳號，存 assume_role"""
+        import base64
+        content = base64.b64encode(b'cross account test').decode()
+
+        # 先新增帳號
+        from accounts import _get_accounts_table
+        _get_accounts_table().put_item(Item={
+            'account_id': '992382394211',
+            'name': 'Dev',
+            'role_arn': 'arn:aws:iam::992382394211:role/BouncerRole',
+            'enabled': True,
+            'created_at': 1000
+        })
+
+        result = app_module.mcp_tool_upload('test-1', {
+            'filename': 'template.yaml',
+            'content': content,
+            'reason': 'deploy test',
+            'source': 'test-bot',
+            'account': '992382394211'
+        })
+
+        body = json.loads(result['body'])
+        resp = json.loads(body['result']['content'][0]['text'])
+        assert resp['status'] == 'pending_approval'
+        assert 'bouncer-uploads-992382394211' in resp['s3_uri']
+
+        # 檢查 DynamoDB item 有 assume_role
+        table = app_module.table
+        items = table.scan()['Items']
+        upload_item = [i for i in items if i.get('action') == 'upload' and i.get('account_id') == '992382394211'][-1]
+        assert upload_item['assume_role'] == 'arn:aws:iam::992382394211:role/BouncerRole'
+        assert upload_item['account_name'] == 'Dev'
+        assert upload_item['bucket'] == 'bouncer-uploads-992382394211'
+
+    @patch('mcp_tools.send_telegram_message')
+    def test_upload_invalid_account(self, mock_telegram, app_module):
+        """帶不存在的 account → 錯誤"""
+        import base64
+        content = base64.b64encode(b'test').decode()
+
+        result = app_module.mcp_tool_upload('test-1', {
+            'filename': 'test.txt',
+            'content': content,
+            'reason': 'test',
+            'source': 'test-bot',
+            'account': '111111111111'
+        })
+
+        body = json.loads(result['body'])
+        resp = json.loads(body['result']['content'][0]['text'])
+        assert resp['status'] == 'error'
+        assert '未配置' in resp['error']
+
+    @patch('mcp_tools.send_telegram_message')
+    def test_upload_disabled_account(self, mock_telegram, app_module):
+        """帶停用的 account → 錯誤"""
+        import base64
+        content = base64.b64encode(b'test').decode()
+
+        # 新增停用帳號
+        from accounts import _get_accounts_table
+        _get_accounts_table().put_item(Item={
+            'account_id': '333333333333',
+            'name': 'Disabled',
+            'role_arn': 'arn:aws:iam::333333333333:role/BouncerRole',
+            'enabled': False,
+            'created_at': 1000
+        })
+
+        result = app_module.mcp_tool_upload('test-1', {
+            'filename': 'test.txt',
+            'content': content,
+            'reason': 'test',
+            'source': 'test-bot',
+            'account': '333333333333'
+        })
+
+        body = json.loads(result['body'])
+        resp = json.loads(body['result']['content'][0]['text'])
+        assert resp['status'] == 'error'
+        assert '已停用' in resp['error']
+
+    @patch('mcp_tools.send_telegram_message')
+    def test_upload_notification_includes_account(self, mock_telegram, app_module):
+        """通知訊息包含帳號資訊"""
+        import base64
+        content = base64.b64encode(b'test').decode()
+
+        result = app_module.mcp_tool_upload('test-1', {
+            'filename': 'test.txt',
+            'content': content,
+            'reason': 'test',
+            'source': 'test-bot'
+        })
+
+        # 檢查 Telegram 通知有帳號欄位
+        mock_telegram.assert_called_once()
+        msg = mock_telegram.call_args[0][0]
+        assert '帳號' in msg
+        assert '190825685292' in msg
+
+
+# ============================================================================
+# Cross-Account Upload Execution Tests
+# ============================================================================
+
+class TestCrossAccountUploadExecution:
+    """Upload 跨帳號執行（審批後）測試"""
+
+    def test_execute_upload_no_assume_role(self, app_module):
+        """無 assume_role → 用 Lambda 自身權限上傳"""
+        import base64
+
+        # 建立 mock upload request
+        request_id = 'test-upload-no-assume'
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'action': 'upload',
+            'bucket': 'bouncer-uploads-190825685292',
+            'key': '2026-02-21/test/file.txt',
+            'content': base64.b64encode(b'hello').decode(),
+            'content_type': 'text/plain',
+            'status': 'pending_approval'
+        })
+
+        with patch('boto3.client') as mock_boto:
+            mock_s3 = MagicMock()
+            mock_s3.meta.region_name = 'us-east-1'
+            mock_boto.return_value = mock_s3
+
+            result = app_module.execute_upload(request_id, 'test-approver')
+
+            assert result['success'] is True
+            # Should NOT have called sts assume_role
+            mock_boto.assert_called_once_with('s3')
+            mock_s3.put_object.assert_called_once()
+
+    def test_execute_upload_with_assume_role(self, app_module):
+        """有 assume_role → STS assume role 後上傳"""
+        import base64
+
+        request_id = 'test-upload-with-assume'
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'action': 'upload',
+            'bucket': 'bouncer-uploads-992382394211',
+            'key': '2026-02-21/test/file.txt',
+            'content': base64.b64encode(b'hello').decode(),
+            'content_type': 'text/plain',
+            'assume_role': 'arn:aws:iam::992382394211:role/BouncerRole',
+            'status': 'pending_approval'
+        })
+
+        mock_sts = MagicMock()
+        mock_sts.assume_role.return_value = {
+            'Credentials': {
+                'AccessKeyId': 'AKIATEST',
+                'SecretAccessKey': 'secret',
+                'SessionToken': 'token'
+            }
+        }
+        mock_s3 = MagicMock()
+        mock_s3.meta.region_name = 'us-east-1'
+
+        def mock_client(service, **kwargs):
+            if service == 'sts':
+                return mock_sts
+            return mock_s3
+
+        with patch('boto3.client', side_effect=mock_client):
+            result = app_module.execute_upload(request_id, 'test-approver')
+
+            assert result['success'] is True
+            mock_sts.assume_role.assert_called_once_with(
+                RoleArn='arn:aws:iam::992382394211:role/BouncerRole',
+                RoleSessionName='bouncer-upload'
+            )
+            mock_s3.put_object.assert_called_once()
+
+
+# ============================================================================
+# Cross-Account Upload Callback Tests
+# ============================================================================
+
+class TestCrossAccountUploadCallback:
+    """Upload callback 帳號顯示測試"""
+
+    @patch('callbacks.answer_callback')
+    @patch('callbacks.update_message')
+    def test_upload_callback_shows_account(self, mock_update, mock_answer, app_module):
+        """上傳 callback 顯示帳號資訊"""
+        import callbacks
+
+        item = {
+            'request_id': 'test-cb-account',
+            'action': 'upload',
+            'bucket': 'bouncer-uploads-992382394211',
+            'key': '2026-02-21/test/file.txt',
+            'content': 'dGVzdA==',
+            'content_type': 'text/plain',
+            'content_size': 4,
+            'source': 'test-bot',
+            'reason': 'test',
+            'account_id': '992382394211',
+            'account_name': 'Dev',
+            'assume_role': 'arn:aws:iam::992382394211:role/BouncerRole',
+            'status': 'pending_approval'
+        }
+
+        # Mock execute_upload
+        with patch.object(app_module, 'execute_upload', return_value={
+            'success': True,
+            's3_uri': 's3://bouncer-uploads-992382394211/2026-02-21/test/file.txt',
+            's3_url': 'https://bouncer-uploads-992382394211.s3.amazonaws.com/2026-02-21/test/file.txt'
+        }):
+            callbacks.handle_upload_callback('approve', 'test-cb-account', item, 123, 'cb-1', 'user-1')
+
+        # 確認通知包含帳號
+        msg = mock_update.call_args[0][1]
+        assert '992382394211' in msg
+        assert 'Dev' in msg
+
+    @patch('callbacks.answer_callback')
+    @patch('callbacks.update_message')
+    def test_upload_callback_no_account_backward_compat(self, mock_update, mock_answer, app_module):
+        """舊的 upload item（無 account_id）→ 不顯示帳號行"""
+        import callbacks
+
+        item = {
+            'request_id': 'test-cb-no-account',
+            'action': 'upload',
+            'bucket': 'bouncer-uploads-190825685292',
+            'key': '2026-02-21/test/file.txt',
+            'content': 'dGVzdA==',
+            'content_type': 'text/plain',
+            'content_size': 4,
+            'source': 'test-bot',
+            'reason': 'test',
+            'status': 'pending_approval'
+        }
+
+        with patch.object(app_module, 'execute_upload', return_value={
+            'success': True,
+            's3_uri': 's3://bouncer-uploads-190825685292/2026-02-21/test/file.txt',
+            's3_url': 'https://bouncer-uploads-190825685292.s3.amazonaws.com/2026-02-21/test/file.txt'
+        }):
+            callbacks.handle_upload_callback('approve', 'test-cb-no-account', item, 123, 'cb-1', 'user-1')
+
+        msg = mock_update.call_args[0][1]
+        assert '帳號' not in msg
+
+
+# ============================================================================
+# Cross-Account Deploy Tests
+# ============================================================================
+
+class TestCrossAccountDeploy:
+    """Deploy 跨帳號功能測試"""
+
+    @pytest.fixture(autouse=True)
+    def setup_deployer_tables(self, mock_dynamodb):
+        """建立 deployer 相關表"""
+        for tbl_name, key in [
+            ('bouncer-projects', 'project_id'),
+            ('bouncer-deploy-locks', 'project_id'),
+        ]:
+            try:
+                mock_dynamodb.create_table(
+                    TableName=tbl_name,
+                    KeySchema=[{'AttributeName': key, 'KeyType': 'HASH'}],
+                    AttributeDefinitions=[{'AttributeName': key, 'AttributeType': 'S'}],
+                    BillingMode='PAY_PER_REQUEST'
+                )
+            except Exception:
+                pass
+        try:
+            mock_dynamodb.create_table(
+                TableName='bouncer-deploy-history',
+                KeySchema=[{'AttributeName': 'deploy_id', 'KeyType': 'HASH'}],
+                AttributeDefinitions=[
+                    {'AttributeName': 'deploy_id', 'AttributeType': 'S'},
+                    {'AttributeName': 'project_id', 'AttributeType': 'S'},
+                    {'AttributeName': 'started_at', 'AttributeType': 'N'}
+                ],
+                GlobalSecondaryIndexes=[{
+                    'IndexName': 'project-time-index',
+                    'KeySchema': [
+                        {'AttributeName': 'project_id', 'KeyType': 'HASH'},
+                        {'AttributeName': 'started_at', 'KeyType': 'RANGE'}
+                    ],
+                    'Projection': {'ProjectionType': 'ALL'}
+                }],
+                BillingMode='PAY_PER_REQUEST'
+            )
+        except Exception:
+            pass
+
+    def test_add_project_stores_target_role_arn(self, app_module):
+        """add_project 正確存 target_role_arn"""
+        from deployer import add_project, get_project
+
+        add_project('test-cross-deploy', {
+            'name': 'Test Project',
+            'git_repo': 'owner/repo',
+            'stack_name': 'test-stack',
+            'target_account': 'Dev (992382394211)',
+            'target_role_arn': 'arn:aws:iam::992382394211:role/BouncerRole'
+        })
+
+        project = get_project('test-cross-deploy')
+        assert project is not None
+        assert project['target_role_arn'] == 'arn:aws:iam::992382394211:role/BouncerRole'
+        assert project['target_account'] == 'Dev (992382394211)'
+
+    def test_add_project_without_target_role_arn(self, app_module):
+        """add_project 不帶 target_role_arn → 空字串"""
+        from deployer import add_project, get_project
+
+        add_project('test-local-deploy', {
+            'name': 'Local Project',
+            'git_repo': 'owner/repo',
+            'stack_name': 'local-stack'
+        })
+
+        project = get_project('test-local-deploy')
+        assert project is not None
+        assert project['target_role_arn'] == ''
+
+    @patch('deployer.sfn_client')
+    def test_start_deploy_passes_target_role_arn(self, mock_sfn, app_module):
+        """start_deploy 傳入 target_role_arn 到 Step Functions"""
+        from deployer import add_project, start_deploy
+
+        mock_sfn.start_execution.return_value = {
+            'executionArn': 'arn:aws:states:us-east-1:190825685292:execution:test:deploy-test'
+        }
+
+        add_project('test-cross-sfn', {
+            'name': 'Cross Account',
+            'git_repo': 'owner/repo',
+            'stack_name': 'cross-stack',
+            'target_role_arn': 'arn:aws:iam::992382394211:role/BouncerRole'
+        })
+
+        result = start_deploy('test-cross-sfn', 'main', 'test-user', 'test deploy')
+        assert result['status'] == 'started'
+
+        # 檢查 SFN input 包含 target_role_arn
+        call_args = mock_sfn.start_execution.call_args
+        sfn_input = json.loads(call_args[1]['input'] if 'input' in call_args[1] else call_args.kwargs['input'])
+        assert sfn_input['target_role_arn'] == 'arn:aws:iam::992382394211:role/BouncerRole'
+
+    @patch('deployer.sfn_client')
+    def test_start_deploy_empty_target_role_arn(self, mock_sfn, app_module):
+        """start_deploy 無 target_role_arn → 空字串"""
+        from deployer import add_project, start_deploy
+
+        mock_sfn.start_execution.return_value = {
+            'executionArn': 'arn:aws:states:us-east-1:190825685292:execution:test:deploy-local'
+        }
+
+        add_project('test-local-sfn', {
+            'name': 'Local',
+            'git_repo': 'owner/repo',
+            'stack_name': 'local-stack'
+        })
+
+        result = start_deploy('test-local-sfn', 'main', 'test-user', 'local deploy')
+        assert result['status'] == 'started'
+
+        call_args = mock_sfn.start_execution.call_args
+        sfn_input = json.loads(call_args[1]['input'] if 'input' in call_args[1] else call_args.kwargs['input'])
+        assert sfn_input['target_role_arn'] == ''
+
+
+# ============================================================================
+# Deploy Notification Fallback Tests
+# ============================================================================
+
+class TestDeployNotificationFallback:
+    """Deploy 通知帳號 fallback 測試"""
+
+    @pytest.fixture(autouse=True)
+    def setup_deployer_tables(self, mock_dynamodb):
+        """建立 deployer 相關表"""
+        for tbl_name, key in [
+            ('bouncer-projects', 'project_id'),
+            ('bouncer-deploy-locks', 'project_id'),
+        ]:
+            try:
+                mock_dynamodb.create_table(
+                    TableName=tbl_name,
+                    KeySchema=[{'AttributeName': key, 'KeyType': 'HASH'}],
+                    AttributeDefinitions=[{'AttributeName': key, 'AttributeType': 'S'}],
+                    BillingMode='PAY_PER_REQUEST'
+                )
+            except Exception:
+                pass
+        try:
+            mock_dynamodb.create_table(
+                TableName='bouncer-deploy-history',
+                KeySchema=[{'AttributeName': 'deploy_id', 'KeyType': 'HASH'}],
+                AttributeDefinitions=[
+                    {'AttributeName': 'deploy_id', 'AttributeType': 'S'},
+                    {'AttributeName': 'project_id', 'AttributeType': 'S'},
+                    {'AttributeName': 'started_at', 'AttributeType': 'N'}
+                ],
+                GlobalSecondaryIndexes=[{
+                    'IndexName': 'project-time-index',
+                    'KeySchema': [
+                        {'AttributeName': 'project_id', 'KeyType': 'HASH'},
+                        {'AttributeName': 'started_at', 'KeyType': 'RANGE'}
+                    ],
+                    'Projection': {'ProjectionType': 'ALL'}
+                }],
+                BillingMode='PAY_PER_REQUEST'
+            )
+        except Exception:
+            pass
+
+    def test_notification_fallback_from_role_arn(self, app_module):
+        """target_account 空，從 target_role_arn 解析帳號 ID 顯示在通知中"""
+        from deployer import send_deploy_approval_request
+        import urllib.request
+
+        project = {
+            'project_id': 'test-fallback',
+            'name': 'Fallback Test',
+            'stack_name': 'fallback-stack',
+            'target_role_arn': 'arn:aws:iam::992382394211:role/BouncerRole',
+            # 注意：沒有 target_account
+        }
+
+        with patch('urllib.request.urlopen') as mock_urlopen:
+            mock_resp = MagicMock()
+            mock_resp.read.return_value = b'{"ok":true,"result":{"message_id":1}}'
+            mock_urlopen.return_value = mock_resp
+
+            send_deploy_approval_request('deploy-test-123', project, 'main', 'test', 'test-bot')
+
+            # 檢查發送的訊息包含解析出的帳號
+            call_args = mock_urlopen.call_args
+            request_obj = call_args[0][0]
+            body = request_obj.data.decode('utf-8')
+            import urllib.parse
+            params = urllib.parse.parse_qs(body)
+            text = params['text'][0]
+            assert '992382394211' in text
+            assert '帳號' in text
+
+    def test_notification_no_fallback_when_target_account_set(self, app_module):
+        """target_account 有值，直接用不需要 fallback"""
+        from deployer import send_deploy_approval_request
+
+        project = {
+            'project_id': 'test-no-fallback',
+            'name': 'No Fallback',
+            'stack_name': 'test-stack',
+            'target_account': 'Dev (992382394211)',
+            'target_role_arn': 'arn:aws:iam::992382394211:role/BouncerRole',
+        }
+
+        with patch('urllib.request.urlopen') as mock_urlopen:
+            mock_resp = MagicMock()
+            mock_resp.read.return_value = b'{"ok":true,"result":{"message_id":1}}'
+            mock_urlopen.return_value = mock_resp
+
+            send_deploy_approval_request('deploy-test-456', project, 'main', 'test', 'test-bot')
+
+            call_args = mock_urlopen.call_args
+            request_obj = call_args[0][0]
+            body = request_obj.data.decode('utf-8')
+            import urllib.parse
+            params = urllib.parse.parse_qs(body)
+            text = params['text'][0]
+            assert 'Dev (992382394211)' in text
+
+    def test_notification_no_account_at_all(self, app_module):
+        """target_account 和 target_role_arn 都空 → 不顯示帳號行"""
+        from deployer import send_deploy_approval_request
+
+        project = {
+            'project_id': 'test-no-account',
+            'name': 'No Account',
+            'stack_name': 'local-stack',
+        }
+
+        with patch('urllib.request.urlopen') as mock_urlopen:
+            mock_resp = MagicMock()
+            mock_resp.read.return_value = b'{"ok":true,"result":{"message_id":1}}'
+            mock_urlopen.return_value = mock_resp
+
+            send_deploy_approval_request('deploy-test-789', project, 'main', 'test', 'test-bot')
+
+            call_args = mock_urlopen.call_args
+            request_obj = call_args[0][0]
+            body = request_obj.data.decode('utf-8')
+            import urllib.parse
+            params = urllib.parse.parse_qs(body)
+            text = params['text'][0]
+            assert '帳號' not in text
+
+
+# ============================================================================
+# Upload Deny Callback Account Display Test
+# ============================================================================
+
+class TestUploadDenyCallbackAccount:
+    """Upload deny callback 帳號顯示測試"""
+
+    @patch('callbacks.answer_callback')
+    @patch('callbacks.update_message')
+    def test_upload_deny_callback_shows_account(self, mock_update, mock_answer, app_module):
+        """拒絕上傳的 callback 也顯示帳號資訊"""
+        import callbacks
+
+        item = {
+            'request_id': 'test-deny-account',
+            'action': 'upload',
+            'bucket': 'bouncer-uploads-992382394211',
+            'key': '2026-02-21/test/file.txt',
+            'content_size': 4,
+            'source': 'test-bot',
+            'reason': 'test',
+            'account_id': '992382394211',
+            'account_name': 'Dev',
+            'status': 'pending_approval'
+        }
+
+        callbacks.handle_upload_callback('deny', 'test-deny-account', item, 123, 'cb-1', 'user-1')
+
+        msg = mock_update.call_args[0][1]
+        assert '992382394211' in msg
+        assert 'Dev' in msg
+        assert '拒絕' in msg
+
+    @patch('callbacks.answer_callback')
+    @patch('callbacks.update_message')
+    def test_upload_deny_callback_no_account(self, mock_update, mock_answer, app_module):
+        """舊的 upload deny item（無 account_id）→ 不顯示帳號行"""
+        import callbacks
+
+        item = {
+            'request_id': 'test-deny-no-account',
+            'action': 'upload',
+            'bucket': 'bouncer-uploads-190825685292',
+            'key': '2026-02-21/test/file.txt',
+            'content_size': 4,
+            'source': 'test-bot',
+            'reason': 'test',
+            'status': 'pending_approval'
+        }
+
+        callbacks.handle_upload_callback('deny', 'test-deny-no-account', item, 123, 'cb-1', 'user-1')
+
+        msg = mock_update.call_args[0][1]
+        assert '帳號' not in msg
+        assert '拒絕' in msg

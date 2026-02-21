@@ -59,6 +59,7 @@ def add_project(project_id: str, config: dict) -> dict:
         'default_branch': config.get('default_branch', 'master'),
         'stack_name': config.get('stack_name', ''),
         'target_account': config.get('target_account', ''),
+        'target_role_arn': config.get('target_role_arn', ''),
         'secrets_id': config.get('secrets_id', ''),
         'sam_template_path': config.get('sam_template_path', '.'),
         'allowed_deployers': config.get('allowed_deployers', []),
@@ -242,7 +243,8 @@ def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str) -
         'sam_template_path': project.get('sam_template_path', '.'),
         'sam_params': project.get('sam_params', ''),
         'github_pat_secret': 'sam-deployer/github-pat',
-        'secrets_id': project.get('secrets_id', '')
+        'secrets_id': project.get('secrets_id', ''),
+        'target_role_arn': project.get('target_role_arn', '')
     }
 
     # 啟動 Step Functions
@@ -508,6 +510,14 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
     project_name = project.get('name', project_id)
     stack_name = project.get('stack_name', '')
     target_account = project.get('target_account', '')
+    # Fallback: extract account ID from target_role_arn if target_account is empty
+    if not target_account:
+        target_role_arn = project.get('target_role_arn', '')
+        if target_role_arn and ':iam::' in target_role_arn:
+            try:
+                target_account = target_role_arn.split(':iam::')[1].split(':')[0]
+            except (IndexError, AttributeError):
+                pass
 
     branch = branch or project.get('default_branch', 'master')
     source_line = f"🤖 來源： {source}\n" if source else ""

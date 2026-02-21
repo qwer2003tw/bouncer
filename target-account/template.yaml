@@ -1,0 +1,197 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Bouncer Target Account Setup - Deploy this stack once in each target AWS account
+  to enable Bouncer execute, deploy, and upload operations from the central account.
+
+Parameters:
+  BouncerAccountId:
+    Type: String
+    Default: '190825685292'
+    Description: The AWS account ID where Bouncer (central) is deployed
+    AllowedPattern: '[0-9]{12}'
+
+  RoleName:
+    Type: String
+    Default: 'BouncerRole'
+    Description: Name of the IAM role to create
+    AllowedPattern: '[a-zA-Z0-9+=,.@_-]{1,64}'
+
+  UploadBucketLifecycleDays:
+    Type: Number
+    Default: 30
+    Description: Days before uploaded files are automatically deleted (0 to disable)
+    MinValue: 0
+    MaxValue: 365
+
+Conditions:
+  EnableLifecycle: !Not [!Equals [!Ref UploadBucketLifecycleDays, 0]]
+
+Resources:
+  # ============================================================
+  # Unified Bouncer Role
+  # One role for execute, deploy, and upload operations
+  # ============================================================
+  BouncerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      Description: !Sub >
+        Bouncer cross-account role - allows execute/deploy/upload
+        from central account ${BouncerAccountId}
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowBouncerCentralAccount
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${BouncerAccountId}:root'
+            Action: sts:AssumeRole
+            Condition:
+              StringLike:
+                aws:PrincipalArn:
+                  # Bouncer Lambda (execute + upload)
+                  - !Sub 'arn:aws:iam::${BouncerAccountId}:role/bouncer-*'
+                  # CodeBuild (deploy)
+                  - !Sub 'arn:aws:iam::${BouncerAccountId}:role/CodeBuildSAMDeployerRole'
+      Policies:
+        # ----------------------------------------------------------
+        # PowerUser: Can do most things
+        # ----------------------------------------------------------
+        - PolicyName: PowerUserAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: PowerUser
+                Effect: Allow
+                Action: '*'
+                Resource: '*'
+
+        # ----------------------------------------------------------
+        # Deny: Block dangerous IAM + org operations
+        # ----------------------------------------------------------
+        - PolicyName: DenyDangerousOperations
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: DenyDangerousIAM
+                Effect: Deny
+                Action:
+                  # User operations
+                  - iam:CreateUser
+                  - iam:DeleteUser
+                  - iam:AttachUserPolicy
+                  - iam:DetachUserPolicy
+                  - iam:PutUserPolicy
+                  - iam:DeleteUserPolicy
+                  - iam:CreateAccessKey
+                  - iam:DeleteAccessKey
+                  - iam:UpdateAccessKey
+                  - iam:CreateLoginProfile
+                  - iam:DeleteLoginProfile
+                  - iam:UpdateLoginProfile
+                  - iam:DeactivateMFADevice
+                  - iam:DeleteVirtualMFADevice
+                  # Policy escalation
+                  - iam:CreatePolicy
+                  - iam:CreatePolicyVersion
+                  - iam:DeletePolicyVersion
+                  - iam:SetDefaultPolicyVersion
+                  # Instance profile abuse
+                  - iam:AddRoleToInstanceProfile
+                  - iam:CreateInstanceProfile
+                  # STS chaining
+                  - iam:CreateServiceLinkedRole
+                Resource: '*'
+              - Sid: DenyOrganizations
+                Effect: Deny
+                Action:
+                  - organizations:*
+                Resource: '*'
+              - Sid: DenySelfEscalation
+                Effect: Deny
+                Action:
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:DeleteRole
+                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${RoleName}'
+
+  # ============================================================
+  # Upload Bucket (auto-provisioned per account)
+  # ============================================================
+  UploadBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'bouncer-uploads-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration: !If
+        - EnableLifecycle
+        - Rules:
+            - Id: AutoCleanup
+              Status: Enabled
+              ExpirationInDays: !Ref UploadBucketLifecycleDays
+        - !Ref AWS::NoValue
+      Tags:
+        - Key: Project
+          Value: Bouncer
+        - Key: auto-delete
+          Value: 'no'
+        - Key: ManagedBy
+          Value: bouncer-target-account-stack
+
+  # Enforce SSL-only access
+  UploadBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref UploadBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyNonSSL
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt UploadBucket.Arn
+              - !Sub '${UploadBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+Outputs:
+  RoleArn:
+    Description: ARN of the Bouncer role (use this when adding the account to Bouncer)
+    Value: !GetAtt BouncerRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-RoleArn'
+
+  RoleName:
+    Description: Name of the Bouncer role
+    Value: !Ref RoleName
+
+  UploadBucketName:
+    Description: Name of the upload bucket
+    Value: !Ref UploadBucket
+
+  UploadBucketArn:
+    Description: ARN of the upload bucket
+    Value: !GetAtt UploadBucket.Arn
+
+  AddAccountCommand:
+    Description: Command to register this account in Bouncer
+    Value: !Sub >
+      mcporter call bouncer bouncer_add_account
+      --account_id ${AWS::AccountId}
+      --name "CHANGE_ME"
+      --role_arn ${BouncerRole.Arn}

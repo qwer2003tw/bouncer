@@ -363,7 +363,7 @@ MCP_TOOLS = {
     },
     # ========== Upload Tool ==========
     'bouncer_upload': {
-        'description': '上傳檔案到固定 S3 桶（需要 Telegram 審批）。用於 CloudFormation template 等場景。檔案會上傳到 bouncer-uploads 桶，30 天後自動刪除。',
+        'description': '上傳檔案到 S3 桶（需要 Telegram 審批）。支援跨帳號上傳，檔案會上傳到 bouncer-uploads-{account_id} 桶，30 天後自動刪除。',
         'parameters': {
             'type': 'object',
             'properties': {
@@ -387,6 +387,10 @@ MCP_TOOLS = {
                 'source': {
                     'type': 'string',
                     'description': '請求來源標識'
+                },
+                'account': {
+                    'type': 'string',
+                    'description': '目標 AWS 帳號 ID（預設使用 Bouncer 所在帳號）'
                 },
                 'sync': {
                     'type': 'boolean',
@@ -579,7 +583,8 @@ def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
 # ============================================================================
 
 # 固定上傳桶
-UPLOAD_BUCKET = os.environ.get('UPLOAD_BUCKET', 'bouncer-uploads')
+# 預設上傳帳號（Bouncer 所在帳號，向後相容）
+DEFAULT_UPLOAD_ACCOUNT_ID = '190825685292'
 
 
 def wait_for_upload_result(request_id: str, timeout: int = 300) -> dict:
@@ -627,7 +632,7 @@ def wait_for_upload_result(request_id: str, timeout: int = 300) -> dict:
 
 
 def execute_upload(request_id: str, approver: str) -> dict:
-    """執行已審批的上傳（上傳到固定桶）"""
+    """執行已審批的上傳（支援跨帳號）"""
     import base64
 
     try:
@@ -641,12 +646,28 @@ def execute_upload(request_id: str, approver: str) -> dict:
         key = item.get('key')
         content_b64 = item.get('content')
         content_type = item.get('content_type', 'application/octet-stream')
+        assume_role_arn = item.get('assume_role')
 
         # 解碼內容
         content_bytes = base64.b64decode(content_b64)
 
-        # 使用 Lambda 本身的權限上傳
-        s3 = boto3.client('s3')
+        # 建立 S3 client（跨帳號時用 assume role）
+        if assume_role_arn:
+            sts = boto3.client('sts')
+            assumed = sts.assume_role(
+                RoleArn=assume_role_arn,
+                RoleSessionName='bouncer-upload'
+            )
+            creds = assumed['Credentials']
+            s3 = boto3.client(
+                's3',
+                aws_access_key_id=creds['AccessKeyId'],
+                aws_secret_access_key=creds['SecretAccessKey'],
+                aws_session_token=creds['SessionToken']
+            )
+        else:
+            # 使用 Lambda 本身的權限上傳
+            s3 = boto3.client('s3')
 
         # 上傳
         s3.put_object(

@@ -328,7 +328,9 @@ Resources:
               - Sid: CrossAccountAssumeRole
                 Effect: Allow
                 Action: sts:AssumeRole
-                Resource: "arn:aws:iam::*:role/BouncerDeployerRole"
+                Resource:
+                  - "arn:aws:iam::*:role/BouncerRole"
+                  - "arn:aws:iam::*:role/BouncerDeployerRole"  # Legacy support
       Tags:
         - Key: Project
           Value: BounceDeployer
@@ -491,6 +493,16 @@ Resources:
                 - echo "Deploying to stack $STACK_NAME..."
                 - |
                   cd $WORK_DIR
+                  # Cross-account: assume role if TARGET_ROLE_ARN is set
+                  if [ -n "$TARGET_ROLE_ARN" ]; then
+                    echo "Assuming role $TARGET_ROLE_ARN for cross-account deploy..."
+                    CREDS=$(aws sts assume-role --role-arn "$TARGET_ROLE_ARN" --role-session-name "bouncer-deploy-${DEPLOY_ID}" --output json) || { echo "ERROR: Failed to assume role $TARGET_ROLE_ARN"; exit 1; }
+                    export AWS_ACCESS_KEY_ID=$(echo "$CREDS" | python3 -c "import sys,json; print(json.load(sys.stdin)['Credentials']['AccessKeyId'])")
+                    export AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | python3 -c "import sys,json; print(json.load(sys.stdin)['Credentials']['SecretAccessKey'])")
+                    export AWS_SESSION_TOKEN=$(echo "$CREDS" | python3 -c "import sys,json; print(json.load(sys.stdin)['Credentials']['SessionToken'])")
+                    echo "Assumed role successfully. Verifying identity..."
+                    aws sts get-caller-identity
+                  fi
                   if [ -n "$SAM_PARAMS" ]; then
                     sam deploy --stack-name "$STACK_NAME" --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM --resolve-s3 --no-confirm-changeset --no-fail-on-empty-changeset --parameter-overrides $SAM_PARAMS
                   else
@@ -581,6 +593,12 @@ Resources:
                 - Name: GITHUB_PAT_SECRET
                   Type: PLAINTEXT
                   Value.$: $.github_pat_secret
+                - Name: TARGET_ROLE_ARN
+                  Type: PLAINTEXT
+                  Value.$: $.target_role_arn
+                - Name: DEPLOY_ID
+                  Type: PLAINTEXT
+                  Value.$: $.deploy_id
             ResultPath: $.build_result
             Next: NotifySuccess
             Catch:

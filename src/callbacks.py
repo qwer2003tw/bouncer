@@ -416,9 +416,12 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
     content_size = int(item.get('content_size', 0))
     source = item.get('source', '')
     reason = item.get('reason', '')
+    account_id = item.get('account_id', '')
+    account_name = item.get('account_name', '')
 
     s3_uri = f"s3://{bucket}/{key}"
     source_line = f"🤖 來源： {source}\n" if source else ""
+    account_line = f"🏦 帳號： {account_id} ({account_name})\n" if account_id else ""
 
     # 格式化大小
     if content_size >= 1024 * 1024:
@@ -437,6 +440,7 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
                 message_id,
                 f"✅ 已上傳\n\n"
                 f"{source_line}"
+                f"{account_line}"
                 f"📁 目標： {s3_uri}\n"
                 f"📊 大小： {size_str}\n"
                 f"🔗 URL： {result.get('s3_url', '')}\n"
@@ -450,6 +454,7 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
                 message_id,
                 f"❌ 上傳失敗\n\n"
                 f"{source_line}"
+                f"{account_line}"
                 f"📁 目標： {s3_uri}\n"
                 f"📊 大小： {size_str}\n"
                 f"❗ 錯誤： {error}\n"
@@ -473,6 +478,7 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
             message_id,
             f"❌ 已拒絕上傳\n\n"
             f"{source_line}"
+            f"{account_line}"
             f"📁 目標： {s3_uri}\n"
             f"📊 大小： {size_str}\n"
             f"💬 原因： {reason}"
