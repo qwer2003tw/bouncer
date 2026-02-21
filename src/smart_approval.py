@@ -6,14 +6,14 @@ Bouncer - Smart Approval Module
 """
 
 import logging
+import os
+import sys
 from typing import Dict, Optional, Tuple
 
-try:
-    from risk_scorer import calculate_risk, RiskCategory, RiskResult, RiskFactor
-    from sequence_analyzer import get_sequence_risk_modifier, record_command
-except ImportError:
-    from src.risk_scorer import calculate_risk, RiskCategory, RiskResult, RiskFactor
-    from src.sequence_analyzer import get_sequence_risk_modifier, record_command
+sys.path.insert(0, os.path.dirname(__file__))
+
+from risk_scorer import calculate_risk, RiskCategory, RiskResult, RiskFactor
+from sequence_analyzer import get_sequence_risk_modifier, record_command
 
 logger = logging.getLogger(__name__)
 

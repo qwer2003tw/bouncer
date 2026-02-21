@@ -2,18 +2,15 @@
 Bouncer - 輸出分頁模組
 處理長輸出的分頁存儲和取得
 """
+import os
+import sys
 import time
 import boto3
 
-try:
-    from constants import TABLE_NAME, OUTPUT_MAX_INLINE, OUTPUT_PAGE_SIZE, OUTPUT_PAGE_TTL
-except ImportError:
-    from src.constants import TABLE_NAME, OUTPUT_MAX_INLINE, OUTPUT_PAGE_SIZE, OUTPUT_PAGE_TTL
+sys.path.insert(0, os.path.dirname(__file__))
 
-try:
-    from telegram import send_telegram_message
-except ImportError:
-    from src.telegram import send_telegram_message
+from constants import TABLE_NAME, OUTPUT_MAX_INLINE, OUTPUT_PAGE_SIZE, OUTPUT_PAGE_TTL
+from telegram import send_telegram_message
 
 __all__ = [
     'store_paged_output',

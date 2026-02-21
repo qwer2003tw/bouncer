@@ -4,14 +4,14 @@ Bouncer - 命令分類與執行模組
 """
 import os
 import re
+import sys
 from io import StringIO
 
 import boto3
 
-try:
-    from constants import BLOCKED_PATTERNS, DANGEROUS_PATTERNS, AUTO_APPROVE_PREFIXES
-except ImportError:
-    from src.constants import BLOCKED_PATTERNS, DANGEROUS_PATTERNS, AUTO_APPROVE_PREFIXES
+sys.path.insert(0, os.path.dirname(__file__))
+
+from constants import BLOCKED_PATTERNS, DANGEROUS_PATTERNS, AUTO_APPROVE_PREFIXES
 
 __all__ = [
     'is_blocked',

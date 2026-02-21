@@ -2,22 +2,19 @@
 Bouncer - Rate Limiting 模組
 處理請求頻率限制和 pending 請求上限
 """
+import os
+import sys
 import time
 
 import boto3
 
-try:
-    from constants import (
-        TABLE_NAME,
-        RATE_LIMIT_ENABLED, RATE_LIMIT_WINDOW, RATE_LIMIT_MAX_REQUESTS,
-        MAX_PENDING_PER_SOURCE,
-    )
-except ImportError:
-    from src.constants import (
-        TABLE_NAME,
-        RATE_LIMIT_ENABLED, RATE_LIMIT_WINDOW, RATE_LIMIT_MAX_REQUESTS,
-        MAX_PENDING_PER_SOURCE,
-    )
+sys.path.insert(0, os.path.dirname(__file__))
+
+from constants import (
+    TABLE_NAME,
+    RATE_LIMIT_ENABLED, RATE_LIMIT_WINDOW, RATE_LIMIT_MAX_REQUESTS,
+    MAX_PENDING_PER_SOURCE,
+)
 
 __all__ = [
     'RateLimitExceeded',

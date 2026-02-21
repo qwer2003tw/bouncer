@@ -2,19 +2,42 @@
 Bouncer - MCP Tool 實作模組
 
 所有 mcp_tool_* 函數
+
+MCP 錯誤格式規則：
+- Business error（命令被阻擋、帳號不存在、格式錯誤等）→ mcp_result with isError: True
+- Protocol error（缺少參數、JSON 解析失敗、內部錯誤等）→ mcp_error
 """
 
 import json
 import os
+import sys
 import time
+
+sys.path.insert(0, os.path.dirname(__file__))
+
+# 從其他模組導入
+from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native
+from commands import is_blocked, is_auto_approve, execute_command
+from accounts import (
+    init_default_account, get_account, list_accounts,
+    validate_account_id, validate_role_arn,
+)
+from paging import store_paged_output, get_paged_output
+from rate_limit import RateLimitExceeded, PendingLimitExceeded, check_rate_limit
+from trust import (
+    revoke_trust_session, increment_trust_command_count, should_trust_approve,
+)
+from telegram import escape_markdown, send_telegram_message
+from constants import (
+    DEFAULT_ACCOUNT_ID, MCP_MAX_WAIT, RATE_LIMIT_WINDOW,
+    TRUST_SESSION_MAX_COMMANDS,
+)
+
 
 # 延遲 import 避免循環依賴
 def _get_app_module():
     """延遲取得 app module 避免循環 import"""
-    try:
-        import app as app_module
-    except ImportError:
-        from src import app as app_module
+    import app as app_module
     return app_module
 
 def _get_table():
@@ -26,43 +49,6 @@ def _get_accounts_table():
     """取得 accounts DynamoDB table"""
     app = _get_app_module()
     return app.accounts_table
-
-
-# 從其他模組導入
-try:
-    from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native
-    from commands import is_blocked, is_auto_approve, execute_command
-    from accounts import (
-        init_default_account, get_account, list_accounts,
-        validate_account_id, validate_role_arn,
-    )
-    from paging import store_paged_output, get_paged_output
-    from rate_limit import RateLimitExceeded, PendingLimitExceeded, check_rate_limit
-    from trust import (
-        revoke_trust_session, increment_trust_command_count, should_trust_approve,
-    )
-    from telegram import escape_markdown, send_telegram_message
-    from constants import (  # noqa: F401
-        DEFAULT_ACCOUNT_ID, MCP_MAX_WAIT, RATE_LIMIT_WINDOW,
-        TRUST_SESSION_MAX_COMMANDS, AUTO_APPROVE_PREFIXES, BLOCKED_PATTERNS,
-    )
-except ImportError:
-    from src.utils import mcp_result, mcp_error, generate_request_id, decimal_to_native
-    from src.commands import is_blocked, is_auto_approve, execute_command
-    from src.accounts import (
-        init_default_account, get_account, list_accounts,
-        validate_account_id, validate_role_arn,
-    )
-    from src.paging import store_paged_output, get_paged_output
-    from src.rate_limit import RateLimitExceeded, PendingLimitExceeded, check_rate_limit
-    from src.trust import (
-        revoke_trust_session, increment_trust_command_count, should_trust_approve,
-    )
-    from src.telegram import escape_markdown, send_telegram_message
-    from src.constants import (
-        DEFAULT_ACCOUNT_ID, MCP_MAX_WAIT, RATE_LIMIT_WINDOW,
-        TRUST_SESSION_MAX_COMMANDS,
-    )
 
 
 # 預設上傳帳號 ID（Bouncer 所在帳號）
@@ -218,28 +204,7 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
                 'isError': True
             })
     except ImportError:
-        # compliance_checker 模組不存在時跳過（向後兼容）
-        try:
-            from src.compliance_checker import check_compliance
-            is_compliant, violation = check_compliance(command)
-            if not is_compliant:
-                print(f"[COMPLIANCE] Blocked: {violation.rule_id} - {violation.rule_name}")
-                return mcp_result(req_id, {
-                    'content': [{
-                        'type': 'text',
-                        'text': json.dumps({
-                            'status': 'compliance_violation',
-                            'rule_id': violation.rule_id,
-                            'rule_name': violation.rule_name,
-                            'description': violation.description,
-                            'remediation': violation.remediation,
-                            'command': command[:200],
-                        })
-                    }],
-                    'isError': True
-                })
-        except ImportError:
-            pass  # 向後兼容
+        pass  # compliance_checker 模組不存在時跳過（向後兼容）
 
     # Layer 1: BLOCKED
     if is_blocked(command):
@@ -448,10 +413,7 @@ def mcp_tool_help(req_id, arguments: dict) -> dict:
     try:
         from help_command import get_command_help, get_service_operations, format_help_text
     except ImportError:
-        try:
-            from src.help_command import get_command_help, get_service_operations, format_help_text
-        except ImportError:
-            return mcp_error(req_id, -32603, 'help_command module not found')
+        return mcp_error(req_id, -32603, 'help_command module not found')
 
     command = arguments.get('command', '').strip()
     service = arguments.get('service', '').strip()

@@ -3,15 +3,16 @@ Bouncer - Telegram API 模組
 處理所有 Telegram 訊息發送、更新、callback 回應
 """
 import json
+import os
+import sys
 import time
 import urllib.request
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-try:
-    from constants import TELEGRAM_TOKEN, TELEGRAM_API_BASE, APPROVED_CHAT_ID
-except ImportError:
-    from src.constants import TELEGRAM_TOKEN, TELEGRAM_API_BASE, APPROVED_CHAT_ID
+sys.path.insert(0, os.path.dirname(__file__))
+
+from constants import TELEGRAM_TOKEN, TELEGRAM_API_BASE, APPROVED_CHAT_ID
 
 __all__ = [
     'escape_markdown',

@@ -10,110 +10,54 @@ Bouncer - Clawdbot AWS 命令審批執行系統
 
 import json
 import os
+import sys
 import hashlib
 import hmac
 import time
 import boto3
-from typing import Optional
 
-# 從模組導入（逐步遷移中）
-try:
-    from telegram import (  # noqa: F401
-        escape_markdown, send_telegram_message, send_telegram_message_silent,
-        update_message, answer_callback,
-        _telegram_request,
-    )
-    from paging import store_paged_output, get_paged_output  # noqa: F401
-    from trust import revoke_trust_session, create_trust_session, increment_trust_command_count, should_trust_approve, is_trust_excluded  # noqa: F401
-    from commands import is_blocked, is_dangerous, is_auto_approve, execute_command, aws_cli_split  # noqa: F401
-    from accounts import (  # noqa: F401
-        init_bot_commands, init_default_account, get_account, list_accounts,
-        validate_account_id, validate_role_arn,
-    )
-    from rate_limit import RateLimitExceeded, PendingLimitExceeded, check_rate_limit  # noqa: F401
-    from utils import response, generate_request_id, decimal_to_native, mcp_result, mcp_error, get_header
-    # 新模組
-    from mcp_tools import (
-        mcp_tool_execute, mcp_tool_status, mcp_tool_help, mcp_tool_trust_status, mcp_tool_trust_revoke,
-        mcp_tool_add_account, mcp_tool_list_accounts, mcp_tool_get_page,
-        mcp_tool_list_pending, mcp_tool_remove_account, mcp_tool_upload,
-    )
-    from callbacks import (
-        handle_command_callback, handle_account_add_callback, handle_account_remove_callback,
-        handle_deploy_callback, handle_upload_callback,
-    )
-    from telegram_commands import handle_telegram_command
-except ImportError:
-    from src.telegram import (  # noqa: F401
-        escape_markdown, send_telegram_message, send_telegram_message_silent,
-        update_message, answer_callback,
-    )
-    from src.paging import store_paged_output, get_paged_output  # noqa: F401
-    from src.trust import revoke_trust_session, create_trust_session, increment_trust_command_count, should_trust_approve, is_trust_excluded  # noqa: F401
-    from src.commands import is_blocked, is_dangerous, is_auto_approve, execute_command, aws_cli_split  # noqa: F401
-    from src.accounts import (  # noqa: F401
-        init_bot_commands, init_default_account, get_account, list_accounts,
-        validate_account_id, validate_role_arn,
-    )
-    from src.rate_limit import RateLimitExceeded, PendingLimitExceeded, check_rate_limit  # noqa: F401
-    from src.utils import response, generate_request_id, decimal_to_native, mcp_result, mcp_error, get_header
-    # 新模組
-    from src.mcp_tools import (
-        mcp_tool_execute, mcp_tool_status, mcp_tool_help, mcp_tool_trust_status, mcp_tool_trust_revoke,
-        mcp_tool_add_account, mcp_tool_list_accounts, mcp_tool_get_page,
-        mcp_tool_list_pending, mcp_tool_remove_account, mcp_tool_upload,
-    )
-    from src.callbacks import (
-        handle_command_callback, handle_account_add_callback, handle_account_remove_callback,
-        handle_deploy_callback, handle_upload_callback,
-    )
-    from src.telegram_commands import handle_telegram_command
+sys.path.insert(0, os.path.dirname(__file__))
+
+# 從模組導入
+from telegram import (  # noqa: F401
+    escape_markdown, send_telegram_message, send_telegram_message_silent,
+    update_message, answer_callback,
+    _telegram_request,
+)
+from paging import store_paged_output, get_paged_output  # noqa: F401
+from trust import revoke_trust_session, create_trust_session, increment_trust_command_count, should_trust_approve, is_trust_excluded  # noqa: F401
+from commands import is_blocked, is_dangerous, is_auto_approve, execute_command, aws_cli_split  # noqa: F401
+from accounts import (  # noqa: F401
+    init_bot_commands, init_default_account, get_account, list_accounts,
+    validate_account_id, validate_role_arn,
+)
+from rate_limit import RateLimitExceeded, PendingLimitExceeded, check_rate_limit  # noqa: F401
+from utils import response, generate_request_id, decimal_to_native, mcp_result, mcp_error, get_header
+# 新模組
+from mcp_tools import (
+    mcp_tool_execute, mcp_tool_status, mcp_tool_help, mcp_tool_trust_status, mcp_tool_trust_revoke,
+    mcp_tool_add_account, mcp_tool_list_accounts, mcp_tool_get_page,
+    mcp_tool_list_pending, mcp_tool_remove_account, mcp_tool_upload,
+)
+from callbacks import (
+    handle_command_callback, handle_account_add_callback, handle_account_remove_callback,
+    handle_deploy_callback, handle_upload_callback,
+)
+from telegram_commands import handle_telegram_command
 
 # 從 constants.py 導入所有常數
-try:
-    # Lambda 環境
-    from constants import (  # noqa: F401
-        VERSION,
-        TELEGRAM_TOKEN, TELEGRAM_WEBHOOK_SECRET,
-        APPROVED_CHAT_IDS,
-        TABLE_NAME, ACCOUNTS_TABLE_NAME,
-        DEFAULT_ACCOUNT_ID,
-        REQUEST_SECRET, ENABLE_HMAC,
-        MCP_MAX_WAIT,
-        RATE_LIMIT_WINDOW,
-        TRUST_SESSION_MAX_COMMANDS,
-        BLOCKED_PATTERNS, AUTO_APPROVE_PREFIXES,
-    )
-except ImportError:
-    # 本地測試環境
-    from src.constants import (  # noqa: F401
-        VERSION,
-        TELEGRAM_WEBHOOK_SECRET,
-        APPROVED_CHAT_IDS,
-        TABLE_NAME, ACCOUNTS_TABLE_NAME,
-        DEFAULT_ACCOUNT_ID,
-        REQUEST_SECRET, ENABLE_HMAC,
-        MCP_MAX_WAIT,
-        RATE_LIMIT_WINDOW,
-        TRUST_SESSION_MAX_COMMANDS,
-        BLOCKED_PATTERNS, AUTO_APPROVE_PREFIXES,
-    )
-
-
-def get_header(headers: dict, key: str) -> Optional[str]:
-    """Case-insensitive header lookup for API Gateway compatibility"""
-    # Try exact match first
-    if key in headers:
-        return headers[key]
-    # Try lowercase
-    lower_key = key.lower()
-    if lower_key in headers:
-        return headers[lower_key]
-    # Try case-insensitive search
-    for k, v in headers.items():
-        if k.lower() == lower_key:
-            return v
-    return None
+from constants import (  # noqa: F401
+    VERSION,
+    TELEGRAM_TOKEN, TELEGRAM_WEBHOOK_SECRET,
+    APPROVED_CHAT_IDS,
+    TABLE_NAME, ACCOUNTS_TABLE_NAME,
+    DEFAULT_ACCOUNT_ID,
+    REQUEST_SECRET, ENABLE_HMAC,
+    MCP_MAX_WAIT,
+    RATE_LIMIT_WINDOW,
+    TRUST_SESSION_MAX_COMMANDS,
+    BLOCKED_PATTERNS, AUTO_APPROVE_PREFIXES,
+)
 
 
 # DynamoDB
@@ -1247,19 +1191,10 @@ def send_trust_auto_approve_notification(command: str, trust_id: str, remaining:
 # ============================================================================
 
 # 從 telegram_commands 模組 re-export (for tests)
-try:
-    from telegram_commands import (  # noqa: F401
-        send_telegram_message_to,
-        handle_accounts_command,
-        handle_trust_command,
-        handle_pending_command,
-        handle_help_command,
-    )
-except ImportError:
-    from src.telegram_commands import (  # noqa: F401
-        send_telegram_message_to,
-        handle_accounts_command,
-        handle_trust_command,
-        handle_pending_command,
-        handle_help_command,
-    )
+from telegram_commands import (  # noqa: F401, E402
+    send_telegram_message_to,
+    handle_accounts_command,
+    handle_trust_command,
+    handle_pending_command,
+    handle_help_command,
+)
