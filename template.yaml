@@ -186,9 +186,6 @@ Resources:
       CodeUri: src/
       Handler: app.lambda_handler
       Description: Bouncer v3.0.0 - AWS 命令審批執行
-      AutoPublishAlias: live
-      DeploymentPreference:
-        Type: AllAtOnce
       DeadLetterQueue:
         Type: SQS
         TargetArn: !GetAtt ApprovalFunctionDLQ.Arn
@@ -409,11 +406,9 @@ Resources:
   # ============================================================
   # CloudWatch Logs - Log Group with Retention
   # ============================================================
-  ApprovalFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub "/aws/lambda/${ApprovalFunction}"
-      RetentionInDays: 30
+  # Note: Log group /aws/lambda/${ApprovalFunction} already exists
+  # (auto-created by Lambda). Set retention manually or via CLI:
+  # aws logs put-retention-policy --log-group-name /aws/lambda/bouncer-prod-function --retention-in-days 30
 
 Outputs:
   ApiUrl:
