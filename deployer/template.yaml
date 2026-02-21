@@ -500,6 +500,7 @@ Resources:
                 - cd $WORK_DIR && sam build --use-container
                 - echo "Deploying to stack $STACK_NAME..."
                 - |
+                  REPO_ROOT=$(pwd)/repo
                   cd $WORK_DIR
                   # Cross-account: assume role if TARGET_ROLE_ARN is set
                   if [ -n "$TARGET_ROLE_ARN" ]; then
@@ -511,7 +512,7 @@ Resources:
                     echo "Assumed role successfully. Verifying identity..."
                     aws sts get-caller-identity
                   fi
-                  python3 $(pwd)/repo/deployer/scripts/sam_deploy.py
+                  python3 ${REPO_ROOT}/deployer/scripts/sam_deploy.py
             post_build:
               commands:
                 - echo "Deployment complete!"
