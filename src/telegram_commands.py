@@ -4,34 +4,29 @@ Bouncer - Telegram 命令處理模組
 所有 handle_*_command 函數
 """
 
+import os
+import sys
 import time
+
+sys.path.insert(0, os.path.dirname(__file__))
+
+# 從其他模組導入
+from utils import response
+from accounts import init_default_account, list_accounts
+from telegram import _telegram_request
+from constants import APPROVED_CHAT_IDS
+
 
 # 延遲 import 避免循環依賴
 def _get_app_module():
     """延遲取得 app module 避免循環 import"""
-    try:
-        import app as app_module
-    except ImportError:
-        from src import app as app_module
+    import app as app_module
     return app_module
 
 def _get_table():
     """取得 DynamoDB table"""
     app = _get_app_module()
     return app.table
-
-
-# 從其他模組導入
-try:
-    from utils import response
-    from accounts import init_default_account, list_accounts
-    from telegram import _telegram_request
-    from constants import APPROVED_CHAT_IDS
-except ImportError:
-    from src.utils import response
-    from src.accounts import init_default_account, list_accounts
-    from src.telegram import _telegram_request
-    from src.constants import APPROVED_CHAT_IDS
 
 
 def send_telegram_message_to(chat_id: str, text: str, parse_mode: str = None):

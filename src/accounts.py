@@ -2,6 +2,8 @@
 Bouncer - 帳號管理模組
 處理 AWS 帳號的 CRUD 和驗證
 """
+import os
+import sys
 import time
 import json
 import urllib.request
@@ -9,14 +11,11 @@ from typing import Optional, Dict
 
 import boto3
 
-try:
-    from constants import (
-        ACCOUNTS_TABLE_NAME, DEFAULT_ACCOUNT_ID, TELEGRAM_TOKEN
-    )
-except ImportError:
-    from src.constants import (
-        ACCOUNTS_TABLE_NAME, DEFAULT_ACCOUNT_ID, TELEGRAM_TOKEN
-    )
+sys.path.insert(0, os.path.dirname(__file__))
+
+from constants import (
+    ACCOUNTS_TABLE_NAME, DEFAULT_ACCOUNT_ID, TELEGRAM_TOKEN
+)
 
 __all__ = [
     'init_bot_commands',

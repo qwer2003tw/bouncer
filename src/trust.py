@@ -2,24 +2,21 @@
 Bouncer - Trust Session 模組
 處理信任時段的建立、查詢、撤銷和自動批准判斷
 """
+import os
+import sys
 import time
 import hashlib
 from typing import Optional, Dict
 
 import boto3
 
-try:
-    from constants import (
-        TABLE_NAME,
-        TRUST_SESSION_ENABLED, TRUST_SESSION_DURATION, TRUST_SESSION_MAX_COMMANDS,
-        TRUST_EXCLUDED_SERVICES, TRUST_EXCLUDED_ACTIONS, TRUST_EXCLUDED_FLAGS,
-    )
-except ImportError:
-    from src.constants import (
-        TABLE_NAME,
-        TRUST_SESSION_ENABLED, TRUST_SESSION_DURATION, TRUST_SESSION_MAX_COMMANDS,
-        TRUST_EXCLUDED_SERVICES, TRUST_EXCLUDED_ACTIONS, TRUST_EXCLUDED_FLAGS,
-    )
+sys.path.insert(0, os.path.dirname(__file__))
+
+from constants import (
+    TABLE_NAME,
+    TRUST_SESSION_ENABLED, TRUST_SESSION_DURATION, TRUST_SESSION_MAX_COMMANDS,
+    TRUST_EXCLUDED_SERVICES, TRUST_EXCLUDED_ACTIONS, TRUST_EXCLUDED_FLAGS,
+)
 
 __all__ = [
     'get_trust_session',

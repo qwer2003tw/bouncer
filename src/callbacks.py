@@ -4,15 +4,25 @@ Bouncer - Telegram Callback 處理模組
 所有 handle_*_callback 函數
 """
 
+import os
+import sys
 import time
+
+sys.path.insert(0, os.path.dirname(__file__))
+
+# 從其他模組導入
+from utils import response
+from commands import execute_command
+from paging import store_paged_output, send_remaining_pages
+from trust import create_trust_session
+from telegram import escape_markdown, update_message, answer_callback, update_and_answer
+from constants import DEFAULT_ACCOUNT_ID
+
 
 # 延遲 import 避免循環依賴
 def _get_app_module():
     """延遲取得 app module 避免循環 import"""
-    try:
-        import app as app_module
-    except ImportError:
-        from src import app as app_module
+    import app as app_module
     return app_module
 
 def _get_table():
@@ -24,23 +34,6 @@ def _get_accounts_table():
     """取得 accounts DynamoDB table"""
     app = _get_app_module()
     return app.accounts_table
-
-
-# 從其他模組導入
-try:
-    from utils import response
-    from commands import execute_command
-    from paging import store_paged_output, send_remaining_pages
-    from trust import create_trust_session
-    from telegram import escape_markdown, update_message, answer_callback, update_and_answer
-    from constants import DEFAULT_ACCOUNT_ID
-except ImportError:
-    from src.utils import response
-    from src.commands import execute_command
-    from src.paging import store_paged_output, send_remaining_pages
-    from src.trust import create_trust_session
-    from src.telegram import escape_markdown, update_message, answer_callback, update_and_answer
-    from src.constants import DEFAULT_ACCOUNT_ID
 
 
 def handle_command_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str):
