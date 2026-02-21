@@ -45,6 +45,7 @@ Globals:
     MemorySize: 256
     Architectures:
       - arm64
+    Tracing: Active
     LoggingConfig:
       LogFormat: JSON
 
@@ -185,6 +186,12 @@ Resources:
       CodeUri: src/
       Handler: app.lambda_handler
       Description: Bouncer v3.0.0 - AWS 命令審批執行
+      AutoPublishAlias: live
+      DeploymentPreference:
+        Type: AllAtOnce
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt ApprovalFunctionDLQ.Arn
       Tags:
         Project: Bouncer
         auto-delete: "no"
@@ -328,6 +335,76 @@ Resources:
       Threshold: 5
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
+
+  # ============================================================
+  # SNS - Alarm Notifications
+  # ============================================================
+  AlarmNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${Environment}-bouncer-alarms"
+
+  # ============================================================
+  # CloudWatch Alarm - API Gateway 5xx
+  # ============================================================
+  ApiGateway5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Environment}-bouncer-api-5xx"
+      MetricName: 5XXError
+      Namespace: AWS/ApiGateway
+      Dimensions:
+        - Name: ApiName
+          Value: !Ref BouncerApi
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
+  # ============================================================
+  # CloudWatch Alarm - Lambda Duration (approaching timeout)
+  # ============================================================
+  LambdaDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Environment}-bouncer-slow-lambda"
+      MetricName: Duration
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ApprovalFunction
+      Statistic: p99
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 600000
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
+  # ============================================================
+  # SQS - Dead Letter Queue
+  # ============================================================
+  ApprovalFunctionDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${Environment}-bouncer-dlq"
+      MessageRetentionPeriod: 1209600
+
+  # ============================================================
+  # CloudWatch Logs - Log Group with Retention
+  # ============================================================
+  ApprovalFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ApprovalFunction}"
+      RetentionInDays: 30
 
 Outputs:
   ApiUrl:
