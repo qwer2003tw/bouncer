@@ -255,6 +255,11 @@ Resources:
             TableName: bouncer-deploy-locks
         - Version: '2012-10-17'
           Statement:
+            # Cross-account assume role
+            - Sid: CrossAccountAssumeRole
+              Effect: Allow
+              Action: sts:AssumeRole
+              Resource: 'arn:aws:iam::*:role/BouncerRole'
             # Step Functions for deployer
             - Sid: StepFunctionsAccess
               Effect: Allow

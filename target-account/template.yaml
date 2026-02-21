@@ -52,6 +52,7 @@ Resources:
                 aws:PrincipalArn:
                   # Bouncer Lambda (execute + upload)
                   - !Sub 'arn:aws:iam::${BouncerAccountId}:role/bouncer-*'
+                  - !Sub 'arn:aws:iam::${BouncerAccountId}:role/clawdbot-bouncer-*'
                   # CodeBuild (deploy)
                   - !Sub 'arn:aws:iam::${BouncerAccountId}:role/CodeBuildSAMDeployerRole'
       Policies:
