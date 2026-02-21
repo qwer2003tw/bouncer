@@ -119,6 +119,13 @@ Resources:
                   - iam:DetachRolePolicy
                   - iam:DeleteRole
                 Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${RoleName}'
+              - Sid: DenyBroadIAM
+                Effect: Deny
+                Action:
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:PutRolePermissionsBoundary
+                  - iam:DeleteRolePermissionsBoundary
+                Resource: '*'
 
   # ============================================================
   # Upload Bucket (auto-provisioned per account)

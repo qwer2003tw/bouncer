@@ -291,6 +291,15 @@ Resources:
                 - iam:CreateAccessKey
                 - iam:DeleteAccessKey
                 - iam:UpdateAccessKey
+                - iam:UpdateAssumeRolePolicy
+                - iam:CreatePolicy
+                - iam:CreatePolicyVersion
+                - iam:SetDefaultPolicyVersion
+                - iam:AddRoleToInstanceProfile
+                - iam:CreateInstanceProfile
+                - iam:PutRolePermissionsBoundary
+                - iam:DeleteRolePermissionsBoundary
+                - iam:CreateServiceLinkedRole
                 - organizations:*
               Resource: '*'
 
@@ -311,6 +320,17 @@ Resources:
         AllowHeaders: "'Content-Type,X-Approval-Secret,X-Timestamp,X-Nonce,X-Signature'"
 
   # ============================================================
+  # SNS Topic - Error Alarm Notifications
+  # ============================================================
+  ErrorAlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "bouncer-${Environment}-error-alarm"
+      Tags:
+        - Key: Project
+          Value: Bouncer
+
+  # ============================================================
   # CloudWatch Alarms
   # ============================================================
   HighErrorAlarm:
@@ -328,6 +348,10 @@ Resources:
       Threshold: 5
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ErrorAlarmTopic
+      OKActions:
+        - !Ref ErrorAlarmTopic
 
 Outputs:
   ApiUrl:

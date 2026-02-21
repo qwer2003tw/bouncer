@@ -307,12 +307,20 @@ Resources:
                   - logs:*
                   - cloudwatch:*
                 Resource: "*"
-              - Sid: IAMForSAM
+              - Sid: IAMForSAMCreateAndAttach
                 Effect: Allow
                 Action:
                   - iam:CreateRole
-                  - iam:DeleteRole
                   - iam:AttachRolePolicy
+                Resource:
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/*"
+                Condition:
+                  StringEquals:
+                    iam:PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/SAMDeployerBoundary"
+              - Sid: IAMForSAM
+                Effect: Allow
+                Action:
+                  - iam:DeleteRole
                   - iam:DetachRolePolicy
                   - iam:PutRolePolicy
                   - iam:DeleteRolePolicy
