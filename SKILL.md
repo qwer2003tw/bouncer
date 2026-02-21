@@ -86,6 +86,13 @@ mcporter call bouncer bouncer_list_safelist
 mcporter call bouncer bouncer_add_account account_id="111111111111" name="Production" role_arn="arn:aws:iam::111111111111:role/BouncerRole" source="<your name>"
 ```
 
+**Parameters:**
+- `account_id` (required): 12 位 AWS 帳號 ID
+- `name` (required): 帳號名稱（顯示用）
+- `role_arn` (required): 該帳號的 BouncerRole ARN
+- `upload_bucket` (optional): 自訂 upload 桶名（預設 `bouncer-uploads-{account_id}`）
+- `source` (required): 來源標識
+
 ### bouncer_remove_account
 移除 AWS 帳號配置（需要 Telegram 審批）。
 
@@ -94,7 +101,7 @@ mcporter call bouncer bouncer_remove_account account_id="111111111111" source="<
 ```
 
 ### bouncer_upload
-上傳檔案到固定 S3 桶（需要 Telegram 審批）。檔案會上傳到集中管理的 `bouncer-uploads-111111111111` 桶，30 天後自動刪除。
+上傳檔案到 S3 桶（需要 Telegram 審批）。檔案會上傳到 `bouncer-uploads-{account_id}` 桶，30 天後自動刪除。支援跨帳號上傳。
 
 ```bash
 # 先把檔案 base64 encode
@@ -114,6 +121,7 @@ mcporter call bouncer bouncer_upload \
 - `content_type` (optional): Content-Type（預設 `application/octet-stream`）
 - `reason` (required): 上傳原因
 - `source` (required): 來源標識
+- `account` (optional): 目標 AWS 帳號 ID，上傳到該帳號的 `bouncer-uploads-{account_id}` 桶
 
 **限制：** 檔案大小最大 4.5 MB（Lambda payload 限制）
 
@@ -121,8 +129,8 @@ mcporter call bouncer bouncer_upload \
 ```json
 {
   "status": "approved",
-  "s3_uri": "s3://bouncer-uploads-111111111111/2026-02-03/upload_abc12345/template.yaml",
-  "s3_url": "https://bouncer-uploads-111111111111.s3.amazonaws.com/2026-02-03/upload_abc12345/template.yaml"
+  "s3_uri": "s3://bouncer-uploads-{account_id}/{source}/{timestamp}_{uuid}/{filename}",
+  "s3_url": "https://bouncer-uploads-{account_id}.s3.amazonaws.com/..."
 }
 ```
 
@@ -188,6 +196,8 @@ mcporter call bouncer bouncer_deploy project="bouncer" reason="更新功能" sou
 - `source` (required): 來源標識
 - `branch` (optional): Git 分支（預設使用專案設定的分支）
 
+**Note:** 跨帳號部署透過專案配置的 `target_account` 控制，不是呼叫時傳參。用 `bouncer_project_list` 查看專案配置。
+
 ### bouncer_deploy_status
 查詢部署狀態。
 
@@ -242,11 +252,10 @@ mcporter call bouncer bouncer_project_list
 
 ## AWS 帳號
 
-| 帳號 | ID | 說明 |
-|------|-----|------|
-| 2nd (主帳號) | 111111111111 | 直接使用 Lambda execution role |
-| Dev | 222222222222 | 透過 assume role `BouncerExecutionRole` |
-| 1st | 333333333333 | 透過 assume role `BouncerExecutionRole` |
+用 `bouncer_list_accounts` 查看當前設定的帳號。
+
+Cross-account 透過 assume role 到目標帳號的 `BouncerRole` 執行。
+新增帳號前需先在目標帳號部署 `target-account/template.yaml`。
 
 ---
 
