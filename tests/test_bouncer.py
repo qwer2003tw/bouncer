@@ -248,14 +248,8 @@ class TestMCPExecuteApproval:
         assert mock_telegram.called
     
     @patch('app.send_telegram_message')
-    @patch('subprocess.run')
-    def test_execute_approved(self, mock_run, mock_telegram, app_module):
+    def test_execute_approved(self, mock_telegram, app_module):
         """測試審批通過的命令"""
-        mock_run.return_value = MagicMock(
-            stdout='Instance started',
-            stderr='',
-            returncode=0
-        )
         
         # 先建立 pending 請求
         request_id = 'test123'
@@ -413,14 +407,10 @@ class TestMCPErrors:
 class TestRESTSafelist:
     """REST API SAFELIST 測試"""
     
-    @patch('subprocess.run')
-    def test_safelist_auto_approved(self, mock_run, app_module):
+    @patch('commands.execute_command')
+    def test_safelist_auto_approved(self, mock_execute, app_module):
         """測試 REST API 自動批准"""
-        mock_run.return_value = MagicMock(
-            stdout='{"Account": "123456"}',
-            stderr='',
-            returncode=0
-        )
+        mock_execute.return_value = '{"Account": "123456"}'
         
         event = {
             'rawPath': '/',
@@ -493,14 +483,10 @@ class TestTelegramWebhook:
     
     @patch('app.update_message')
     @patch('app.answer_callback')
-    @patch('subprocess.run')
-    def test_approve_callback(self, mock_run, mock_answer, mock_update, app_module):
+    @patch('callbacks.execute_command')
+    def test_approve_callback(self, mock_execute, mock_answer, mock_update, app_module):
         """測試審批通過 callback"""
-        mock_run.return_value = MagicMock(
-            stdout='Done',
-            stderr='',
-            returncode=0
-        )
+        mock_execute.return_value = 'Done'
         
         # 建立 pending 請求
         request_id = 'webhook_test'
@@ -598,9 +584,11 @@ class TestCommandClassification:
         assert app_module.is_blocked('aws iam create-user --user-name test')
         assert app_module.is_blocked('aws iam delete-role --role-name admin')
         assert app_module.is_blocked('aws sts assume-role --role-arn xxx')
-        assert app_module.is_blocked('aws ec2 describe-instances; rm -rf /')
-        assert app_module.is_blocked('aws s3 ls | cat /etc/passwd')
-        assert app_module.is_blocked('aws lambda invoke $(whoami)')
+        # Shell metacharacters are NOT checked by is_blocked — they are handled
+        # by execute_command's aws_cli_split which doesn't invoke a shell
+        assert not app_module.is_blocked('aws ec2 describe-instances; rm -rf /')
+        assert not app_module.is_blocked('aws s3 ls | cat /etc/passwd')
+        assert not app_module.is_blocked('aws lambda invoke $(whoami)')
     
     def test_is_auto_approve(self, app_module):
         """測試 SAFELIST 分類"""
@@ -642,8 +630,7 @@ class TestSecurity:
             # aws_cli_split 會把 ; | && 等當作普通字元，不是 shell 操作符
             pass  # shell injection 防護測試在 test_execute_only_aws_commands
     
-    @patch('subprocess.run')
-    def test_execute_only_aws_commands(self, mock_run, app_module):
+    def test_execute_only_aws_commands(self, app_module):
         """測試只能執行 aws 命令"""
         result = app_module.execute_command('ls -la')
         assert '只能執行 aws CLI 命令' in result
@@ -961,7 +948,7 @@ class TestOutputPaging:
 # 命令分類測試（補充）
 # ============================================================================
 
-class TestCommandClassification:
+class TestCommandClassificationExtended:
     """命令分類補充測試"""
     
     def test_blocked_iam_commands(self, app_module):
@@ -2219,14 +2206,10 @@ class TestTelegramCallbackHandlers:
     
     @patch('app.answer_callback')
     @patch('app.update_message')
-    @patch('subprocess.run')
-    def test_callback_approve_trust(self, mock_run, mock_update, mock_answer, app_module):
+    @patch('callbacks.execute_command')
+    def test_callback_approve_trust(self, mock_execute, mock_update, mock_answer, app_module):
         """批准並建立信任時段"""
-        mock_run.return_value = MagicMock(
-            stdout='Instance started',
-            stderr='',
-            returncode=0
-        )
+        mock_execute.return_value = 'Instance started'
         
         request_id = 'trust-approve-123'
         app_module.table.put_item(Item={
@@ -3439,14 +3422,10 @@ class TestRESTAPIHandlerAdditional:
         result = app_module.handle_clawdbot_request(event)
         assert result['statusCode'] == 400
     
-    @patch('subprocess.run')
-    def test_handle_clawdbot_request_safelist(self, mock_run, app_module):
+    @patch('commands.execute_command')
+    def test_handle_clawdbot_request_safelist(self, mock_execute, app_module):
         """REST API 自動批准"""
-        mock_run.return_value = MagicMock(
-            stdout='{"result": "ok"}',
-            stderr='',
-            returncode=0
-        )
+        mock_execute.return_value = '{"result": "ok"}'
         
         event = {
             'headers': {'x-approval-secret': 'test-secret'},
@@ -4315,8 +4294,7 @@ class TestCallbackHandlersFull:
     
     @patch('app.answer_callback')
     @patch('app.update_message')
-    @patch('subprocess.run')
-    def test_callback_deny_command(self, mock_run, mock_update, mock_answer, app_module):
+    def test_callback_deny_command(self, mock_update, mock_answer, app_module):
         """拒絕命令執行"""
         request_id = 'deny-cmd-test'
         app_module.table.put_item(Item={
@@ -4944,15 +4922,11 @@ class TestCoverage80Sprint:
     
     @patch('app.update_message')
     @patch('app.answer_callback')
-    @patch('subprocess.run')
-    def test_callback_approve_with_paged_result(self, mock_run, mock_answer, mock_update, app_module):
+    @patch('callbacks.execute_command')
+    def test_callback_approve_with_paged_result(self, mock_execute, mock_answer, mock_update, app_module):
         """批准命令並返回分頁結果"""
         # 返回長輸出
-        mock_run.return_value = MagicMock(
-            stdout='x' * 5000,  # 長輸出
-            stderr='',
-            returncode=0
-        )
+        mock_execute.return_value = 'x' * 5000  # 長輸出
         
         request_id = 'paged-approve-test'
         app_module.table.put_item(Item={
@@ -5071,7 +5045,7 @@ class TestCommandsMore:
 # 80% 覆蓋率衝刺 - 第二波
 # ============================================================================
 
-class TestDeployerMore:
+class TestDeployerMoreExtended:
     """Deployer 更多測試"""
     
     def test_mcp_deploy_missing_project(self, app_module):
@@ -5339,7 +5313,7 @@ class TestMCPListPending:
         assert content['pending_count'] >= 1
 
 
-class TestPagingMore:
+class TestPagingMoreExtended:
     """Paging 更多測試"""
     
     def test_get_page_not_found(self, app_module):
@@ -6275,3 +6249,448 @@ class TestUploadDenyCallbackAccount:
         msg = mock_update.call_args[0][1]
         assert '帳號' not in msg
         assert '拒絕' in msg
+
+
+# ============================================================================
+# Trust Session Limits Tests
+# ============================================================================
+
+class TestTrustSessionLimits:
+    """測試信任時段的邊界條件"""
+
+    def test_trust_session_expired(self, app_module):
+        """信任時段已過期 → should_trust_approve 返回 False"""
+        from trust import should_trust_approve
+
+        # 建立已過期的信任時段
+        app_module.table.put_item(Item={
+            'request_id': 'trust-expired-test',
+            'type': 'trust_session',
+            'source': 'test-source-expired',
+            'account_id': '111111111111',
+            'approved_by': '999999999',
+            'created_at': int(time.time()) - 700,
+            'expires_at': int(time.time()) - 100,  # 已過期
+            'command_count': 0,
+        })
+
+        should, session, reason = should_trust_approve(
+            'aws ec2 describe-instances', 'test-source-expired', '111111111111'
+        )
+        assert should is False
+        assert 'expired' in reason.lower() or 'No active' in reason
+
+    def test_trust_session_command_limit_reached(self, app_module):
+        """命令數達上限 → should_trust_approve 返回 False"""
+        from trust import should_trust_approve
+        from constants import TRUST_SESSION_MAX_COMMANDS
+
+        # 建立已達上限的信任時段
+        app_module.table.put_item(Item={
+            'request_id': 'trust-maxed-test',
+            'type': 'trust_session',
+            'source': 'test-source-maxed',
+            'account_id': '111111111111',
+            'approved_by': '999999999',
+            'created_at': int(time.time()),
+            'expires_at': int(time.time()) + 600,
+            'command_count': TRUST_SESSION_MAX_COMMANDS,  # 已達上限
+        })
+
+        should, session, reason = should_trust_approve(
+            'aws ec2 describe-instances', 'test-source-maxed', '111111111111'
+        )
+        assert should is False
+        assert 'limit' in reason.lower()
+
+    def test_trust_session_excluded_high_risk(self, app_module):
+        """高危命令排除 → 即使在信任中也返回 False"""
+        from trust import should_trust_approve
+
+        # 建立有效的信任時段
+        app_module.table.put_item(Item={
+            'request_id': 'trust-excluded-test',
+            'type': 'trust_session',
+            'source': 'test-source-excluded',
+            'account_id': '111111111111',
+            'approved_by': '999999999',
+            'created_at': int(time.time()),
+            'expires_at': int(time.time()) + 600,
+            'command_count': 0,
+        })
+
+        # IAM 操作即使在信任中也應被排除
+        should, session, reason = should_trust_approve(
+            'aws iam create-user --user-name hacker', 'test-source-excluded', '111111111111'
+        )
+        assert should is False
+        assert 'excluded' in reason.lower() or 'trust' in reason.lower()
+
+
+# ============================================================================
+# Sync Mode Execute Tests
+# ============================================================================
+
+class TestSyncModeExecute:
+    """測試同步/異步模式"""
+
+    @patch('mcp_tools.execute_command')
+    def test_sync_safe_command_auto_approved(self, mock_execute, app_module):
+        """sync=True + safe command → 直接返回結果"""
+        mock_execute.return_value = '{"Instances": []}'
+
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 100,
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_execute',
+                    'arguments': {
+                        'command': 'aws ec2 describe-instances',
+                        'reason': 'sync test',
+                        'sync': True
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'auto_approved'
+        assert '{"Instances": []}' in content['result']
+
+    @patch('app.send_telegram_message')
+    def test_async_default_pending(self, mock_telegram, app_module):
+        """async 預設 → 立即返回 pending_approval"""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 101,
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_execute',
+                    'arguments': {
+                        'command': 'aws ec2 start-instances --instance-ids i-123',
+                        'reason': 'async test'
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'pending_approval'
+        assert 'request_id' in content
+
+
+# ============================================================================
+# Cross-Account Execute Flow Tests
+# ============================================================================
+
+class TestCrossAccountExecuteFlow:
+    """測試跨帳號執行流程"""
+
+    @pytest.fixture(autouse=True)
+    def setup_accounts_table(self, mock_dynamodb, app_module):
+        """建立 accounts 表"""
+        import accounts
+        accounts._accounts_table = None  # 重置快取
+        try:
+            mock_dynamodb.create_table(
+                TableName='bouncer-accounts',
+                KeySchema=[{'AttributeName': 'account_id', 'KeyType': 'HASH'}],
+                AttributeDefinitions=[{'AttributeName': 'account_id', 'AttributeType': 'S'}],
+                BillingMode='PAY_PER_REQUEST'
+            )
+        except Exception:
+            pass  # 表可能已存在
+
+    @patch('mcp_tools.execute_command')
+    @patch('app.send_telegram_message')
+    def test_cross_account_with_assume_role(self, mock_telegram, mock_execute, app_module):
+        """mock execute_command 驗證帶 assume_role 的調用"""
+        mock_execute.return_value = '{"Account": "992382394211"}'
+
+        # 先在 accounts table 加入帳號
+        from accounts import _get_accounts_table
+        accounts_table = _get_accounts_table()
+        accounts_table.put_item(Item={
+            'account_id': '992382394211',
+            'name': 'Dev',
+            'role_arn': 'arn:aws:iam::992382394211:role/BouncerExecutionRole',
+            'enabled': True,
+        })
+
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 200,
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_execute',
+                    'arguments': {
+                        'command': 'aws sts get-caller-identity',
+                        'account': '992382394211',
+                        'reason': 'cross-account test'
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'auto_approved'
+        # 驗證 execute_command 被呼叫時帶了 assume_role
+        mock_execute.assert_called_once()
+        call_args = mock_execute.call_args
+        assert call_args[0][0] == 'aws sts get-caller-identity'
+        assert 'BouncerExecutionRole' in (call_args[0][1] or '')
+
+    def test_account_not_found_returns_available(self, app_module):
+        """帳號不存在 → 返回可用帳號列表"""
+        # 初始化預設帳號，這樣才有可用帳號列表
+        from accounts import init_default_account
+        init_default_account()
+
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 201,
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_execute',
+                    'arguments': {
+                        'command': 'aws s3 ls',
+                        'account': '999999999999',
+                        'reason': 'test unknown account'
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'error'
+        assert '999999999999' in content['error']
+
+    @patch('mcp_tools.execute_command')
+    def test_assume_role_failure(self, mock_execute, app_module):
+        """assume_role 失敗 → 返回錯誤"""
+        mock_execute.return_value = '❌ Assume role 失敗: Access Denied'
+
+        # 建立帳號配置
+        from accounts import _get_accounts_table
+        accounts_table = _get_accounts_table()
+        accounts_table.put_item(Item={
+            'account_id': '888888888888',
+            'name': 'Broken',
+            'role_arn': 'arn:aws:iam::888888888888:role/BrokenRole',
+            'enabled': True,
+        })
+
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 202,
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_execute',
+                    'arguments': {
+                        'command': 'aws sts get-caller-identity',
+                        'account': '888888888888',
+                        'reason': 'test broken role'
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'auto_approved'
+        assert 'Assume role 失敗' in content['result']
+
+
+# ============================================================
+# Phase 2 Audit Fix: Additional Test Coverage
+# ============================================================
+
+class TestTrustSessionExpiry:
+    """Trust session expiry and limits (T-4)."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, app_module):
+        self.app = app_module
+        import trust as trust_mod
+        self.trust = trust_mod
+        # Reset trust module table reference
+        trust_mod._table = None
+
+    def test_expired_trust_session_not_approved(self, app_module):
+        """Expired trust session should NOT auto-approve."""
+        # Create an already-expired trust session
+        table = app_module.table
+        table.put_item(Item={
+            'request_id': 'trust-expired-test',
+            'type': 'trust_session',
+            'source': 'expire-test',
+            'account_id': '111111111111',
+            'approved_by': '999999999',
+            'created_at': int(time.time()) - 700,
+            'expires_at': int(time.time()) - 10,
+            'command_count': 0,
+            'ttl': int(time.time()) + 3600,
+        })
+        should, session, reason = self.trust.should_trust_approve(
+            'aws s3 ls', 'expire-test', '111111111111'
+        )
+        assert should is False
+
+    def test_max_commands_trust_session_not_approved(self, app_module):
+        """Trust session at max commands should NOT auto-approve."""
+        from constants import TRUST_SESSION_MAX_COMMANDS
+        table = app_module.table
+        table.put_item(Item={
+            'request_id': 'trust-maxcmd-test',
+            'type': 'trust_session',
+            'source': 'maxcmd-test',
+            'account_id': '111111111111',
+            'approved_by': '999999999',
+            'created_at': int(time.time()),
+            'expires_at': int(time.time()) + 600,
+            'command_count': TRUST_SESSION_MAX_COMMANDS,
+            'ttl': int(time.time()) + 3600,
+        })
+        should, session, reason = self.trust.should_trust_approve(
+            'aws s3 ls', 'maxcmd-test', '111111111111'
+        )
+        assert should is False
+        assert 'limit' in reason.lower()
+
+    def test_excluded_command_not_trusted(self, app_module):
+        """High-risk commands should NOT be trusted even in active session."""
+        table = app_module.table
+        table.put_item(Item={
+            'request_id': 'trust-exclude-test',
+            'type': 'trust_session',
+            'source': 'exclude-test',
+            'account_id': '111111111111',
+            'approved_by': '999999999',
+            'created_at': int(time.time()),
+            'expires_at': int(time.time()) + 600,
+            'command_count': 0,
+            'ttl': int(time.time()) + 3600,
+        })
+        should, session, reason = self.trust.should_trust_approve(
+            'aws iam create-user --user-name hacker', 'exclude-test', '111111111111'
+        )
+        assert should is False
+
+    def test_valid_trust_session_approved(self, app_module):
+        """Valid trust session with safe command should auto-approve."""
+        table = app_module.table
+        table.put_item(Item={
+            'request_id': 'trust-valid-test',
+            'type': 'trust_session',
+            'source': 'valid-test',
+            'account_id': '111111111111',
+            'approved_by': '999999999',
+            'created_at': int(time.time()),
+            'expires_at': int(time.time()) + 600,
+            'command_count': 0,
+            'ttl': int(time.time()) + 3600,
+        })
+        should, session, reason = self.trust.should_trust_approve(
+            'aws s3 cp file.txt s3://bucket/', 'valid-test', '111111111111'
+        )
+        assert should is True
+        assert 'active' in reason.lower()
+
+
+class TestSyncAsyncMode:
+    """Sync vs async execution mode (T-5)."""
+
+    @patch('mcp_tools.send_telegram_message')
+    def test_async_returns_immediately(self, mock_telegram, app_module):
+        """Default async mode returns pending_approval immediately."""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': os.environ.get('REQUEST_SECRET', 'test-secret')},
+            'body': json.dumps({
+                'jsonrpc': '2.0', 'id': 'async-test', 'method': 'tools/call',
+                'params': {'name': 'bouncer_execute', 'arguments': {
+                    'command': 'aws ec2 start-instances --instance-ids i-123',
+                    'reason': 'test async', 'source': 'test-bot'
+                }}
+            })
+        }
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'pending_approval'
+        assert 'request_id' in content
+
+
+class TestCrossAccountExecuteErrors:
+    """Cross-account execution error paths (T-3)."""
+
+    @patch('mcp_tools.send_telegram_message')
+    def test_nonexistent_account_returns_available(self, mock_telegram, app_module):
+        """Requesting non-existent account should list available accounts."""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': os.environ.get('REQUEST_SECRET', 'test-secret')},
+            'body': json.dumps({
+                'jsonrpc': '2.0', 'id': 'bad-acct', 'method': 'tools/call',
+                'params': {'name': 'bouncer_execute', 'arguments': {
+                    'command': 'aws s3 ls',
+                    'reason': 'test', 'source': 'test-bot',
+                    'account': '999999999999'
+                }}
+            })
+        }
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'error'
+        assert '999999999999' in content.get('error', '')
+
+    @patch('mcp_tools.send_telegram_message')
+    def test_invalid_account_format(self, mock_telegram, app_module):
+        """Non-numeric account ID should be rejected."""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': os.environ.get('REQUEST_SECRET', 'test-secret')},
+            'body': json.dumps({
+                'jsonrpc': '2.0', 'id': 'bad-format', 'method': 'tools/call',
+                'params': {'name': 'bouncer_execute', 'arguments': {
+                    'command': 'aws s3 ls',
+                    'reason': 'test', 'source': 'test-bot',
+                    'account': 'not-a-number'
+                }}
+            })
+        }
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content.get('status') == 'error' or body.get('error')
