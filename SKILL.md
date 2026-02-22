@@ -155,6 +155,7 @@ mcporter call bouncer bouncer_get_page page_id="abc123:page:2"
 ## Trust Session Tools
 
 Trust Session 讓你在審批時選擇「信任10分鐘」，期間同 source 的命令會自動批准（高危操作除外）。
+信任時段自動批准時，Telegram 通知會顯示來源、剩餘時間和已執行命令數。
 
 ### bouncer_trust_status
 查詢當前的信任時段狀態。
