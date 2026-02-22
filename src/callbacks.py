@@ -219,6 +219,7 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
             update_message(
                 message_id,
                 f"✅ *已新增帳號*\n\n"
+                f"📋 *請求 ID：* `{request_id}`\n"
                 f"{source_line}"
                 f"🆔 *帳號 ID：* `{account_id}`\n"
                 f"📛 *名稱：* {account_name}\n"
@@ -245,6 +246,7 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
         update_message(
             message_id,
             f"❌ *已拒絕新增帳號*\n\n"
+            f"📋 *請求 ID：* `{request_id}`\n"
             f"{source_line}"
             f"🆔 *帳號 ID：* `{account_id}`\n"
             f"📛 *名稱：* {account_name}"
@@ -283,6 +285,7 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
             update_message(
                 message_id,
                 f"✅ *已移除帳號*\n\n"
+                f"📋 *請求 ID：* `{request_id}`\n"
                 f"{source_line}"
                 f"🆔 *帳號 ID：* `{account_id}`\n"
                 f"📛 *名稱：* {account_name}"
@@ -308,6 +311,7 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
         update_message(
             message_id,
             f"❌ *已拒絕移除帳號*\n\n"
+            f"📋 *請求 ID：* `{request_id}`\n"
             f"{source_line}"
             f"🆔 *帳號 ID：* `{account_id}`\n"
             f"📛 *名稱：* {account_name}"
@@ -351,6 +355,7 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
             update_message(
                 message_id,
                 f"❌ *部署啟動失敗*\n\n"
+                f"📋 *請求 ID：* `{request_id}`\n"
                 f"{source_line}"
                 f"📦 *專案：* {project_name}\n"
                 f"🌿 *分支：* {branch}\n\n"
@@ -363,6 +368,7 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
             update_message(
                 message_id,
                 f"🚀 *部署已啟動*\n\n"
+                f"📋 *請求 ID：* `{request_id}`\n"
                 f"{source_line}"
                 f"📦 *專案：* {project_name}\n"
                 f"🌿 *分支：* {branch}\n"
@@ -388,6 +394,7 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
         update_message(
             message_id,
             f"❌ *已拒絕部署*\n\n"
+            f"📋 *請求 ID：* `{request_id}`\n"
             f"{source_line}"
             f"📦 *專案：* {project_name}\n"
             f"🌿 *分支：* {branch}\n"
@@ -432,6 +439,7 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
             update_message(
                 message_id,
                 f"✅ 已上傳\n\n"
+                f"📋 請求 ID： `{request_id}`\n"
                 f"{source_line}"
                 f"{account_line}"
                 f"📁 目標： {s3_uri}\n"
@@ -446,6 +454,7 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
             update_message(
                 message_id,
                 f"❌ 上傳失敗\n\n"
+                f"📋 請求 ID： `{request_id}`\n"
                 f"{source_line}"
                 f"{account_line}"
                 f"📁 目標： {s3_uri}\n"
@@ -470,6 +479,7 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
         update_message(
             message_id,
             f"❌ 已拒絕上傳\n\n"
+            f"📋 請求 ID： `{request_id}`\n"
             f"{source_line}"
             f"{account_line}"
             f"📁 目標： {s3_uri}\n"
