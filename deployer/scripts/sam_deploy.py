@@ -10,8 +10,10 @@ Supports two SAM_PARAMS formats:
   2. Legacy space-separated: Key1=Value1 Key2=Value2
 
 Environment Variables:
-  STACK_NAME   - CloudFormation stack name (required)
-  SAM_PARAMS   - Parameter overrides (optional, JSON or legacy format)
+  STACK_NAME     - CloudFormation stack name (required)
+  SAM_PARAMS     - Parameter overrides (optional, JSON or legacy format)
+  CFN_ROLE_ARN   - CloudFormation execution role ARN (optional)
+  TARGET_ROLE_ARN - Cross-account assume role ARN (optional; when set, CFN_ROLE_ARN is skipped)
 """
 
 import json
@@ -92,6 +94,13 @@ def main() -> None:
             )
             parts = re.split(r"\s+(?=\w+=)", params_raw)
             cmd.extend(parts)
+
+    # Use CFN execution role for local-account deploys (not cross-account)
+    cfn_role = os.environ.get("CFN_ROLE_ARN", "").strip()
+    target_role = os.environ.get("TARGET_ROLE_ARN", "").strip()
+    if cfn_role and not target_role:
+        cmd.extend(["--role-arn", cfn_role])
+        print(f"Using CFN execution role: {cfn_role}")
 
     param_count = len(cmd) - base_len
     print(f"Running sam deploy --stack-name {stack} with {param_count} param args")
