@@ -5650,8 +5650,10 @@ class TestCrossAccountUpload:
         monkeypatch.setattr(mcp_tools, 'DEFAULT_ACCOUNT_ID', '111111111111')
 
     @pytest.fixture(autouse=True)
-    def setup_accounts_table(self, mock_dynamodb):
+    def setup_accounts_table(self, mock_dynamodb, app_module):
         """建立 accounts 表"""
+        import accounts
+        accounts._accounts_table = None  # 重置快取
         try:
             mock_dynamodb.create_table(
                 TableName='bouncer-accounts',
