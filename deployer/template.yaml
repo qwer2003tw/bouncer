@@ -433,7 +433,7 @@ Resources:
         Type: ARM_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/amazonlinux2-aarch64-standard:3.0
-        PrivilegedMode: false
+        PrivilegedMode: true
         EnvironmentVariables:
           - Name: ARTIFACTS_BUCKET
             Value: !Ref ArtifactsBucket
@@ -452,6 +452,8 @@ Resources:
                 python: 3.11
               commands:
                 - pip install aws-sam-cli cfn-lint
+                - nohup /usr/local/bin/dockerd --host=unix:///var/run/docker.sock --host=tcp://127.0.0.1:2375 &
+                - timeout 15 sh -c "until docker info; do echo .; sleep 1; done"
             pre_build:
               commands:
                 - echo "Cloning repository..."
@@ -464,7 +466,7 @@ Resources:
               commands:
                 - export WORK_DIR=$(pwd)/repo/${SAM_TEMPLATE_PATH}
                 - echo "Building SAM application in $WORK_DIR..."
-                - cd $WORK_DIR && sam build
+                - cd $WORK_DIR && sam build --use-container
                 - echo "Deploying to stack $STACK_NAME..."
                 - |
                   cd $WORK_DIR
