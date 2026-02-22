@@ -16,7 +16,7 @@ import time
 sys.path.insert(0, os.path.dirname(__file__))
 
 # 從其他模組導入
-from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native
+from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native, log_decision
 from commands import is_blocked, is_auto_approve, execute_command
 from accounts import (
     init_default_account, get_account, list_accounts,
@@ -54,6 +54,36 @@ def _get_accounts_table():
 # 預設上傳帳號 ID（Bouncer 所在帳號）
 # Shadow mode 表名（用於收集智慧審批數據）
 SHADOW_TABLE_NAME = os.environ.get('SHADOW_TABLE', 'bouncer-shadow-approvals')
+
+
+def _safe_risk_category(smart_decision):
+    """安全取得 risk category 值（相容 enum 和 string）"""
+    if not smart_decision:
+        return None
+    try:
+        cat = smart_decision.risk_result.category
+        return cat.value if hasattr(cat, 'value') else cat
+    except Exception:
+        return None
+
+
+def _safe_risk_factors(smart_decision):
+    """安全取得 risk factors（相容各種格式，float → Decimal）"""
+    if not smart_decision:
+        return None
+    try:
+        from decimal import Decimal as _Dec
+        factors = [f.__dict__ for f in smart_decision.risk_result.factors[:5]]
+        # 將 float 轉為 Decimal（DynamoDB 不接受 float）
+        sanitized = []
+        for factor in factors:
+            sanitized.append({
+                k: _Dec(str(v)) if isinstance(v, float) else v
+                for k, v in factor.items()
+            })
+        return sanitized
+    except Exception:
+        return None
 
 
 def _log_smart_approval_shadow(
@@ -190,6 +220,20 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
         is_compliant, violation = check_compliance(command)
         if not is_compliant:
             print(f"[COMPLIANCE] Blocked: {violation.rule_id} - {violation.rule_name}")
+            log_decision(
+                table=_get_table(),
+                request_id=generate_request_id(command),
+                command=command,
+                reason=reason,
+                source=source,
+                account_id=account_id,
+                decision_type='compliance_violation',
+                risk_score=smart_decision.final_score if smart_decision else None,
+                risk_category=_safe_risk_category(smart_decision),
+                risk_factors=_safe_risk_factors(smart_decision),
+                violation_rule_id=violation.rule_id,
+                violation_rule_name=violation.rule_name,
+            )
             return mcp_result(req_id, {
                 'content': [{
                     'type': 'text',
@@ -209,6 +253,18 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
 
     # Layer 1: BLOCKED
     if is_blocked(command):
+        log_decision(
+            table=_get_table(),
+            request_id=generate_request_id(command),
+            command=command,
+            reason=reason,
+            source=source,
+            account_id=account_id,
+            decision_type='blocked',
+            risk_score=smart_decision.final_score if smart_decision else None,
+            risk_category=_safe_risk_category(smart_decision),
+            risk_factors=_safe_risk_factors(smart_decision),
+        )
         return mcp_result(req_id, {
             'content': [{
                 'type': 'text',
@@ -225,6 +281,21 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
     if is_auto_approve(command):
         result = execute_command(command, assume_role)
         paged = store_paged_output(generate_request_id(command), result)
+
+        log_decision(
+            table=_get_table(),
+            request_id=generate_request_id(command),
+            command=command,
+            reason=reason,
+            source=source,
+            account_id=account_id,
+            decision_type='auto_approved',
+            risk_score=smart_decision.final_score if smart_decision else None,
+            risk_category=_safe_risk_category(smart_decision),
+            risk_factors=_safe_risk_factors(smart_decision),
+            account_name=account_name,
+            mode='mcp',
+        )
 
         response_data = {
             'status': 'auto_approved',
@@ -297,6 +368,22 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
             command, trust_session['request_id'], remaining_str, new_count, result
         )
 
+        log_decision(
+            table=_get_table(),
+            request_id=generate_request_id(command),
+            command=command,
+            reason=reason,
+            source=source,
+            account_id=account_id,
+            decision_type='trust_approved',
+            risk_score=smart_decision.final_score if smart_decision else None,
+            risk_category=_safe_risk_category(smart_decision),
+            risk_factors=_safe_risk_factors(smart_decision),
+            account_name=account_name,
+            trust_session_id=trust_session['request_id'],
+            mode='mcp',
+        )
+
         response_data = {
             'status': 'trust_auto_approved',
             'command': command,
@@ -341,6 +428,12 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
         'ttl': ttl,
         'mode': 'mcp'
     }
+    if smart_decision:
+        from decimal import Decimal as _Dec
+        item['risk_score'] = _Dec(str(smart_decision.final_score))
+        item['risk_category'] = _safe_risk_category(smart_decision) or ''
+        item['risk_factors'] = _safe_risk_factors(smart_decision) or []
+        item['decision_type'] = 'pending'  # 會在 callback 時更新
     table.put_item(Item=item)
 
     # 發送 Telegram 審批請求

@@ -32,7 +32,7 @@ from accounts import (  # noqa: F401
     validate_account_id, validate_role_arn,
 )
 from rate_limit import RateLimitExceeded, PendingLimitExceeded, check_rate_limit  # noqa: F401
-from utils import response, generate_request_id, decimal_to_native, mcp_result, mcp_error, get_header
+from utils import response, generate_request_id, decimal_to_native, mcp_result, mcp_error, get_header, log_decision
 # 新模組
 from mcp_tools import (
     mcp_tool_execute, mcp_tool_status, mcp_tool_help, mcp_tool_trust_status, mcp_tool_trust_revoke,
@@ -808,6 +808,15 @@ def handle_clawdbot_request(event):
 
     # Layer 1: BLOCKED
     if is_blocked(command):
+        log_decision(
+            table=table,
+            request_id=generate_request_id(command),
+            command=command,
+            reason=reason,
+            source=source,
+            account_id=None,
+            decision_type='blocked',
+        )
         return response(403, {
             'status': 'blocked',
             'error': 'Command blocked for security',
@@ -817,6 +826,16 @@ def handle_clawdbot_request(event):
     # Layer 2: SAFELIST
     if is_auto_approve(command):
         result = execute_command(command, assume_role)
+        log_decision(
+            table=table,
+            request_id=generate_request_id(command),
+            command=command,
+            reason=reason,
+            source=source,
+            account_id=None,
+            decision_type='auto_approved',
+            mode='rest',
+        )
         return response(200, {
             'status': 'auto_approved',
             'command': command,
@@ -836,7 +855,8 @@ def handle_clawdbot_request(event):
         'status': 'pending_approval',
         'created_at': int(time.time()),
         'ttl': ttl,
-        'mode': 'rest'
+        'mode': 'rest',
+        'decision_type': 'pending',
     }
     table.put_item(Item=item)
 

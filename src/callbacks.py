@@ -56,14 +56,21 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         result = execute_command(command, assume_role)
         paged = store_paged_output(request_id, result)
 
+        now = int(time.time())
+        created_at = int(item.get('created_at', 0))
+        decision_latency_ms = (now - created_at) * 1000 if created_at else 0
+
         # 存入 DynamoDB（包含分頁資訊）
-        update_expr = 'SET #s = :s, #r = :r, approved_at = :t, approver = :a'
+        update_expr = 'SET #s = :s, #r = :r, approved_at = :t, approver = :a, decision_type = :dt, decided_at = :da, decision_latency_ms = :dl'
         expr_names = {'#s': 'status', '#r': 'result'}
         expr_values = {
             ':s': 'approved',
             ':r': paged['result'],
-            ':t': int(time.time()),
-            ':a': user_id
+            ':t': now,
+            ':a': user_id,
+            ':dt': 'manual_approved',
+            ':da': now,
+            ':dl': decision_latency_ms
         }
 
         if paged.get('paged'):
@@ -107,14 +114,21 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         result = execute_command(command, assume_role)
         paged = store_paged_output(request_id, result)
 
+        now = int(time.time())
+        created_at = int(item.get('created_at', 0))
+        decision_latency_ms = (now - created_at) * 1000 if created_at else 0
+
         # 存入 DynamoDB（包含分頁資訊）
-        update_expr = 'SET #s = :s, #r = :r, approved_at = :t, approver = :a'
+        update_expr = 'SET #s = :s, #r = :r, approved_at = :t, approver = :a, decision_type = :dt, decided_at = :da, decision_latency_ms = :dl'
         expr_names = {'#s': 'status', '#r': 'result'}
         expr_values = {
             ':s': 'approved',
             ':r': paged['result'],
-            ':t': int(time.time()),
-            ':a': user_id
+            ':t': now,
+            ':a': user_id,
+            ':dt': 'manual_approved_trust',
+            ':da': now,
+            ':dl': decision_latency_ms
         }
 
         if paged.get('paged'):
@@ -158,14 +172,21 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             send_remaining_pages(request_id, paged['total_pages'])
 
     elif action == 'deny':
+        now = int(time.time())
+        created_at = int(item.get('created_at', 0))
+        decision_latency_ms = (now - created_at) * 1000 if created_at else 0
+
         table.update_item(
             Key={'request_id': request_id},
-            UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
+            UpdateExpression='SET #s = :s, approved_at = :t, approver = :a, decision_type = :dt, decided_at = :da, decision_latency_ms = :dl',
             ExpressionAttributeNames={'#s': 'status'},
             ExpressionAttributeValues={
                 ':s': 'denied',
-                ':t': int(time.time()),
-                ':a': user_id
+                ':t': now,
+                ':a': user_id,
+                ':dt': 'manual_denied',
+                ':da': now,
+                ':dl': decision_latency_ms
             }
         )
 
