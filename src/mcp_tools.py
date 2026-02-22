@@ -183,10 +183,11 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
         assume_role = account.get('role_arn')
         account_name = account.get('name', account_id)
     else:
-        # 使用預設帳號
+        # 使用預設帳號 — 也從 accounts 表查 role_arn
         account_id = DEFAULT_ACCOUNT_ID
-        assume_role = None
-        account_name = 'Default'
+        account = get_account(account_id) if account_id else None
+        assume_role = account.get('role_arn') if account else None
+        account_name = account.get('name', 'Default') if account else 'Default'
 
     # ========== Smart Approval Shadow Mode ==========
     # 記錄風險評分但不影響現有決策（收集 100 樣本後評估）
@@ -923,6 +924,13 @@ def mcp_tool_upload(req_id, arguments: dict) -> dict:
     assume_role = None
     account_name = 'Default'
     target_account_id = DEFAULT_ACCOUNT_ID
+
+    # 如果沒指定帳號，也查預設帳號的 role_arn
+    if not account_id and DEFAULT_ACCOUNT_ID:
+        default_account = get_account(DEFAULT_ACCOUNT_ID)
+        if default_account:
+            assume_role = default_account.get('role_arn')
+            account_name = default_account.get('name', 'Default')
 
     if account_id:
         # 驗證帳號 ID 格式
