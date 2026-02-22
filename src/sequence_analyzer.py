@@ -762,49 +762,6 @@ def get_sequence_risk_modifier(
 
 
 # ============================================================================
-# CloudFormation Template Generator
-# ============================================================================
-
-def generate_table_cloudformation() -> str:
-    """
-    生成 DynamoDB 表的 CloudFormation 模板片段
-
-    Returns:
-        YAML 格式的 CloudFormation 資源定義
-    """
-    return """
-  # ============================================================
-  # DynamoDB - 命令歷史記錄（序列分析用）
-  # ============================================================
-  CommandHistoryTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: !Sub "bouncer-${Environment}-command-history"
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: pk
-          AttributeType: S
-        - AttributeName: sk
-          AttributeType: S
-      KeySchema:
-        - AttributeName: pk
-          KeyType: HASH
-        - AttributeName: sk
-          KeyType: RANGE
-      TimeToLiveSpecification:
-        AttributeName: ttl
-        Enabled: true
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
-      Tags:
-        - Key: Project
-          Value: Bouncer
-        - Key: auto-delete
-          Value: "no"
-"""
-
-
-# ============================================================================
 # Testing Support
 # ============================================================================
 

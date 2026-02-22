@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     'evaluate_command',
-    'record_executed_command',
     'ApprovalDecision',
 ]
 
@@ -154,48 +153,3 @@ def evaluate_command(
             reason=f"風險評估失敗: {e}",
         )
 
-
-def record_executed_command(
-    source: str,
-    command: str,
-    account_id: str,
-) -> None:
-    """
-    記錄已執行的命令（供序列分析使用）
-
-    應該在命令成功執行後調用。
-
-    Args:
-        source: 請求來源
-        command: 執行的命令
-        account_id: 目標帳號
-    """
-    try:
-        record_command(source, command, account_id)
-    except Exception as e:
-        # 記錄失敗不應影響主流程
-        logger.warning(f"Failed to record command: {e}")
-
-
-def should_smart_approve(
-    command: str,
-    reason: str,
-    source: str,
-    account_id: str,
-) -> Tuple[bool, Optional[ApprovalDecision], str]:
-    """
-    檢查是否應該智慧自動批准
-
-    這個函數可以和現有的 trust session 邏輯一起使用。
-
-    Returns:
-        Tuple of (should_approve, decision, reason)
-    """
-    decision = evaluate_command(command, reason, source, account_id)
-
-    if decision.decision == ApprovalDecision.AUTO_APPROVE:
-        return True, decision, "智慧審批：低風險自動批准"
-    elif decision.decision == ApprovalDecision.AUTO_APPROVE_LOG:
-        return True, decision, "智慧審批：低風險自動批准（已記錄）"
-    else:
-        return False, decision, decision.reason

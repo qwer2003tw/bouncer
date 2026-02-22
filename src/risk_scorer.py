@@ -1305,51 +1305,6 @@ def calculate_risk(
 
 
 # ============================================================================
-# Convenience Functions
-# ============================================================================
-
-def quick_score(command: str) -> int:
-    """
-    快速取得風險分數（簡化版）
-
-    Args:
-        command: AWS CLI 命令
-
-    Returns:
-        風險分數 (0-100)
-    """
-    return calculate_risk(command).score
-
-
-def is_safe(command: str, threshold: int = 45) -> bool:
-    """
-    檢查命令是否足夠安全（可自動批准）
-
-    Args:
-        command: AWS CLI 命令
-        threshold: 安全閾值，預設 45（log 分類以下）
-
-    Returns:
-        True 如果分數 <= threshold
-    """
-    return calculate_risk(command).score <= threshold
-
-
-def needs_approval(command: str) -> bool:
-    """
-    檢查命令是否需要人工審批
-
-    Args:
-        command: AWS CLI 命令
-
-    Returns:
-        True 如果分類是 manual 或 block
-    """
-    result = calculate_risk(command)
-    return result.category in [RiskCategory.MANUAL.value, RiskCategory.BLOCK.value]
-
-
-# ============================================================================
 # Testing Support
 # ============================================================================
 
