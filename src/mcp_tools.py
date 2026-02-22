@@ -12,6 +12,8 @@ import json
 import os
 import sys
 import time
+from dataclasses import dataclass
+from typing import Optional
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -126,11 +128,33 @@ def _log_smart_approval_shadow(
         print(f"[SHADOW] Failed to log: {e}")
 
 
-def mcp_tool_execute(req_id, arguments: dict) -> dict:
-    """MCP tool: bouncer_execute（預設異步，立即返回 request_id）"""
-    app = _get_app_module()
-    table = _get_table()
+# =============================================================================
+# Execute Pipeline — Context + Check Functions
+# =============================================================================
 
+@dataclass
+class ExecuteContext:
+    """Pipeline context for mcp_tool_execute"""
+    req_id: str
+    command: str
+    reason: str
+    source: Optional[str]
+    context: Optional[str]
+    account_id: str
+    account_name: str
+    assume_role: Optional[str]
+    timeout: int
+    sync_mode: bool
+    smart_decision: object = None  # smart_approval result (or None)
+    mode: str = 'mcp'
+
+
+def _parse_execute_request(req_id, arguments: dict) -> 'dict | ExecuteContext':
+    """Parse and validate execute request arguments.
+
+    Returns an ExecuteContext on success, or an MCP error/result dict on
+    validation failure (caller should return immediately).
+    """
     command = str(arguments.get('command', '')).strip()
     reason = str(arguments.get('reason', 'No reason provided'))
     source = arguments.get('source', None)
@@ -139,8 +163,7 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
     if account_id:
         account_id = str(account_id).strip()
     timeout = min(int(arguments.get('timeout', MCP_MAX_WAIT)), MCP_MAX_WAIT)
-    # 預設異步（避免 API Gateway 29s 超時）
-    sync_mode = arguments.get('sync', False)  # 明確要求同步才等待
+    sync_mode = arguments.get('sync', False)
 
     if not command:
         return mcp_error(req_id, -32602, 'Missing required parameter: command')
@@ -150,7 +173,6 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
 
     # 解析帳號配置
     if account_id:
-        # 驗證帳號 ID 格式
         valid, error = validate_account_id(account_id)
         if not valid:
             return mcp_result(req_id, {
@@ -158,7 +180,6 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
                 'isError': True
             })
 
-        # 查詢帳號配置
         account = get_account(account_id)
         if not account:
             available = [a['account_id'] for a in list_accounts()]
@@ -183,59 +204,73 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
         assume_role = account.get('role_arn')
         account_name = account.get('name', account_id)
     else:
-        # 使用預設帳號 — 也從 accounts 表查 role_arn
         account_id = DEFAULT_ACCOUNT_ID
         account = get_account(account_id) if account_id else None
         assume_role = account.get('role_arn') if account else None
         account_name = account.get('name', 'Default') if account else 'Default'
 
-    # ========== Smart Approval Shadow Mode ==========
-    # 記錄風險評分但不影響現有決策（收集 100 樣本後評估）
-    smart_decision = None
+    return ExecuteContext(
+        req_id=req_id,
+        command=command,
+        reason=reason,
+        source=source,
+        context=context,
+        account_id=account_id,
+        account_name=account_name,
+        assume_role=assume_role,
+        timeout=timeout,
+        sync_mode=sync_mode,
+    )
+
+
+def _score_risk(ctx: ExecuteContext) -> None:
+    """Smart Approval Shadow Mode — score risk, log to DynamoDB.
+
+    Mutates ctx.smart_decision in-place.  Never raises.
+    """
     try:
         from smart_approval import evaluate_command as smart_evaluate
-        smart_decision = smart_evaluate(
-            command=command,
-            reason=reason,
-            source=source or 'unknown',
-            account_id=account_id,
-            enable_sequence_analysis=False  # 先不啟用序列分析
+        ctx.smart_decision = smart_evaluate(
+            command=ctx.command,
+            reason=ctx.reason,
+            source=ctx.source or 'unknown',
+            account_id=ctx.account_id,
+            enable_sequence_analysis=False,
         )
-        # 記錄到 DynamoDB（異步，不阻塞主流程）
         _log_smart_approval_shadow(
-            req_id=req_id,
-            command=command,
-            reason=reason,
-            source=source,
-            account_id=account_id,
-            smart_decision=smart_decision,
+            req_id=ctx.req_id,
+            command=ctx.command,
+            reason=ctx.reason,
+            source=ctx.source,
+            account_id=ctx.account_id,
+            smart_decision=ctx.smart_decision,
         )
     except Exception as e:
-        # Shadow mode 失敗不影響主流程
         print(f"[SHADOW] Smart approval error: {e}")
-    # ========== End Shadow Mode ==========
 
-    # Layer 0: 合規檢查（最高優先，違反安規直接攔截）
+
+def _check_compliance(ctx: ExecuteContext) -> Optional[dict]:
+    """Layer 0: compliance check — blocks on security-rule violations."""
     try:
         from compliance_checker import check_compliance
-        is_compliant, violation = check_compliance(command)
+        is_compliant, violation = check_compliance(ctx.command)
         if not is_compliant:
             print(f"[COMPLIANCE] Blocked: {violation.rule_id} - {violation.rule_name}")
             log_decision(
                 table=_get_table(),
-                request_id=generate_request_id(command),
-                command=command,
-                reason=reason,
-                source=source,
-                account_id=account_id,
+                request_id=generate_request_id(ctx.command),
+                command=ctx.command,
+                reason=ctx.reason,
+                source=ctx.source,
+                account_id=ctx.account_id,
                 decision_type='compliance_violation',
-                risk_score=smart_decision.final_score if smart_decision else None,
-                risk_category=_safe_risk_category(smart_decision),
-                risk_factors=_safe_risk_factors(smart_decision),
+                risk_score=ctx.smart_decision.final_score if ctx.smart_decision else None,
+                risk_category=_safe_risk_category(ctx.smart_decision),
+                risk_factors=_safe_risk_factors(ctx.smart_decision),
                 violation_rule_id=violation.rule_id,
                 violation_rule_name=violation.rule_name,
             )
-            return mcp_result(req_id, {
+            return mcp_result(ctx.req_id, {
                 'content': [{
                     'type': 'text',
                     'text': json.dumps({
@@ -244,229 +279,282 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
                         'rule_name': violation.rule_name,
                         'description': violation.description,
                         'remediation': violation.remediation,
-                        'command': command[:200],
+                        'command': ctx.command[:200],
                     })
                 }],
                 'isError': True
             })
     except ImportError:
         pass  # compliance_checker 模組不存在時跳過（向後兼容）
+    return None
 
-    # Layer 1: BLOCKED
-    if is_blocked(command):
+
+def _check_blocked(ctx: ExecuteContext) -> Optional[dict]:
+    """Layer 1: blocked commands."""
+    if is_blocked(ctx.command):
         log_decision(
             table=_get_table(),
-            request_id=generate_request_id(command),
-            command=command,
-            reason=reason,
-            source=source,
-            account_id=account_id,
+            request_id=generate_request_id(ctx.command),
+            command=ctx.command,
+            reason=ctx.reason,
+            source=ctx.source,
+            account_id=ctx.account_id,
             decision_type='blocked',
-            risk_score=smart_decision.final_score if smart_decision else None,
-            risk_category=_safe_risk_category(smart_decision),
-            risk_factors=_safe_risk_factors(smart_decision),
+            risk_score=ctx.smart_decision.final_score if ctx.smart_decision else None,
+            risk_category=_safe_risk_category(ctx.smart_decision),
+            risk_factors=_safe_risk_factors(ctx.smart_decision),
         )
-        return mcp_result(req_id, {
+        return mcp_result(ctx.req_id, {
             'content': [{
                 'type': 'text',
                 'text': json.dumps({
                     'status': 'blocked',
                     'error': 'Command blocked for security',
-                    'command': command
+                    'command': ctx.command
                 })
             }],
             'isError': True
         })
+    return None
 
-    # Layer 2: SAFELIST (auto-approve)
-    if is_auto_approve(command):
-        result = execute_command(command, assume_role)
-        paged = store_paged_output(generate_request_id(command), result)
 
-        log_decision(
-            table=_get_table(),
-            request_id=generate_request_id(command),
-            command=command,
-            reason=reason,
-            source=source,
-            account_id=account_id,
-            decision_type='auto_approved',
-            risk_score=smart_decision.final_score if smart_decision else None,
-            risk_category=_safe_risk_category(smart_decision),
-            risk_factors=_safe_risk_factors(smart_decision),
-            account_name=account_name,
-            mode='mcp',
-        )
+def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
+    """Layer 2: safelist auto-approve — execute immediately."""
+    if not is_auto_approve(ctx.command):
+        return None
 
-        response_data = {
-            'status': 'auto_approved',
-            'command': command,
-            'account': account_id,
-            'account_name': account_name,
-            'result': paged['result']
-        }
+    result = execute_command(ctx.command, ctx.assume_role)
+    paged = store_paged_output(generate_request_id(ctx.command), result)
 
-        if paged.get('paged'):
-            response_data['paged'] = True
-            response_data['page'] = paged['page']
-            response_data['total_pages'] = paged['total_pages']
-            response_data['output_length'] = paged['output_length']
-            response_data['next_page'] = paged.get('next_page')
+    log_decision(
+        table=_get_table(),
+        request_id=generate_request_id(ctx.command),
+        command=ctx.command,
+        reason=ctx.reason,
+        source=ctx.source,
+        account_id=ctx.account_id,
+        decision_type='auto_approved',
+        risk_score=ctx.smart_decision.final_score if ctx.smart_decision else None,
+        risk_category=_safe_risk_category(ctx.smart_decision),
+        risk_factors=_safe_risk_factors(ctx.smart_decision),
+        account_name=ctx.account_name,
+        mode='mcp',
+    )
 
-        return mcp_result(req_id, {
-            'content': [{
-                'type': 'text',
-                'text': json.dumps(response_data)
-            }]
-        })
+    response_data = {
+        'status': 'auto_approved',
+        'command': ctx.command,
+        'account': ctx.account_id,
+        'account_name': ctx.account_name,
+        'result': paged['result']
+    }
 
-    # Rate Limit 檢查（只對需要審批的命令）
+    if paged.get('paged'):
+        response_data['paged'] = True
+        response_data['page'] = paged['page']
+        response_data['total_pages'] = paged['total_pages']
+        response_data['output_length'] = paged['output_length']
+        response_data['next_page'] = paged.get('next_page')
+
+    return mcp_result(ctx.req_id, {
+        'content': [{
+            'type': 'text',
+            'text': json.dumps(response_data)
+        }]
+    })
+
+
+def _check_rate_limit(ctx: ExecuteContext) -> Optional[dict]:
+    """Rate limit check — only for commands requiring approval."""
     try:
-        check_rate_limit(source)
+        check_rate_limit(ctx.source)
     except RateLimitExceeded as e:
-        return mcp_result(req_id, {
+        return mcp_result(ctx.req_id, {
             'content': [{
                 'type': 'text',
                 'text': json.dumps({
                     'status': 'rate_limited',
                     'error': str(e),
-                    'command': command,
+                    'command': ctx.command,
                     'retry_after': RATE_LIMIT_WINDOW
                 })
             }],
             'isError': True
         })
     except PendingLimitExceeded as e:
-        return mcp_result(req_id, {
+        return mcp_result(ctx.req_id, {
             'content': [{
                 'type': 'text',
                 'text': json.dumps({
                     'status': 'pending_limit_exceeded',
                     'error': str(e),
-                    'command': command,
+                    'command': ctx.command,
                     'hint': '請等待 pending 請求處理後再試'
                 })
             }],
             'isError': True
         })
+    return None
 
-    # Trust Session 檢查（連續批准功能）
-    should_trust, trust_session, trust_reason = should_trust_approve(command, source, account_id)
-    if should_trust and trust_session:
-        # 增加命令計數
-        new_count = increment_trust_command_count(trust_session['request_id'])
 
-        # 執行命令
-        result = execute_command(command, assume_role)
-        paged = store_paged_output(generate_request_id(command), result)
+def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
+    """Trust session auto-approve — execute if trusted."""
+    app = _get_app_module()
+    should_trust, trust_session, trust_reason = should_trust_approve(
+        ctx.command, ctx.source, ctx.account_id
+    )
+    if not (should_trust and trust_session):
+        return None
 
-        # 計算剩餘時間
-        remaining = int(trust_session.get('expires_at', 0)) - int(time.time())
-        remaining_str = f"{remaining // 60}:{remaining % 60:02d}" if remaining > 0 else "0:00"
+    # 增加命令計數
+    new_count = increment_trust_command_count(trust_session['request_id'])
 
-        # 發送靜默通知
-        app.send_trust_auto_approve_notification(
-            command, trust_session['request_id'], remaining_str, new_count, result
-        )
+    # 執行命令
+    result = execute_command(ctx.command, ctx.assume_role)
+    paged = store_paged_output(generate_request_id(ctx.command), result)
 
-        log_decision(
-            table=_get_table(),
-            request_id=generate_request_id(command),
-            command=command,
-            reason=reason,
-            source=source,
-            account_id=account_id,
-            decision_type='trust_approved',
-            risk_score=smart_decision.final_score if smart_decision else None,
-            risk_category=_safe_risk_category(smart_decision),
-            risk_factors=_safe_risk_factors(smart_decision),
-            account_name=account_name,
-            trust_session_id=trust_session['request_id'],
-            mode='mcp',
-        )
+    # 計算剩餘時間
+    remaining = int(trust_session.get('expires_at', 0)) - int(time.time())
+    remaining_str = f"{remaining // 60}:{remaining % 60:02d}" if remaining > 0 else "0:00"
 
-        response_data = {
-            'status': 'trust_auto_approved',
-            'command': command,
-            'account': account_id,
-            'account_name': account_name,
-            'result': paged['result'],
-            'trust_session': trust_session['request_id'],
-            'remaining': remaining_str,
-            'command_count': f"{new_count}/{TRUST_SESSION_MAX_COMMANDS}"
-        }
+    # 發送靜默通知
+    app.send_trust_auto_approve_notification(
+        ctx.command, trust_session['request_id'], remaining_str, new_count, result
+    )
 
-        if paged.get('paged'):
-            response_data['paged'] = True
-            response_data['page'] = paged['page']
-            response_data['total_pages'] = paged['total_pages']
-            response_data['output_length'] = paged['output_length']
-            response_data['next_page'] = paged.get('next_page')
+    log_decision(
+        table=_get_table(),
+        request_id=generate_request_id(ctx.command),
+        command=ctx.command,
+        reason=ctx.reason,
+        source=ctx.source,
+        account_id=ctx.account_id,
+        decision_type='trust_approved',
+        risk_score=ctx.smart_decision.final_score if ctx.smart_decision else None,
+        risk_category=_safe_risk_category(ctx.smart_decision),
+        risk_factors=_safe_risk_factors(ctx.smart_decision),
+        account_name=ctx.account_name,
+        trust_session_id=trust_session['request_id'],
+        mode='mcp',
+    )
 
-        return mcp_result(req_id, {
-            'content': [{
-                'type': 'text',
-                'text': json.dumps(response_data)
-            }]
-        })
+    response_data = {
+        'status': 'trust_auto_approved',
+        'command': ctx.command,
+        'account': ctx.account_id,
+        'account_name': ctx.account_name,
+        'result': paged['result'],
+        'trust_session': trust_session['request_id'],
+        'remaining': remaining_str,
+        'command_count': f"{new_count}/{TRUST_SESSION_MAX_COMMANDS}"
+    }
 
-    # Layer 3: APPROVAL (human review)
-    request_id = generate_request_id(command)
-    ttl = int(time.time()) + timeout + 60
+    if paged.get('paged'):
+        response_data['paged'] = True
+        response_data['page'] = paged['page']
+        response_data['total_pages'] = paged['total_pages']
+        response_data['output_length'] = paged['output_length']
+        response_data['next_page'] = paged.get('next_page')
+
+    return mcp_result(ctx.req_id, {
+        'content': [{
+            'type': 'text',
+            'text': json.dumps(response_data)
+        }]
+    })
+
+
+def _submit_for_approval(ctx: ExecuteContext) -> dict:
+    """Layer 3: submit for human approval — always returns a result."""
+    app = _get_app_module()
+    table = _get_table()
+
+    request_id = generate_request_id(ctx.command)
+    ttl = int(time.time()) + ctx.timeout + 60
 
     # 存入 DynamoDB
     item = {
         'request_id': request_id,
-        'command': command,
-        'reason': reason,
-        'source': source or '__anonymous__',  # GSI 需要有值
-        'context': context or '',
-        'account_id': account_id,
-        'account_name': account_name,
-        'assume_role': assume_role,
+        'command': ctx.command,
+        'reason': ctx.reason,
+        'source': ctx.source or '__anonymous__',  # GSI 需要有值
+        'context': ctx.context or '',
+        'account_id': ctx.account_id,
+        'account_name': ctx.account_name,
+        'assume_role': ctx.assume_role,
         'status': 'pending_approval',
         'created_at': int(time.time()),
         'ttl': ttl,
         'mode': 'mcp'
     }
-    if smart_decision:
+    if ctx.smart_decision:
         from decimal import Decimal as _Dec
-        item['risk_score'] = _Dec(str(smart_decision.final_score))
-        item['risk_category'] = _safe_risk_category(smart_decision) or ''
-        item['risk_factors'] = _safe_risk_factors(smart_decision) or []
+        item['risk_score'] = _Dec(str(ctx.smart_decision.final_score))
+        item['risk_category'] = _safe_risk_category(ctx.smart_decision) or ''
+        item['risk_factors'] = _safe_risk_factors(ctx.smart_decision) or []
         item['decision_type'] = 'pending'  # 會在 callback 時更新
     table.put_item(Item=item)
 
     # 發送 Telegram 審批請求
-    app.send_approval_request(request_id, command, reason, timeout, source, account_id, account_name, context=context)
+    app.send_approval_request(
+        request_id, ctx.command, ctx.reason, ctx.timeout, ctx.source,
+        ctx.account_id, ctx.account_name, context=ctx.context
+    )
 
     # 預設異步：立即返回讓 client 用 bouncer_status 輪詢
-    if not sync_mode:
-        return mcp_result(req_id, {
+    if not ctx.sync_mode:
+        return mcp_result(ctx.req_id, {
             'content': [{
                 'type': 'text',
                 'text': json.dumps({
                     'status': 'pending_approval',
                     'request_id': request_id,
-                    'command': command,
-                    'account': account_id,
-                    'account_name': account_name,
+                    'command': ctx.command,
+                    'account': ctx.account_id,
+                    'account_name': ctx.account_name,
                     'message': '請求已發送，用 bouncer_status 查詢結果',
-                    'expires_in': f'{timeout} seconds'
+                    'expires_in': f'{ctx.timeout} seconds'
                 })
             }]
         })
 
     # 同步模式（sync=True）：長輪詢等待結果（可能被 API Gateway 29s 超時）
-    result = app.wait_for_result_mcp(request_id, timeout=timeout)
+    result = app.wait_for_result_mcp(request_id, timeout=ctx.timeout)
 
-    return mcp_result(req_id, {
+    return mcp_result(ctx.req_id, {
         'content': [{
             'type': 'text',
             'text': json.dumps(result)
         }],
         'isError': result.get('status') in ['denied', 'timeout', 'error']
     })
+
+
+# =============================================================================
+# Public Entry Point
+# =============================================================================
+
+def mcp_tool_execute(req_id, arguments: dict) -> dict:
+    """MCP tool: bouncer_execute（預設異步，立即返回 request_id）"""
+    # Phase 1: Parse & validate request, resolve account
+    ctx = _parse_execute_request(req_id, arguments)
+    if not isinstance(ctx, ExecuteContext):
+        return ctx  # validation error — already an MCP response dict
+
+    # Phase 2: Smart approval shadow scoring (before any decision)
+    _score_risk(ctx)
+
+    # Phase 3: Pipeline — first non-None result wins
+    result = (
+        _check_compliance(ctx)
+        or _check_blocked(ctx)
+        or _check_auto_approve(ctx)
+        or _check_rate_limit(ctx)
+        or _check_trust_session(ctx)
+        or _submit_for_approval(ctx)
+    )
+
+    return result
 
 
 def mcp_tool_status(req_id, arguments: dict) -> dict:
@@ -867,11 +955,38 @@ def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
     })
 
 
-def mcp_tool_upload(req_id, arguments: dict) -> dict:
-    """MCP tool: bouncer_upload（上傳檔案到 S3 桶，支援跨帳號，需要 Telegram 審批）"""
+# =============================================================================
+# Upload Pipeline — Context + Step Functions
+# =============================================================================
+
+@dataclass
+class UploadContext:
+    """Pipeline context for mcp_tool_upload"""
+    req_id: str
+    filename: str
+    content_b64: str
+    content_type: str
+    content_size: int
+    reason: str
+    source: Optional[str]
+    sync_mode: bool
+    legacy_bucket: Optional[str]
+    legacy_key: Optional[str]
+    account_id: str
+    account_name: str
+    assume_role: Optional[str]
+    target_account_id: str
+    bucket: str = ''
+    key: str = ''
+    request_id: str = ''
+
+
+def _parse_upload_request(req_id, arguments: dict) -> 'dict | UploadContext':
+    """Parse and validate upload request arguments.
+
+    Returns an UploadContext on success, or an MCP response dict on failure.
+    """
     import base64
-    app = _get_app_module()
-    table = _get_table()
 
     filename = str(arguments.get('filename', '')).strip()
     content_b64 = str(arguments.get('content', '')).strip()
@@ -881,10 +996,8 @@ def mcp_tool_upload(req_id, arguments: dict) -> dict:
     account_id = arguments.get('account', None)
     if account_id:
         account_id = str(account_id).strip()
-    # 預設異步（避免 API Gateway 29s 超時）
     sync_mode = arguments.get('sync', False)
 
-    # 向後相容：如果有 bucket/key 就用舊邏輯
     legacy_bucket = arguments.get('bucket', None)
     legacy_key = arguments.get('key', None)
 
@@ -921,11 +1034,11 @@ def mcp_tool_upload(req_id, arguments: dict) -> dict:
             'isError': True
         })
 
+    # 解析帳號
     assume_role = None
     account_name = 'Default'
     target_account_id = DEFAULT_ACCOUNT_ID
 
-    # 如果沒指定帳號，也查預設帳號的 role_arn
     if not account_id and DEFAULT_ACCOUNT_ID:
         default_account = get_account(DEFAULT_ACCOUNT_ID)
         if default_account:
@@ -933,7 +1046,6 @@ def mcp_tool_upload(req_id, arguments: dict) -> dict:
             account_name = default_account.get('name', 'Default')
 
     if account_id:
-        # 驗證帳號 ID 格式
         valid, error = validate_account_id(account_id)
         if not valid:
             return mcp_result(req_id, {
@@ -941,7 +1053,6 @@ def mcp_tool_upload(req_id, arguments: dict) -> dict:
                 'isError': True
             })
 
-        # 查詢帳號配置
         account = get_account(account_id)
         if not account:
             available = [a['account_id'] for a in list_accounts()]
@@ -967,78 +1078,102 @@ def mcp_tool_upload(req_id, arguments: dict) -> dict:
         account_name = account.get('name', account_id)
         target_account_id = account_id
 
-    # 決定 bucket 和 key
-    if legacy_bucket and legacy_key:
-        # 向後相容模式
-        bucket = legacy_bucket
-        key = legacy_key
+    return UploadContext(
+        req_id=req_id,
+        filename=filename,
+        content_b64=content_b64,
+        content_type=content_type,
+        content_size=content_size,
+        reason=reason,
+        source=source,
+        sync_mode=sync_mode,
+        legacy_bucket=legacy_bucket,
+        legacy_key=legacy_key,
+        account_id=account_id or DEFAULT_ACCOUNT_ID,
+        account_name=account_name,
+        assume_role=assume_role,
+        target_account_id=target_account_id,
+    )
+
+
+def _resolve_upload_target(ctx: UploadContext) -> None:
+    """Determine bucket, key, and request_id.  Mutates ctx in-place."""
+    if ctx.legacy_bucket and ctx.legacy_key:
+        ctx.bucket = ctx.legacy_bucket
+        ctx.key = ctx.legacy_key
     else:
-        # 自動產生路徑: bouncer-uploads-{account_id}/{date}/{request_id}/{filename}
-        bucket = f"bouncer-uploads-{target_account_id}"
+        ctx.bucket = f"bouncer-uploads-{ctx.target_account_id}"
         date_str = time.strftime('%Y-%m-%d')
-        # request_id 在這裡先產生，後面會用到
-        request_id = generate_request_id(f"upload:{filename}")
-        key = f"{date_str}/{request_id}/{filename or legacy_key}"
+        ctx.request_id = generate_request_id(f"upload:{ctx.filename}")
+        ctx.key = f"{date_str}/{ctx.request_id}/{ctx.filename or ctx.legacy_key}"
 
-    # Rate limit 檢查
-    if source:
-        try:
-            check_rate_limit(source)
-        except RateLimitExceeded as e:
-            return mcp_result(req_id, {
-                'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': str(e)})}],
-                'isError': True
-            })
-        except PendingLimitExceeded as e:
-            return mcp_result(req_id, {
-                'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': str(e)})}],
-                'isError': True
-            })
 
-    # 建立審批請求（固定桶模式已在上面產生 request_id）
-    if legacy_bucket and legacy_key:
-        request_id = generate_request_id(f"upload:{bucket}:{key}")
+def _check_upload_rate_limit(ctx: UploadContext) -> Optional[dict]:
+    """Rate limit check for uploads."""
+    if not ctx.source:
+        return None
+    try:
+        check_rate_limit(ctx.source)
+    except RateLimitExceeded as e:
+        return mcp_result(ctx.req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': str(e)})}],
+            'isError': True
+        })
+    except PendingLimitExceeded as e:
+        return mcp_result(ctx.req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': str(e)})}],
+            'isError': True
+        })
+    return None
+
+
+def _submit_upload_for_approval(ctx: UploadContext) -> dict:
+    """Submit upload for human approval — always returns a result."""
+    app = _get_app_module()
+    table = _get_table()
+
+    # 固定桶模式在 _resolve_upload_target 時 request_id 尚未設定
+    if ctx.legacy_bucket and ctx.legacy_key:
+        ctx.request_id = generate_request_id(f"upload:{ctx.bucket}:{ctx.key}")
     ttl = int(time.time()) + 300 + 60
 
     # 格式化大小顯示
-    if content_size >= 1024 * 1024:
-        size_str = f"{content_size / 1024 / 1024:.2f} MB"
-    elif content_size >= 1024:
-        size_str = f"{content_size / 1024:.2f} KB"
+    if ctx.content_size >= 1024 * 1024:
+        size_str = f"{ctx.content_size / 1024 / 1024:.2f} MB"
+    elif ctx.content_size >= 1024:
+        size_str = f"{ctx.content_size / 1024:.2f} KB"
     else:
-        size_str = f"{content_size} bytes"
+        size_str = f"{ctx.content_size} bytes"
 
     item = {
-        'request_id': request_id,
+        'request_id': ctx.request_id,
         'action': 'upload',
-        'bucket': bucket,
-        'key': key,
-        'content': content_b64,  # 存 base64，審批後再上傳
-        'content_type': content_type,
-        'content_size': content_size,
-        'reason': reason,
-        'source': source or '__anonymous__',
-        'account_id': target_account_id,
-        'account_name': account_name,
+        'bucket': ctx.bucket,
+        'key': ctx.key,
+        'content': ctx.content_b64,  # 存 base64，審批後再上傳
+        'content_type': ctx.content_type,
+        'content_size': ctx.content_size,
+        'reason': ctx.reason,
+        'source': ctx.source or '__anonymous__',
+        'account_id': ctx.target_account_id,
+        'account_name': ctx.account_name,
         'status': 'pending_approval',
         'created_at': int(time.time()),
         'ttl': ttl,
         'mode': 'mcp'
     }
-    # Only store assume_role if it has a value (DynamoDB doesn't accept None for strings)
-    if assume_role:
-        item['assume_role'] = assume_role
+    if ctx.assume_role:
+        item['assume_role'] = ctx.assume_role
     table.put_item(Item=item)
 
     # 發送 Telegram 審批
-    s3_uri = f"s3://{bucket}/{key}"
+    s3_uri = f"s3://{ctx.bucket}/{ctx.key}"
 
-    # 跳脫 Markdown 特殊字元
     safe_s3_uri = escape_markdown(s3_uri)
-    safe_reason = escape_markdown(reason)
-    safe_source = escape_markdown(source or 'Unknown')
-    safe_content_type = escape_markdown(content_type)
-    safe_account = escape_markdown(f"{target_account_id} ({account_name})")
+    safe_reason = escape_markdown(ctx.reason)
+    safe_source = escape_markdown(ctx.source or 'Unknown')
+    safe_content_type = escape_markdown(ctx.content_type)
+    safe_account = escape_markdown(f"{ctx.target_account_id} ({ctx.account_name})")
 
     message = (
         f"📤 *上傳檔案請求*\n\n"
@@ -1048,24 +1183,24 @@ def mcp_tool_upload(req_id, arguments: dict) -> dict:
         f"📊 *大小：* {size_str}\n"
         f"📝 *類型：* {safe_content_type}\n"
         f"💬 *原因：* {safe_reason}\n\n"
-        f"🆔 *ID：* `{request_id}`"
+        f"🆔 *ID：* `{ctx.request_id}`"
     )
 
     keyboard = {
         'inline_keyboard': [[
-            {'text': '✅ 批准', 'callback_data': f'approve:{request_id}'},
-            {'text': '❌ 拒絕', 'callback_data': f'deny:{request_id}'}
+            {'text': '✅ 批准', 'callback_data': f'approve:{ctx.request_id}'},
+            {'text': '❌ 拒絕', 'callback_data': f'deny:{ctx.request_id}'}
         ]]
     }
 
     send_telegram_message(message, keyboard)
 
-    # 預設異步：立即返回讓 client 用 bouncer_status 輪詢
-    if not sync_mode:
-        return mcp_result(req_id, {
+    # 預設異步
+    if not ctx.sync_mode:
+        return mcp_result(ctx.req_id, {
             'content': [{'type': 'text', 'text': json.dumps({
                 'status': 'pending_approval',
-                'request_id': request_id,
+                'request_id': ctx.request_id,
                 's3_uri': s3_uri,
                 'size': size_str,
                 'message': '請求已發送，用 bouncer_status 查詢結果',
@@ -1073,10 +1208,29 @@ def mcp_tool_upload(req_id, arguments: dict) -> dict:
             })}]
         })
 
-    # 同步模式（sync=True）：等待結果（可能被 API Gateway 29s 超時）
-    result = app.wait_for_upload_result(request_id, timeout=300)
+    # 同步模式
+    result = app.wait_for_upload_result(ctx.request_id, timeout=300)
 
-    return mcp_result(req_id, {
+    return mcp_result(ctx.req_id, {
         'content': [{'type': 'text', 'text': json.dumps(result)}],
         'isError': result.get('status') != 'approved'
     })
+
+
+def mcp_tool_upload(req_id, arguments: dict) -> dict:
+    """MCP tool: bouncer_upload（上傳檔案到 S3 桶，支援跨帳號，需要 Telegram 審批）"""
+    # Phase 1: Parse & validate request, resolve account
+    ctx = _parse_upload_request(req_id, arguments)
+    if not isinstance(ctx, UploadContext):
+        return ctx  # validation error
+
+    # Phase 2: Determine bucket/key/request_id
+    _resolve_upload_target(ctx)
+
+    # Phase 3: Pipeline — first non-None result wins
+    result = (
+        _check_upload_rate_limit(ctx)
+        or _submit_upload_for_approval(ctx)
+    )
+
+    return result
