@@ -1210,16 +1210,17 @@ def send_account_approval_request(request_id: str, action: str, account_id: str,
 
 
 def send_trust_auto_approve_notification(command: str, trust_id: str, remaining: str, count: int,
-                                         result: str = None):
+                                         result: str = None, source: str = None):
     """
     發送 Trust Session 自動批准的靜默通知
 
     Args:
         command: 執行的命令
         trust_id: 信任時段 ID
-        remaining: 剩餘時間 (不再顯示)
+        remaining: 剩餘時間
         count: 已執行命令數
         result: 執行結果（可選）
+        source: 信任時段的來源（可選）
     """
     cmd_preview = command if len(command) <= 100 else command[:100] + '...'
     cmd_preview = escape_markdown(cmd_preview)
@@ -1237,10 +1238,17 @@ def send_trust_auto_approve_notification(command: str, trust_id: str, remaining:
         result_text = escape_markdown(result_text)
         result_preview = f"\n{result_status} `{result_text}`"
 
+    # 來源 + 剩餘時間
+    source_line = f"🤖 `{escape_markdown(source)}` · " if source else ""
+    remaining_line = f"⏱ {remaining}" if remaining else ""
+    session_info = f"{source_line}{remaining_line}".strip()
+    session_line = f"\n{session_info}" if session_info else ""
+
     text = (
-        f"🔓 *自動批准* (信任中)\n"
+        f"🔓 *自動批准* \\(信任中\\)\n"
         f"📋 `{cmd_preview}`\n"
         f"📊 {count}/{TRUST_SESSION_MAX_COMMANDS}"
+        f"{session_line}"
         f"{result_preview}"
     )
 
