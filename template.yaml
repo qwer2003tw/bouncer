@@ -358,10 +358,6 @@ Resources:
       Tags:
         Project: Bouncer
         auto-delete: "no"
-      Cors:
-        AllowOrigin: "'*'"
-        AllowMethods: "'GET,POST,OPTIONS'"
-        AllowHeaders: "'Content-Type,X-Approval-Secret,X-Timestamp,X-Nonce,X-Signature'"
 
   # ============================================================
   # CloudWatch Alarms
@@ -449,6 +445,21 @@ Resources:
   # Note: Log group /aws/lambda/${ApprovalFunction} already exists
   # (auto-created by Lambda). Set retention manually or via CLI:
   # aws logs put-retention-policy --log-group-name /aws/lambda/bouncer-prod-function --retention-in-days 30
+
+  # ============================================================
+  # API Gateway - Usage Plan + Throttling
+  # ============================================================
+  ApiUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn: BouncerApiprodStage
+    Properties:
+      UsagePlanName: bouncer-throttle
+      Throttle:
+        BurstLimit: 50
+        RateLimit: 10
+      ApiStages:
+        - ApiId: !Ref BouncerApi
+          Stage: prod
 
 Outputs:
   ApiUrl:
