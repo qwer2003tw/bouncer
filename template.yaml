@@ -177,6 +177,77 @@ Resources:
           Value: "Smart approval shadow mode data collection"
 
   # ============================================================
+  # IAM - Default 帳號 BouncerRole（命令執行用）
+  # Lambda assume 此 role 後執行 AWS CLI 命令
+  # 與 cross-account BouncerRole 權限一致
+  # ============================================================
+  DefaultBouncerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: BouncerRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PowerUserAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: PowerUserAccess
+                Effect: Allow
+                Action: '*'
+                Resource: '*'
+              - Sid: DenyDangerousIAM
+                Effect: Deny
+                Action:
+                  - iam:CreateUser
+                  - iam:DeleteUser
+                  - iam:AttachUserPolicy
+                  - iam:DetachUserPolicy
+                  - iam:PutUserPolicy
+                  - iam:DeleteUserPolicy
+                  - iam:CreateAccessKey
+                  - iam:DeleteAccessKey
+                  - iam:UpdateAccessKey
+                  - iam:CreateLoginProfile
+                  - iam:DeleteLoginProfile
+                  - iam:UpdateLoginProfile
+                  - iam:DeactivateMFADevice
+                  - iam:DeleteVirtualMFADevice
+                  - iam:CreatePolicy
+                  - iam:CreatePolicyVersion
+                  - iam:DeletePolicyVersion
+                  - iam:SetDefaultPolicyVersion
+                  - iam:AddRoleToInstanceProfile
+                  - iam:CreateInstanceProfile
+                  - iam:CreateServiceLinkedRole
+                Resource: '*'
+              - Sid: DenyOrganizations
+                Effect: Deny
+                Action:
+                  - organizations:*
+                Resource: '*'
+              - Sid: DenySelfEscalation
+                Effect: Deny
+                Action:
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:DeleteRole
+                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/BouncerRole'
+      Tags:
+        - Key: Project
+          Value: Bouncer
+        - Key: auto-delete
+          Value: "no"
+
+  # ============================================================
   # Lambda - 主函數
   # ============================================================
   ApprovalFunction:
@@ -259,11 +330,14 @@ Resources:
             TableName: bouncer-deploy-locks
         - Version: '2012-10-17'
           Statement:
-            # Cross-account assume role
-            - Sid: CrossAccountAssumeRole
+            # Assume BouncerRole — 所有帳號都走 assume role 執行命令
+            # 通配 * 允許新增帳號不用改 template；Application 層有 accounts 表白名單控管
+            - Sid: AssumeBouncerRole
               Effect: Allow
               Action: sts:AssumeRole
-              Resource: 'arn:aws:iam::*:role/BouncerRole'
+              Resource:
+                - !GetAtt DefaultBouncerRole.Arn
+                - 'arn:aws:iam::*:role/BouncerRole'
             # Step Functions for deployer
             - Sid: StepFunctionsAccess
               Effect: Allow
@@ -272,40 +346,6 @@ Resources:
                 - states:DescribeExecution
                 - states:StopExecution
               Resource: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:sam-deployer-workflow'
-            # PowerUser: 可以做大部分事情，但不能動 IAM
-            - Sid: PowerUserAccess
-              Effect: Allow
-              Action: '*'
-              Resource: '*'
-            - Sid: DenyDangerousIAM
-              Effect: Deny
-              Action:
-                - iam:CreateUser
-                - iam:DeleteUser
-                - iam:CreateRole
-                - iam:DeleteRole
-                - iam:AttachUserPolicy
-                - iam:DetachUserPolicy
-                - iam:AttachRolePolicy
-                - iam:DetachRolePolicy
-                - iam:PutUserPolicy
-                - iam:DeleteUserPolicy
-                - iam:PutRolePolicy
-                - iam:DeleteRolePolicy
-                - iam:CreateAccessKey
-                - iam:DeleteAccessKey
-                - iam:UpdateAccessKey
-                - iam:UpdateAssumeRolePolicy
-                - iam:CreatePolicy
-                - iam:CreatePolicyVersion
-                - iam:SetDefaultPolicyVersion
-                - iam:AddRoleToInstanceProfile
-                - iam:CreateInstanceProfile
-                - iam:PutRolePermissionsBoundary
-                - iam:DeleteRolePermissionsBoundary
-                - iam:CreateServiceLinkedRole
-                - organizations:*
-              Resource: '*'
 
   # ============================================================
   # API Gateway
@@ -426,3 +466,6 @@ Outputs:
   TableName:
     Description: DynamoDB 表名
     Value: !Ref RequestsTable
+  DefaultBouncerRoleArn:
+    Description: Default 帳號 BouncerRole ARN（用於 accounts 表設定）
+    Value: !GetAtt DefaultBouncerRole.Arn

@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Bouncer Architecture</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background: #1a1a2e; color: #eee; }
+  h1 { text-align: center; color: #e94560; }
+  h2 { color: #0f3460; background: #e94560; padding: 8px 16px; border-radius: 6px; margin-top: 40px; }
+  .mermaid { background: #fff; border-radius: 12px; padding: 20px; margin: 16px 0; }
+</style>
+</head>
+<body>
+<script>mermaid.initialize({startOnLoad:true, theme:'default', securityLevel:'loose'});</script>
+
+<h1>🔐 Bouncer v3.0.0 — Architecture</h1>
+
+<h2>1. 整體架構</h2>
+<div class="mermaid">
+graph TB
+    subgraph Clients["客戶端"]
+        Agent["🤖 OpenClaw Agent<br/>(Private Bot)"]
+        Steven["👤 Steven<br/>(Telegram 審批者)"]
+    end
+    subgraph LocalMCP["本機"]
+        MCP["bouncer_mcp.py<br/>(MCP Server / stdio)"]
+    end
+    subgraph AWS["AWS us-east-1"]
+        subgraph APIGW["API Gateway REST"]
+            EP_MCP["POST /mcp"]
+            EP_WH["POST /webhook"]
+            EP_REST["POST /"]
+            EP_STATUS["GET /status/:id"]
+        end
+        subgraph Lambda["Lambda: bouncer-prod-function<br/>Python 3.9 ARM64 256MB 900s"]
+            subgraph Pipeline["請求處理 Pipeline"]
+                Compliance["1 Compliance<br/>Checker"]
+                Blocked["2 Blocked<br/>Patterns"]
+                AutoApprove["3 Auto<br/>Approve"]
+                RateLimit["4 Rate<br/>Limit"]
+                Trust["5 Trust<br/>Session"]
+                SmartApproval["6 Smart<br/>Approval"]
+            end
+            AuditLog["Audit Logging"]
+            CmdExec["Command Execution"]
+        end
+        subgraph DDB["DynamoDB"]
+            Requests["requests<br/>TTL PITR GSI"]
+            Accounts["accounts<br/>PITR"]
+            CmdHist["command-history<br/>TTL PITR"]
+            Shadow["shadow-approvals<br/>TTL"]
+        end
+        subgraph Deploy["Deployer Stack"]
+            SFn["Step Functions"]
+            CB["CodeBuild"]
+            CFN_D["CloudFormation"]
+            S3["S3 Artifacts<br/>KMS Versioning"]
+            DeployDDB["projects / history / locks"]
+        end
+        subgraph Monitor["監控"]
+            Alarms["CloudWatch Alarms"]
+            XRay["X-Ray"]
+            DLQ["SQS DLQ"]
+        end
+        subgraph XAcct["Cross-Account"]
+            Dev["Dev 992382394211"]
+            First["1st 841882238387"]
+            LT["LT 811246247192"]
+        end
+    end
+    subgraph TG["Telegram"]
+        TGBot["Bouncer Bot"]
+        TGMsg["審批訊息"]
+    end
+    Agent -->|MCP stdio| MCP
+    MCP -->|HTTPS| EP_MCP
+    Steven -->|按鈕| TGBot
+    TGBot -->|Webhook| EP_WH
+    EP_MCP --> Lambda
+    EP_WH --> Lambda
+    EP_REST --> Lambda
+    EP_STATUS --> Lambda
+    Compliance -->|pass| Blocked
+    Blocked -->|pass| AutoApprove
+    AutoApprove -->|pass| RateLimit
+    RateLimit -->|pass| Trust
+    Trust -->|pass| SmartApproval
+    SmartApproval -->|pending| TGMsg
+    Lambda --> AuditLog
+    AuditLog --> Requests
+    Lambda --> CmdExec
+    CmdExec -->|STS AssumeRole| XAcct
+    Lambda --> DDB
+    Lambda -->|Start| SFn
+    SFn --> CB
+    CB --> S3
+    CB --> CFN_D
+    SFn -->|通知| TGBot
+    CB --> DeployDDB
+    Alarms --> Monitor
+    Lambda --> DLQ
+    style Pipeline fill:#e8f5e9,stroke:#2e7d32
+    style Lambda fill:#fff3e0,stroke:#ef6c00
+    style DDB fill:#e3f2fd,stroke:#1565c0
+    style Deploy fill:#f3e5f5,stroke:#7b1fa2
+    style XAcct fill:#e0f2f1,stroke:#00695c
+    style Monitor fill:#fce4ec,stroke:#c62828
+</div>
+
+<h2>2. 請求處理 Pipeline</h2>
+<div class="mermaid">
+flowchart LR
+    REQ["收到命令"] --> C1
+    subgraph Pipeline["6 層過濾"]
+        C1["Compliance<br/>Checker"] -->|違規| R1["拒絕<br/>compliance_violation"]
+        C1 -->|通過| C2["Blocked<br/>Patterns"]
+        C2 -->|匹配| R2["拒絕<br/>blocked"]
+        C2 -->|通過| C3["Auto<br/>Approve"]
+        C3 -->|安全命令| R3["自動執行<br/>auto_approved"]
+        C3 -->|通過| C4["Rate<br/>Limit"]
+        C4 -->|超限| R4["拒絕<br/>rate_limited"]
+        C4 -->|通過| C5["Trust<br/>Session"]
+        C5 -->|信任期| R5["自動執行<br/>trust_approved"]
+        C5 -->|通過| C6["Smart<br/>Approval"]
+    end
+    C6 -->|Shadow記錄| SHADOW["Shadow Approvals"]
+    C6 -->|pending| TG["Telegram 審批"]
+    TG -->|批准| EXEC["執行 manual_approved"]
+    TG -->|信任10分| TRUST["執行 + Trust Session"]
+    TG -->|拒絕| DENY["拒絕 manual_denied"]
+    style R1 fill:#ffcdd2
+    style R2 fill:#ffcdd2
+    style R3 fill:#c8e6c9
+    style R4 fill:#ffcdd2
+    style R5 fill:#c8e6c9
+    style EXEC fill:#c8e6c9
+    style TRUST fill:#c8e6c9
+    style DENY fill:#ffcdd2
+    style SHADOW fill:#e1bee7
+</div>
+
+<h2>3. IAM 權限結構 (現狀 vs 理想)</h2>
+<div class="mermaid">
+graph TB
+    subgraph Current["現狀 - Lambda Role"]
+        P1["DynamoDB CRUD x7"]
+        P2["STS AssumeRole"]
+        P3["Step Functions"]
+        P4["SQS DLQ"]
+        P5["Action: * Resource: *<br/>⚠ PowerUser"]
+        P6["Deny IAM 危險操作<br/>⚠ 不完整"]
+    end
+    subgraph Ideal["理想 - 方案 A"]
+        IR1["Lambda Role<br/>只有營運權限"]
+        IR2["BouncerExecRole<br/>Default 帳號"]
+        IR3["BouncerExecRole<br/>Cross-Account"]
+    end
+    Current -->|"Default 帳號直接用<br/>⚠ 這就是要 * 的原因"| Exec1["執行 AWS CLI"]
+    Current -->|"Cross-Account<br/>assume role ✅"| Exec2["執行 AWS CLI"]
+    IR1 -->|assume role| IR2
+    IR1 -->|assume role| IR3
+    IR2 --> Exec3["執行 AWS CLI"]
+    IR3 --> Exec4["執行 AWS CLI"]
+    style P5 fill:#ffcdd2,stroke:#c62828
+    style P6 fill:#fff9c4,stroke:#f57f17
+    style Ideal fill:#e8f5e9,stroke:#2e7d32
+    style Current fill:#fff3e0,stroke:#ef6c00
+</div>
+
+<h2>4. Deployer 部署流程</h2>
+<div class="mermaid">
+sequenceDiagram
+    participant Agent as Agent
+    participant Bouncer as Lambda
+    participant TG as Telegram
+    participant Steven as Steven
+    participant SFn as Step Functions
+    participant CB as CodeBuild
+    participant S3 as S3
+    participant CFN as CloudFormation
+    Agent->>Bouncer: bouncer_deploy(project, reason)
+    Bouncer->>Bouncer: 驗證專案 + 檢查鎖
+    Bouncer->>TG: 發送部署審批請求
+    TG->>Steven: [確認部署] [拒絕]
+    Steven->>TG: 點擊確認
+    TG->>Bouncer: Webhook callback
+    Bouncer->>Bouncer: 取得鎖 DDB conditional write
+    Bouncer->>SFn: StartExecution
+    SFn->>CB: 啟動建置
+    CB->>S3: 下載 sam_deploy.py
+    CB->>CB: git clone + sam build
+    CB->>CFN: sam deploy
+    CFN-->>CB: 部署完成
+    CB-->>SFn: 建置成功
+    SFn->>TG: 部署成功通知
+    SFn->>Bouncer: 釋放鎖
+</div>
+
+<h2>5. CI/CD Pipeline</h2>
+<div class="mermaid">
+graph LR
+    subgraph GH["GitHub Actions"]
+        Push["git push"] --> Lint["ruff lint"]
+        Push --> Security["bandit security"]
+        Push --> CFNLint["cfn-lint ⚠"]
+        Push --> Test["pytest 519 tests"]
+    end
+    subgraph Dep["部署 手動觸發"]
+        Agent2["Agent"] -->|bouncer_deploy| Bouncer2["Bouncer API"]
+        Bouncer2 -->|審批| TG2["Telegram"]
+        TG2 -->|確認| SFn2["Step Functions"]
+        SFn2 --> CB2["CodeBuild"]
+        CB2 --> CFN2["SAM Deploy"]
+    end
+    Test -->|無 coverage gate| Manual["手動決定"]
+    Manual --> Dep
+    style CFNLint fill:#fff9c4
+    style Manual fill:#fff9c4
+</div>
+
+</body>
+</html>
