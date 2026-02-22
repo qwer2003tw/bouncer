@@ -4,6 +4,7 @@ Bouncer - 工具函數模組
 
 import hashlib
 import json
+import time
 from decimal import Decimal
 from typing import Optional
 
@@ -74,3 +75,38 @@ def mcp_error(req_id, code: int, message: str) -> dict:
             'message': message
         }
     })
+
+
+def log_decision(table, request_id, command, reason, source, account_id,
+                 decision_type, risk_score=None, risk_factors=None,
+                 sequence_modifier=None, **kwargs):
+    """統一的決策記錄函數 — 記錄所有審批決策到 requests 表"""
+    now = int(time.time())
+    item = {
+        'request_id': request_id,
+        'command': command[:2000],
+        'reason': reason[:500],
+        'source': source or '__anonymous__',
+        'account_id': account_id or '',
+        'decision_type': decision_type,
+        'status': decision_type,  # 向後兼容
+        'created_at': now,
+        'decided_at': now,
+        'decision_latency_ms': 0,
+        'ttl': now + 90 * 24 * 3600,  # 90 天保留（blocked/compliance 30 天）
+    }
+    if decision_type in ('blocked', 'compliance_violation'):
+        item['ttl'] = now + 30 * 24 * 3600  # 30 天
+    if risk_score is not None:
+        item['risk_score'] = Decimal(str(risk_score))
+        item['risk_category'] = kwargs.pop('risk_category', '')
+    if risk_factors:
+        item['risk_factors'] = risk_factors[:5]
+    if sequence_modifier is not None:
+        item['sequence_modifier'] = str(sequence_modifier)
+    item.update({k: v for k, v in kwargs.items() if v is not None})
+    try:
+        table.put_item(Item=item)
+    except Exception as e:
+        print(f"[AUDIT] Failed to log decision: {e}")
+    return item
