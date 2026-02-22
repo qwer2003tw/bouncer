@@ -19,10 +19,10 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.12'
           
       - name: Install ruff
-        run: pip install ruff
+        run: pip install ruff==0.15.2
         
       - name: Run ruff check
         run: ruff check src/ mcp_server/ --ignore E501,E722
@@ -36,10 +36,10 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.12'
           
       - name: Install bandit
-        run: pip install bandit
+        run: pip install bandit==1.9.3
         
       - name: Run bandit
         run: bandit -r src/ -ll  # Medium and above
@@ -53,13 +53,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.12'
           
       - name: Install cfn-lint
-        run: pip install cfn-lint
+        run: pip install cfn-lint==1.44.0
         
       - name: Run cfn-lint
-        run: cfn-lint template.yaml || true  # Ignore warnings
+        run: cfn-lint template.yaml --non-zero-exit-code error
 
   docs-check:
     name: Docs Updated Check
@@ -115,14 +115,14 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.12'
           
       - name: Install dependencies
         run: |
-          pip install boto3 moto pytest
+          pip install boto3 moto pytest pytest-cov==7.0.0
           
       - name: Run pytest
-        run: pytest tests/ -v --tb=short -k "not safelist"  # Skip tests requiring aws cli
+        run: pytest tests/ -v --tb=short -k "not safelist" --cov=src --cov-report=term-missing --cov-fail-under=80
         env:
           AWS_DEFAULT_REGION: us-east-1
           TABLE_NAME: test-table

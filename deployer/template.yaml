@@ -22,7 +22,7 @@ Parameters:
 Globals:
   Function:
     Timeout: 30
-    Runtime: python3.9
+    Runtime: python3.12
     MemorySize: 256
     Architectures:
       - arm64
@@ -432,7 +432,7 @@ Resources:
       Environment:
         Type: ARM_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/amazonlinux2-aarch64-standard:3.0
+        Image: aws/codebuild/amazonlinux-aarch64-standard:3.0
         PrivilegedMode: true
         EnvironmentVariables:
           - Name: ARTIFACTS_BUCKET
@@ -449,7 +449,7 @@ Resources:
           phases:
             install:
               runtime-versions:
-                python: 3.11
+                python: 3.12
               commands:
                 - pip install aws-sam-cli cfn-lint
                 - nohup /usr/local/bin/dockerd --host=unix:///var/run/docker.sock --host=tcp://127.0.0.1:2375 &
@@ -461,7 +461,7 @@ Resources:
                 - export WORK_DIR=$(pwd)/repo/${SAM_TEMPLATE_PATH}
                 - echo "WORK_DIR=$WORK_DIR"
                 - echo "Running cfn-lint..."
-                - cfn-lint ${WORK_DIR}/template.yaml || true
+                - cfn-lint ${WORK_DIR}/template.yaml --non-zero-exit-code error
             build:
               commands:
                 - export WORK_DIR=$(pwd)/repo/${SAM_TEMPLATE_PATH}

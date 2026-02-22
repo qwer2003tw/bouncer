@@ -41,7 +41,7 @@ Parameters:
 Globals:
   Function:
     Timeout: 900
-    Runtime: python3.9
+    Runtime: python3.12
     MemorySize: 256
     Architectures:
       - arm64
