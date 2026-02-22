@@ -178,6 +178,14 @@ MCP_TOOLS = {
                 'role_arn': {
                     'type': 'string',
                     'description': 'IAM Role ARN（例如：arn:aws:iam::111111111111:role/BouncerRole）'
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '請求來源識別（例如：Private Bot）'
+                },
+                'async': {
+                    'type': 'boolean',
+                    'description': '異步模式：立即返回 pending，不等審批結果（避免 API Gateway 超時）'
                 }
             },
             'required': ['account_id', 'name', 'role_arn']
@@ -227,6 +235,14 @@ MCP_TOOLS = {
                 'account_id': {
                     'type': 'string',
                     'description': 'AWS 帳號 ID（12 位數字）'
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '請求來源識別（例如：Private Bot）'
+                },
+                'async': {
+                    'type': 'boolean',
+                    'description': '異步模式：立即返回 pending，不等審批結果'
                 }
             },
             'required': ['account_id']
