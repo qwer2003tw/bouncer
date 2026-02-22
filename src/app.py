@@ -92,6 +92,10 @@ MCP_TOOLS = {
                     'type': 'string',
                     'description': '請求來源標識（哪個 agent/系統發的）'
                 },
+                'context': {
+                    'type': 'string',
+                    'description': '任務上下文說明（例如：清除 bouncer deploy lock，準備部署 schema 修復）'
+                },
                 'sync': {
                     'type': 'boolean',
                     'description': '同步模式：等待審批結果（可能超時），預設 false',
@@ -183,6 +187,10 @@ MCP_TOOLS = {
                     'type': 'string',
                     'description': '請求來源識別（例如：Private Bot）'
                 },
+                'context': {
+                    'type': 'string',
+                    'description': '任務上下文說明'
+                },
                 'async': {
                     'type': 'boolean',
                     'description': '異步模式：立即返回 pending，不等審批結果（避免 API Gateway 超時）'
@@ -240,6 +248,10 @@ MCP_TOOLS = {
                     'type': 'string',
                     'description': '請求來源識別（例如：Private Bot）'
                 },
+                'context': {
+                    'type': 'string',
+                    'description': '任務上下文說明'
+                },
                 'async': {
                     'type': 'boolean',
                     'description': '異步模式：立即返回 pending，不等審批結果'
@@ -265,6 +277,14 @@ MCP_TOOLS = {
                 'reason': {
                     'type': 'string',
                     'description': '部署原因'
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '請求來源標識（哪個 agent/系統發的）'
+                },
+                'context': {
+                    'type': 'string',
+                    'description': '任務上下文說明'
                 }
             },
             'required': ['project', 'reason']
@@ -940,11 +960,14 @@ def handle_telegram_webhook(event):
             source = item.get('source', '')
             command = item.get('command', '')[:200]
             reason = item.get('reason', '')
+            context = item.get('context', '')
             source_line = f"🤖 *來源：* {escape_markdown(source)}\n" if source else ""
+            context_line = f"📝 *任務：* {escape_markdown(context)}\n" if context else ""
             update_message(
                 message_id,
                 f"{status_emoji} *已處理* (狀態: {status})\n\n"
                 f"{source_line}"
+                f"{context_line}"
                 f"📋 *命令：*\n`{escape_markdown(command)}`\n\n"
                 f"💬 *原因：* {escape_markdown(reason)}",
                 remove_buttons=True
@@ -966,12 +989,15 @@ def handle_telegram_webhook(event):
             source = item.get('source', '')
             command = item.get('command', '')
             reason = item.get('reason', '')
+            context = item.get('context', '')
             source_line = f"🤖 *來源：* {escape_markdown(source)}\n" if source else ""
+            context_line = f"📝 *任務：* {escape_markdown(context)}\n" if context else ""
             cmd_preview = command[:200] + '...' if len(command) > 200 else command
             update_message(
                 message_id,
                 f"⏰ *已過期*\n\n"
                 f"{source_line}"
+                f"{context_line}"
                 f"📋 *命令：*\n`{escape_markdown(cmd_preview)}`\n\n"
                 f"💬 *原因：* {escape_markdown(reason)}",
                 remove_buttons=True
@@ -1026,7 +1052,7 @@ def verify_hmac(headers: dict, body: str) -> bool:
 
 def send_approval_request(request_id: str, command: str, reason: str, timeout: int = 840,
                           source: str = None, account_id: str = None, account_name: str = None,
-                          assume_role: str = None):
+                          assume_role: str = None, context: str = None):
     """發送 Telegram 審批請求
 
     Args:
@@ -1058,6 +1084,7 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
 
     # 來源資訊
     source_line = f"🤖 *來源：* {source}\n" if source else ""
+    context_line = f"📝 *任務：* {escape_markdown(context)}\n" if context else ""
 
     # 帳號資訊
     if account_id and account_name:
@@ -1081,6 +1108,7 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
         text = (
             f"⚠️ *高危操作請求* ⚠️\n\n"
             f"{source_line}"
+            f"{context_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{cmd_preview}`\n\n"
             f"💬 *原因：* {reason}\n\n"
@@ -1101,6 +1129,7 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
         text = (
             f"🔐 *AWS 執行請求*\n\n"
             f"{source_line}"
+            f"{context_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{cmd_preview}`\n\n"
             f"💬 *原因：* {reason}\n\n"
@@ -1120,30 +1149,33 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
     send_telegram_message(text, keyboard)
 
 
-def send_account_approval_request(request_id: str, action: str, account_id: str, name: str, role_arn: str, source: str):
+def send_account_approval_request(request_id: str, action: str, account_id: str, name: str, role_arn: str, source: str, context: str = None):
     """發送帳號管理的 Telegram 審批請求"""
     # 轉義用戶輸入
     name = escape_markdown(name) if name else name
     source = escape_markdown(source) if source else None
     source_line = f"🤖 *來源：* {source}\n" if source else ""
+    context_line = f"📝 *任務：* {escape_markdown(context)}\n" if context else ""
 
     if action == 'add':
         text = (
             f"🔐 *新增 AWS 帳號請求*\n\n"
             f"{source_line}"
+            f"{context_line}"
             f"🆔 *帳號 ID：* `{account_id}`\n"
             f"📛 *名稱：* {name}\n"
             f"🔗 *Role：* `{role_arn}`\n\n"
-            f"📝 *請求 ID：* `{request_id}`\n"
+            f"📋 *請求 ID：* `{request_id}`\n"
             f"⏰ *5 分鐘後過期*"
         )
     else:  # remove
         text = (
             f"🔐 *移除 AWS 帳號請求*\n\n"
             f"{source_line}"
+            f"{context_line}"
             f"🆔 *帳號 ID：* `{account_id}`\n"
             f"📛 *名稱：* {name}\n\n"
-            f"📝 *請求 ID：* `{request_id}`\n"
+            f"📋 *請求 ID：* `{request_id}`\n"
             f"⏰ *5 分鐘後過期*"
         )
 

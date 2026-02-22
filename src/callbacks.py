@@ -44,10 +44,12 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
     assume_role = item.get('assume_role')
     source = item.get('source', '')
     reason = item.get('reason', '')
+    context = item.get('context', '')
     account_id = item.get('account_id', DEFAULT_ACCOUNT_ID)
     account_name = item.get('account_name', 'Default')
 
     source_line = f"🤖 *來源：* {source}\n" if source else ""
+    context_line = f"📝 *任務：* {context}\n" if context else ""
     account_line = f"🏢 *帳號：* `{account_id}` ({account_name})\n"
 
     if action == 'approve':
@@ -88,6 +90,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             f"✅ *已批准並執行*\n\n"
             f"🆔 *ID：* `{request_id}`\n"
             f"{source_line}"
+            f"{context_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{command}`\n\n"
             f"💬 *原因：* {reason}\n\n"
@@ -141,6 +144,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             f"✅ *已批准並執行* + 🔓 *信任 10 分鐘*\n\n"
             f"🆔 *ID：* `{request_id}`\n"
             f"{source_line}"
+            f"{context_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{command}`\n\n"
             f"💬 *原因：* {reason}\n\n"
@@ -170,6 +174,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             f"❌ *已拒絕*\n\n"
             f"🆔 *ID：* `{request_id}`\n"
             f"{source_line}"
+            f"{context_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{command}`\n\n"
             f"💬 *原因：* {reason}",
@@ -189,8 +194,10 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
     account_name = item.get('account_name', '')
     role_arn = item.get('role_arn', '')
     source = item.get('source', '')
+    context = item.get('context', '')
 
     source_line = f"🤖 *來源：* {source}\n" if source else ""
+    context_line = f"📝 *任務：* {context}\n" if context else ""
 
     if action == 'approve':
         # 寫入帳號配置
@@ -221,6 +228,7 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
                 f"✅ *已新增帳號*\n\n"
                 f"📋 *請求 ID：* `{request_id}`\n"
                 f"{source_line}"
+                f"{context_line}"
                 f"🆔 *帳號 ID：* `{account_id}`\n"
                 f"📛 *名稱：* {account_name}\n"
                 f"🔗 *Role：* `{role_arn}`"
@@ -248,6 +256,7 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
             f"❌ *已拒絕新增帳號*\n\n"
             f"📋 *請求 ID：* `{request_id}`\n"
             f"{source_line}"
+            f"{context_line}"
             f"🆔 *帳號 ID：* `{account_id}`\n"
             f"📛 *名稱：* {account_name}"
         )
@@ -264,8 +273,10 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
     account_id = item.get('account_id', '')
     account_name = item.get('account_name', '')
     source = item.get('source', '')
+    context = item.get('context', '')
 
     source_line = f"🤖 *來源：* {source}\n" if source else ""
+    context_line = f"📝 *任務：* {context}\n" if context else ""
 
     if action == 'approve':
         try:
@@ -287,6 +298,7 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
                 f"✅ *已移除帳號*\n\n"
                 f"📋 *請求 ID：* `{request_id}`\n"
                 f"{source_line}"
+                f"{context_line}"
                 f"🆔 *帳號 ID：* `{account_id}`\n"
                 f"📛 *名稱：* {account_name}"
             )
@@ -313,6 +325,7 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
             f"❌ *已拒絕移除帳號*\n\n"
             f"📋 *請求 ID：* `{request_id}`\n"
             f"{source_line}"
+            f"{context_line}"
             f"🆔 *帳號 ID：* `{account_id}`\n"
             f"📛 *名稱：* {account_name}"
         )
@@ -332,8 +345,10 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
     stack_name = item.get('stack_name', '')
     source = item.get('source', '')
     reason = item.get('reason', '')
+    context = item.get('context', '')
 
     source_line = f"🤖 *來源：* {source}\n" if source else ""
+    context_line = f"📝 *任務：* {context}\n" if context else ""
 
     if action == 'approve':
         # 更新審批狀態
@@ -357,6 +372,7 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
                 f"❌ *部署啟動失敗*\n\n"
                 f"📋 *請求 ID：* `{request_id}`\n"
                 f"{source_line}"
+                f"{context_line}"
                 f"📦 *專案：* {project_name}\n"
                 f"🌿 *分支：* {branch}\n\n"
                 f"❗ *錯誤：* {result['error']}"
@@ -370,6 +386,7 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
                 f"🚀 *部署已啟動*\n\n"
                 f"📋 *請求 ID：* `{request_id}`\n"
                 f"{source_line}"
+                f"{context_line}"
                 f"📦 *專案：* {project_name}\n"
                 f"🌿 *分支：* {branch}\n"
                 f"{reason_line}"
@@ -396,6 +413,7 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
             f"❌ *已拒絕部署*\n\n"
             f"📋 *請求 ID：* `{request_id}`\n"
             f"{source_line}"
+            f"{context_line}"
             f"📦 *專案：* {project_name}\n"
             f"🌿 *分支：* {branch}\n"
             f"📋 *Stack：* {stack_name}\n\n"
@@ -416,11 +434,13 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
     content_size = int(item.get('content_size', 0))
     source = item.get('source', '')
     reason = item.get('reason', '')
+    context = item.get('context', '')
     account_id = item.get('account_id', '')
     account_name = item.get('account_name', '')
 
     s3_uri = f"s3://{bucket}/{key}"
     source_line = f"🤖 來源： {source}\n" if source else ""
+    context_line = f"📝 任務： {context}\n" if context else ""
     account_line = f"🏦 帳號： {account_id} ({account_name})\n" if account_id else ""
 
     # 格式化大小
@@ -441,6 +461,7 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
                 f"✅ 已上傳\n\n"
                 f"📋 請求 ID： `{request_id}`\n"
                 f"{source_line}"
+                f"{context_line}"
                 f"{account_line}"
                 f"📁 目標： {s3_uri}\n"
                 f"📊 大小： {size_str}\n"
@@ -456,6 +477,7 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
                 f"❌ 上傳失敗\n\n"
                 f"📋 請求 ID： `{request_id}`\n"
                 f"{source_line}"
+                f"{context_line}"
                 f"{account_line}"
                 f"📁 目標： {s3_uri}\n"
                 f"📊 大小： {size_str}\n"
@@ -481,6 +503,7 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
             f"❌ 已拒絕上傳\n\n"
             f"📋 請求 ID： `{request_id}`\n"
             f"{source_line}"
+            f"{context_line}"
             f"{account_line}"
             f"📁 目標： {s3_uri}\n"
             f"📊 大小： {size_str}\n"

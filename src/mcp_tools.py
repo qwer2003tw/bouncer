@@ -104,6 +104,7 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
     command = str(arguments.get('command', '')).strip()
     reason = str(arguments.get('reason', 'No reason provided'))
     source = arguments.get('source', None)
+    context = arguments.get('context', None)
     account_id = arguments.get('account', None)
     if account_id:
         account_id = str(account_id).strip()
@@ -331,6 +332,7 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
         'command': command,
         'reason': reason,
         'source': source or '__anonymous__',  # GSI 需要有值
+        'context': context or '',
         'account_id': account_id,
         'account_name': account_name,
         'assume_role': assume_role,
@@ -342,7 +344,7 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
     table.put_item(Item=item)
 
     # 發送 Telegram 審批請求
-    app.send_approval_request(request_id, command, reason, timeout, source, account_id, account_name)
+    app.send_approval_request(request_id, command, reason, timeout, source, account_id, account_name, context=context)
 
     # 預設異步：立即返回讓 client 用 bouncer_status 輪詢
     if not sync_mode:
@@ -530,6 +532,7 @@ def mcp_tool_add_account(req_id, arguments: dict) -> dict:
     name = str(arguments.get('name', '')).strip()
     role_arn = str(arguments.get('role_arn', '')).strip()
     source = arguments.get('source', None)
+    context = arguments.get('context', None)
     async_mode = arguments.get('async', False)  # 如果 True，立即返回 pending
 
     # 驗證
@@ -564,6 +567,7 @@ def mcp_tool_add_account(req_id, arguments: dict) -> dict:
         'account_name': name,
         'role_arn': role_arn,
         'source': source or '__anonymous__',
+        'context': context or '',
         'status': 'pending_approval',
         'created_at': int(time.time()),
         'ttl': ttl,
@@ -572,7 +576,7 @@ def mcp_tool_add_account(req_id, arguments: dict) -> dict:
     table.put_item(Item=item)
 
     # 發送 Telegram 審批
-    app.send_account_approval_request(request_id, 'add', account_id, name, role_arn, source)
+    app.send_account_approval_request(request_id, 'add', account_id, name, role_arn, source, context=context)
 
     # 如果是 async 模式，立即返回讓 client 輪詢
     if async_mode:
@@ -702,6 +706,7 @@ def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
 
     account_id = str(arguments.get('account_id', '')).strip()
     source = arguments.get('source', None)
+    context = arguments.get('context', None)
     async_mode = arguments.get('async', False)
 
     # 驗證
@@ -737,6 +742,7 @@ def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
         'account_id': account_id,
         'account_name': account.get('name', account_id),
         'source': source or '__anonymous__',
+        'context': context or '',
         'status': 'pending_approval',
         'created_at': int(time.time()),
         'ttl': ttl,
@@ -745,7 +751,7 @@ def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
     table.put_item(Item=item)
 
     # 發送 Telegram 審批
-    app.send_account_approval_request(request_id, 'remove', account_id, account.get('name', ''), None, source)
+    app.send_account_approval_request(request_id, 'remove', account_id, account.get('name', ''), None, source, context=context)
 
     # 如果是 async 模式，立即返回讓 client 輪詢
     if async_mode:

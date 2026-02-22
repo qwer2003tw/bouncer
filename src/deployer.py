@@ -353,6 +353,7 @@ def mcp_tool_deploy(req_id, arguments: dict, table, send_approval_func) -> dict:
     branch = str(arguments.get('branch', '')).strip() or None
     reason = str(arguments.get('reason', '')).strip()
     source = arguments.get('source', None)
+    context = arguments.get('context', None)
     async_mode = arguments.get('async', True)
 
     if not project_id:
@@ -399,6 +400,7 @@ def mcp_tool_deploy(req_id, arguments: dict, table, send_approval_func) -> dict:
         'stack_name': project.get('stack_name', ''),
         'reason': reason,
         'source': source or 'mcp',  # GSI 不允許 NULL，用預設值
+        'context': context or '',
         'status': 'pending_approval',
         'created_at': int(time.time()),
         'ttl': ttl,
@@ -407,7 +409,7 @@ def mcp_tool_deploy(req_id, arguments: dict, table, send_approval_func) -> dict:
     table.put_item(Item=item)
 
     # 發送 Telegram 審批請求
-    send_deploy_approval_request(request_id, project, branch, reason, source)
+    send_deploy_approval_request(request_id, project, branch, reason, source, context=context)
 
     if async_mode:
         return mcp_result(req_id, {
@@ -501,7 +503,7 @@ def mcp_tool_project_list(req_id, arguments: dict) -> dict:
 # Telegram Notifications
 # ============================================================================
 
-def send_deploy_approval_request(request_id: str, project: dict, branch: str, reason: str, source: str):
+def send_deploy_approval_request(request_id: str, project: dict, branch: str, reason: str, source: str, context: str = None):
     """發送部署審批請求到 Telegram"""
     import urllib.request
     import urllib.parse
@@ -521,11 +523,13 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
 
     branch = branch or project.get('default_branch', 'master')
     source_line = f"🤖 來源： {source}\n" if source else ""
+    context_line = f"📝 任務： {context}\n" if context else ""
     account_line = f"🏢 帳號： {target_account}\n" if target_account else ""
 
     text = (
         f"🚀 SAM 部署請求\n\n"
         f"{source_line}"
+        f"{context_line}"
         f"📦 專案： {project_name}\n"
         f"🌿 分支： {branch}\n"
         f"{account_line}"
