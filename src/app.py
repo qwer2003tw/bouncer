@@ -58,6 +58,8 @@ from constants import (  # noqa: F401
     RATE_LIMIT_WINDOW,
     TRUST_SESSION_MAX_COMMANDS,
     BLOCKED_PATTERNS, AUTO_APPROVE_PREFIXES,
+    APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER, COMMAND_APPROVAL_TIMEOUT,
+    UPLOAD_TIMEOUT, TELEGRAM_TIMESTAMP_MAX_AGE,
 )
 
 
@@ -245,7 +247,7 @@ def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
 # Upload 相關函數（被 callbacks 呼叫）
 # ============================================================================
 
-def wait_for_upload_result(request_id: str, timeout: int = 300) -> dict:
+def wait_for_upload_result(request_id: str, timeout: int = UPLOAD_TIMEOUT) -> dict:
     """等待上傳審批結果"""
     interval = 2
     start_time = time.time()
@@ -375,7 +377,7 @@ def execute_upload(request_id: str, approver: str) -> dict:
         return {'success': False, 'error': str(e)}
 
 
-def wait_for_result_mcp(request_id: str, timeout: int = 840) -> dict:
+def wait_for_result_mcp(request_id: str, timeout: int = COMMAND_APPROVAL_TIMEOUT) -> dict:
     """MCP 模式的長輪詢，最多 timeout 秒"""
     interval = 2  # 每 2 秒查一次
     start_time = time.time()
@@ -484,7 +486,7 @@ def handle_clawdbot_request(event):
     source = body.get('source', None)  # 來源（哪個 agent/系統）
     assume_role = body.get('assume_role', None)  # 目標帳號 role ARN
     wait = body.get('wait', False)
-    timeout = min(body.get('timeout', 300), MCP_MAX_WAIT)
+    timeout = min(body.get('timeout', APPROVAL_TIMEOUT_DEFAULT), MCP_MAX_WAIT)
 
     if not command:
         return response(400, {'error': 'Missing command'})
@@ -527,7 +529,7 @@ def handle_clawdbot_request(event):
 
     # Layer 3: APPROVAL
     request_id = generate_request_id(command)
-    ttl = int(time.time()) + timeout + 60
+    ttl = int(time.time()) + timeout + APPROVAL_TTL_BUFFER
 
     item = {
         'request_id': request_id,
@@ -737,7 +739,7 @@ def verify_hmac(headers: dict, body: str) -> bool:
 
     try:
         ts = int(timestamp)
-        if abs(time.time() - ts) > 300:
+        if abs(time.time() - ts) > TELEGRAM_TIMESTAMP_MAX_AGE:
             return False
     except Exception as e:
         print(f"Error: {e}")
@@ -753,7 +755,7 @@ def verify_hmac(headers: dict, body: str) -> bool:
     return hmac.compare_digest(signature, expected)
 
 
-def send_approval_request(request_id: str, command: str, reason: str, timeout: int = 840,
+def send_approval_request(request_id: str, command: str, reason: str, timeout: int = COMMAND_APPROVAL_TIMEOUT,
                           source: str = None, account_id: str = None, account_name: str = None,
                           assume_role: str = None, context: str = None):
     """發送 Telegram 審批請求

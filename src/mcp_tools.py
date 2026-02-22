@@ -33,6 +33,8 @@ from telegram import escape_markdown, send_telegram_message
 from constants import (
     DEFAULT_ACCOUNT_ID, MCP_MAX_WAIT, RATE_LIMIT_WINDOW,
     TRUST_SESSION_MAX_COMMANDS,
+    APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER, UPLOAD_TIMEOUT,
+    AUDIT_TTL_SHORT,
 )
 
 
@@ -118,7 +120,7 @@ def _log_smart_approval_shadow(
             'smart_category': smart_decision.risk_result.category.value,
             'smart_factors': [f.__dict__ for f in smart_decision.risk_result.factors[:5]],  # 只記錄前 5 個因素
             # 30 天後自動刪除
-            'ttl': int(time.time()) + 30 * 24 * 60 * 60,
+            'ttl': int(time.time()) + AUDIT_TTL_SHORT,
         }
 
         table.put_item(Item=item)
@@ -471,7 +473,7 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
     table = _get_table()
 
     request_id = generate_request_id(ctx.command)
-    ttl = int(time.time()) + ctx.timeout + 60
+    ttl = int(time.time()) + ctx.timeout + APPROVAL_TTL_BUFFER
 
     # 存入 DynamoDB
     item = {
@@ -741,7 +743,7 @@ def mcp_tool_add_account(req_id, arguments: dict) -> dict:
 
     # 建立審批請求
     request_id = generate_request_id(f"add_account:{account_id}")
-    ttl = int(time.time()) + 300 + 60
+    ttl = int(time.time()) + APPROVAL_TIMEOUT_DEFAULT + APPROVAL_TTL_BUFFER
 
     item = {
         'request_id': request_id,
@@ -768,12 +770,12 @@ def mcp_tool_add_account(req_id, arguments: dict) -> dict:
                 'status': 'pending_approval',
                 'request_id': request_id,
                 'message': '請求已發送，等待 Telegram 確認',
-                'expires_in': '300 seconds'
+                'expires_in': f'{APPROVAL_TIMEOUT_DEFAULT} seconds'
             })}]
         })
 
     # 同步模式：等待結果（會被 API Gateway 29s 超時）
-    result = app.wait_for_result_mcp(request_id, timeout=300)
+    result = app.wait_for_result_mcp(request_id, timeout=APPROVAL_TIMEOUT_DEFAULT)
 
     return mcp_result(req_id, {
         'content': [{'type': 'text', 'text': json.dumps(result)}],
@@ -917,7 +919,7 @@ def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
 
     # 建立審批請求
     request_id = generate_request_id(f"remove_account:{account_id}")
-    ttl = int(time.time()) + 300 + 60
+    ttl = int(time.time()) + APPROVAL_TIMEOUT_DEFAULT + APPROVAL_TTL_BUFFER
 
     item = {
         'request_id': request_id,
@@ -943,12 +945,12 @@ def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
                 'status': 'pending_approval',
                 'request_id': request_id,
                 'message': '請求已發送，等待 Telegram 確認',
-                'expires_in': '300 seconds'
+                'expires_in': f'{APPROVAL_TIMEOUT_DEFAULT} seconds'
             })}]
         })
 
     # 同步模式：等待結果
-    result = app.wait_for_result_mcp(request_id, timeout=300)
+    result = app.wait_for_result_mcp(request_id, timeout=APPROVAL_TIMEOUT_DEFAULT)
 
     return mcp_result(req_id, {
         'content': [{'type': 'text', 'text': json.dumps(result)}],
@@ -1136,7 +1138,7 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
     # 固定桶模式在 _resolve_upload_target 時 request_id 尚未設定
     if ctx.legacy_bucket and ctx.legacy_key:
         ctx.request_id = generate_request_id(f"upload:{ctx.bucket}:{ctx.key}")
-    ttl = int(time.time()) + 300 + 60
+    ttl = int(time.time()) + UPLOAD_TIMEOUT + APPROVAL_TTL_BUFFER
 
     # 格式化大小顯示
     if ctx.content_size >= 1024 * 1024:
@@ -1205,12 +1207,12 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
                 's3_uri': s3_uri,
                 'size': size_str,
                 'message': '請求已發送，用 bouncer_status 查詢結果',
-                'expires_in': '300 seconds'
+                'expires_in': f'{UPLOAD_TIMEOUT} seconds'
             })}]
         })
 
     # 同步模式
-    result = app.wait_for_upload_result(ctx.request_id, timeout=300)
+    result = app.wait_for_upload_result(ctx.request_id, timeout=UPLOAD_TIMEOUT)
 
     return mcp_result(ctx.req_id, {
         'content': [{'type': 'text', 'text': json.dumps(result)}],

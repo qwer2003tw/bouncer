@@ -8,6 +8,8 @@ import time
 from decimal import Decimal
 from typing import Optional
 
+from constants import AUDIT_TTL_SHORT, AUDIT_TTL_LONG
+
 
 def get_header(headers: dict, key: str) -> Optional[str]:
     """Case-insensitive header lookup for API Gateway compatibility"""
@@ -92,10 +94,10 @@ def log_decision(table, request_id, command, reason, source, account_id,
         'created_at': now,
         'decided_at': now,
         'decision_latency_ms': 0,
-        'ttl': now + 90 * 24 * 3600,  # 90 天保留（blocked/compliance 30 天）
+        'ttl': now + AUDIT_TTL_LONG,  # 90 天保留（blocked/compliance 30 天）
     }
     if decision_type in ('blocked', 'compliance_violation'):
-        item['ttl'] = now + 30 * 24 * 3600  # 30 天
+        item['ttl'] = now + AUDIT_TTL_SHORT  # 30 天
     if risk_score is not None:
         item['risk_score'] = Decimal(str(risk_score))
         item['risk_category'] = kwargs.pop('risk_category', '')
