@@ -182,6 +182,55 @@ mcporter call bouncer bouncer_trust_revoke trust_id="trust-xxx-yyy"
 
 ---
 
+## Grant Session Tools (批次權限授予)
+
+Agent 可以預先申請一批命令的執行權限，經人工審批後在 TTL 內自動執行。
+
+### bouncer_request_grant
+```bash
+mcporter call bouncer bouncer_request_grant \
+  commands='["aws s3 ls s3://bucket", "aws ec2 describe-instances"]' \
+  reason="部署前檢查" source="Private-Bot" ttl_minutes=30
+```
+- 每個命令會預檢 compliance、blocked、risk score
+- 分類為 grantable / requires_individual / blocked
+- Steven 收到 Telegram 訊息 + [全部批准] / [只批准安全的] / [拒絕]
+- 回傳 `grant_request_id`
+
+### bouncer_grant_status
+```bash
+mcporter call bouncer bouncer_grant_status grant_id="grant_xxx" source="Private-Bot"
+```
+- 查詢 grant 狀態、剩餘命令、剩餘時間
+
+### bouncer_revoke_grant
+```bash
+mcporter call bouncer bouncer_revoke_grant grant_id="grant_xxx"
+```
+
+### 使用 Grant 執行命令
+```bash
+mcporter call bouncer bouncer_execute \
+  command="aws s3 ls s3://bucket" grant_id="grant_xxx" \
+  reason="部署前檢查" source="Private-Bot"
+```
+- 帶 `grant_id` 的命令會自動比對授權清單
+- 匹配成功 → 自動執行（不需審批）
+- 匹配失敗 → fallthrough 到正常審批流程
+
+### Grant Session 規則
+- **僅精確匹配**（normalized: 空白壓縮 + 小寫）
+- TTL 最長 60 分鐘（預設 30）
+- 每個 grant 最多 20 個命令
+- 每個 grant 最多 50 次執行（含重複）
+- TTL 從**批准時**算起
+- 128-bit grant ID（`grant_` + 32 hex chars）
+- Source + Account 綁定
+- Compliance/Blocked 仍優先於 Grant 檢查
+- 高危命令（TRUST_EXCLUDED_*）分類為 requires_individual
+
+---
+
 ## SAM Deployer Tools
 
 ### bouncer_deploy
