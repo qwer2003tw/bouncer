@@ -55,6 +55,8 @@ Resources:
   # ============================================================
   RequestsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "bouncer-${Environment}-requests"
       BillingMode: PAY_PER_REQUEST
@@ -105,6 +107,8 @@ Resources:
   # ============================================================
   AccountsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "bouncer-${Environment}-accounts"
       BillingMode: PAY_PER_REQUEST
@@ -127,6 +131,8 @@ Resources:
   # ============================================================
   CommandHistoryTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "bouncer-${Environment}-command-history"
       BillingMode: PAY_PER_REQUEST
@@ -156,6 +162,8 @@ Resources:
   # ============================================================
   ShadowApprovalsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "bouncer-${Environment}-shadow-approvals"
       BillingMode: PAY_PER_REQUEST
@@ -435,9 +443,33 @@ Resources:
   # ============================================================
   ApprovalFunctionDLQ:
     Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       QueueName: !Sub "${Environment}-bouncer-dlq"
       MessageRetentionPeriod: 1209600
+
+  # ============================================================
+  # CloudWatch Alarm - DLQ Depth (messages stuck in DLQ)
+  # ============================================================
+  DLQDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: bouncer-dlq-depth
+      AlarmDescription: Messages in DLQ - investigate failed Lambda invocations
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt ApprovalFunctionDLQ.QueueName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      TreatMissingData: notBreaching
 
   # ============================================================
   # CloudWatch Logs - Log Group with Retention
