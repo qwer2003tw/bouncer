@@ -123,7 +123,7 @@ class TestVerbBaseScore:
         for cmd in commands:
             result = calculate_risk(cmd, reason="Check status", source="test", rules=risk_rules)
             assert result.score <= 25, f"'{cmd}' score {result.score} should be <= 25"
-            assert result.category == RiskCategory.AUTO_APPROVE.value
+            assert result.category == RiskCategory.AUTO_APPROVE
 
         # Lambda/RDS 敏感服務的 describe 可能略高（因為服務敏感度、參數、時間等因素）
         # 允許 LOG 級別 (26-45)
@@ -134,7 +134,7 @@ class TestVerbBaseScore:
         for cmd in sensitive_describe_commands:
             result = calculate_risk(cmd, reason="Check status", source="test", rules=risk_rules)
             assert result.score <= 35, f"'{cmd}' score {result.score} should be <= 35"
-            assert result.category in [RiskCategory.AUTO_APPROVE.value, RiskCategory.LOG.value]
+            assert result.category in [RiskCategory.AUTO_APPROVE, RiskCategory.LOG]
 
     def test_list_is_read_only(self, risk_rules):
         """list-* → 低風險 (0-25) 或 LOG (26-45) for 高敏感服務"""
@@ -151,7 +151,7 @@ class TestVerbBaseScore:
         # 高敏感服務 (IAM) 即使是唯讀也會略高 - LOG 級別
         iam_list = calculate_risk('aws iam list-users', reason="Inventory check", source="Private Bot", rules=risk_rules)
         assert iam_list.score <= 45, f"IAM list score {iam_list.score} should be <= 45 (LOG)"
-        assert iam_list.category in [RiskCategory.AUTO_APPROVE.value, RiskCategory.LOG.value]
+        assert iam_list.category in [RiskCategory.AUTO_APPROVE, RiskCategory.LOG]
 
     def test_get_is_read_only(self, risk_rules):
         """get-* → 低風險 (0-25)"""
@@ -197,7 +197,7 @@ class TestVerbBaseScore:
             result = calculate_risk(cmd, reason="Cleanup", source="test", rules=risk_rules)
             assert result.score >= 30, f"'{cmd}' score {result.score} should be >= 30"
             # delete 是危險操作，通常不會是 auto_approve
-            assert result.category != RiskCategory.BLOCK.value  # 但也不應該被 block
+            assert result.category != RiskCategory.BLOCK  # 但也不應該被 block
 
     def test_terminate_is_destructive(self, risk_rules):
         """terminate-* → 高風險 (46-85)"""
@@ -339,7 +339,7 @@ class TestServiceSensitivity:
         # STS 雖然是高敏感服務，但 get-caller-identity 是常用安全操作
         # 分數可能因為非工作時間等因素略高，允許 LOG 級別
         assert result.score <= 40, f"STS get-caller-identity score {result.score} should be <= 40"
-        assert result.category in [RiskCategory.AUTO_APPROVE.value, RiskCategory.LOG.value]
+        assert result.category in [RiskCategory.AUTO_APPROVE, RiskCategory.LOG]
 
     def test_s3_is_medium(self, risk_rules):
         """s3 → 中等敏感度 (30)"""
@@ -347,7 +347,7 @@ class TestServiceSensitivity:
         result = calculate_risk(cmd, reason="List buckets", source="test", rules=risk_rules)
 
         # S3 list 應該是自動批准
-        assert result.category == RiskCategory.AUTO_APPROVE.value, \
+        assert result.category == RiskCategory.AUTO_APPROVE, \
             f"S3 ls should be auto_approve, got {result.category}"
 
     def test_ec2_is_medium(self, risk_rules):
@@ -372,7 +372,7 @@ class TestServiceSensitivity:
         result = calculate_risk(cmd, reason="List accounts", source="test", rules=risk_rules)
 
         # Organizations 在黑名單中
-        assert result.category == RiskCategory.BLOCK.value, \
+        assert result.category == RiskCategory.BLOCK, \
             f"Organizations should be blocked, got {result.category}"
 
     def test_unknown_service_gets_moderate_score(self, risk_rules):
@@ -496,7 +496,7 @@ class TestRiskCalculation:
 
         for cmd, reason in safe_commands:
             result = calculate_risk(cmd, reason=reason, source="Private Bot", rules=risk_rules)
-            assert result.category == RiskCategory.AUTO_APPROVE.value, \
+            assert result.category == RiskCategory.AUTO_APPROVE, \
                 f"'{cmd}' should be auto_approve, got {result.category} (score: {result.score})"
             assert result.score <= 25, f"'{cmd}' score {result.score} should be <= 25"
 
@@ -510,9 +510,9 @@ class TestRiskCalculation:
         for cmd, reason in medium_commands:
             result = calculate_risk(cmd, reason=reason, source="Private Bot", rules=risk_rules)
             assert result.category in [
-                RiskCategory.AUTO_APPROVE.value,
-                RiskCategory.LOG.value,
-                RiskCategory.CONFIRM.value
+                RiskCategory.AUTO_APPROVE,
+                RiskCategory.LOG,
+                RiskCategory.CONFIRM
             ], f"'{cmd}' should be log/confirm, got {result.category}"
 
     def test_dangerous_command_manual(self, risk_rules):
@@ -532,7 +532,7 @@ class TestRiskCalculation:
         """黑名單命令 → block (86-100)"""
         for cmd in sample_commands['blocked']:
             result = calculate_risk(cmd, reason="Test", source="test", rules=risk_rules)
-            assert result.category == RiskCategory.BLOCK.value, \
+            assert result.category == RiskCategory.BLOCK, \
                 f"'{cmd}' should be blocked, got {result.category} (score: {result.score})"
             assert result.score >= 86, f"'{cmd}' score {result.score} should be >= 86"
 
@@ -564,7 +564,7 @@ class TestRiskCalculation:
         # 基本欄位
         assert isinstance(result.score, int)
         assert 0 <= result.score <= 100
-        assert result.category in [c.value for c in RiskCategory]
+        assert result.category in list(RiskCategory)
         assert isinstance(result.factors, list)
         assert len(result.factors) > 0
         assert isinstance(result.recommendation, str)
@@ -602,7 +602,7 @@ class TestEdgeCases:
         """空命令 → Fail-closed (manual)"""
         result = calculate_risk("", reason="Test", source="test", rules=risk_rules)
 
-        assert result.category == RiskCategory.MANUAL.value
+        assert result.category == RiskCategory.MANUAL
         assert result.score == 70  # Fail-closed 分數
         assert not result.parsed_command.is_valid
 
@@ -610,7 +610,7 @@ class TestEdgeCases:
         """只有空白的命令"""
         result = calculate_risk("   ", reason="Test", source="test", rules=risk_rules)
 
-        assert result.category == RiskCategory.MANUAL.value
+        assert result.category == RiskCategory.MANUAL
         assert not result.parsed_command.is_valid
 
     def test_malformed_command(self, risk_rules):
@@ -634,7 +634,7 @@ class TestEdgeCases:
         result = calculate_risk(cmd, reason="Test", source="test", rules=risk_rules)
 
         # 未知服務應該使用預設分數，不應該是 block
-        assert result.category != RiskCategory.BLOCK.value
+        assert result.category != RiskCategory.BLOCK
         assert 20 <= result.score <= 60
 
     def test_missing_reason(self, risk_rules):
@@ -874,32 +874,32 @@ class TestCategoryThresholds:
 
     def test_auto_approve_threshold(self):
         """auto_approve 閾值 (0-25)"""
-        assert get_category_from_score(0) == RiskCategory.AUTO_APPROVE.value
-        assert get_category_from_score(25) == RiskCategory.AUTO_APPROVE.value
-        assert get_category_from_score(26) != RiskCategory.AUTO_APPROVE.value
+        assert get_category_from_score(0) == RiskCategory.AUTO_APPROVE
+        assert get_category_from_score(25) == RiskCategory.AUTO_APPROVE
+        assert get_category_from_score(26) != RiskCategory.AUTO_APPROVE
 
     def test_log_threshold(self):
         """log 閾值 (26-45)"""
-        assert get_category_from_score(26) == RiskCategory.LOG.value
-        assert get_category_from_score(45) == RiskCategory.LOG.value
-        assert get_category_from_score(46) != RiskCategory.LOG.value
+        assert get_category_from_score(26) == RiskCategory.LOG
+        assert get_category_from_score(45) == RiskCategory.LOG
+        assert get_category_from_score(46) != RiskCategory.LOG
 
     def test_confirm_threshold(self):
         """confirm 閾值 (46-65)"""
-        assert get_category_from_score(46) == RiskCategory.CONFIRM.value
-        assert get_category_from_score(65) == RiskCategory.CONFIRM.value
-        assert get_category_from_score(66) != RiskCategory.CONFIRM.value
+        assert get_category_from_score(46) == RiskCategory.CONFIRM
+        assert get_category_from_score(65) == RiskCategory.CONFIRM
+        assert get_category_from_score(66) != RiskCategory.CONFIRM
 
     def test_manual_threshold(self):
         """manual 閾值 (66-85)"""
-        assert get_category_from_score(66) == RiskCategory.MANUAL.value
-        assert get_category_from_score(85) == RiskCategory.MANUAL.value
-        assert get_category_from_score(86) != RiskCategory.MANUAL.value
+        assert get_category_from_score(66) == RiskCategory.MANUAL
+        assert get_category_from_score(85) == RiskCategory.MANUAL
+        assert get_category_from_score(86) != RiskCategory.MANUAL
 
     def test_block_threshold(self):
         """block 閾值 (86-100)"""
-        assert get_category_from_score(86) == RiskCategory.BLOCK.value
-        assert get_category_from_score(100) == RiskCategory.BLOCK.value
+        assert get_category_from_score(86) == RiskCategory.BLOCK
+        assert get_category_from_score(100) == RiskCategory.BLOCK
 
 
 class TestPerformance:
@@ -974,7 +974,7 @@ class TestRealWorldScenarios:
             source="CI/CD Pipeline",
             rules=risk_rules
         )
-        assert check_result.category == RiskCategory.AUTO_APPROVE.value
+        assert check_result.category == RiskCategory.AUTO_APPROVE
 
         # 2. 上傳程式碼
         upload_result = calculate_risk(
@@ -1003,7 +1003,7 @@ class TestRealWorldScenarios:
             source="SRE Team",
             rules=risk_rules
         )
-        assert diagnose_result.category == RiskCategory.AUTO_APPROVE.value
+        assert diagnose_result.category == RiskCategory.AUTO_APPROVE
 
         # 2. 查看日誌
         logs_result = calculate_risk(
@@ -1033,7 +1033,7 @@ class TestRealWorldScenarios:
             source="Cleanup Bot",
             rules=risk_rules
         )
-        assert list_result.category == RiskCategory.AUTO_APPROVE.value
+        assert list_result.category == RiskCategory.AUTO_APPROVE
 
         # 2. 刪除快照（需要審批）
         delete_result = calculate_risk(
@@ -1056,7 +1056,7 @@ class TestRealWorldScenarios:
         )
         # IAM list 應該在 LOG 或以下（即使 IAM 敏感度高，list 仍然是安全操作）
         assert list_users.score <= 45, f"IAM list score {list_users.score} should be <= 45"
-        assert list_users.category in [RiskCategory.AUTO_APPROVE.value, RiskCategory.LOG.value]
+        assert list_users.category in [RiskCategory.AUTO_APPROVE, RiskCategory.LOG]
 
         # 2. 檢查政策（讀取）
         get_policy = calculate_risk(
@@ -1075,4 +1075,4 @@ class TestRealWorldScenarios:
             rules=risk_rules
         )
         # 修改 IAM 政策在黑名單中
-        assert put_policy.category == RiskCategory.BLOCK.value
+        assert put_policy.category == RiskCategory.BLOCK

@@ -797,7 +797,7 @@ def score_account(
 # Main Scoring Function
 # ============================================================================
 
-def get_category_from_score(score: int) -> str:
+def get_category_from_score(score: int) -> RiskCategory:
     """
     根據分數決定風險分類
 
@@ -805,18 +805,18 @@ def get_category_from_score(score: int) -> str:
         score: 風險分數 (0-100)
 
     Returns:
-        分類字串: auto_approve, log, confirm, manual, block
+        RiskCategory enum
     """
     if score <= 25:
-        return RiskCategory.AUTO_APPROVE.value
+        return RiskCategory.AUTO_APPROVE
     elif score <= 45:
-        return RiskCategory.LOG.value
+        return RiskCategory.LOG
     elif score <= 65:
-        return RiskCategory.CONFIRM.value
+        return RiskCategory.CONFIRM
     elif score <= 85:
-        return RiskCategory.MANUAL.value
+        return RiskCategory.MANUAL
     else:
-        return RiskCategory.BLOCK.value
+        return RiskCategory.BLOCK
 
 
 def _generate_recommendation(
@@ -839,11 +839,11 @@ def _generate_recommendation(
     """
     # 基礎訊息
     base_messages = {
-        RiskCategory.AUTO_APPROVE.value: f"✅ 低風險操作 ({score}分)，可自動批准",
-        RiskCategory.LOG.value: f"📝 低風險操作 ({score}分)，建議自動批准並記錄",
-        RiskCategory.CONFIRM.value: f"⚠️ 中等風險 ({score}分)，請確認 reason 後可批准",
-        RiskCategory.MANUAL.value: f"🔒 高風險操作 ({score}分)，需要人工審批",
-        RiskCategory.BLOCK.value: f"🚫 危險操作 ({score}分)，建議自動拒絕",
+        RiskCategory.AUTO_APPROVE: f"✅ 低風險操作 ({score}分)，可自動批准",
+        RiskCategory.LOG: f"📝 低風險操作 ({score}分)，建議自動批准並記錄",
+        RiskCategory.CONFIRM: f"⚠️ 中等風險 ({score}分)，請確認 reason 後可批准",
+        RiskCategory.MANUAL: f"🔒 高風險操作 ({score}分)，需要人工審批",
+        RiskCategory.BLOCK: f"🚫 危險操作 ({score}分)，建議自動拒絕",
     }
 
     message = base_messages.get(category, f"風險分數: {score}")
@@ -913,7 +913,7 @@ def calculate_risk(
             # 解析失敗 → Fail-closed
             return RiskResult(
                 score=70,
-                category=RiskCategory.MANUAL.value,
+                category=RiskCategory.MANUAL,
                 factors=[RiskFactor(
                     name="Parse error",
                     category="error",
@@ -940,7 +940,7 @@ def calculate_risk(
         if verb_score >= 100:
             return RiskResult(
                 score=100,
-                category=RiskCategory.BLOCK.value,
+                category=RiskCategory.BLOCK,
                 factors=verb_factors,
                 recommendation="🚫 命令被封鎖：觸發安全規則",
                 command=command,
@@ -1007,7 +1007,7 @@ def calculate_risk(
         # Fail-closed: 任何錯誤都回傳 manual
         return RiskResult(
             score=70,
-            category=RiskCategory.MANUAL.value,
+            category=RiskCategory.MANUAL,
             factors=[RiskFactor(
                 name="Scoring error",
                 category="error",
