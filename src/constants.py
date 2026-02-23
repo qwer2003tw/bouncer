@@ -87,6 +87,17 @@ RATE_LIMIT_ENABLED = os.environ.get('RATE_LIMIT_ENABLED', 'true').lower() == 'tr
 # Trust Session - 連續批准功能
 # ============================================================================
 
+# ============================================================================
+# Grant Session - 批次權限授予功能
+# ============================================================================
+
+GRANT_SESSION_ENABLED = os.environ.get('GRANT_SESSION_ENABLED', 'true').lower() == 'true'
+GRANT_MAX_TTL_MINUTES = 60
+GRANT_DEFAULT_TTL_MINUTES = 30
+GRANT_MAX_COMMANDS = 20
+GRANT_MAX_TOTAL_EXECUTIONS = 50
+GRANT_APPROVAL_TIMEOUT = 300  # 5 分鐘內未審批自動過期
+
 TRUST_SESSION_DURATION = 600  # 10 分鐘
 TRUST_SESSION_MAX_COMMANDS = 20  # 信任時段內最多執行 20 個命令
 TRUST_SESSION_ENABLED = os.environ.get('TRUST_SESSION_ENABLED', 'true').lower() == 'true'

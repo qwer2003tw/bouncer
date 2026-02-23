@@ -178,3 +178,173 @@ def send_trust_auto_approve_notification(command: str, trust_id: str, remaining:
     }
 
     _send_message_silent(text, keyboard)
+
+
+# ============================================================================
+# Grant Session Notifications
+# ============================================================================
+
+def send_grant_request_notification(
+    grant_id: str,
+    commands_detail: list,
+    reason: str,
+    source: str,
+    account_id: str,
+    ttl_minutes: int,
+    allow_repeat: bool = False,
+) -> None:
+    """發送 Grant Session 審批請求通知
+
+    Args:
+        grant_id: Grant ID
+        commands_detail: 命令預檢結果清單
+        reason: 申請原因
+        source: 請求來源
+        account_id: AWS 帳號 ID
+        ttl_minutes: TTL（分鐘）
+        allow_repeat: 是否允許重複
+    """
+    try:
+        safe_source = _escape_markdown(source) if source else 'Unknown'
+        safe_reason = _escape_markdown(reason) if reason else ''
+        mode_str = '可重複' if allow_repeat else '一次性'
+
+        # 分類統計
+        grantable = [d for d in commands_detail if d.get('category') == 'grantable']
+        requires_individual = [d for d in commands_detail if d.get('category') == 'requires_individual']
+        blocked = [d for d in commands_detail if d.get('category') == 'blocked']
+
+        # 組裝命令清單文字
+        lines = []
+
+        max_display = 10
+
+        if grantable:
+            lines.append(f"\n✅ *可授權 ({len(grantable)}):*")
+            for i, d in enumerate(grantable[:max_display]):
+                cmd_preview = d['command'][:80]
+                lines.append(f" {i+1}\\. `{_escape_markdown(cmd_preview)}`")
+            if len(grantable) > max_display:
+                lines.append(f" \\.\\.\\.及其他 {len(grantable) - max_display} 個命令")
+
+        if requires_individual:
+            lines.append(f"\n⚠️ *需個別審批 ({len(requires_individual)}):*")
+            offset = len(grantable)
+            for i, d in enumerate(requires_individual[:max_display]):
+                cmd_preview = d['command'][:80]
+                lines.append(f" {offset+i+1}\\. `{_escape_markdown(cmd_preview)}`")
+            if len(requires_individual) > max_display:
+                lines.append(f" \\.\\.\\.及其他 {len(requires_individual) - max_display} 個命令")
+
+        if blocked:
+            lines.append(f"\n🚫 *已攔截 ({len(blocked)}):*")
+            offset = len(grantable) + len(requires_individual)
+            for i, d in enumerate(blocked[:max_display]):
+                cmd_preview = d['command'][:80]
+                block_reason = d.get('block_reason', '')
+                lines.append(f" {offset+i+1}\\. `{_escape_markdown(cmd_preview)}`")
+            if len(blocked) > max_display:
+                lines.append(f" \\.\\.\\.及其他 {len(blocked) - max_display} 個命令")
+
+        commands_text = '\n'.join(lines)
+
+        text = (
+            f"🔑 *批次權限申請*\n\n"
+            f"🤖 *來源：* {safe_source}\n"
+            f"💬 *原因：* {safe_reason}\n"
+            f"🏦 *帳號：* `{account_id}`\n"
+            f"⏱ *TTL：* {ttl_minutes} 分鐘 \\| 模式：{mode_str}\n"
+            f"{commands_text}\n\n"
+            f"🆔 *ID：* `{grant_id}`"
+        )
+
+        # 根據是否有 requires_individual 決定按鈕
+        buttons = []
+        if grantable or requires_individual:
+            buttons.append([
+                {'text': '✅ 全部批准', 'callback_data': f'grant_approve_all:{grant_id}'},
+            ])
+            if grantable and requires_individual:
+                buttons[0].append(
+                    {'text': '✅ 只批准安全的', 'callback_data': f'grant_approve_safe:{grant_id}'},
+                )
+        buttons.append([
+            {'text': '❌ 拒絕', 'callback_data': f'grant_deny:{grant_id}'},
+        ])
+
+        keyboard = {'inline_keyboard': buttons}
+        _send_message(text, keyboard)
+
+    except Exception as e:
+        print(f"[GRANT] send_grant_request_notification error: {e}")
+
+
+def send_grant_execute_notification(
+    command: str,
+    grant_id: str,
+    result: str,
+    remaining_info: str,
+) -> None:
+    """發送 Grant Session 命令自動執行的靜默通知
+
+    Args:
+        command: 執行的命令
+        grant_id: Grant ID
+        result: 執行結果
+        remaining_info: 剩餘資訊（如 "1/3 命令, 25:13"）
+    """
+    try:
+        cmd_preview = command[:100] + '...' if len(command) > 100 else command
+        cmd_preview = _escape_markdown(cmd_preview)
+
+        if result and (result.startswith('❌') or 'error' in result.lower()[:100]):
+            result_status = "❌"
+        else:
+            result_status = "✅"
+
+        result_text = result[:200] + '...' if result and len(result) > 200 else (result or '')
+        result_text = _escape_markdown(result_text)
+
+        grant_short = grant_id[:20] + '...' if len(grant_id) > 20 else grant_id
+
+        text = (
+            f"🔑 *Grant 自動執行*\n"
+            f"📋 `{cmd_preview}`\n"
+            f"{result_status} `{result_text}`\n"
+            f"📊 剩餘: {_escape_markdown(remaining_info)}\n"
+            f"🆔 `{grant_short}`"
+        )
+
+        keyboard = {
+            'inline_keyboard': [[
+                {'text': '🛑 撤銷 Grant', 'callback_data': f'grant_revoke:{grant_id}'}
+            ]]
+        }
+
+        _send_message_silent(text, keyboard)
+
+    except Exception as e:
+        print(f"[GRANT] send_grant_execute_notification error: {e}")
+
+
+def send_grant_complete_notification(grant_id: str, reason: str) -> None:
+    """發送 Grant Session 完成/過期通知
+
+    Args:
+        grant_id: Grant ID
+        reason: 完成原因（如 "全部使用完畢"、"TTL 到期"）
+    """
+    try:
+        safe_reason = _escape_markdown(reason) if reason else ''
+        grant_short = grant_id[:20] + '...' if len(grant_id) > 20 else grant_id
+
+        text = (
+            f"🔑 *Grant 已結束*\n\n"
+            f"🆔 `{grant_short}`\n"
+            f"💬 *原因：* {safe_reason}"
+        )
+
+        _send_message_silent(text)
+
+    except Exception as e:
+        print(f"[GRANT] send_grant_complete_notification error: {e}")

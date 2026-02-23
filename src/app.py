@@ -37,10 +37,12 @@ from mcp_tools import (
     mcp_tool_execute, mcp_tool_status, mcp_tool_help, mcp_tool_trust_status, mcp_tool_trust_revoke,
     mcp_tool_add_account, mcp_tool_list_accounts, mcp_tool_get_page,
     mcp_tool_list_pending, mcp_tool_remove_account, mcp_tool_upload,
+    mcp_tool_request_grant, mcp_tool_grant_status, mcp_tool_revoke_grant,
 )
 from callbacks import (
     handle_command_callback, handle_account_add_callback, handle_account_remove_callback,
     handle_deploy_callback, handle_upload_callback,
+    handle_grant_approve_all, handle_grant_approve_safe, handle_grant_deny,
 )
 from telegram_commands import handle_telegram_command
 from tool_schema import MCP_TOOLS  # noqa: F401
@@ -237,6 +239,16 @@ def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
 
     elif tool_name == 'bouncer_upload':
         return mcp_tool_upload(req_id, arguments)
+
+    # Grant Session tools
+    elif tool_name == 'bouncer_request_grant':
+        return mcp_tool_request_grant(req_id, arguments)
+
+    elif tool_name == 'bouncer_grant_status':
+        return mcp_tool_grant_status(req_id, arguments)
+
+    elif tool_name == 'bouncer_revoke_grant':
+        return mcp_tool_revoke_grant(req_id, arguments)
 
     else:
         return mcp_error(req_id, -32602, f'Unknown tool: {tool_name}')
@@ -654,6 +666,24 @@ def handle_telegram_webhook(event: dict) -> dict:
             answer_callback(callback['id'], '❌ 撤銷失敗')
         return response(200, {'ok': True})
 
+    # 特殊處理：Grant Session callbacks
+    if action == 'grant_approve_all':
+        return handle_grant_approve_all(callback, request_id)
+    elif action == 'grant_approve_safe':
+        return handle_grant_approve_safe(callback, request_id)
+    elif action == 'grant_deny':
+        return handle_grant_deny(callback, request_id)
+    elif action == 'grant_revoke':
+        from grant import revoke_grant
+        success = revoke_grant(request_id)
+        message_id = callback.get('message', {}).get('message_id')
+        if success:
+            update_message(message_id, f"🛑 *Grant 已撤銷*\n\n`{request_id}`", remove_buttons=True)
+            answer_callback(callback['id'], '🛑 Grant 已撤銷')
+        else:
+            answer_callback(callback['id'], '❌ 撤銷失敗')
+        return response(200, {'ok': True})
+
     try:
         db_start = time.time()
         item = table.get_item(Key={'request_id': request_id}).get('Item')
@@ -773,6 +803,9 @@ from notifications import (  # noqa: F401, E402
     send_approval_request,
     send_account_approval_request,
     send_trust_auto_approve_notification,
+    send_grant_request_notification,
+    send_grant_execute_notification,
+    send_grant_complete_notification,
 )
 
 # ============================================================================

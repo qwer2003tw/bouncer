@@ -36,6 +36,118 @@ def _get_accounts_table():
 
 
 # ============================================================================
+# Grant Session Callbacks
+# ============================================================================
+
+def handle_grant_approve_all(query: dict, grant_id: str) -> dict:
+    """處理 Grant 全部批准 callback"""
+    from grant import approve_grant, get_grant_session
+    from notifications import send_grant_complete_notification
+    from telegram import update_and_answer, escape_markdown
+
+    callback_id = query.get('id', '')
+    user_id = str(query.get('from', {}).get('id', ''))
+    message_id = query.get('message', {}).get('message_id')
+
+    try:
+        grant = approve_grant(grant_id, user_id, mode='all')
+        if not grant:
+            answer_callback(callback_id, '❌ Grant 不存在或已處理')
+            return response(200, {'ok': True})
+
+        granted = grant.get('granted_commands', [])
+        ttl_minutes = grant.get('ttl_minutes', 30)
+
+        update_and_answer(
+            message_id,
+            f"✅ *Grant 已批准（全部）*\n\n"
+            f"🔑 *Grant ID：* `{grant_id}`\n"
+            f"📋 *已授權命令：* {len(granted)} 個\n"
+            f"⏱ *有效時間：* {ttl_minutes} 分鐘\n"
+            f"👤 *批准者：* {user_id}",
+            callback_id,
+            f'✅ 已批准 {len(granted)} 個命令'
+        )
+
+        return response(200, {'ok': True})
+
+    except Exception as e:
+        print(f"[GRANT] handle_grant_approve_all error: {e}")
+        answer_callback(callback_id, f'❌ 批准失敗: {str(e)[:50]}')
+        return response(500, {'error': str(e)})
+
+
+def handle_grant_approve_safe(query: dict, grant_id: str) -> dict:
+    """處理 Grant 只批准安全命令 callback"""
+    from grant import approve_grant, get_grant_session
+    from notifications import send_grant_complete_notification
+    from telegram import update_and_answer, escape_markdown
+
+    callback_id = query.get('id', '')
+    user_id = str(query.get('from', {}).get('id', ''))
+    message_id = query.get('message', {}).get('message_id')
+
+    try:
+        grant = approve_grant(grant_id, user_id, mode='safe_only')
+        if not grant:
+            answer_callback(callback_id, '❌ Grant 不存在或已處理')
+            return response(200, {'ok': True})
+
+        granted = grant.get('granted_commands', [])
+        ttl_minutes = grant.get('ttl_minutes', 30)
+
+        update_and_answer(
+            message_id,
+            f"✅ *Grant 已批准（僅安全）*\n\n"
+            f"🔑 *Grant ID：* `{grant_id}`\n"
+            f"📋 *已授權命令：* {len(granted)} 個\n"
+            f"⏱ *有效時間：* {ttl_minutes} 分鐘\n"
+            f"👤 *批准者：* {user_id}",
+            callback_id,
+            f'✅ 已批准 {len(granted)} 個安全命令'
+        )
+
+        return response(200, {'ok': True})
+
+    except Exception as e:
+        print(f"[GRANT] handle_grant_approve_safe error: {e}")
+        answer_callback(callback_id, f'❌ 批准失敗: {str(e)[:50]}')
+        return response(500, {'error': str(e)})
+
+
+def handle_grant_deny(query: dict, grant_id: str) -> dict:
+    """處理 Grant 拒絕 callback"""
+    from grant import deny_grant
+    from telegram import update_and_answer
+
+    callback_id = query.get('id', '')
+    user_id = str(query.get('from', {}).get('id', ''))
+    message_id = query.get('message', {}).get('message_id')
+
+    try:
+        success = deny_grant(grant_id)
+        if not success:
+            answer_callback(callback_id, '❌ 拒絕失敗')
+            return response(200, {'ok': True})
+
+        update_and_answer(
+            message_id,
+            f"❌ *Grant 已拒絕*\n\n"
+            f"🔑 *Grant ID：* `{grant_id}`\n"
+            f"👤 *拒絕者：* {user_id}",
+            callback_id,
+            '❌ 已拒絕'
+        )
+
+        return response(200, {'ok': True})
+
+    except Exception as e:
+        print(f"[GRANT] handle_grant_deny error: {e}")
+        answer_callback(callback_id, f'❌ 處理失敗: {str(e)[:50]}')
+        return response(500, {'error': str(e)})
+
+
+# ============================================================================
 # 共用函數
 # ============================================================================
 

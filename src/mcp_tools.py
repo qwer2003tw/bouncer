@@ -33,12 +33,16 @@ from notifications import (
     send_approval_request,
     send_account_approval_request,
     send_trust_auto_approve_notification,
+    send_grant_request_notification,
+    send_grant_execute_notification,
+    send_grant_complete_notification,
 )
 from constants import (
     DEFAULT_ACCOUNT_ID, MCP_MAX_WAIT, RATE_LIMIT_WINDOW,
     TRUST_SESSION_MAX_COMMANDS,
     APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER, UPLOAD_TIMEOUT,
     AUDIT_TTL_SHORT,
+    GRANT_SESSION_ENABLED, GRANT_APPROVAL_TIMEOUT,
 )
 
 
@@ -143,6 +147,7 @@ class ExecuteContext:
     sync_mode: bool
     smart_decision: object = None  # smart_approval result (or None)
     mode: str = 'mcp'
+    grant_id: Optional[str] = None
 
 
 def _parse_execute_request(req_id, arguments: dict) -> 'dict | ExecuteContext':
@@ -216,6 +221,7 @@ def _parse_execute_request(req_id, arguments: dict) -> 'dict | ExecuteContext':
         assume_role=assume_role,
         timeout=timeout,
         sync_mode=sync_mode,
+        grant_id=arguments.get('grant_id', None),
     )
 
 
@@ -329,6 +335,118 @@ def _check_blocked(ctx: ExecuteContext) -> Optional[dict]:
             'isError': True
         })
     return None
+
+
+def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
+    """Layer 2: Grant session auto-approve — execute if command is in an active grant.
+
+    Fallthrough design: returns None on any mismatch/error so the pipeline
+    continues to the next layer (auto_approve, trust, approval, etc.).
+    """
+    try:
+        if not GRANT_SESSION_ENABLED:
+            return None
+
+        grant_id = ctx.grant_id
+        if not grant_id:
+            return None
+
+        from grant import (
+            normalize_command, get_grant_session, is_command_in_grant,
+            try_use_grant_command,
+        )
+
+        grant = get_grant_session(grant_id)
+
+        # Grant 不存在或非 active → fallthrough
+        if not grant or grant.get('status') != 'active':
+            return None
+
+        # Source/Account 不匹配 → fallthrough
+        if grant.get('source') != (ctx.source or '') or grant.get('account_id') != ctx.account_id:
+            return None
+
+        # 過期 → fallthrough
+        if int(time.time()) > int(grant.get('expires_at', 0)):
+            return None
+
+        # Normalize 比對
+        normalized_cmd = normalize_command(ctx.command)
+        if not is_command_in_grant(normalized_cmd, grant):
+            return None  # 不在清單 → fallthrough
+
+        # 總執行次數檢查
+        if int(grant.get('total_executions', 0)) >= int(grant.get('max_total_executions', 50)):
+            return None  # 超限 → fallthrough
+
+        # Conditional update（防並發）
+        success = try_use_grant_command(
+            grant_id, normalized_cmd,
+            allow_repeat=grant.get('allow_repeat', False),
+        )
+        if not success:
+            return None  # 已用過或並發衝突 → fallthrough
+
+        # 執行命令
+        result = execute_command(ctx.command, ctx.assume_role)
+        paged = store_paged_output(generate_request_id(ctx.command), result)
+
+        # 計算剩餘資訊
+        granted_commands = grant.get('granted_commands', [])
+        used_commands = grant.get('used_commands', {})
+        total_exec = int(grant.get('total_executions', 0)) + 1  # 已經 +1
+        remaining_seconds = max(0, int(grant.get('expires_at', 0)) - int(time.time()))
+        remaining_str = f"{remaining_seconds // 60}:{remaining_seconds % 60:02d}"
+        remaining_info = f"{len(used_commands) + 1}/{len(granted_commands)} 命令, {remaining_str}"
+
+        # 通知
+        send_grant_execute_notification(ctx.command, grant_id, result, remaining_info)
+
+        # Audit log
+        log_decision(
+            table=table,
+            request_id=generate_request_id(ctx.command),
+            command=ctx.command,
+            reason=ctx.reason,
+            source=ctx.source,
+            account_id=ctx.account_id,
+            decision_type='grant_approved',
+            risk_score=ctx.smart_decision.final_score if ctx.smart_decision else None,
+            risk_category=_safe_risk_category(ctx.smart_decision),
+            risk_factors=_safe_risk_factors(ctx.smart_decision),
+            account_name=ctx.account_name,
+            grant_id=grant_id,
+            mode='mcp',
+        )
+
+        response_data = {
+            'status': 'grant_auto_approved',
+            'command': ctx.command,
+            'account': ctx.account_id,
+            'account_name': ctx.account_name,
+            'result': paged['result'],
+            'grant_id': grant_id,
+            'remaining': remaining_info,
+        }
+
+        if paged.get('paged'):
+            response_data['paged'] = True
+            response_data['page'] = paged['page']
+            response_data['total_pages'] = paged['total_pages']
+            response_data['output_length'] = paged['output_length']
+            response_data['next_page'] = paged.get('next_page')
+
+        return mcp_result(ctx.req_id, {
+            'content': [{
+                'type': 'text',
+                'text': json.dumps(response_data)
+            }]
+        })
+
+    except Exception as e:
+        # Grant 失敗不影響主流程 → fallthrough
+        print(f"[GRANT] _check_grant_session error: {e}")
+        return None
 
 
 def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
@@ -548,6 +666,7 @@ def mcp_tool_execute(req_id: str, arguments: dict) -> dict:
     result = (
         _check_compliance(ctx)
         or _check_blocked(ctx)
+        or _check_grant_session(ctx)
         or _check_auto_approve(ctx)
         or _check_rate_limit(ctx)
         or _check_trust_session(ctx)
@@ -1210,3 +1329,150 @@ def mcp_tool_upload(req_id: str, arguments: dict) -> dict:
     )
 
     return result
+
+
+# =============================================================================
+# Grant Session MCP Tools
+# =============================================================================
+
+def mcp_tool_request_grant(req_id: str, arguments: dict) -> dict:
+    """MCP tool: bouncer_request_grant — 批次申請命令執行權限"""
+    try:
+        from grant import create_grant_request
+
+        commands = arguments.get('commands', [])
+        reason = str(arguments.get('reason', '')).strip()
+        source = arguments.get('source', None)
+        account_id = arguments.get('account', None)
+        ttl_minutes = arguments.get('ttl_minutes', None)
+        allow_repeat = arguments.get('allow_repeat', False)
+
+        if not commands:
+            return mcp_error(req_id, -32602, 'Missing required parameter: commands')
+        if not reason:
+            return mcp_error(req_id, -32602, 'Missing required parameter: reason')
+        if not source:
+            return mcp_error(req_id, -32602, 'Missing required parameter: source')
+
+        # 解析帳號
+        init_default_account()
+        if account_id:
+            account_id = str(account_id).strip()
+            valid, error = validate_account_id(account_id)
+            if not valid:
+                return mcp_result(req_id, {
+                    'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': error})}],
+                    'isError': True
+                })
+            account = get_account(account_id)
+            if not account:
+                return mcp_result(req_id, {
+                    'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': f'帳號 {account_id} 未配置'})}],
+                    'isError': True
+                })
+        else:
+            account_id = DEFAULT_ACCOUNT_ID
+
+        if ttl_minutes is not None:
+            ttl_minutes = int(ttl_minutes)
+
+        result = create_grant_request(
+            commands=commands,
+            reason=reason,
+            source=source,
+            account_id=account_id,
+            ttl_minutes=ttl_minutes,
+            allow_repeat=allow_repeat,
+        )
+
+        # 發送 Telegram 審批通知
+        try:
+            send_grant_request_notification(
+                grant_id=result['grant_id'],
+                commands_detail=result['commands_detail'],
+                reason=reason,
+                source=source,
+                account_id=account_id,
+                ttl_minutes=result['ttl_minutes'],
+                allow_repeat=allow_repeat,
+            )
+        except Exception as e:
+            print(f"[GRANT] Failed to send notification: {e}")
+
+        return mcp_result(req_id, {
+            'content': [{
+                'type': 'text',
+                'text': json.dumps({
+                    'status': 'pending_approval',
+                    'grant_request_id': result['grant_id'],
+                    'summary': result['summary'],
+                    'expires_in': f"{result['expires_in']} seconds",
+                })
+            }]
+        })
+
+    except ValueError as e:
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': str(e)})}],
+            'isError': True
+        })
+    except Exception as e:
+        return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
+
+
+def mcp_tool_grant_status(req_id: str, arguments: dict) -> dict:
+    """MCP tool: bouncer_grant_status — 查詢 Grant Session 狀態"""
+    try:
+        from grant import get_grant_status
+
+        grant_id = str(arguments.get('grant_id', '')).strip()
+        source = arguments.get('source', None)
+
+        if not grant_id:
+            return mcp_error(req_id, -32602, 'Missing required parameter: grant_id')
+        if not source:
+            return mcp_error(req_id, -32602, 'Missing required parameter: source')
+
+        status = get_grant_status(grant_id, source)
+        if not status:
+            return mcp_result(req_id, {
+                'content': [{'type': 'text', 'text': json.dumps({
+                    'error': 'Grant not found or source mismatch',
+                    'grant_id': grant_id,
+                })}],
+                'isError': True
+            })
+
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps(status)}]
+        })
+
+    except Exception as e:
+        return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
+
+
+def mcp_tool_revoke_grant(req_id: str, arguments: dict) -> dict:
+    """MCP tool: bouncer_revoke_grant — 撤銷 Grant Session"""
+    try:
+        from grant import revoke_grant
+
+        grant_id = str(arguments.get('grant_id', '')).strip()
+        if not grant_id:
+            return mcp_error(req_id, -32602, 'Missing required parameter: grant_id')
+
+        success = revoke_grant(grant_id)
+
+        return mcp_result(req_id, {
+            'content': [{
+                'type': 'text',
+                'text': json.dumps({
+                    'success': success,
+                    'grant_id': grant_id,
+                    'message': 'Grant 已撤銷' if success else '撤銷失敗',
+                })
+            }],
+            'isError': not success
+        })
+
+    except Exception as e:
+        return mcp_error(req_id, -32603, f'Internal error: {str(e)}')

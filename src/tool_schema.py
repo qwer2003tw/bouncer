@@ -34,6 +34,10 @@ MCP_TOOLS = {
                     'type': 'boolean',
                     'description': '同步模式：等待審批結果（可能超時），預設 false',
                     'default': False
+                },
+                'grant_id': {
+                    'type': 'string',
+                    'description': 'Grant Session ID（如果有有效的 grant session，命令將自動執行）'
                 }
             },
             'required': ['command']
@@ -273,6 +277,73 @@ MCP_TOOLS = {
         'parameters': {
             'type': 'object',
             'properties': {}
+        }
+    },
+    # ========== Grant Session Tools ==========
+    'bouncer_request_grant': {
+        'description': '批次申請多個 AWS CLI 命令的執行權限。每個命令會經過預檢分類（可授權/需個別審批/已攔截），經 Telegram 審批後可在 TTL 內自動執行。',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'commands': {
+                    'type': 'array',
+                    'items': {'type': 'string'},
+                    'description': '要申請的 AWS CLI 命令清單（1-20 個）'
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': '申請原因'
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '請求來源標識'
+                },
+                'account': {
+                    'type': 'string',
+                    'description': '目標 AWS 帳號 ID（不填則使用預設帳號）'
+                },
+                'ttl_minutes': {
+                    'type': 'integer',
+                    'description': 'Grant 有效時間（分鐘），預設 30，最大 60',
+                    'default': 30
+                },
+                'allow_repeat': {
+                    'type': 'boolean',
+                    'description': '是否允許重複執行同一命令，預設 false',
+                    'default': False
+                }
+            },
+            'required': ['commands', 'reason', 'source']
+        }
+    },
+    'bouncer_grant_status': {
+        'description': '查詢 Grant Session 狀態（已授權命令數、已使用數、剩餘時間等）',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'grant_id': {
+                    'type': 'string',
+                    'description': 'Grant Session ID'
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '請求來源標識（必須與申請時一致）'
+                }
+            },
+            'required': ['grant_id', 'source']
+        }
+    },
+    'bouncer_revoke_grant': {
+        'description': '撤銷 Grant Session',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'grant_id': {
+                    'type': 'string',
+                    'description': 'Grant Session ID'
+                }
+            },
+            'required': ['grant_id']
         }
     },
     # ========== Upload Tool ==========
