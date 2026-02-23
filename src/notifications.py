@@ -205,8 +205,6 @@ def send_grant_request_notification(
         allow_repeat: 是否允許重複
     """
     try:
-        safe_source = _escape_markdown(source) if source else 'Unknown'
-        safe_reason = _escape_markdown(reason) if reason else ''
         mode_str = '可重複' if allow_repeat else '一次性'
 
         # 分類統計
@@ -223,36 +221,36 @@ def send_grant_request_notification(
             lines.append(f"\n✅ *可授權 ({len(grantable)}):*")
             for i, d in enumerate(grantable[:max_display]):
                 cmd_preview = d['command'][:80]
-                lines.append(f" {i+1}\\. `{_escape_markdown(cmd_preview)}`")
+                lines.append(f" {i+1}. `{cmd_preview}`")
             if len(grantable) > max_display:
-                lines.append(f" \\.\\.\\.及其他 {len(grantable) - max_display} 個命令")
+                lines.append(f" ...及其他 {len(grantable) - max_display} 個命令")
 
         if requires_individual:
             lines.append(f"\n⚠️ *需個別審批 ({len(requires_individual)}):*")
             offset = len(grantable)
             for i, d in enumerate(requires_individual[:max_display]):
                 cmd_preview = d['command'][:80]
-                lines.append(f" {offset+i+1}\\. `{_escape_markdown(cmd_preview)}`")
+                lines.append(f" {offset+i+1}. `{cmd_preview}`")
             if len(requires_individual) > max_display:
-                lines.append(f" \\.\\.\\.及其他 {len(requires_individual) - max_display} 個命令")
+                lines.append(f" ...及其他 {len(requires_individual) - max_display} 個命令")
 
         if blocked:
             lines.append(f"\n🚫 *已攔截 ({len(blocked)}):*")
             offset = len(grantable) + len(requires_individual)
             for i, d in enumerate(blocked[:max_display]):
                 cmd_preview = d['command'][:80]
-                lines.append(f" {offset+i+1}\\. `{_escape_markdown(cmd_preview)}`")
+                lines.append(f" {offset+i+1}. `{cmd_preview}`")
             if len(blocked) > max_display:
-                lines.append(f" \\.\\.\\.及其他 {len(blocked) - max_display} 個命令")
+                lines.append(f" ...及其他 {len(blocked) - max_display} 個命令")
 
         commands_text = '\n'.join(lines)
 
         text = (
             f"🔑 *批次權限申請*\n\n"
-            f"🤖 *來源：* {safe_source}\n"
-            f"💬 *原因：* {safe_reason}\n"
+            f"🤖 *來源：* {source or 'Unknown'}\n"
+            f"💬 *原因：* {reason or ''}\n"
             f"🏦 *帳號：* `{account_id}`\n"
-            f"⏱ *TTL：* {ttl_minutes} 分鐘 \\| 模式：{mode_str}\n"
+            f"⏱ *TTL：* {ttl_minutes} 分鐘 | 模式：{mode_str}\n"
             f"{commands_text}\n\n"
             f"🆔 *ID：* `{grant_id}`"
         )
@@ -294,7 +292,6 @@ def send_grant_execute_notification(
     """
     try:
         cmd_preview = command[:100] + '...' if len(command) > 100 else command
-        cmd_preview = _escape_markdown(cmd_preview)
 
         if result and (result.startswith('❌') or 'error' in result.lower()[:100]):
             result_status = "❌"
@@ -302,7 +299,6 @@ def send_grant_execute_notification(
             result_status = "✅"
 
         result_text = result[:200] + '...' if result and len(result) > 200 else (result or '')
-        result_text = _escape_markdown(result_text)
 
         grant_short = grant_id[:20] + '...' if len(grant_id) > 20 else grant_id
 
@@ -310,7 +306,7 @@ def send_grant_execute_notification(
             f"🔑 *Grant 自動執行*\n"
             f"📋 `{cmd_preview}`\n"
             f"{result_status} `{result_text}`\n"
-            f"📊 剩餘: {_escape_markdown(remaining_info)}\n"
+            f"📊 剩餘: {remaining_info}\n"
             f"🆔 `{grant_short}`"
         )
 
@@ -327,20 +323,14 @@ def send_grant_execute_notification(
 
 
 def send_grant_complete_notification(grant_id: str, reason: str) -> None:
-    """發送 Grant Session 完成/過期通知
-
-    Args:
-        grant_id: Grant ID
-        reason: 完成原因（如 "全部使用完畢"、"TTL 到期"）
-    """
+    """發送 Grant Session 完成/過期通知"""
     try:
-        safe_reason = _escape_markdown(reason) if reason else ''
         grant_short = grant_id[:20] + '...' if len(grant_id) > 20 else grant_id
 
         text = (
             f"🔑 *Grant 已結束*\n\n"
             f"🆔 `{grant_short}`\n"
-            f"💬 *原因：* {safe_reason}"
+            f"💬 *原因：* {reason or ''}"
         )
 
         _send_message_silent(text)
