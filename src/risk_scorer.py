@@ -245,318 +245,37 @@ def create_default_rules() -> RiskRules:
     """
     建立預設風險規則
 
-    這些規則會在無法載入外部 JSON 時使用
-    確保系統有合理的預設行為
+    從 data/risk-rules.json 載入。如果找不到或解析失敗，
+    回傳最小可用的 hardcoded fallback（fail-closed: 高風險）。
     """
+    default_paths = [
+        Path(__file__).parent / 'data' / 'risk-rules.json',
+        Path('data/risk-rules.json'),
+    ]
+
+    for p in default_paths:
+        try:
+            if p.exists():
+                with open(p, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                rules = _dict_to_rules(data)
+                rules.version = data.get('version', '1.0.0-json')
+                return rules
+        except Exception as e:
+            print(f"[RiskScorer] Failed to load {p}: {e}")
+
+    # Hardcoded fallback — 最小化，fail-closed（未知命令 = 高風險）
+    print("[RiskScorer] WARNING: No risk-rules.json found, using minimal fallback")
     return RiskRules(
-        version="1.0.0-default",
-
-        # 動詞基礎分數（0-100）
-        verb_scores={
-            # 唯讀操作 - 低風險 (目標: 最終分數 0-25)
-            'describe': 0,
-            'list': 0,
-            'get': 5,
-            'head': 0,
-            'scan': 10,
-            'query': 10,
-            'tail': 5,
-            'filter': 5,
-            'ls': 10,       # S3 列表
-
-            # 寫入操作 - 中等風險 (目標: 最終分數 46-65)
-            'create': 65,
-            'put': 70,
-            'update': 75,
-            'modify': 80,
-            'set': 70,
-            'add': 65,
-            'attach': 75,
-            'associate': 70,
-            'register': 65,
-            'enable': 70,
-            'start': 55,
-            'invoke': 60,
-            'run': 65,
-            'execute': 70,
-            'cp': 60,       # S3 複製
-            'mv': 70,       # S3 移動
-            'sync': 75,     # S3 同步
-
-            # 刪除操作 - 高風險 (目標: 最終分數 66-85)
-            'delete': 90,
-            'remove': 85,
-            'rm': 85,       # S3 刪除
-            'rb': 95,       # S3 刪除 bucket
-            'terminate': 95,
-            'destroy': 100,
-            'deregister': 80,
-            'detach': 75,
-            'dissociate': 70,
-            'disable': 75,
-            'stop': 70,
-            'revoke': 80,
-            'cancel': 60,
-
-            # 危險操作 - 極高風險 (目標: 最終分數 86-100)
-            'import': 85,
-            'export': 80,
-            'assume': 95,
-            'schedule': 75,
-        },
-
-        # 服務敏感度分數（與動詞結合後決定最終分數）
-        service_scores={
-            # 身份與存取 - 最高風險
-            'iam': 95,
-            'sts': 85,
-            'organizations': 100,
-            'sso': 90,
-            'sso-admin': 95,
-
-            # 安全服務 - 高風險
-            'kms': 90,
-            'secretsmanager': 75,
-            'acm': 65,
-            'waf': 70,
-            'wafv2': 70,
-            'guardduty': 65,
-            'securityhub': 65,
-
-            # 基礎建設 - 高風險
-            'cloudformation': 80,
-            'cloudtrail': 85,
-            'config': 70,
-
-            # 運算服務 - 中等風險
-            'ec2': 40,
-            'lambda': 35,
-            'ecs': 40,
-            'eks': 50,
-            'batch': 40,
-
-            # 儲存服務 - 中等風險
-            's3': 30,
-            'dynamodb': 30,
-            'rds': 50,
-            'elasticache': 45,
-            'redshift': 50,
-
-            # 網路服務 - 高風險
-            'vpc': 55,
-            'route53': 60,
-            'cloudfront': 50,
-            'apigateway': 40,
-            'apigatewayv2': 40,
-            'elb': 45,
-            'elbv2': 45,
-
-            # 訊息服務 - 低風險
-            'sns': 25,
-            'sqs': 25,
-            'events': 30,
-            'eventbridge': 30,
-
-            # 監控服務 - 低風險
-            'logs': 15,
-            'cloudwatch': 20,
-            'xray': 15,
-
-            # 其他
-            'ssm': 40,
-            'codebuild': 35,
-            'codepipeline': 45,
-            'codecommit': 30,
-            'ecr': 30,
-            'stepfunctions': 30,
-            'states': 30,
-        },
-
-        # 參數風險模式
-        parameter_patterns=[
-            {
-                'pattern': r'--policy-document',
-                'score': 70,
-                'description': 'IAM Policy 修改',
-            },
-            {
-                'pattern': r'--assume-role-policy-document',
-                'score': 80,
-                'description': 'Trust Policy 修改',
-            },
-            {
-                'pattern': r'--role-arn',
-                'score': 60,
-                'description': '指定 IAM Role',
-            },
-            {
-                'pattern': r'--access-key',
-                'score': 85,
-                'description': 'Access Key 操作',
-            },
-            {
-                'pattern': r'--secret',
-                'score': 70,
-                'description': 'Secret 操作',
-            },
-            {
-                'pattern': r'--password',
-                'score': 75,
-                'description': 'Password 操作',
-            },
-            {
-                'pattern': r'--security-group',
-                'score': 55,
-                'description': 'Security Group 操作',
-            },
-            {
-                'pattern': r'--cidr',
-                'score': 50,
-                'description': 'CIDR 設定',
-            },
-            {
-                'pattern': r'--public',
-                'score': 60,
-                'description': '公開存取設定',
-            },
-            {
-                'pattern': r'--grant',
-                'score': 65,
-                'description': '權限授予',
-            },
-            {
-                'pattern': r'--acl\s+(public|authenticated)',
-                'score': 75,
-                'description': '公開 ACL 設定',
-            },
-            {
-                'pattern': r'--instance-ids?\s+i-[a-f0-9]+',
-                'score': 35,
-                'description': '指定 EC2 Instance',
-            },
-            {
-                'pattern': r'--bucket\s+\S+',
-                'score': 30,
-                'description': '指定 S3 Bucket',
-            },
-            {
-                'pattern': r'--table-name\s+\S+',
-                'score': 30,
-                'description': '指定 DynamoDB Table',
-            },
-            {
-                'pattern': r'--function-name\s+\S+',
-                'score': 30,
-                'description': '指定 Lambda Function',
-            },
-            {
-                'pattern': r'--key-id',
-                'score': 70,
-                'description': 'KMS Key 操作',
-            },
-            {
-                'pattern': r'--user-name',
-                'score': 65,
-                'description': 'IAM User 操作',
-            },
-            {
-                'pattern': r'--principal',
-                'score': 60,
-                'description': 'Principal 設定',
-            },
-        ],
-
-        # 危險旗標
-        dangerous_flags={
-            '--force': 30,
-            '--yes': 20,
-            '-y': 20,
-            '--no-wait': 15,
-            '--no-verify-ssl': 35,
-            '--recursive': 35,        # 遞迴操作風險較高
-            '-r': 35,
-            '--include-all-instances': 30,
-            '--skip-final-snapshot': 40,
-            '--delete-automated-backups': 45,
-            '--no-preserve-deleted-files': 30,
-            '--delete': 35,
-            '--exact-timestamps': 5,
-            '--only-show-errors': 0,
-            '--quiet': 0,
-            '-q': 0,
-        },
-
-        # 黑名單模式（觸發即 100 分）
-        blocked_patterns=[
-            r'iam\s+delete-user',
-            r'iam\s+delete-role',
-            r'iam\s+create-user',
-            r'iam\s+create-access-key',
-            r'iam\s+attach-user-policy',
-            r'iam\s+attach-role-policy',
-            r'iam\s+put-user-policy',
-            r'iam\s+put-role-policy',
-            r'sts\s+assume-role',
-            r'sts\s+get-session-token',
-            r'organizations\s+',
-            r'ec2\s+modify-instance-attribute',
-            r'ec2\s+create-key-pair',
-            r'ec2\s+import-key-pair',
-            r'kms\s+schedule-key-deletion',
-        ],
-
-        # 帳號敏感度（預設值，實際應從外部配置載入）
-        account_sensitivity={
-            # Production 帳號 - 高敏感
-            # 'PROD_ACCOUNT_ID': 80,
-            # Dev 帳號 - 低敏感
-            # 'DEV_ACCOUNT_ID': 20,
-        },
-
-        # 上下文規則
-        context_rules=[
-            {
-                'condition': 'reason_empty',
-                'score_modifier': 15,
-                'description': 'Reason 為空增加風險',
-            },
-            {
-                'condition': 'reason_short',
-                'threshold': 10,
-                'score_modifier': 10,
-                'description': 'Reason 過短增加風險',
-            },
-            {
-                'condition': 'source_unknown',
-                'score_modifier': 20,
-                'description': '未知來源增加風險',
-            },
-            {
-                'condition': 'after_hours',
-                'score_modifier': 10,
-                'description': '非工作時間增加風險',
-            },
-            {
-                'condition': 'reason_contains_keywords',
-                'keywords': ['test', 'debug', 'try', 'experiment'],
-                'score_modifier': -5,
-                'description': '測試/除錯關鍵字降低風險',
-            },
-            {
-                'condition': 'reason_contains_keywords',
-                'keywords': ['urgent', 'emergency', 'hotfix'],
-                'score_modifier': 5,
-                'description': '緊急關鍵字略微增加風險（需謹慎確認）',
-            },
-        ],
-
-        # 權重配置
-        weights={
-            'verb': 0.40,      # 動詞基礎分 40%
-            'parameter': 0.30, # 參數風險 30%
-            'context': 0.20,   # 上下文 20%
-            'account': 0.10,   # 帳號敏感度 10%
-        },
+        version="1.0.0-fallback",
+        verb_scores={'describe': 0, 'list': 0, 'get': 5},
+        service_scores={'iam': 95, 'sts': 85},
+        parameter_patterns=[],
+        dangerous_flags={},
+        blocked_patterns=[],
+        account_sensitivity={},
+        context_rules=[],
+        weights={'verb': 0.40, 'parameter': 0.30, 'context': 0.20, 'account': 0.10},
     )
 
 
@@ -640,7 +359,7 @@ def _load_rules_from_file(path: Optional[str] = None) -> RiskRules:
 
     # 預設路徑
     paths_to_try.extend([
-        Path(__file__).parent.parent / 'data' / 'risk-rules.json',
+        Path(__file__).parent / 'data' / 'risk-rules.json',
         Path('/opt/bouncer/risk-rules.json'),
         Path('data/risk-rules.json'),
     ])

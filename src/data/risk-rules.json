@@ -1,15 +1,5 @@
 {
-  "version": "1.0.0",
-  "description": "Bouncer Risk Scoring Rules",
-  "last_updated": "2026-02-17",
-  
-  "weights": {
-    "verb": 0.40,
-    "parameter": 0.30,
-    "context": 0.20,
-    "account": 0.10
-  },
-  
+  "version": "1.0.0-default",
   "verb_scores": {
     "describe": 0,
     "list": 0,
@@ -55,7 +45,6 @@
     "assume": 95,
     "schedule": 75
   },
-  
   "service_scores": {
     "iam": 95,
     "sts": 85,
@@ -104,7 +93,6 @@
     "stepfunctions": 30,
     "states": 30
   },
-  
   "parameter_patterns": [
     {
       "pattern": "--policy-document",
@@ -162,6 +150,26 @@
       "description": "公開 ACL 設定"
     },
     {
+      "pattern": "--instance-ids?\\s+i-[a-f0-9]+",
+      "score": 35,
+      "description": "指定 EC2 Instance"
+    },
+    {
+      "pattern": "--bucket\\s+\\S+",
+      "score": 30,
+      "description": "指定 S3 Bucket"
+    },
+    {
+      "pattern": "--table-name\\s+\\S+",
+      "score": 30,
+      "description": "指定 DynamoDB Table"
+    },
+    {
+      "pattern": "--function-name\\s+\\S+",
+      "score": 30,
+      "description": "指定 Lambda Function"
+    },
+    {
       "pattern": "--key-id",
       "score": 70,
       "description": "KMS Key 操作"
@@ -177,7 +185,6 @@
       "description": "Principal 設定"
     }
   ],
-  
   "dangerous_flags": {
     "--force": 30,
     "--yes": 20,
@@ -196,7 +203,6 @@
     "--quiet": 0,
     "-q": 0
   },
-  
   "blocked_patterns": [
     "iam\\s+delete-user",
     "iam\\s+delete-role",
@@ -214,13 +220,7 @@
     "ec2\\s+import-key-pair",
     "kms\\s+schedule-key-deletion"
   ],
-  
-  "account_sensitivity": {
-    "111111111111": 50,
-    "222222222222": 30,
-    "333333333333": 40
-  },
-  
+  "account_sensitivity": {},
   "context_rules": [
     {
       "condition": "reason_empty",
@@ -245,15 +245,30 @@
     },
     {
       "condition": "reason_contains_keywords",
-      "keywords": ["test", "debug", "try", "experiment"],
+      "keywords": [
+        "test",
+        "debug",
+        "try",
+        "experiment"
+      ],
       "score_modifier": -5,
       "description": "測試/除錯關鍵字降低風險"
     },
     {
       "condition": "reason_contains_keywords",
-      "keywords": ["urgent", "emergency", "hotfix"],
+      "keywords": [
+        "urgent",
+        "emergency",
+        "hotfix"
+      ],
       "score_modifier": 5,
-      "description": "緊急關鍵字略微增加風險"
+      "description": "緊急關鍵字略微增加風險（需謹慎確認）"
     }
-  ]
+  ],
+  "weights": {
+    "verb": 0.4,
+    "parameter": 0.3,
+    "context": 0.2,
+    "account": 0.1
+  }
 }
