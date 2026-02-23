@@ -10,7 +10,6 @@ import os
 import sys
 from typing import Dict, Optional, Tuple
 
-sys.path.insert(0, os.path.dirname(__file__))
 
 from risk_scorer import calculate_risk, RiskCategory, RiskResult, RiskFactor
 from sequence_analyzer import get_sequence_risk_modifier, record_command

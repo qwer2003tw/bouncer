@@ -16,7 +16,6 @@ import hmac
 import time
 import boto3
 
-sys.path.insert(0, os.path.dirname(__file__))
 
 # 從模組導入
 from telegram import (  # noqa: F401

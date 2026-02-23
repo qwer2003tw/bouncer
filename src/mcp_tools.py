@@ -15,7 +15,6 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-sys.path.insert(0, os.path.dirname(__file__))
 
 # 從其他模組導入
 from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native, log_decision

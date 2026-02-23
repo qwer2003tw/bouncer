@@ -2,12 +2,9 @@
 Bouncer - 輸出分頁模組
 處理長輸出的分頁存儲和取得
 """
-import os
-import sys
 import time
 import boto3
 
-sys.path.insert(0, os.path.dirname(__file__))
 
 from constants import TABLE_NAME, OUTPUT_MAX_INLINE, OUTPUT_PAGE_SIZE, OUTPUT_PAGE_TTL
 from telegram import send_telegram_message

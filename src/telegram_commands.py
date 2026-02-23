@@ -4,11 +4,8 @@ Bouncer - Telegram 命令處理模組
 所有 handle_*_command 函數
 """
 
-import os
-import sys
 import time
 
-sys.path.insert(0, os.path.dirname(__file__))
 
 # 從其他模組導入
 from utils import response
