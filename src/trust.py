@@ -59,7 +59,7 @@ def get_trust_session(trust_scope: str, account_id: str) -> Optional[Dict]:
         return None
 
     # 用 trust_scope 算出 trust_id 直接 get（不用 scan）
-    scope_hash = hashlib.md5(trust_scope.encode(), usedforsecurity=False).hexdigest()[:8]
+    scope_hash = hashlib.sha256(trust_scope.encode()).hexdigest()[:16]
     trust_id = f"trust-{scope_hash}-{account_id}"
 
     now = int(time.time())
@@ -101,7 +101,7 @@ def create_trust_session(trust_scope: str, account_id: str, approved_by: str,
     Returns:
         trust_id
     """
-    scope_hash = hashlib.md5(trust_scope.encode(), usedforsecurity=False).hexdigest()[:8]
+    scope_hash = hashlib.sha256(trust_scope.encode()).hexdigest()[:16]
     trust_id = f"trust-{scope_hash}-{account_id}"
 
     now = int(time.time())

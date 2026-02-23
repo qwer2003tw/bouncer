@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 
 def _trust_id(scope, account='111111111111'):
-    h = hashlib.md5(scope.encode(), usedforsecurity=False).hexdigest()[:8]
+    h = hashlib.sha256(scope.encode()).hexdigest()[:16]
     return f'trust-{h}-{account}'
 
 

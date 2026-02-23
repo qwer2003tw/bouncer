@@ -89,8 +89,7 @@ def evaluate_command(
         sequence_modifier = 0.0
         if enable_sequence_analysis:
             try:
-                seq_analysis = get_sequence_risk_modifier(source, command)
-                sequence_modifier = seq_analysis.get('risk_modifier', 0.0)
+                sequence_modifier, _seq_reason = get_sequence_risk_modifier(source, command)
             except Exception as e:
                 logger.warning(f"Sequence analysis failed: {e}")
                 # 序列分析失敗不影響主流程

@@ -260,53 +260,6 @@ def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
 # Upload 相關函數（被 callbacks 呼叫）
 # ============================================================================
 
-def wait_for_upload_result(request_id: str, timeout: int = UPLOAD_TIMEOUT) -> dict:
-    """等待上傳審批結果
-
-    DEPRECATED: Sync long-polling 已移除。Lambda timeout 已降至 60s，
-    API Gateway 29s timeout 使 sync wait 無意義。
-    此函數保留以維持測試相容性，但不應再被呼叫。
-    """
-    interval = 2
-    start_time = time.time()
-
-    while (time.time() - start_time) < timeout:
-        time.sleep(interval)
-
-        try:
-            result = table.get_item(Key={'request_id': request_id})
-            item = result.get('Item')
-
-            if item:
-                status = item.get('status', '')
-                if status == 'approved':
-                    return {
-                        'status': 'approved',
-                        'request_id': request_id,
-                        's3_uri': f"s3://{item.get('bucket')}/{item.get('key')}",
-                        's3_url': item.get('s3_url', ''),
-                        'size': int(item.get('content_size', 0)),
-                        'approved_by': item.get('approver', 'unknown'),
-                        'waited_seconds': int(time.time() - start_time)
-                    }
-                elif status == 'denied':
-                    return {
-                        'status': 'denied',
-                        'request_id': request_id,
-                        's3_uri': f"s3://{item.get('bucket')}/{item.get('key')}",
-                        'denied_by': item.get('approver', 'unknown'),
-                        'waited_seconds': int(time.time() - start_time)
-                    }
-        except Exception as e:
-            print(f"Polling error: {e}")
-            pass
-
-    return {
-        'status': 'timeout',
-        'request_id': request_id,
-        'message': '審批請求已過期',
-        'waited_seconds': timeout
-    }
 
 
 def execute_upload(request_id: str, approver: str) -> dict:
@@ -395,63 +348,6 @@ def execute_upload(request_id: str, approver: str) -> dict:
         return {'success': False, 'error': str(e)}
 
 
-def wait_for_result_mcp(request_id: str, timeout: int = COMMAND_APPROVAL_TIMEOUT) -> dict:
-    """MCP 模式的長輪詢，最多 timeout 秒
-
-    DEPRECATED: Sync long-polling 已移除。Lambda timeout 已降至 60s，
-    API Gateway 29s timeout 使 sync wait 無意義。
-    此函數保留以維持測試相容性，但不應再被呼叫。
-    """
-    interval = 2  # 每 2 秒查一次
-    start_time = time.time()
-
-    while (time.time() - start_time) < timeout:
-        time.sleep(interval)
-
-        try:
-            result = table.get_item(Key={'request_id': request_id})
-            item = result.get('Item')
-
-            if item:
-                status = item.get('status', '')
-                if status == 'approved':
-                    response_data = {
-                        'status': 'approved',
-                        'request_id': request_id,
-                        'command': item.get('command'),
-                        'result': item.get('result', ''),
-                        'approved_by': item.get('approver', 'unknown'),
-                        'waited_seconds': int(time.time() - start_time)
-                    }
-                    # 加入分頁資訊
-                    if item.get('paged'):
-                        response_data['paged'] = True
-                        response_data['page'] = 1
-                        response_data['total_pages'] = int(item.get('total_pages', 1))
-                        response_data['output_length'] = int(item.get('output_length', 0))
-                        response_data['next_page'] = item.get('next_page')
-                    return response_data
-                elif status == 'denied':
-                    return {
-                        'status': 'denied',
-                        'request_id': request_id,
-                        'command': item.get('command'),
-                        'denied_by': item.get('approver', 'unknown'),
-                        'waited_seconds': int(time.time() - start_time)
-                    }
-                # status == 'pending_approval' → 繼續等待
-        except Exception as e:
-            # 網路或 DynamoDB 錯誤，繼續嘗試
-            print(f"Polling error: {e}")
-            pass
-
-    # 超時
-    return {
-        'status': 'timeout',
-        'request_id': request_id,
-        'message': f'等待 {timeout} 秒後仍未審批',
-        'waited_seconds': timeout
-    }
 
 
 # ============================================================================
@@ -582,41 +478,6 @@ def handle_clawdbot_request(event: dict) -> dict:
     })
 
 
-def wait_for_result_rest(request_id: str, timeout: int = 50) -> dict:
-    """REST API 的輪詢等待
-
-    DEPRECATED: Sync long-polling 已移除。Lambda timeout 已降至 60s，
-    API Gateway 29s timeout 使 sync wait 無意義。
-    此函數保留以維持測試相容性，但不應再被呼叫。
-    """
-    interval = 2
-    start_time = time.time()
-
-    while (time.time() - start_time) < timeout:
-        time.sleep(interval)
-
-        try:
-            result = table.get_item(Key={'request_id': request_id})
-            item = result.get('Item')
-
-            if item and item.get('status') not in ['pending_approval', 'pending']:
-                return response(200, {
-                    'status': item['status'],
-                    'request_id': request_id,
-                    'command': item.get('command'),
-                    'result': item.get('result', ''),
-                    'waited': True
-                })
-        except Exception as e:
-            print(f"Error: {e}")
-            pass
-
-    return response(202, {
-        'status': 'pending_approval',
-        'request_id': request_id,
-        'message': f'等待 {timeout} 秒後仍未審批',
-        'check_status': f'/status/{request_id}'
-    })
 
 
 # ============================================================================

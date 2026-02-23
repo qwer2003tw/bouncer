@@ -287,10 +287,9 @@ AUTO_APPROVE_PREFIXES = [
     'aws ecr list-',
     'aws ecr get-',
 
-    # Secrets Manager (唯讀)
+    # Secrets Manager (唯讀，get-secret-value 需審批)
     'aws secretsmanager list-secrets',
     'aws secretsmanager describe-secret',
-    'aws secretsmanager get-secret-value',
 
     # KMS (唯讀)
     'aws kms list-',

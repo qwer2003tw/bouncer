@@ -6291,7 +6291,7 @@ class TestTrustSessionLimits:
 
         # 建立已過期的信任時段
         app_module.table.put_item(Item={
-            'request_id': 'trust-b341d19c-111111111111',
+            'request_id': 'trust-0d41c6bf4532be5b-111111111111',
             'type': 'trust_session',
             'source': 'test-source-expired',
             'trust_scope': 'test-source-expired',
@@ -6315,7 +6315,7 @@ class TestTrustSessionLimits:
 
         # 建立已達上限的信任時段
         app_module.table.put_item(Item={
-            'request_id': 'trust-08556e97-111111111111',
+            'request_id': 'trust-efb587eb4f037ac7-111111111111',
             'type': 'trust_session',
             'source': 'test-source-maxed',
             'trust_scope': 'test-source-maxed',
@@ -6338,7 +6338,7 @@ class TestTrustSessionLimits:
 
         # 建立有效的信任時段
         app_module.table.put_item(Item={
-            'request_id': 'trust-91562714-111111111111',
+            'request_id': 'trust-042fefdf8d5cf4b5-111111111111',
             'type': 'trust_session',
             'source': 'test-source-excluded',
             'trust_scope': 'test-source-excluded',
@@ -6586,7 +6586,7 @@ class TestTrustSessionExpiry:
         # Create an already-expired trust session
         table = app_module.table
         table.put_item(Item={
-            'request_id': 'trust-69306aad-111111111111',
+            'request_id': 'trust-37b1ddd649ff2758-111111111111',
             'type': 'trust_session',
             'source': 'expire-test',
             'trust_scope': 'expire-test',
@@ -6607,7 +6607,7 @@ class TestTrustSessionExpiry:
         from constants import TRUST_SESSION_MAX_COMMANDS
         table = app_module.table
         table.put_item(Item={
-            'request_id': 'trust-972af0a2-111111111111',
+            'request_id': 'trust-18bb6f0eae17a70a-111111111111',
             'type': 'trust_session',
             'source': 'maxcmd-test',
             'trust_scope': 'maxcmd-test',
@@ -6628,7 +6628,7 @@ class TestTrustSessionExpiry:
         """High-risk commands should NOT be trusted even in active session."""
         table = app_module.table
         table.put_item(Item={
-            'request_id': 'trust-6afe11c3-111111111111',
+            'request_id': 'trust-cc46a32017401146-111111111111',
             'type': 'trust_session',
             'source': 'exclude-test',
             'trust_scope': 'exclude-test',
@@ -6648,7 +6648,7 @@ class TestTrustSessionExpiry:
         """Valid trust session with safe command should auto-approve."""
         table = app_module.table
         table.put_item(Item={
-            'request_id': 'trust-543b0301-111111111111',
+            'request_id': 'trust-b52d169fa85badb4-111111111111',
             'type': 'trust_session',
             'source': 'valid-test',
             'trust_scope': 'valid-test',
