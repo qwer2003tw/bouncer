@@ -31,8 +31,8 @@ Parameters:
     Description: 啟用 HMAC 請求簽章驗證（Phase 2）
   McpMaxWait:
     Type: String
-    Default: "840"
-    Description: MCP 模式最大等待時間（秒），預設 840（14分鐘）
+    Default: "30"
+    Description: DEPRECATED - 不再用於 sync long-polling。保留作為 approval timeout 上限。
   DefaultAccountId:
     Type: String
     Default: ""
@@ -40,7 +40,7 @@ Parameters:
 
 Globals:
   Function:
-    Timeout: 900
+    Timeout: 60
     Runtime: python3.12
     MemorySize: 256
     Architectures:

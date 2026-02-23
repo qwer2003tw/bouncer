@@ -46,7 +46,10 @@ ENABLE_HMAC = os.environ.get('ENABLE_HMAC', 'false').lower() == 'true'
 # MCP 配置
 # ============================================================================
 
-MCP_MAX_WAIT = int(os.environ.get('MCP_MAX_WAIT', '840'))  # 14 分鐘
+# DEPRECATED: MCP_MAX_WAIT 不再用於 sync long-polling。
+# Lambda 已改為 60s timeout，API Gateway 29s timeout 使 sync wait 無意義。
+# 保留此值作為 approval timeout 上限（如 pending 過期時間）。
+MCP_MAX_WAIT = int(os.environ.get('MCP_MAX_WAIT', '30'))
 
 # ============================================================================
 # Approval Timeouts
@@ -54,7 +57,8 @@ MCP_MAX_WAIT = int(os.environ.get('MCP_MAX_WAIT', '840'))  # 14 分鐘
 
 APPROVAL_TIMEOUT_DEFAULT = 300  # 5 分鐘（帳號/上傳/部署）
 APPROVAL_TTL_BUFFER = 60  # TTL 額外緩衝秒數
-COMMAND_APPROVAL_TIMEOUT = MCP_MAX_WAIT  # 命令審批超時（同 MCP_MAX_WAIT）
+# DEPRECATED: 不再用於 sync long-polling。保留用於 TTL 計算。
+COMMAND_APPROVAL_TIMEOUT = MCP_MAX_WAIT
 UPLOAD_TIMEOUT = 300  # 上傳審批超時
 
 # ============================================================================

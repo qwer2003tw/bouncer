@@ -504,32 +504,21 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
         ctx.account_id, ctx.account_name, context=ctx.context
     )
 
-    # 預設異步：立即返回讓 client 用 bouncer_status 輪詢
-    if not ctx.sync_mode:
-        return mcp_result(ctx.req_id, {
-            'content': [{
-                'type': 'text',
-                'text': json.dumps({
-                    'status': 'pending_approval',
-                    'request_id': request_id,
-                    'command': ctx.command,
-                    'account': ctx.account_id,
-                    'account_name': ctx.account_name,
-                    'message': '請求已發送，用 bouncer_status 查詢結果',
-                    'expires_in': f'{ctx.timeout} seconds'
-                })
-            }]
-        })
-
-    # 同步模式（sync=True）：長輪詢等待結果（可能被 API Gateway 29s 超時）
-    result = app.wait_for_result_mcp(request_id, timeout=ctx.timeout)
-
+    # 一律異步返回：讓 client 用 bouncer_status 輪詢結果。
+    # sync long-polling 已移除（Lambda 60s timeout + API Gateway 29s timeout 使其無意義）。
     return mcp_result(ctx.req_id, {
         'content': [{
             'type': 'text',
-            'text': json.dumps(result)
-        }],
-        'isError': result.get('status') in ['denied', 'timeout', 'error']
+            'text': json.dumps({
+                'status': 'pending_approval',
+                'request_id': request_id,
+                'command': ctx.command,
+                'account': ctx.account_id,
+                'account_name': ctx.account_name,
+                'message': '請求已發送，用 bouncer_status 查詢結果',
+                'expires_in': f'{ctx.timeout} seconds'
+            })
+        }]
     })
 
 
@@ -718,7 +707,6 @@ def mcp_tool_add_account(req_id, arguments: dict) -> dict:
     role_arn = str(arguments.get('role_arn', '')).strip()
     source = arguments.get('source', None)
     context = arguments.get('context', None)
-    async_mode = arguments.get('async', False)  # 如果 True，立即返回 pending
 
     # 驗證
     valid, error = validate_account_id(account_id)
@@ -763,23 +751,14 @@ def mcp_tool_add_account(req_id, arguments: dict) -> dict:
     # 發送 Telegram 審批
     app.send_account_approval_request(request_id, 'add', account_id, name, role_arn, source, context=context)
 
-    # 如果是 async 模式，立即返回讓 client 輪詢
-    if async_mode:
-        return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps({
-                'status': 'pending_approval',
-                'request_id': request_id,
-                'message': '請求已發送，等待 Telegram 確認',
-                'expires_in': f'{APPROVAL_TIMEOUT_DEFAULT} seconds'
-            })}]
-        })
-
-    # 同步模式：等待結果（會被 API Gateway 29s 超時）
-    result = app.wait_for_result_mcp(request_id, timeout=APPROVAL_TIMEOUT_DEFAULT)
-
+    # 一律異步返回（sync long-polling 已移除）
     return mcp_result(req_id, {
-        'content': [{'type': 'text', 'text': json.dumps(result)}],
-        'isError': result.get('status') != 'approved'
+        'content': [{'type': 'text', 'text': json.dumps({
+            'status': 'pending_approval',
+            'request_id': request_id,
+            'message': '請求已發送，等待 Telegram 確認',
+            'expires_in': f'{APPROVAL_TIMEOUT_DEFAULT} seconds'
+        })}]
     })
 
 
@@ -892,7 +871,6 @@ def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
     account_id = str(arguments.get('account_id', '')).strip()
     source = arguments.get('source', None)
     context = arguments.get('context', None)
-    async_mode = arguments.get('async', False)
 
     # 驗證
     valid, error = validate_account_id(account_id)
@@ -938,23 +916,14 @@ def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
     # 發送 Telegram 審批
     app.send_account_approval_request(request_id, 'remove', account_id, account.get('name', ''), None, source, context=context)
 
-    # 如果是 async 模式，立即返回讓 client 輪詢
-    if async_mode:
-        return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps({
-                'status': 'pending_approval',
-                'request_id': request_id,
-                'message': '請求已發送，等待 Telegram 確認',
-                'expires_in': f'{APPROVAL_TIMEOUT_DEFAULT} seconds'
-            })}]
-        })
-
-    # 同步模式：等待結果
-    result = app.wait_for_result_mcp(request_id, timeout=APPROVAL_TIMEOUT_DEFAULT)
-
+    # 一律異步返回（sync long-polling 已移除）
     return mcp_result(req_id, {
-        'content': [{'type': 'text', 'text': json.dumps(result)}],
-        'isError': result.get('status') != 'approved'
+        'content': [{'type': 'text', 'text': json.dumps({
+            'status': 'pending_approval',
+            'request_id': request_id,
+            'message': '請求已發送，等待 Telegram 確認',
+            'expires_in': f'{APPROVAL_TIMEOUT_DEFAULT} seconds'
+        })}]
     })
 
 
@@ -1132,7 +1101,6 @@ def _check_upload_rate_limit(ctx: UploadContext) -> Optional[dict]:
 
 def _submit_upload_for_approval(ctx: UploadContext) -> dict:
     """Submit upload for human approval — always returns a result."""
-    app = _get_app_module()
     table = _get_table()
 
     # 固定桶模式在 _resolve_upload_target 時 request_id 尚未設定
@@ -1198,25 +1166,17 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
 
     send_telegram_message(message, keyboard)
 
-    # 預設異步
-    if not ctx.sync_mode:
-        return mcp_result(ctx.req_id, {
-            'content': [{'type': 'text', 'text': json.dumps({
-                'status': 'pending_approval',
-                'request_id': ctx.request_id,
-                's3_uri': s3_uri,
-                'size': size_str,
-                'message': '請求已發送，用 bouncer_status 查詢結果',
-                'expires_in': f'{UPLOAD_TIMEOUT} seconds'
-            })}]
-        })
-
-    # 同步模式
-    result = app.wait_for_upload_result(ctx.request_id, timeout=UPLOAD_TIMEOUT)
-
+    # 一律異步返回：讓 client 用 bouncer_status 輪詢結果。
+    # sync long-polling 已移除。
     return mcp_result(ctx.req_id, {
-        'content': [{'type': 'text', 'text': json.dumps(result)}],
-        'isError': result.get('status') != 'approved'
+        'content': [{'type': 'text', 'text': json.dumps({
+            'status': 'pending_approval',
+            'request_id': ctx.request_id,
+            's3_uri': s3_uri,
+            'size': size_str,
+            'message': '請求已發送，用 bouncer_status 查詢結果',
+            'expires_in': f'{UPLOAD_TIMEOUT} seconds'
+        })}]
     })
 
 

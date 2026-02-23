@@ -248,7 +248,12 @@ def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
 # ============================================================================
 
 def wait_for_upload_result(request_id: str, timeout: int = UPLOAD_TIMEOUT) -> dict:
-    """等待上傳審批結果"""
+    """等待上傳審批結果
+
+    DEPRECATED: Sync long-polling 已移除。Lambda timeout 已降至 60s，
+    API Gateway 29s timeout 使 sync wait 無意義。
+    此函數保留以維持測試相容性，但不應再被呼叫。
+    """
     interval = 2
     start_time = time.time()
 
@@ -378,7 +383,12 @@ def execute_upload(request_id: str, approver: str) -> dict:
 
 
 def wait_for_result_mcp(request_id: str, timeout: int = COMMAND_APPROVAL_TIMEOUT) -> dict:
-    """MCP 模式的長輪詢，最多 timeout 秒"""
+    """MCP 模式的長輪詢，最多 timeout 秒
+
+    DEPRECATED: Sync long-polling 已移除。Lambda timeout 已降至 60s，
+    API Gateway 29s timeout 使 sync wait 無意義。
+    此函數保留以維持測試相容性，但不應再被呼叫。
+    """
     interval = 2  # 每 2 秒查一次
     start_time = time.time()
 
@@ -485,7 +495,6 @@ def handle_clawdbot_request(event):
     reason = body.get('reason', 'No reason provided')
     source = body.get('source', None)  # 來源（哪個 agent/系統）
     assume_role = body.get('assume_role', None)  # 目標帳號 role ARN
-    wait = body.get('wait', False)
     timeout = min(body.get('timeout', APPROVAL_TIMEOUT_DEFAULT), MCP_MAX_WAIT)
 
     if not command:
@@ -547,9 +556,8 @@ def handle_clawdbot_request(event):
 
     send_approval_request(request_id, command, reason, timeout, source, assume_role)
 
-    if wait:
-        return wait_for_result_rest(request_id, timeout=timeout)
-
+    # Sync long-polling 已移除（wait=True 不再生效）。
+    # 一律返回 pending，讓 client 用 /status/{id} 輪詢。
     return response(202, {
         'status': 'pending_approval',
         'request_id': request_id,
@@ -560,7 +568,12 @@ def handle_clawdbot_request(event):
 
 
 def wait_for_result_rest(request_id: str, timeout: int = 50) -> dict:
-    """REST API 的輪詢等待"""
+    """REST API 的輪詢等待
+
+    DEPRECATED: Sync long-polling 已移除。Lambda timeout 已降至 60s，
+    API Gateway 29s timeout 使 sync wait 無意義。
+    此函數保留以維持測試相容性，但不應再被呼叫。
+    """
     interval = 2
     start_time = time.time()
 
