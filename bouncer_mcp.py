@@ -61,6 +61,10 @@ TOOLS = [
                 'sync': {
                     'type': 'boolean',
                     'description': '同步模式：等待審批結果（可能超時），預設 false'
+                },
+                'grant_id': {
+                    'type': 'string',
+                    'description': 'Grant Session ID — 帶此參數時，命令在授權清單內會自動執行'
                 }
             },
             'required': ['command', 'reason']
@@ -324,6 +328,73 @@ TOOLS = [
                 }
             },
             'required': ['filename', 'content', 'reason', 'source']
+        }
+    },
+    {
+        'name': 'bouncer_request_grant',
+        'description': '申請批次權限授予。Agent 預先列出需要的命令，Steven 一鍵審批後，Agent 可在 TTL 內自動執行。',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'commands': {
+                    'type': 'array',
+                    'items': {'type': 'string'},
+                    'description': '需要授權的 AWS CLI 命令清單（1-20 個）'
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': '申請原因'
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '請求來源標識'
+                },
+                'ttl_minutes': {
+                    'type': 'integer',
+                    'description': '有效期（分鐘），預設 30，最大 60'
+                },
+                'allow_repeat': {
+                    'type': 'boolean',
+                    'description': '是否允許同一命令重複執行，預設 false'
+                },
+                'account': {
+                    'type': 'string',
+                    'description': '目標 AWS 帳號 ID'
+                }
+            },
+            'required': ['commands', 'reason', 'source']
+        }
+    },
+    {
+        'name': 'bouncer_grant_status',
+        'description': '查詢 Grant Session 狀態（剩餘命令、剩餘時間）',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'grant_id': {
+                    'type': 'string',
+                    'description': 'Grant Session ID'
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '請求來源（用於驗證）'
+                }
+            },
+            'required': ['grant_id', 'source']
+        }
+    },
+    {
+        'name': 'bouncer_revoke_grant',
+        'description': '撤銷 Grant Session',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'grant_id': {
+                    'type': 'string',
+                    'description': 'Grant Session ID'
+                }
+            },
+            'required': ['grant_id']
         }
     }
 ]
@@ -770,6 +841,63 @@ def tool_upload(arguments: dict) -> dict:
     return parse_mcp_result(result) or result
 
 
+def tool_request_grant(arguments: dict) -> dict:
+    """申請批次權限授予"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'request_grant',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_request_grant',
+            'arguments': arguments
+        }
+    }
+
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
+def tool_grant_status(arguments: dict) -> dict:
+    """查詢 Grant Session 狀態"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'grant_status',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_grant_status',
+            'arguments': arguments
+        }
+    }
+
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
+def tool_revoke_grant(arguments: dict) -> dict:
+    """撤銷 Grant Session"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'revoke_grant',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_revoke_grant',
+            'arguments': arguments
+        }
+    }
+
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
 def parse_mcp_result(result: dict) -> dict:
     """解析 MCP 回應"""
     if 'result' in result:
@@ -851,6 +979,13 @@ def handle_request(request: dict) -> dict:
             result = tool_trust_revoke(arguments)
         elif tool_name == 'bouncer_upload':
             result = tool_upload(arguments)
+        # Grant session tools
+        elif tool_name == 'bouncer_request_grant':
+            result = tool_request_grant(arguments)
+        elif tool_name == 'bouncer_grant_status':
+            result = tool_grant_status(arguments)
+        elif tool_name == 'bouncer_revoke_grant':
+            result = tool_revoke_grant(arguments)
         else:
             return error_response(req_id, -32602, f'Unknown tool: {tool_name}')
 
