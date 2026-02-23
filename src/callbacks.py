@@ -14,6 +14,7 @@ from paging import store_paged_output, send_remaining_pages
 from trust import create_trust_session
 from telegram import escape_markdown, update_message, answer_callback, update_and_answer
 from constants import DEFAULT_ACCOUNT_ID
+from metrics import emit_metric
 
 
 # DynamoDB tables from db.py (no circular dependency)
@@ -125,6 +126,8 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
 
     if action in ('approve', 'approve_trust'):
         result = execute_command(command, assume_role)
+        cmd_status = 'failed' if result.startswith('❌') else 'success'
+        emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status})
         paged = store_paged_output(request_id, result)
 
         now = int(time.time())

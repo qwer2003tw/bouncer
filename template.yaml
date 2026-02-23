@@ -265,6 +265,9 @@ Resources:
       CodeUri: src/
       Handler: app.lambda_handler
       Description: Bouncer v3.0.0 - AWS 命令審批執行
+      AutoPublishAlias: live
+      DeploymentPreference:
+        Type: AllAtOnce
       DeadLetterQueue:
         Type: SQS
         TargetArn: !GetAtt ApprovalFunctionDLQ.Arn

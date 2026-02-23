@@ -19,6 +19,15 @@ Parameters:
     Default: sam-deployer/github-pat
     Description: GitHub PAT 在 Secrets Manager 的名稱
 
+  CreateCFNRole:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: 是否建立 CloudFormation execution role（首次部署用，之後 import）
+
+Conditions:
+  ShouldCreateCFNRole: !Equals [!Ref CreateCFNRole, "true"]
+
 Globals:
   Function:
     Timeout: 30
@@ -420,6 +429,31 @@ Resources:
           Value: "no"
 
   # ============================================================
+  # IAM - CloudFormation Execution Role (import-friendly)
+  # 預設不建立（CreateCFNRole=false），Role 已手動存在。
+  # 之後可用 aws cloudformation import 匯入管理。
+  # ============================================================
+  DeployerCFNRole:
+    Type: AWS::IAM::Role
+    Condition: ShouldCreateCFNRole
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RoleName: BounceDeployerCFNRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudformation.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      Tags:
+        - Key: ManagedBy
+          Value: bouncer-deployer
+
+  # ============================================================
   # CodeBuild Project
   # ============================================================
   SAMDeployerProject:
@@ -639,3 +673,10 @@ Outputs:
   PermissionBoundaryArn:
     Description: Permission Boundary ARN for SAM roles
     Value: !Ref SAMDeployerBoundary
+
+  DeployerCFNRoleArn:
+    Description: CloudFormation execution role ARN
+    Value: !If
+      - ShouldCreateCFNRole
+      - !GetAtt DeployerCFNRole.Arn
+      - !Sub "arn:aws:iam::${AWS::AccountId}:role/BounceDeployerCFNRole"

@@ -44,6 +44,7 @@ from callbacks import (
 )
 from telegram_commands import handle_telegram_command
 from tool_schema import MCP_TOOLS  # noqa: F401
+from metrics import emit_metric
 
 # 從 constants.py 導入所有常數
 from constants import (  # noqa: F401
@@ -170,6 +171,7 @@ def handle_mcp_request(event) -> dict:
 
 def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
     """處理 MCP tool 呼叫"""
+    emit_metric('Bouncer', 'ToolCall', 1, dimensions={'ToolName': tool_name})
 
     if tool_name == 'bouncer_execute':
         return mcp_tool_execute(req_id, arguments)
@@ -639,6 +641,7 @@ def handle_telegram_webhook(event: dict) -> dict:
         return response(400, {'error': 'Invalid callback data'})
 
     action, request_id = data.split(':', 1)
+    emit_metric('Bouncer', 'ApprovalAction', 1, dimensions={'Action': action})
 
     # 特殊處理：撤銷信任時段
     if action == 'revoke_trust':
