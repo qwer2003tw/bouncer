@@ -1,6 +1,10 @@
 """
 Bouncer - Trust Session 模組
 處理信任時段的建立、查詢、撤銷和自動批准判斷
+
+信任匹配基於 trust_scope + account_id：
+- trust_scope 是呼叫端提供的穩定識別符（如 session key）
+- source 僅用於顯示，不參與信任匹配
 """
 import time
 import hashlib
@@ -36,61 +40,64 @@ def _get_table():
     return _table
 
 
-def get_trust_session(source: str, account_id: str) -> Optional[Dict]:
+def get_trust_session(trust_scope: str, account_id: str) -> Optional[Dict]:
     """
     查詢有效的信任時段
 
     Args:
-        source: 請求來源
+        trust_scope: 信任範圍識別符（session key 等）
         account_id: AWS 帳號 ID
 
     Returns:
         信任時段記錄，或 None
     """
-    if not TRUST_SESSION_ENABLED or not source:
+    if not TRUST_SESSION_ENABLED or not trust_scope:
         return None
+
+    # 用 trust_scope 算出 trust_id 直接 get（不用 scan）
+    scope_hash = hashlib.md5(trust_scope.encode(), usedforsecurity=False).hexdigest()[:8]
+    trust_id = f"trust-{scope_hash}-{account_id}"
 
     now = int(time.time())
 
     try:
-        response = _get_table().scan(
-            FilterExpression='#type = :type AND #src = :source AND account_id = :account AND expires_at > :now',
-            ExpressionAttributeNames={
-                '#type': 'type',
-                '#src': 'source'
-            },
-            ExpressionAttributeValues={
-                ':type': 'trust_session',
-                ':source': source,
-                ':account': account_id,
-                ':now': now
-            }
-        )
+        response = _get_table().get_item(Key={'request_id': trust_id})
+        item = response.get('Item')
 
-        items = response.get('Items', [])
-        if items:
-            return items[0]
-        return None
+        if not item:
+            return None
+
+        # 驗證未過期
+        if int(item.get('expires_at', 0)) <= now:
+            return None
+
+        # 驗證類型
+        if item.get('type') != 'trust_session':
+            return None
+
+        return item
 
     except Exception as e:
         print(f"Trust session check error: {e}")
         return None
 
 
-def create_trust_session(source: str, account_id: str, approved_by: str) -> str:
+def create_trust_session(trust_scope: str, account_id: str, approved_by: str,
+                         source: str = '') -> str:
     """
     建立信任時段
 
     Args:
-        source: 請求來源
+        trust_scope: 信任範圍識別符（session key 等）
         account_id: AWS 帳號 ID
         approved_by: 批准者 ID
+        source: 顯示用來源描述（不參與匹配）
 
     Returns:
         trust_id
     """
-    source_hash = hashlib.md5(source.encode(), usedforsecurity=False).hexdigest()[:8]
-    trust_id = f"trust-{source_hash}-{account_id}"
+    scope_hash = hashlib.md5(trust_scope.encode(), usedforsecurity=False).hexdigest()[:8]
+    trust_id = f"trust-{scope_hash}-{account_id}"
 
     now = int(time.time())
     expires_at = now + TRUST_SESSION_DURATION
@@ -98,7 +105,8 @@ def create_trust_session(source: str, account_id: str, approved_by: str) -> str:
     item = {
         'request_id': trust_id,
         'type': 'trust_session',
-        'source': source,
+        'trust_scope': trust_scope,
+        'source': source or trust_scope,  # GSI 不接受空字串
         'account_id': account_id,
         'approved_by': approved_by,
         'created_at': now,
@@ -182,23 +190,23 @@ def is_trust_excluded(command: str) -> bool:
     return False
 
 
-def should_trust_approve(command: str, source: str, account_id: str) -> tuple:
+def should_trust_approve(command: str, trust_scope: str, account_id: str) -> tuple:
     """
     檢查是否應該透過信任時段自動批准
 
     Args:
         command: AWS CLI 命令
-        source: 請求來源
+        trust_scope: 信任範圍識別符
         account_id: AWS 帳號 ID
 
     Returns:
         (should_approve: bool, trust_session: dict or None, reason: str)
     """
-    if not TRUST_SESSION_ENABLED or not source:
-        return False, None, "Trust session disabled or no source"
+    if not TRUST_SESSION_ENABLED or not trust_scope:
+        return False, None, "Trust session disabled or no trust_scope"
 
     # 檢查是否有有效的信任時段
-    session = get_trust_session(source, account_id)
+    session = get_trust_session(trust_scope, account_id)
     if not session:
         return False, None, "No active trust session"
 

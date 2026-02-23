@@ -140,6 +140,7 @@ class ExecuteContext:
     command: str
     reason: str
     source: Optional[str]
+    trust_scope: str
     context: Optional[str]
     account_id: str
     account_name: str
@@ -160,6 +161,7 @@ def _parse_execute_request(req_id, arguments: dict) -> 'dict | ExecuteContext':
     command = str(arguments.get('command', '')).strip()
     reason = str(arguments.get('reason', 'No reason provided'))
     source = arguments.get('source', None)
+    trust_scope = str(arguments.get('trust_scope', '')).strip()
     context = arguments.get('context', None)
     account_id = arguments.get('account', None)
     if account_id:
@@ -169,6 +171,9 @@ def _parse_execute_request(req_id, arguments: dict) -> 'dict | ExecuteContext':
 
     if not command:
         return mcp_error(req_id, -32602, 'Missing required parameter: command')
+
+    if not trust_scope:
+        return mcp_error(req_id, -32602, 'Missing required parameter: trust_scope (use session key or stable ID)')
 
     # 初始化預設帳號
     init_default_account()
@@ -216,6 +221,7 @@ def _parse_execute_request(req_id, arguments: dict) -> 'dict | ExecuteContext':
         command=command,
         reason=reason,
         source=source,
+        trust_scope=trust_scope,
         context=context,
         account_id=account_id,
         account_name=account_name,
@@ -551,7 +557,7 @@ def _check_rate_limit(ctx: ExecuteContext) -> Optional[dict]:
 def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
     """Trust session auto-approve — execute if trusted."""
     should_trust, trust_session, trust_reason = should_trust_approve(
-        ctx.command, ctx.source, ctx.account_id
+        ctx.command, ctx.trust_scope, ctx.account_id
     )
     if not (should_trust and trust_session):
         return None
@@ -627,6 +633,7 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
         'command': ctx.command,
         'reason': ctx.reason,
         'source': ctx.source or '__anonymous__',  # GSI 需要有值
+        'trust_scope': ctx.trust_scope,
         'context': ctx.context or '',
         'account_id': ctx.account_id,
         'account_name': ctx.account_name,

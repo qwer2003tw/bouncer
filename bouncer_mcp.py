@@ -52,7 +52,11 @@ TOOLS = [
                 },
                 'source': {
                     'type': 'string',
-                    'description': '來源標識（例如：Clawdbot、Steven 的 OpenClaw）'
+                    'description': '來源描述（例如：Private Bot (Bouncer 部署)）'
+                },
+                'trust_scope': {
+                    'type': 'string',
+                    'description': '信任範圍識別符（必填，用於 Trust Session 匹配。使用 session key 或穩定 ID）'
                 },
                 'account': {
                     'type': 'string',
@@ -67,7 +71,7 @@ TOOLS = [
                     'description': 'Grant Session ID — 帶此參數時，命令在授權清單內會自動執行'
                 }
             },
-            'required': ['command', 'reason']
+            'required': ['command', 'reason', 'trust_scope']
         }
     },
     {
@@ -437,6 +441,7 @@ def tool_execute(arguments: dict) -> dict:
     command = str(arguments.get('command', '')).strip()
     reason = str(arguments.get('reason', 'No reason provided'))
     source = arguments.get('source', 'OpenClaw Agent')
+    trust_scope = str(arguments.get('trust_scope', '')).strip()
     account = arguments.get('account', None)
     if account:
         account = str(account).strip()
@@ -444,6 +449,9 @@ def tool_execute(arguments: dict) -> dict:
 
     if not command:
         return {'error': 'Missing required parameter: command'}
+
+    if not trust_scope:
+        return {'error': 'Missing required parameter: trust_scope (use session key or stable ID)'}
 
     if not SECRET:
         return {'error': 'BOUNCER_SECRET not configured'}
@@ -453,11 +461,14 @@ def tool_execute(arguments: dict) -> dict:
         'command': command,
         'reason': reason,
         'source': source,
+        'trust_scope': trust_scope,
         'timeout': timeout,
         'async': True  # 關鍵：讓 Lambda 不等待，立即返回
     }
     if account:
         mcp_args['account'] = account
+    if arguments.get('grant_id'):
+        mcp_args['grant_id'] = arguments['grant_id']
 
     payload = {
         'jsonrpc': '2.0',

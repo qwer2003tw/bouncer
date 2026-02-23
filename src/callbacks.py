@@ -226,6 +226,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
     command = item.get('command', '')
     assume_role = item.get('assume_role')
     source = item.get('source', '')
+    trust_scope = item.get('trust_scope', '')
     reason = item.get('reason', '')
     context = item.get('context', '')
     account_id = item.get('account_id', DEFAULT_ACCOUNT_ID)
@@ -277,12 +278,12 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         # 信任模式
         trust_line = ""
         if action == 'approve_trust':
-            trust_id = create_trust_session(source, account_id, user_id)
+            trust_id = create_trust_session(trust_scope, account_id, user_id, source=source)
             trust_line = f"\n\n🔓 信任時段已啟動：`{trust_id}`"
 
-            # 自動執行同 source + account 的排隊中請求
+            # 自動執行同 trust_scope + account 的排隊中請求
             try:
-                _auto_execute_pending_requests(source, account_id, assume_role, trust_id)
+                _auto_execute_pending_requests(trust_scope, account_id, assume_role, trust_id, source)
             except Exception as e:
                 print(f"[TRUST] Auto-execute pending error: {e}")
 
@@ -608,26 +609,25 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
     return response(200, {'ok': True})
 
 
-def _auto_execute_pending_requests(source: str, account_id: str, assume_role: str, trust_id: str):
-    """信任開啟後，自動執行同 source + account 的排隊中請求"""
-    if not source:
+def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_role: str,
+                                    trust_id: str, source: str = ''):
+    """信任開啟後，自動執行同 trust_scope + account 的排隊中請求"""
+    if not trust_scope:
         return
 
     table = _db.table
 
-    # 查同 source 的 pending 請求
+    # 查 pending 請求，用 status-created-index + filter by trust_scope + account
     response_data = table.query(
-        IndexName='source-created-index',
-        KeyConditionExpression='#src = :source',
-        FilterExpression='#status = :status AND #acct = :account',
+        IndexName='status-created-index',
+        KeyConditionExpression='#status = :status',
+        FilterExpression='trust_scope = :scope AND account_id = :account',
         ExpressionAttributeNames={
-            '#src': 'source',
             '#status': 'status',
-            '#acct': 'account_id',
         },
         ExpressionAttributeValues={
-            ':source': source,
             ':status': 'pending',
+            ':scope': trust_scope,
             ':account': account_id,
         },
         ScanIndexForward=True,
@@ -646,6 +646,7 @@ def _auto_execute_pending_requests(source: str, account_id: str, assume_role: st
         req_id = item['request_id']
         cmd = item.get('command', '')
         reason = item.get('reason', '')
+        item_source = item.get('source', source)
         item_assume_role = item.get('assume_role', assume_role)
 
         # 執行命令
@@ -676,7 +677,7 @@ def _auto_execute_pending_requests(source: str, account_id: str, assume_role: st
         # 靜默通知
         send_trust_auto_approve_notification(
             cmd, trust_id, remaining, new_count, result,
-            source=source,
+            source=item_source,
         )
 
         # Audit log
@@ -685,7 +686,7 @@ def _auto_execute_pending_requests(source: str, account_id: str, assume_role: st
             request_id=generate_request_id(cmd),
             command=cmd,
             reason=reason,
-            source=source,
+            source=item_source,
             account_id=account_id,
             decision_type='trust_approved',
             mode='mcp',
@@ -695,4 +696,4 @@ def _auto_execute_pending_requests(source: str, account_id: str, assume_role: st
         executed += 1
 
     if executed > 0:
-        print(f"[TRUST] Auto-executed {executed} pending requests for source={source}")
+        print(f"[TRUST] Auto-executed {executed} pending requests for trust_scope={trust_scope}")

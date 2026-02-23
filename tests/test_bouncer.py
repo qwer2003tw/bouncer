@@ -171,7 +171,8 @@ class TestMCPExecuteSafelist:
                     'params': {
                         'name': 'bouncer_execute',
                         'arguments': {
-                            'command': 'aws ec2 describe-instances'
+                            'command': 'aws ec2 describe-instances',
+                            'trust_scope': 'test-session',
                         }
                     }
                 }),
@@ -202,7 +203,8 @@ class TestMCPExecuteBlocked:
                 'params': {
                     'name': 'bouncer_execute',
                     'arguments': {
-                        'command': 'aws iam create-user --user-name hacker'
+                        'command': 'aws iam create-user --user-name hacker',
+                        'trust_scope': 'test-session',
                     }
                 }
             }),
@@ -235,6 +237,7 @@ class TestMCPExecuteApproval:
                     'name': 'bouncer_execute',
                     'arguments': {
                         'command': 'aws ec2 start-instances --instance-ids i-123',
+                        'trust_scope': 'test-session',
                         'reason': 'Test start'
                     }
                 }
@@ -769,7 +772,8 @@ class TestIntegration:
                     'params': {
                         'name': 'bouncer_execute',
                         'arguments': {
-                            'command': 'aws sts get-caller-identity'
+                            'command': 'aws sts get-caller-identity',
+                            'trust_scope': 'test-session',
                         }
                     }
                 }),
@@ -1870,6 +1874,7 @@ class TestAccountValidationErrorPaths:
                     'name': 'bouncer_execute',
                     'arguments': {
                         'command': 'aws s3 ls',
+                        'trust_scope': 'test-session',
                         'account': 'invalid'  # 非 12 位數字 (注意：參數名是 account 不是 account_id)
                     }
                 }
@@ -1899,6 +1904,7 @@ class TestAccountValidationErrorPaths:
                     'name': 'bouncer_execute',
                     'arguments': {
                         'command': 'aws s3 ls',
+                        'trust_scope': 'test-session',
                         'account': '999999999999'  # 不存在的帳號
                     }
                 }
@@ -1933,6 +1939,7 @@ class TestAccountValidationErrorPaths:
                     'name': 'bouncer_execute',
                     'arguments': {
                         'command': 'aws s3 ls',
+                        'trust_scope': 'test-session',
                         'account': '123456789012'
                     }
                 }
@@ -1975,7 +1982,8 @@ class TestBlockedCommandPath:
                 'params': {
                     'name': 'bouncer_execute',
                     'arguments': {
-                        'command': 'aws iam create-access-key --user-name admin'
+                        'command': 'aws iam create-access-key --user-name admin',
+                        'trust_scope': 'test-session',
                     }
                 }
             }),
@@ -2001,7 +2009,8 @@ class TestBlockedCommandPath:
                 'params': {
                     'name': 'bouncer_execute',
                     'arguments': {
-                        'command': 'aws sts assume-role --role-arn arn:aws:iam::123456789012:role/Admin'
+                        'command': 'aws sts assume-role --role-arn arn:aws:iam::123456789012:role/Admin',
+                        'trust_scope': 'test-session',
                     }
                 }
             }),
@@ -2036,6 +2045,7 @@ class TestRateLimitErrors:
                     'name': 'bouncer_execute',
                     'arguments': {
                         'command': 'aws ec2 start-instances --instance-ids i-123',
+                        'trust_scope': 'test-session',
                         'source': 'test-source'
                     }
                 }
@@ -2067,6 +2077,7 @@ class TestRateLimitErrors:
                     'name': 'bouncer_execute',
                     'arguments': {
                         'command': 'aws ec2 start-instances --instance-ids i-123',
+                        'trust_scope': 'test-session',
                         'source': 'test-source'
                     }
                 }
@@ -2103,6 +2114,7 @@ class TestTelegramCallbackHandlers:
             'request_id': trust_id,
             'type': 'trust_session',
             'source': 'test-source',
+            'trust_scope': 'test-source',
             'expires_at': int(time.time()) + 600
         })
         
@@ -3087,6 +3099,7 @@ class TestTrustAutoApprove:
                         'name': 'bouncer_execute',
                         'arguments': {
                             'command': 'aws s3 cp file.txt s3://bucket/',
+                            'trust_scope': source,
                             'source': source,
                             'account': account_id
                         }
@@ -3578,7 +3591,8 @@ class TestBlockedCommands:
                 'params': {
                     'name': 'bouncer_execute',
                     'arguments': {
-                        'command': 'aws iam create-user --user-name hacker'
+                        'command': 'aws iam create-user --user-name hacker',
+                        'trust_scope': 'test-session',
                     }
                 }
             }),
@@ -3602,7 +3616,8 @@ class TestBlockedCommands:
                 'params': {
                     'name': 'bouncer_execute',
                     'arguments': {
-                        'command': 'aws sts assume-role --role-arn arn:aws:iam::123:role/Admin'
+                        'command': 'aws sts assume-role --role-arn arn:aws:iam::123:role/Admin',
+                        'trust_scope': 'test-session',
                     }
                 }
             }),
@@ -4516,7 +4531,8 @@ class TestAppModuleMore:
                     'params': {
                         'name': 'bouncer_execute',
                         'arguments': {
-                            'command': 'aws logs get-log-events --log-group-name test'
+                            'command': 'aws logs get-log-events --log-group-name test',
+                            'trust_scope': 'test-session',
                         }
                     }
                 }),
@@ -4853,6 +4869,7 @@ class TestCoverage80Sprint:
                         'name': 'bouncer_execute',
                         'arguments': {
                             'command': 'aws s3 ls',
+                            'trust_scope': 'test-session',
                             'account': '555555555555'
                         }
                     }
@@ -6274,9 +6291,10 @@ class TestTrustSessionLimits:
 
         # 建立已過期的信任時段
         app_module.table.put_item(Item={
-            'request_id': 'trust-expired-test',
+            'request_id': 'trust-b341d19c-111111111111',
             'type': 'trust_session',
             'source': 'test-source-expired',
+            'trust_scope': 'test-source-expired',
             'account_id': '111111111111',
             'approved_by': '999999999',
             'created_at': int(time.time()) - 700,
@@ -6297,9 +6315,10 @@ class TestTrustSessionLimits:
 
         # 建立已達上限的信任時段
         app_module.table.put_item(Item={
-            'request_id': 'trust-maxed-test',
+            'request_id': 'trust-08556e97-111111111111',
             'type': 'trust_session',
             'source': 'test-source-maxed',
+            'trust_scope': 'test-source-maxed',
             'account_id': '111111111111',
             'approved_by': '999999999',
             'created_at': int(time.time()),
@@ -6319,9 +6338,10 @@ class TestTrustSessionLimits:
 
         # 建立有效的信任時段
         app_module.table.put_item(Item={
-            'request_id': 'trust-excluded-test',
+            'request_id': 'trust-91562714-111111111111',
             'type': 'trust_session',
             'source': 'test-source-excluded',
+            'trust_scope': 'test-source-excluded',
             'account_id': '111111111111',
             'approved_by': '999999999',
             'created_at': int(time.time()),
@@ -6360,6 +6380,7 @@ class TestSyncModeExecute:
                     'name': 'bouncer_execute',
                     'arguments': {
                         'command': 'aws ec2 describe-instances',
+                        'trust_scope': 'test-session',
                         'reason': 'sync test',
                         'sync': True
                     }
@@ -6388,6 +6409,7 @@ class TestSyncModeExecute:
                     'name': 'bouncer_execute',
                     'arguments': {
                         'command': 'aws ec2 start-instances --instance-ids i-123',
+                        'trust_scope': 'test-session',
                         'reason': 'async test'
                     }
                 }
@@ -6451,6 +6473,7 @@ class TestCrossAccountExecuteFlow:
                     'name': 'bouncer_execute',
                     'arguments': {
                         'command': 'aws sts get-caller-identity',
+                        'trust_scope': 'test-session',
                         'account': '992382394211',
                         'reason': 'cross-account test'
                     }
@@ -6486,6 +6509,7 @@ class TestCrossAccountExecuteFlow:
                     'name': 'bouncer_execute',
                     'arguments': {
                         'command': 'aws s3 ls',
+                        'trust_scope': 'test-session',
                         'account': '999999999999',
                         'reason': 'test unknown account'
                     }
@@ -6526,6 +6550,7 @@ class TestCrossAccountExecuteFlow:
                     'name': 'bouncer_execute',
                     'arguments': {
                         'command': 'aws sts get-caller-identity',
+                        'trust_scope': 'test-session',
                         'account': '888888888888',
                         'reason': 'test broken role'
                     }
@@ -6561,9 +6586,10 @@ class TestTrustSessionExpiry:
         # Create an already-expired trust session
         table = app_module.table
         table.put_item(Item={
-            'request_id': 'trust-expired-test',
+            'request_id': 'trust-69306aad-111111111111',
             'type': 'trust_session',
             'source': 'expire-test',
+            'trust_scope': 'expire-test',
             'account_id': '111111111111',
             'approved_by': '999999999',
             'created_at': int(time.time()) - 700,
@@ -6581,9 +6607,10 @@ class TestTrustSessionExpiry:
         from constants import TRUST_SESSION_MAX_COMMANDS
         table = app_module.table
         table.put_item(Item={
-            'request_id': 'trust-maxcmd-test',
+            'request_id': 'trust-972af0a2-111111111111',
             'type': 'trust_session',
             'source': 'maxcmd-test',
+            'trust_scope': 'maxcmd-test',
             'account_id': '111111111111',
             'approved_by': '999999999',
             'created_at': int(time.time()),
@@ -6601,9 +6628,10 @@ class TestTrustSessionExpiry:
         """High-risk commands should NOT be trusted even in active session."""
         table = app_module.table
         table.put_item(Item={
-            'request_id': 'trust-exclude-test',
+            'request_id': 'trust-6afe11c3-111111111111',
             'type': 'trust_session',
             'source': 'exclude-test',
+            'trust_scope': 'exclude-test',
             'account_id': '111111111111',
             'approved_by': '999999999',
             'created_at': int(time.time()),
@@ -6620,9 +6648,10 @@ class TestTrustSessionExpiry:
         """Valid trust session with safe command should auto-approve."""
         table = app_module.table
         table.put_item(Item={
-            'request_id': 'trust-valid-test',
+            'request_id': 'trust-543b0301-111111111111',
             'type': 'trust_session',
             'source': 'valid-test',
+            'trust_scope': 'valid-test',
             'account_id': '111111111111',
             'approved_by': '999999999',
             'created_at': int(time.time()),
@@ -6650,6 +6679,7 @@ class TestSyncAsyncMode:
                 'jsonrpc': '2.0', 'id': 'async-test', 'method': 'tools/call',
                 'params': {'name': 'bouncer_execute', 'arguments': {
                     'command': 'aws ec2 start-instances --instance-ids i-123',
+                    'trust_scope': 'test-session',
                     'reason': 'test async', 'source': 'test-bot'
                 }}
             })
@@ -6674,6 +6704,7 @@ class TestCrossAccountExecuteErrors:
                 'jsonrpc': '2.0', 'id': 'bad-acct', 'method': 'tools/call',
                 'params': {'name': 'bouncer_execute', 'arguments': {
                     'command': 'aws s3 ls',
+                    'trust_scope': 'test-session',
                     'reason': 'test', 'source': 'test-bot',
                     'account': '999999999999'
                 }}
@@ -6695,6 +6726,7 @@ class TestCrossAccountExecuteErrors:
                 'jsonrpc': '2.0', 'id': 'bad-format', 'method': 'tools/call',
                 'params': {'name': 'bouncer_execute', 'arguments': {
                     'command': 'aws s3 ls',
+                    'trust_scope': 'test-session',
                     'reason': 'test', 'source': 'test-bot',
                     'account': 'not-a-number'
                 }}

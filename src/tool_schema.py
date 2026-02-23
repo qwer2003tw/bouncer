@@ -24,7 +24,11 @@ MCP_TOOLS = {
                 },
                 'source': {
                     'type': 'string',
-                    'description': '請求來源標識（哪個 agent/系統發的）'
+                    'description': '請求來源描述（顯示用，例如：Private Bot (Bouncer 部署)）'
+                },
+                'trust_scope': {
+                    'type': 'string',
+                    'description': '信任範圍識別符（必填，用於 Trust Session 匹配。使用 session key 或穩定 ID，不要用任務描述）'
                 },
                 'context': {
                     'type': 'string',
@@ -40,7 +44,7 @@ MCP_TOOLS = {
                     'description': 'Grant Session ID（如果有有效的 grant session，命令將自動執行）'
                 }
             },
-            'required': ['command']
+            'required': ['command', 'trust_scope']
         }
     },
     'bouncer_status': {
