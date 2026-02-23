@@ -13,6 +13,7 @@ from commands import execute_command
 from paging import store_paged_output, send_remaining_pages
 from trust import create_trust_session
 from telegram import escape_markdown, update_message, answer_callback, update_and_answer
+from notifications import send_trust_auto_approve_notification
 from constants import DEFAULT_ACCOUNT_ID
 from metrics import emit_metric
 
@@ -278,6 +279,12 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         if action == 'approve_trust':
             trust_id = create_trust_session(source, account_id, user_id)
             trust_line = f"\n\n🔓 信任時段已啟動：`{trust_id}`"
+
+            # 自動執行同 source + account 的排隊中請求
+            try:
+                _auto_execute_pending_requests(source, account_id, assume_role, trust_id)
+            except Exception as e:
+                print(f"[TRUST] Auto-execute pending error: {e}")
 
         max_preview = 800 if action == 'approve_trust' else 1000
         result_preview = result[:max_preview] if len(result) > max_preview else result
@@ -599,3 +606,93 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
         answer_callback(callback_id, '❌ 已拒絕')
 
     return response(200, {'ok': True})
+
+
+def _auto_execute_pending_requests(source: str, account_id: str, assume_role: str, trust_id: str):
+    """信任開啟後，自動執行同 source + account 的排隊中請求"""
+    if not source:
+        return
+
+    table = _db.table
+
+    # 查同 source 的 pending 請求
+    response_data = table.query(
+        IndexName='source-created-index',
+        KeyConditionExpression='#src = :source',
+        FilterExpression='#status = :status AND #acct = :account',
+        ExpressionAttributeNames={
+            '#src': 'source',
+            '#status': 'status',
+            '#acct': 'account_id',
+        },
+        ExpressionAttributeValues={
+            ':source': source,
+            ':status': 'pending',
+            ':account': account_id,
+        },
+        ScanIndexForward=True,
+        Limit=20,
+    )
+
+    items = response_data.get('Items', [])
+    if not items:
+        return
+
+    from trust import increment_trust_command_count
+    from utils import generate_request_id, log_decision
+
+    executed = 0
+    for item in items:
+        req_id = item['request_id']
+        cmd = item.get('command', '')
+        reason = item.get('reason', '')
+        item_assume_role = item.get('assume_role', assume_role)
+
+        # 執行命令
+        result = execute_command(cmd, item_assume_role)
+        paged = store_paged_output(req_id, result)
+
+        # 更新 DynamoDB 狀態
+        now = int(time.time())
+        table.update_item(
+            Key={'request_id': req_id},
+            UpdateExpression='SET #s = :s, #r = :r, approved_at = :t, decision_type = :dt, decided_at = :da',
+            ExpressionAttributeNames={'#s': 'status', '#r': 'result'},
+            ExpressionAttributeValues={
+                ':s': 'approved',
+                ':r': paged['result'],
+                ':t': now,
+                ':dt': 'trust_auto_approved',
+                ':da': now,
+            },
+        )
+
+        # Trust 計數
+        new_count = increment_trust_command_count(trust_id)
+
+        # 計算剩餘時間
+        remaining = "~10:00"  # 剛建的 trust session，約 10 分鐘
+
+        # 靜默通知
+        send_trust_auto_approve_notification(
+            cmd, trust_id, remaining, new_count, result,
+            source=source,
+        )
+
+        # Audit log
+        log_decision(
+            table=table,
+            request_id=generate_request_id(cmd),
+            command=cmd,
+            reason=reason,
+            source=source,
+            account_id=account_id,
+            decision_type='trust_approved',
+            mode='mcp',
+            trust_session_id=trust_id,
+        )
+
+        executed += 1
+
+    if executed > 0:
+        print(f"[TRUST] Auto-executed {executed} pending requests for source={source}")
