@@ -93,6 +93,25 @@ mcporter call bouncer.bouncer_deploy \
 | `bouncer_deploy_history` | 查看部署歷史 | 自動 |
 | `bouncer_project_list` | 列出可部署專案 | 自動 |
 
+### 上傳
+| Tool | 說明 | 審批 |
+|------|------|------|
+| `bouncer_upload` | 上傳單一檔案到 S3 | 需審批（信任期間可自動） |
+| `bouncer_upload_batch` | 批量上傳多個檔案 | 需審批（信任期間可自動） |
+
+### 信任時段 (Trust Session)
+| Tool | 說明 | 審批 |
+|------|------|------|
+| `bouncer_approve_trust` | 開啟信任時段 | 由審批者觸發 |
+| `bouncer_revoke_trust` | 撤銷信任時段 | 自動 |
+
+### 批次授權 (Grant Session)
+| Tool | 說明 | 審批 |
+|------|------|------|
+| `bouncer_request_grant` | 申請批次命令授權 | 需審批 |
+| `bouncer_grant_execute` | 在授權範圍內執行命令 | 自動（授權內） |
+| `bouncer_grant_status` | 查詢授權狀態 | 自動 |
+
 ## 命令分類
 
 | 分類 | 行為 | 範例 |
