@@ -10,6 +10,7 @@ MCP 錯誤格式規則：
 
 import json
 import os
+import secrets
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -103,7 +104,7 @@ def _log_smart_approval_shadow(
         dynamodb = boto3_shadow.resource('dynamodb')
         table = dynamodb.Table(SHADOW_TABLE_NAME)
 
-        shadow_id = f"shadow-{generate_request_id()}"
+        shadow_id = f"shadow-{secrets.token_hex(12)}"
         item = {
             'request_id': shadow_id,
             'mcp_req_id': req_id,
