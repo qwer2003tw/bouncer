@@ -14,10 +14,12 @@ from decimal import Decimal
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
 HISTORY_TABLE = os.environ.get('HISTORY_TABLE', 'bouncer-deploy-history')
+LOCKS_TABLE = os.environ.get('LOCKS_TABLE', 'bouncer-deploy-locks')
 
 # DynamoDB
 dynamodb = boto3.resource('dynamodb')
 history_table = dynamodb.Table(HISTORY_TABLE)
+locks_table = dynamodb.Table(LOCKS_TABLE)
 
 
 def lambda_handler(event, context):
@@ -158,6 +160,9 @@ def handle_success(event):
         'build_id': build_id
     })
     
+    # 釋放部署鎖
+    release_lock(project_id)
+    
     return {'status': 'success'}
 
 
@@ -207,6 +212,9 @@ def handle_failure(event):
         'error_message': error_message[:1000],
         'error_phase': phase
     })
+    
+    # 釋放部署鎖
+    release_lock(project_id)
     
     return {'status': 'failed'}
 
@@ -287,6 +295,17 @@ def update_history(deploy_id: str, updates: dict):
         )
     except Exception as e:
         print(f"Error updating history: {e}")
+
+
+def release_lock(project_id: str):
+    """釋放部署鎖"""
+    if not project_id:
+        return
+    try:
+        locks_table.delete_item(Key={'project_id': project_id})
+        print(f"Released lock for {project_id}")
+    except Exception as e:
+        print(f"Error releasing lock for {project_id}: {e}")
 
 
 def format_duration(seconds: int) -> str:

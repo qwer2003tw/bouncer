@@ -345,8 +345,10 @@ Resources:
                 Action:
                   - dynamodb:UpdateItem
                   - dynamodb:GetItem
+                  - dynamodb:DeleteItem
                 Resource:
                   - !GetAtt DeployHistoryTable.Arn
+                  - !GetAtt DeployLocksTable.Arn
               - Sid: KMS
                 Effect: Allow
                 Action:
@@ -513,6 +515,7 @@ Resources:
           TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
           TELEGRAM_CHAT_ID: !Ref TelegramChatId
           HISTORY_TABLE: !Ref DeployHistoryTable
+          LOCKS_TABLE: !Ref DeployLocksTable
       Tags:
         Project: BounceDeployer
         auto-delete: "no"
