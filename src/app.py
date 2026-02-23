@@ -9,8 +9,6 @@ Bouncer - Clawdbot AWS 命令審批執行系統
 """
 
 import json
-import os
-import sys
 import hashlib
 import hmac
 import time

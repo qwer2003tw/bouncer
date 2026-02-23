@@ -206,7 +206,6 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
     Returns:
         命令輸出（成功或錯誤訊息）
     """
-    import sys
 
     try:
         # 解析命令字串為 argv list

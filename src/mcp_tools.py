@@ -28,21 +28,20 @@ from trust import (
     revoke_trust_session, increment_trust_command_count, should_trust_approve,
 )
 from telegram import escape_markdown, send_telegram_message
-from db import table, accounts_table
+from db import table
 from notifications import (
     send_approval_request,
     send_account_approval_request,
     send_trust_auto_approve_notification,
     send_grant_request_notification,
     send_grant_execute_notification,
-    send_grant_complete_notification,
 )
 from constants import (
     DEFAULT_ACCOUNT_ID, MCP_MAX_WAIT, RATE_LIMIT_WINDOW,
     TRUST_SESSION_MAX_COMMANDS,
     APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER, UPLOAD_TIMEOUT,
     AUDIT_TTL_SHORT,
-    GRANT_SESSION_ENABLED, GRANT_APPROVAL_TIMEOUT,
+    GRANT_SESSION_ENABLED,
 )
 
 
@@ -394,7 +393,6 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
         # 計算剩餘資訊
         granted_commands = grant.get('granted_commands', [])
         used_commands = grant.get('used_commands', {})
-        total_exec = int(grant.get('total_executions', 0)) + 1  # 已經 +1
         remaining_seconds = max(0, int(grant.get('expires_at', 0)) - int(time.time()))
         remaining_str = f"{remaining_seconds // 60}:{remaining_seconds % 60:02d}"
         remaining_info = f"{len(used_commands) + 1}/{len(granted_commands)} 命令, {remaining_str}"

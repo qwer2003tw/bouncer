@@ -241,7 +241,6 @@ def send_grant_request_notification(
             offset = len(grantable) + len(requires_individual)
             for i, d in enumerate(blocked[:max_display]):
                 cmd_preview = d['command'][:80]
-                block_reason = d.get('block_reason', '')
                 lines.append(f" {offset+i+1}\\. `{_escape_markdown(cmd_preview)}`")
             if len(blocked) > max_display:
                 lines.append(f" \\.\\.\\.及其他 {len(blocked) - max_display} 個命令")

@@ -41,9 +41,8 @@ def _get_accounts_table():
 
 def handle_grant_approve_all(query: dict, grant_id: str) -> dict:
     """處理 Grant 全部批准 callback"""
-    from grant import approve_grant, get_grant_session
-    from notifications import send_grant_complete_notification
-    from telegram import update_and_answer, escape_markdown
+    from grant import approve_grant
+    from telegram import update_and_answer
 
     callback_id = query.get('id', '')
     user_id = str(query.get('from', {}).get('id', ''))
@@ -79,9 +78,8 @@ def handle_grant_approve_all(query: dict, grant_id: str) -> dict:
 
 def handle_grant_approve_safe(query: dict, grant_id: str) -> dict:
     """處理 Grant 只批准安全命令 callback"""
-    from grant import approve_grant, get_grant_session
-    from notifications import send_grant_complete_notification
-    from telegram import update_and_answer, escape_markdown
+    from grant import approve_grant
+    from telegram import update_and_answer
 
     callback_id = query.get('id', '')
     user_id = str(query.get('from', {}).get('id', ''))

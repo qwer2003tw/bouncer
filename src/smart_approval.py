@@ -6,13 +6,11 @@ Bouncer - Smart Approval Module
 """
 
 import logging
-import os
-import sys
-from typing import Dict, Optional, Tuple
+from typing import Dict
 
 
 from risk_scorer import calculate_risk, RiskCategory, RiskResult, RiskFactor
-from sequence_analyzer import get_sequence_risk_modifier, record_command
+from sequence_analyzer import get_sequence_risk_modifier
 
 logger = logging.getLogger(__name__)
 

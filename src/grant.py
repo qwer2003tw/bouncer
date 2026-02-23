@@ -13,7 +13,6 @@ from botocore.exceptions import ClientError
 
 from db import table
 from constants import (
-    GRANT_SESSION_ENABLED,
     GRANT_MAX_TTL_MINUTES,
     GRANT_DEFAULT_TTL_MINUTES,
     GRANT_MAX_COMMANDS,
