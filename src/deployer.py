@@ -14,8 +14,6 @@ PROJECTS_TABLE = os.environ.get('PROJECTS_TABLE', 'bouncer-projects')
 HISTORY_TABLE = os.environ.get('HISTORY_TABLE', 'bouncer-deploy-history')
 LOCKS_TABLE = os.environ.get('LOCKS_TABLE', 'bouncer-deploy-locks')
 STATE_MACHINE_ARN = os.environ.get('DEPLOY_STATE_MACHINE_ARN', '')
-TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
-APPROVED_CHAT_ID = os.environ.get('APPROVED_CHAT_ID', '')
 
 # DynamoDB
 dynamodb = boto3.resource('dynamodb')
@@ -505,8 +503,7 @@ def mcp_tool_project_list(req_id, arguments: dict) -> dict:
 
 def send_deploy_approval_request(request_id: str, project: dict, branch: str, reason: str, source: str, context: str = None):
     """發送部署審批請求到 Telegram"""
-    import urllib.request
-    import urllib.parse
+    from telegram import send_telegram_message
 
     project_id = project.get('project_id', '')
     project_name = project.get('name', project_id)
@@ -546,22 +543,4 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
         ]]
     }
 
-    if not TELEGRAM_BOT_TOKEN or not APPROVED_CHAT_ID:
-        return
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    data = {
-        'chat_id': APPROVED_CHAT_ID,
-        'text': text,
-        'reply_markup': json.dumps(keyboard)
-    }
-
-    try:
-        req = urllib.request.Request(
-            url,
-            data=urllib.parse.urlencode(data).encode(),
-            method='POST'
-        )
-        urllib.request.urlopen(req, timeout=5)  # nosec B310
-    except Exception as e:
-        print(f"Telegram send error: {e}")
+    send_telegram_message(text, reply_markup=keyboard)

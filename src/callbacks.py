@@ -36,6 +36,79 @@ def _get_accounts_table():
     return app.accounts_table
 
 
+# ============================================================================
+# 共用函數
+# ============================================================================
+
+def _update_request_status(table, request_id: str, status: str, approver: str, extra_attrs: dict = None) -> None:
+    """更新 DynamoDB 請求狀態
+
+    Args:
+        table: DynamoDB table resource
+        request_id: 請求 ID
+        status: 新狀態 (approved/denied)
+        approver: 審批者 user_id
+        extra_attrs: 額外要更新的屬性 dict
+    """
+    now = int(time.time())
+    update_expr = 'SET #s = :s, approved_at = :t, approver = :a'
+    expr_names = {'#s': 'status'}
+    expr_values = {
+        ':s': status,
+        ':t': now,
+        ':a': approver,
+    }
+
+    if extra_attrs:
+        for key, value in extra_attrs.items():
+            placeholder = f':{key}'
+            # 處理保留字
+            if key in ('status', 'result'):
+                expr_names[f'#{key}'] = key
+                update_expr += f', #{key} = {placeholder}'
+            else:
+                update_expr += f', {key} = {placeholder}'
+            expr_values[placeholder] = value
+
+    table.update_item(
+        Key={'request_id': request_id},
+        UpdateExpression=update_expr,
+        ExpressionAttributeNames=expr_names,
+        ExpressionAttributeValues=expr_values,
+    )
+
+
+def _send_status_update(message_id: int, status_emoji: str, title: str, item: dict, extra_lines: str = '') -> None:
+    """更新 Telegram 訊息
+
+    Args:
+        message_id: Telegram 訊息 ID
+        status_emoji: 狀態 emoji (✅/❌)
+        title: 標題文字
+        item: 包含 request_id, source, context 等的 dict
+        extra_lines: 額外要加在訊息中的行
+    """
+    request_id = item.get('request_id', '')
+    source = item.get('source', '')
+    context = item.get('context', '')
+
+    source_line = f"🤖 *來源：* {source}\n" if source else ""
+    context_line = f"📝 *任務：* {context}\n" if context else ""
+
+    update_message(
+        message_id,
+        f"{status_emoji} *{title}*\n\n"
+        f"📋 *請求 ID：* `{request_id}`\n"
+        f"{source_line}"
+        f"{context_line}"
+        f"{extra_lines}"
+    )
+
+
+# ============================================================================
+# Command Callback
+# ============================================================================
+
 def handle_command_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str):
     """處理命令執行的審批 callback"""
     table = _get_table()
@@ -52,13 +125,15 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
     context_line = f"📝 *任務：* {context}\n" if context else ""
     account_line = f"🏢 *帳號：* `{account_id}` ({account_name})\n"
 
-    if action == 'approve':
+    if action in ('approve', 'approve_trust'):
         result = execute_command(command, assume_role)
         paged = store_paged_output(request_id, result)
 
         now = int(time.time())
         created_at = int(item.get('created_at', 0))
         decision_latency_ms = (now - created_at) * 1000 if created_at else 0
+
+        decision_type = 'manual_approved_trust' if action == 'approve_trust' else 'manual_approved'
 
         # 存入 DynamoDB（包含分頁資訊）
         update_expr = 'SET #s = :s, #r = :r, approved_at = :t, approver = :a, decision_type = :dt, decided_at = :da, decision_latency_ms = :dl'
@@ -68,7 +143,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             ':r': paged['result'],
             ':t': now,
             ':a': user_id,
-            ':dt': 'manual_approved',
+            ':dt': decision_type,
             ':da': now,
             ':dl': decision_latency_ms
         }
@@ -87,85 +162,34 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             ExpressionAttributeValues=expr_values
         )
 
-        result_preview = result[:1000] if len(result) > 1000 else result
+        # 信任模式
+        trust_line = ""
+        if action == 'approve_trust':
+            trust_id = create_trust_session(source, account_id, user_id)
+            trust_line = f"\n\n🔓 信任時段已啟動：`{trust_id}`"
+
+        max_preview = 800 if action == 'approve_trust' else 1000
+        result_preview = result[:max_preview] if len(result) > max_preview else result
         if paged.get('paged'):
             truncate_notice = f"\n\n⚠️ 輸出較長 ({paged['output_length']} 字元，共 {paged['total_pages']} 頁)"
         else:
             truncate_notice = ""
+
+        title = "✅ *已批准並執行* + 🔓 *信任 10 分鐘*" if action == 'approve_trust' else "✅ *已批准並執行*"
+        cb_text = '✅ 已執行 + 🔓 信任啟動' if action == 'approve_trust' else '✅ 已執行'
+
         update_and_answer(
             message_id,
-            f"✅ *已批准並執行*\n\n"
+            f"{title}\n\n"
             f"🆔 *ID：* `{request_id}`\n"
             f"{source_line}"
             f"{context_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{command}`\n\n"
             f"💬 *原因：* {reason}\n\n"
-            f"📤 *結果：*\n```\n{result_preview}\n```{truncate_notice}",
+            f"📤 *結果：*\n```\n{result_preview}\n```{truncate_notice}{trust_line}",
             callback_id,
-            '✅ 已執行'
-        )
-        # 自動發送剩餘頁面
-        if paged.get('paged'):
-            send_remaining_pages(request_id, paged['total_pages'])
-
-    elif action == 'approve_trust':
-        # 批准並建立信任時段
-        result = execute_command(command, assume_role)
-        paged = store_paged_output(request_id, result)
-
-        now = int(time.time())
-        created_at = int(item.get('created_at', 0))
-        decision_latency_ms = (now - created_at) * 1000 if created_at else 0
-
-        # 存入 DynamoDB（包含分頁資訊）
-        update_expr = 'SET #s = :s, #r = :r, approved_at = :t, approver = :a, decision_type = :dt, decided_at = :da, decision_latency_ms = :dl'
-        expr_names = {'#s': 'status', '#r': 'result'}
-        expr_values = {
-            ':s': 'approved',
-            ':r': paged['result'],
-            ':t': now,
-            ':a': user_id,
-            ':dt': 'manual_approved_trust',
-            ':da': now,
-            ':dl': decision_latency_ms
-        }
-
-        if paged.get('paged'):
-            update_expr += ', paged = :p, total_pages = :tp, output_length = :ol, next_page = :np'
-            expr_values[':p'] = True
-            expr_values[':tp'] = paged['total_pages']
-            expr_values[':ol'] = paged['output_length']
-            expr_values[':np'] = paged.get('next_page')
-
-        table.update_item(
-            Key={'request_id': request_id},
-            UpdateExpression=update_expr,
-            ExpressionAttributeNames=expr_names,
-            ExpressionAttributeValues=expr_values
-        )
-
-        # 建立信任時段
-        trust_id = create_trust_session(source, account_id, user_id)
-
-        result_preview = result[:800] if len(result) > 800 else result
-        if paged.get('paged'):
-            truncate_notice = f"\n\n⚠️ 輸出較長 ({paged['output_length']} 字元，共 {paged['total_pages']} 頁)"
-        else:
-            truncate_notice = ""
-        update_and_answer(
-            message_id,
-            f"✅ *已批准並執行* + 🔓 *信任 10 分鐘*\n\n"
-            f"🆔 *ID：* `{request_id}`\n"
-            f"{source_line}"
-            f"{context_line}"
-            f"{account_line}"
-            f"📋 *命令：*\n`{command}`\n\n"
-            f"💬 *原因：* {reason}\n\n"
-            f"📤 *結果：*\n```\n{result_preview}\n```{truncate_notice}\n\n"
-            f"🔓 信任時段已啟動：`{trust_id}`",
-            callback_id,
-            '✅ 已執行 + 🔓 信任啟動'
+            cb_text
         )
         # 自動發送剩餘頁面
         if paged.get('paged'):
@@ -176,19 +200,11 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         created_at = int(item.get('created_at', 0))
         decision_latency_ms = (now - created_at) * 1000 if created_at else 0
 
-        table.update_item(
-            Key={'request_id': request_id},
-            UpdateExpression='SET #s = :s, approved_at = :t, approver = :a, decision_type = :dt, decided_at = :da, decision_latency_ms = :dl',
-            ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={
-                ':s': 'denied',
-                ':t': now,
-                ':a': user_id,
-                ':dt': 'manual_denied',
-                ':da': now,
-                ':dl': decision_latency_ms
-            }
-        )
+        _update_request_status(table, request_id, 'denied', user_id, extra_attrs={
+            'decision_type': 'manual_denied',
+            'decided_at': now,
+            'decision_latency_ms': decision_latency_ms,
+        })
 
         update_and_answer(
             message_id,
@@ -206,6 +222,10 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
     return response(200, {'ok': True})
 
 
+# ============================================================================
+# Account Add Callback
+# ============================================================================
+
 def handle_account_add_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str):
     """處理新增帳號的審批 callback"""
     table = _get_table()
@@ -217,8 +237,10 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
     source = item.get('source', '')
     context = item.get('context', '')
 
-    source_line = f"🤖 *來源：* {source}\n" if source else ""
-    context_line = f"📝 *任務：* {context}\n" if context else ""
+    detail_lines = (
+        f"🆔 *帳號 ID：* `{account_id}`\n"
+        f"📛 *名稱：* {account_name}"
+    )
 
     if action == 'approve':
         # 寫入帳號配置
@@ -233,26 +255,12 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
                 'created_by': user_id
             })
 
-            table.update_item(
-                Key={'request_id': request_id},
-                UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
-                ExpressionAttributeNames={'#s': 'status'},
-                ExpressionAttributeValues={
-                    ':s': 'approved',
-                    ':t': int(time.time()),
-                    ':a': user_id
-                }
-            )
+            _update_request_status(table, request_id, 'approved', user_id)
 
-            update_message(
-                message_id,
-                f"✅ *已新增帳號*\n\n"
-                f"📋 *請求 ID：* `{request_id}`\n"
-                f"{source_line}"
-                f"{context_line}"
-                f"🆔 *帳號 ID：* `{account_id}`\n"
-                f"📛 *名稱：* {account_name}\n"
-                f"🔗 *Role：* `{role_arn}`"
+            _send_status_update(
+                message_id, '✅', '已新增帳號',
+                {'request_id': request_id, 'source': source, 'context': context},
+                extra_lines=f"{detail_lines}\n🔗 *Role：* `{role_arn}`"
             )
             answer_callback(callback_id, '✅ 帳號已新增')
 
@@ -261,30 +269,21 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
             return response(500, {'error': str(e)})
 
     elif action == 'deny':
-        table.update_item(
-            Key={'request_id': request_id},
-            UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
-            ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={
-                ':s': 'denied',
-                ':t': int(time.time()),
-                ':a': user_id
-            }
-        )
+        _update_request_status(table, request_id, 'denied', user_id)
 
-        update_message(
-            message_id,
-            f"❌ *已拒絕新增帳號*\n\n"
-            f"📋 *請求 ID：* `{request_id}`\n"
-            f"{source_line}"
-            f"{context_line}"
-            f"🆔 *帳號 ID：* `{account_id}`\n"
-            f"📛 *名稱：* {account_name}"
+        _send_status_update(
+            message_id, '❌', '已拒絕新增帳號',
+            {'request_id': request_id, 'source': source, 'context': context},
+            extra_lines=detail_lines
         )
         answer_callback(callback_id, '❌ 已拒絕')
 
     return response(200, {'ok': True})
 
+
+# ============================================================================
+# Account Remove Callback
+# ============================================================================
 
 def handle_account_remove_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str):
     """處理移除帳號的審批 callback"""
@@ -296,32 +295,21 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
     source = item.get('source', '')
     context = item.get('context', '')
 
-    source_line = f"🤖 *來源：* {source}\n" if source else ""
-    context_line = f"📝 *任務：* {context}\n" if context else ""
+    detail_lines = (
+        f"🆔 *帳號 ID：* `{account_id}`\n"
+        f"📛 *名稱：* {account_name}"
+    )
 
     if action == 'approve':
         try:
             accounts_table.delete_item(Key={'account_id': account_id})
 
-            table.update_item(
-                Key={'request_id': request_id},
-                UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
-                ExpressionAttributeNames={'#s': 'status'},
-                ExpressionAttributeValues={
-                    ':s': 'approved',
-                    ':t': int(time.time()),
-                    ':a': user_id
-                }
-            )
+            _update_request_status(table, request_id, 'approved', user_id)
 
-            update_message(
-                message_id,
-                f"✅ *已移除帳號*\n\n"
-                f"📋 *請求 ID：* `{request_id}`\n"
-                f"{source_line}"
-                f"{context_line}"
-                f"🆔 *帳號 ID：* `{account_id}`\n"
-                f"📛 *名稱：* {account_name}"
+            _send_status_update(
+                message_id, '✅', '已移除帳號',
+                {'request_id': request_id, 'source': source, 'context': context},
+                extra_lines=detail_lines
             )
             answer_callback(callback_id, '✅ 帳號已移除')
 
@@ -330,30 +318,21 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
             return response(500, {'error': str(e)})
 
     elif action == 'deny':
-        table.update_item(
-            Key={'request_id': request_id},
-            UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
-            ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={
-                ':s': 'denied',
-                ':t': int(time.time()),
-                ':a': user_id
-            }
-        )
+        _update_request_status(table, request_id, 'denied', user_id)
 
-        update_message(
-            message_id,
-            f"❌ *已拒絕移除帳號*\n\n"
-            f"📋 *請求 ID：* `{request_id}`\n"
-            f"{source_line}"
-            f"{context_line}"
-            f"🆔 *帳號 ID：* `{account_id}`\n"
-            f"📛 *名稱：* {account_name}"
+        _send_status_update(
+            message_id, '❌', '已拒絕移除帳號',
+            {'request_id': request_id, 'source': source, 'context': context},
+            extra_lines=detail_lines
         )
         answer_callback(callback_id, '❌ 已拒絕')
 
     return response(200, {'ok': True})
 
+
+# ============================================================================
+# Deploy Callback
+# ============================================================================
 
 def handle_deploy_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str):
     """處理部署的審批 callback"""
@@ -372,17 +351,7 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
     context_line = f"📝 *任務：* {context}\n" if context else ""
 
     if action == 'approve':
-        # 更新審批狀態
-        table.update_item(
-            Key={'request_id': request_id},
-            UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
-            ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={
-                ':s': 'approved',
-                ':t': int(time.time()),
-                ':a': user_id
-            }
-        )
+        _update_request_status(table, request_id, 'approved', user_id)
 
         # 啟動部署
         result = start_deploy(project_id, branch, user_id, reason)
@@ -418,16 +387,7 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
             answer_callback(callback_id, '🚀 部署已啟動')
 
     elif action == 'deny':
-        table.update_item(
-            Key={'request_id': request_id},
-            UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
-            ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={
-                ':s': 'denied',
-                ':t': int(time.time()),
-                ':a': user_id
-            }
-        )
+        _update_request_status(table, request_id, 'denied', user_id)
 
         update_message(
             message_id,
@@ -444,6 +404,10 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
 
     return response(200, {'ok': True})
 
+
+# ============================================================================
+# Upload Callback
+# ============================================================================
 
 def handle_upload_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str):
     """處理上傳的審批 callback"""
@@ -508,16 +472,7 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
             answer_callback(callback_id, '❌ 上傳失敗')
 
     elif action == 'deny':
-        table.update_item(
-            Key={'request_id': request_id},
-            UpdateExpression='SET #s = :s, approved_at = :t, approver = :a',
-            ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={
-                ':s': 'denied',
-                ':t': int(time.time()),
-                ':a': user_id
-            }
-        )
+        _update_request_status(table, request_id, 'denied', user_id)
 
         update_message(
             message_id,
