@@ -88,6 +88,7 @@ def _log_smart_approval_shadow(
     source: str,
     account_id: str,
     smart_decision,
+    actual_decision: str = '',
 ) -> None:
     """
     記錄智慧審批決策到 DynamoDB（Shadow Mode）
@@ -99,23 +100,25 @@ def _log_smart_approval_shadow(
         dynamodb = boto3_shadow.resource('dynamodb')
         table = dynamodb.Table(SHADOW_TABLE_NAME)
 
+        shadow_id = f"shadow-{generate_request_id()}"
         item = {
-            'request_id': req_id,
+            'request_id': shadow_id,
+            'mcp_req_id': req_id,
             'timestamp': int(time.time()),
-            'command': command[:500],  # 截斷過長命令
+            'command': command[:500],
             'reason': reason[:200],
             'source': source or 'unknown',
             'account_id': account_id,
             'smart_decision': smart_decision.decision,
             'smart_score': smart_decision.final_score,
             'smart_category': smart_decision.risk_result.category.value,
-            'smart_factors': json.dumps([f.__dict__ for f in smart_decision.risk_result.factors[:5]], default=str),  # JSON string 避免 float
-            # 30 天後自動刪除
+            'smart_factors': json.dumps([f.__dict__ for f in smart_decision.risk_result.factors[:5]], default=str),
+            'actual_decision': actual_decision,
             'ttl': int(time.time()) + AUDIT_TTL_SHORT,
         }
 
         table.put_item(Item=item)
-        print(f"[SHADOW] Logged: {req_id} -> {smart_decision.decision} (score={smart_decision.final_score})")
+        print(f"[SHADOW] Logged: {shadow_id} -> {smart_decision.decision} (score={smart_decision.final_score}, actual={actual_decision})")
     except Exception as e:
         # Shadow 記錄失敗不影響主流程
         print(f"[SHADOW] Failed to log: {e}")
@@ -230,16 +233,33 @@ def _score_risk(ctx: ExecuteContext) -> None:
             account_id=ctx.account_id,
             enable_sequence_analysis=False,
         )
-        _log_smart_approval_shadow(
-            req_id=ctx.req_id,
-            command=ctx.command,
-            reason=ctx.reason,
-            source=ctx.source,
-            account_id=ctx.account_id,
-            smart_decision=ctx.smart_decision,
-        )
     except Exception as e:
         print(f"[SHADOW] Smart approval error: {e}")
+
+
+def _extract_actual_decision(result: dict) -> str:
+    """Extract actual decision from pipeline result for shadow comparison."""
+    try:
+        content = result.get('result', {}).get('content', [{}])
+        if content:
+            text = content[0].get('text', '{}')
+            data = json.loads(text)
+            status = data.get('status', '')
+            # Map to comparable decision labels
+            if status == 'auto_approved':
+                return 'auto_approve'
+            elif status == 'blocked':
+                return 'blocked'
+            elif status == 'compliance_blocked':
+                return 'blocked'
+            elif status == 'pending_approval':
+                return 'needs_approval'
+            elif status == 'trust_auto_approved':
+                return 'auto_approve'
+            return status
+    except Exception:
+        pass
+    return 'unknown'
 
 
 def _check_compliance(ctx: ExecuteContext) -> Optional[dict]:
@@ -533,6 +553,19 @@ def mcp_tool_execute(req_id: str, arguments: dict) -> dict:
         or _check_trust_session(ctx)
         or _submit_for_approval(ctx)
     )
+
+    # Phase 4: Log shadow with actual decision for comparison
+    if ctx.smart_decision:
+        actual = _extract_actual_decision(result)
+        _log_smart_approval_shadow(
+            req_id=ctx.req_id,
+            command=ctx.command,
+            reason=ctx.reason,
+            source=ctx.source,
+            account_id=ctx.account_id,
+            smart_decision=ctx.smart_decision,
+            actual_decision=actual,
+        )
 
     return result
 
