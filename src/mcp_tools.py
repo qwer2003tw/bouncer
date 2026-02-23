@@ -109,7 +109,7 @@ def _log_smart_approval_shadow(
             'smart_decision': smart_decision.decision,
             'smart_score': smart_decision.final_score,
             'smart_category': smart_decision.risk_result.category.value,
-            'smart_factors': [f.__dict__ for f in smart_decision.risk_result.factors[:5]],  # 只記錄前 5 個因素
+            'smart_factors': json.dumps([f.__dict__ for f in smart_decision.risk_result.factors[:5]], default=str),  # JSON string 避免 float
             # 30 天後自動刪除
             'ttl': int(time.time()) + AUDIT_TTL_SHORT,
         }
