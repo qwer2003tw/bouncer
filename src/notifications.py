@@ -29,7 +29,7 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
                           assume_role: str = None, context: str = None):
     """發送 Telegram 審批請求"""
     cmd_preview = command if len(command) <= 500 else command[:500] + '...'
-    cmd_preview = _escape_markdown(cmd_preview)
+    # cmd_preview 放在 backtick code block 裡，不需要 escape
     reason = _escape_markdown(reason)
     source = _escape_markdown(source) if source else None
 
@@ -146,7 +146,7 @@ def send_trust_auto_approve_notification(command: str, trust_id: str, remaining:
                                          result: str = None, source: str = None):
     """發送 Trust Session 自動批准的靜默通知"""
     cmd_preview = command if len(command) <= 100 else command[:100] + '...'
-    cmd_preview = _escape_markdown(cmd_preview)
+    # code block 內不需要 escape
 
     result_preview = ""
     if result:
@@ -155,16 +155,16 @@ def send_trust_auto_approve_notification(command: str, trust_id: str, remaining:
         else:
             result_status = "✅"
         result_text = result[:200] + '...' if len(result) > 200 else result
-        result_text = _escape_markdown(result_text)
+        # code block 內不需要 escape
         result_preview = f"\n{result_status} `{result_text}`"
 
-    source_line = f"🤖 `{_escape_markdown(source)}` · " if source else ""
+    source_line = f"🤖 `{source}` · " if source else ""
     remaining_line = f"⏱ {remaining}" if remaining else ""
     session_info = f"{source_line}{remaining_line}".strip()
     session_line = f"\n{session_info}" if session_info else ""
 
     text = (
-        f"🔓 *自動批准* \\(信任中\\)\n"
+        f"🔓 *自動批准* (信任中)\n"
         f"📋 `{cmd_preview}`\n"
         f"📊 {count}/{TRUST_SESSION_MAX_COMMANDS}"
         f"{session_line}"
