@@ -245,28 +245,44 @@ def _score_risk(ctx: ExecuteContext) -> None:
 
 
 def _extract_actual_decision(result: dict) -> str:
-    """Extract actual decision from pipeline result for shadow comparison."""
+    """Extract actual decision from pipeline result for shadow comparison.
+
+    Pipeline returns: {'statusCode': 200, 'body': '{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"{\\"status\\":\\"auto_approved\\",...}"}]}}'}
+    """
     try:
-        content = result.get('result', {}).get('content', [{}])
-        if content:
-            text = content[0].get('text', '{}')
-            data = json.loads(text)
-            status = data.get('status', '')
-            # Map to comparable decision labels
-            if status == 'auto_approved':
-                return 'auto_approve'
-            elif status == 'blocked':
-                return 'blocked'
-            elif status == 'compliance_blocked':
-                return 'blocked'
-            elif status == 'pending_approval':
-                return 'needs_approval'
-            elif status == 'trust_auto_approved':
-                return 'auto_approve'
-            return status
+        body = result.get('body', '{}')
+        if isinstance(body, str):
+            body = json.loads(body)
+        # MCP result path
+        content = body.get('result', {}).get('content', [])
+        if not content:
+            # MCP error path
+            if 'error' in body:
+                return 'error'
+            # REST path (body is the response directly)
+            status = body.get('status', '')
+            if status:
+                return _map_status_to_decision(status)
+            return 'unknown'
+        text = content[0].get('text', '{}')
+        data = json.loads(text)
+        status = data.get('status', '')
+        return _map_status_to_decision(status)
     except Exception:
-        pass
-    return 'unknown'
+        return 'unknown'
+
+
+def _map_status_to_decision(status: str) -> str:
+    """Map pipeline status to comparable decision label."""
+    mapping = {
+        'auto_approved': 'auto_approve',
+        'blocked': 'blocked',
+        'compliance_violation': 'blocked',
+        'pending_approval': 'needs_approval',
+        'trust_auto_approved': 'auto_approve',
+        'grant_auto_approved': 'auto_approve',
+    }
+    return mapping.get(status, status or 'unknown')
 
 
 def _check_compliance(ctx: ExecuteContext) -> Optional[dict]:
