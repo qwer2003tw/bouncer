@@ -514,7 +514,7 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
 # Public Entry Point
 # =============================================================================
 
-def mcp_tool_execute(req_id, arguments: dict) -> dict:
+def mcp_tool_execute(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_execute（預設異步，立即返回 request_id）"""
     # Phase 1: Parse & validate request, resolve account
     ctx = _parse_execute_request(req_id, arguments)
@@ -537,7 +537,7 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
     return result
 
 
-def mcp_tool_status(req_id, arguments: dict) -> dict:
+def mcp_tool_status(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_status"""
     request_id = arguments.get('request_id', '')
 
@@ -571,7 +571,7 @@ def mcp_tool_status(req_id, arguments: dict) -> dict:
         return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
 
 
-def mcp_tool_help(req_id, arguments: dict) -> dict:
+def mcp_tool_help(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_help - 查詢 AWS CLI 命令說明"""
     try:
         from help_command import get_command_help, get_service_operations, format_help_text
@@ -602,7 +602,7 @@ def mcp_tool_help(req_id, arguments: dict) -> dict:
     })
 
 
-def mcp_tool_trust_status(req_id, arguments: dict) -> dict:
+def mcp_tool_trust_status(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_trust_status"""
     source = arguments.get('source')
     now = int(time.time())
@@ -661,7 +661,7 @@ def mcp_tool_trust_status(req_id, arguments: dict) -> dict:
         return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
 
 
-def mcp_tool_trust_revoke(req_id, arguments: dict) -> dict:
+def mcp_tool_trust_revoke(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_trust_revoke"""
     trust_id = arguments.get('trust_id', '')
 
@@ -683,7 +683,7 @@ def mcp_tool_trust_revoke(req_id, arguments: dict) -> dict:
     })
 
 
-def mcp_tool_add_account(req_id, arguments: dict) -> dict:
+def mcp_tool_add_account(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_add_account（需要 Telegram 審批）"""
 
     account_id = str(arguments.get('account_id', '')).strip()
@@ -746,7 +746,7 @@ def mcp_tool_add_account(req_id, arguments: dict) -> dict:
     })
 
 
-def mcp_tool_list_accounts(req_id, arguments: dict) -> dict:
+def mcp_tool_list_accounts(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_list_accounts"""
     init_default_account()
     accounts = list_accounts()
@@ -761,7 +761,7 @@ def mcp_tool_list_accounts(req_id, arguments: dict) -> dict:
     })
 
 
-def mcp_tool_get_page(req_id, arguments: dict) -> dict:
+def mcp_tool_get_page(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_get_page - 取得長輸出的下一頁"""
     page_id = str(arguments.get('page_id', '')).strip()
 
@@ -781,7 +781,7 @@ def mcp_tool_get_page(req_id, arguments: dict) -> dict:
     })
 
 
-def mcp_tool_list_pending(req_id, arguments: dict) -> dict:
+def mcp_tool_list_pending(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_list_pending - 列出待審批請求"""
     source = arguments.get('source')
     limit = min(int(arguments.get('limit', 20)), 100)
@@ -846,7 +846,7 @@ def mcp_tool_list_pending(req_id, arguments: dict) -> dict:
         return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
 
 
-def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
+def mcp_tool_remove_account(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_remove_account（需要 Telegram 審批）"""
 
     account_id = str(arguments.get('account_id', '')).strip()
@@ -1160,7 +1160,7 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
     })
 
 
-def mcp_tool_upload(req_id, arguments: dict) -> dict:
+def mcp_tool_upload(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_upload（上傳檔案到 S3 桶，支援跨帳號，需要 Telegram 審批）"""
     # Phase 1: Parse & validate request, resolve account
     ctx = _parse_upload_request(req_id, arguments)

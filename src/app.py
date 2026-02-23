@@ -70,7 +70,7 @@ from db import table, accounts_table  # noqa: F401
 # Lambda Handler
 # ============================================================================
 
-def lambda_handler(event, context):
+def lambda_handler(event: dict, context) -> dict:
     """主入口 - 路由請求"""
     # 初始化 Bot commands（cold start 時執行一次）
     init_bot_commands()
@@ -470,7 +470,7 @@ def handle_status_query(event, path):
         return response(500, {'error': str(e)})
 
 
-def handle_clawdbot_request(event):
+def handle_clawdbot_request(event: dict) -> dict:
     """處理 REST API 的命令執行請求（向後兼容）"""
     headers = event.get('headers', {})
 
@@ -605,7 +605,7 @@ def wait_for_result_rest(request_id: str, timeout: int = 50) -> dict:
 # Telegram Webhook Handler
 # ============================================================================
 
-def handle_telegram_webhook(event):
+def handle_telegram_webhook(event: dict) -> dict:
     """處理 Telegram callback"""
     headers = event.get('headers', {})
 
