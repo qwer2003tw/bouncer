@@ -14,6 +14,7 @@ from constants import BLOCKED_PATTERNS, DANGEROUS_PATTERNS, AUTO_APPROVE_PREFIXE
 
 __all__ = [
     'is_blocked',
+    'get_block_reason',
     'is_dangerous',
     'is_auto_approve',
     'execute_command',
@@ -29,30 +30,48 @@ def _normalize_whitespace(command: str) -> str:
 
 def is_blocked(command: str) -> bool:
     """Layer 1: 檢查命令是否在黑名單（絕對禁止）"""
-    # 正規化空白（防止雙空格繞過）
+    reason = get_block_reason(command)
+    return reason is not None
+
+
+def get_block_reason(command: str) -> str | None:
+    """檢查命令是否被封鎖，回傳封鎖原因或 None"""
     cmd_normalized = _normalize_whitespace(command)
     # 移除 --query 參數內容（JMESPath 語法可能包含反引號）
     cmd_sanitized = re.sub(r"--query\s+['\"].*?['\"]", "--query REDACTED", cmd_normalized)
     cmd_sanitized = re.sub(r"--query\s+[^\s'\"]+", "--query REDACTED", cmd_sanitized)
     cmd_lower = cmd_sanitized.lower()
     # 檢查危險旗標
-    if _has_blocked_flag(cmd_lower):
-        return True
+    flag = _get_blocked_flag(cmd_lower)
+    if flag:
+        return f"危險旗標: {flag.strip()}"
     # 檢查 file:// 協議
     if _has_file_protocol(cmd_lower):
-        return True
-    return any(pattern in cmd_lower for pattern in BLOCKED_PATTERNS)
+        return "禁止使用 file:// 或 fileb:// 協議（本地檔案讀取風險）"
+    # 檢查封鎖 pattern
+    for pattern in BLOCKED_PATTERNS:
+        if pattern in cmd_lower:
+            return f"封鎖規則: {pattern}"
+    return None
 
 
-def _has_blocked_flag(cmd_lower: str) -> bool:
-    """檢查命令是否包含危險的全域旗標"""
+def _get_blocked_flag(cmd_lower: str) -> str | None:
+    """檢查命令是否包含危險的全域旗標，回傳匹配的旗標或 None"""
     blocked_flags = [
         '--endpoint-url ',   # 重定向 API 請求到外部
         '--profile ',        # 切換到未授權的 AWS profile
         '--no-verify-ssl',   # 禁用 SSL 驗證（MITM 風險）
         '--ca-bundle ',      # 使用自訂 CA 證書
     ]
-    return any(flag in cmd_lower for flag in blocked_flags)
+    for flag in blocked_flags:
+        if flag in cmd_lower:
+            return flag
+    return None
+
+
+def _has_blocked_flag(cmd_lower: str) -> bool:
+    """向後兼容包裝"""
+    return _get_blocked_flag(cmd_lower) is not None
 
 
 def _has_file_protocol(cmd_lower: str) -> bool:

@@ -18,7 +18,7 @@ from typing import Optional
 
 # 從其他模組導入
 from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native, log_decision
-from commands import is_blocked, is_auto_approve, execute_command
+from commands import get_block_reason, is_auto_approve, execute_command
 from accounts import (
     init_default_account, get_account, list_accounts,
     validate_account_id, validate_role_arn,
@@ -36,6 +36,7 @@ from notifications import (
     send_trust_auto_approve_notification,
     send_grant_request_notification,
     send_grant_execute_notification,
+    send_blocked_notification,
 )
 from constants import (
     DEFAULT_ACCOUNT_ID, MCP_MAX_WAIT, RATE_LIMIT_WINDOW,
@@ -310,7 +311,9 @@ def _check_compliance(ctx: ExecuteContext) -> Optional[dict]:
 
 def _check_blocked(ctx: ExecuteContext) -> Optional[dict]:
     """Layer 1: blocked commands."""
-    if is_blocked(ctx.command):
+    block_reason = get_block_reason(ctx.command)
+    if block_reason:
+        send_blocked_notification(ctx.command, block_reason, ctx.source)
         log_decision(
             table=table,
             request_id=generate_request_id(ctx.command),
@@ -328,8 +331,10 @@ def _check_blocked(ctx: ExecuteContext) -> Optional[dict]:
                 'type': 'text',
                 'text': json.dumps({
                     'status': 'blocked',
-                    'error': 'Command blocked for security',
-                    'command': ctx.command
+                    'error': '命令被安全規則封鎖',
+                    'block_reason': block_reason,
+                    'command': ctx.command[:200],
+                    'suggestion': '如果需要執行此操作，請聯繫管理員或使用替代方案',
                 })
             }],
             'isError': True

@@ -23,7 +23,7 @@ from telegram import (  # noqa: F401
 )
 from paging import store_paged_output, get_paged_output  # noqa: F401
 from trust import revoke_trust_session, create_trust_session, increment_trust_command_count, should_trust_approve, is_trust_excluded  # noqa: F401
-from commands import is_blocked, is_dangerous, is_auto_approve, execute_command, aws_cli_split  # noqa: F401
+from commands import is_blocked, get_block_reason, is_dangerous, is_auto_approve, execute_command, aws_cli_split  # noqa: F401
 from accounts import (  # noqa: F401
     init_bot_commands, init_default_account, get_account, list_accounts,
     validate_account_id, validate_role_arn,
@@ -510,7 +510,8 @@ def handle_clawdbot_request(event: dict) -> dict:
         return response(400, {'error': 'Missing command'})
 
     # Layer 1: BLOCKED
-    if is_blocked(command):
+    block_reason = get_block_reason(command)
+    if block_reason:
         log_decision(
             table=table,
             request_id=generate_request_id(command),
@@ -522,8 +523,9 @@ def handle_clawdbot_request(event: dict) -> dict:
         )
         return response(403, {
             'status': 'blocked',
-            'error': 'Command blocked for security',
-            'command': command
+            'error': '命令被安全規則封鎖',
+            'block_reason': block_reason,
+            'command': command[:200]
         })
 
     # Layer 2: SAFELIST
@@ -804,6 +806,7 @@ from notifications import (  # noqa: F401, E402
     send_grant_request_notification,
     send_grant_execute_notification,
     send_grant_complete_notification,
+    send_blocked_notification,
 )
 
 # ============================================================================

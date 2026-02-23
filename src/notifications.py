@@ -337,3 +337,25 @@ def send_grant_complete_notification(grant_id: str, reason: str) -> None:
 
     except Exception as e:
         print(f"[GRANT] send_grant_complete_notification error: {e}")
+
+
+def send_blocked_notification(
+    command: str,
+    block_reason: str,
+    source: str = '',
+) -> None:
+    """發送命令被封鎖的靜默通知"""
+    try:
+        cmd_preview = command[:100] + '...' if len(command) > 100 else command
+
+        text = (
+            f"🚫 *命令被封鎖*\n\n"
+            f"📋 `{cmd_preview}`\n"
+            f"❌ *原因：* {block_reason}\n"
+            f"🤖 *來源：* {source or 'Unknown'}"
+        )
+
+        _send_message_silent(text)
+
+    except Exception as e:
+        print(f"[BLOCKED] send_blocked_notification error: {e}")
