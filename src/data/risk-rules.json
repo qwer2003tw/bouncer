@@ -270,5 +270,16 @@
     "parameter": 0.3,
     "context": 0.2,
     "account": 0.1
-  }
+  },
+  "template_rules": [
+    {"id": "TP-001", "name": "Wildcard Action", "target": "iam_policy", "check": "action_wildcard", "score": 90, "description": "Policy contains Action:*"},
+    {"id": "TP-002", "name": "Wildcard Resource", "target": "iam_policy", "check": "resource_wildcard", "score": 85, "description": "Policy contains Resource:*"},
+    {"id": "TP-003", "name": "Wildcard Principal", "target": "trust_policy", "check": "principal_wildcard", "score": 90, "description": "Policy contains Principal:*"},
+    {"id": "TP-004", "name": "External Account Trust", "target": "trust_policy", "check": "external_account_trust", "score": 80, "description": "Trust policy references external AWS account"},
+    {"id": "TP-005", "name": "Open Ingress", "target": "security_group", "check": "open_ingress", "score": 75, "description": "Security Group allows 0.0.0.0/0 ingress"},
+    {"id": "TP-006", "name": "High Risk Port", "target": "security_group", "check": "high_risk_port", "score": 85, "description": "Security Group exposes high-risk port to 0.0.0.0/0"},
+    {"id": "TP-007", "name": "Hardcoded Secret", "target": "lambda_env", "check": "hardcoded_secret", "score": 80, "description": "Lambda environment contains potential hardcoded secrets"},
+    {"id": "TP-008", "name": "Admin Policy", "target": "iam_policy", "check": "admin_policy", "score": 95, "description": "Full admin policy: Allow + Action:* + Resource:*"},
+    {"id": "TP-009", "name": "Public Access", "target": "bucket_policy", "check": "public_access", "score": 85, "description": "Public access: Principal:* with Effect:Allow"}
+  ]
 }

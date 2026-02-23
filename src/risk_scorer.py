@@ -204,6 +204,7 @@ class RiskRules:
     blocked_patterns: List[str] = field(default_factory=list)
     account_sensitivity: Dict[str, int] = field(default_factory=dict)
     context_rules: List[Dict] = field(default_factory=list)
+    template_rules: List[Dict] = field(default_factory=list)
     weights: Dict[str, float] = field(default_factory=lambda: {
         'verb': 0.40,
         'parameter': 0.30,
@@ -384,6 +385,7 @@ def _dict_to_rules(data: Dict) -> RiskRules:
         blocked_patterns=data.get('blocked_patterns', []),
         account_sensitivity=data.get('account_sensitivity', {}),
         context_rules=data.get('context_rules', []),
+        template_rules=data.get('template_rules', []),
         weights=data.get('weights', {
             'verb': 0.40,
             'parameter': 0.30,
@@ -652,6 +654,21 @@ def score_parameters(
     # 3. 計算組合分數
     # 使用最高參數模式分數 + 旗標分數（上限 100）
     combined_score = min(100, max_pattern_score + flag_score_total)
+
+    # 4. Template scanning (Phase 4)
+    try:
+        from template_scanner import scan_command_payloads
+        template_rules = rules.template_rules if hasattr(rules, 'template_rules') else []
+        template_score, template_factors = scan_command_payloads(
+            parsed.original, template_rules,
+        )
+        if template_factors:
+            factors.extend(template_factors)
+            max_pattern_score = max(max_pattern_score, template_score)
+            combined_score = min(100, max(combined_score, max_pattern_score + flag_score_total))
+    except Exception as e:
+        print(f"[TEMPLATE_SCAN] Error: {e}")
+        # Fail-open: don't change score on scanner error
 
     # 如果沒有匹配任何模式或旗標，給予基礎分數
     if not factors:
