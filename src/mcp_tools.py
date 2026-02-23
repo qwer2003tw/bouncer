@@ -10,12 +10,10 @@ MCP 錯誤格式規則：
 
 import json
 import os
-import sys
 import time
 from dataclasses import dataclass
 from typing import Optional
 
-sys.path.insert(0, os.path.dirname(__file__))
 
 # 從其他模組導入
 from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native, log_decision
@@ -30,6 +28,12 @@ from trust import (
     revoke_trust_session, increment_trust_command_count, should_trust_approve,
 )
 from telegram import escape_markdown, send_telegram_message
+from db import table, accounts_table
+from notifications import (
+    send_approval_request,
+    send_account_approval_request,
+    send_trust_auto_approve_notification,
+)
 from constants import (
     DEFAULT_ACCOUNT_ID, MCP_MAX_WAIT, RATE_LIMIT_WINDOW,
     TRUST_SESSION_MAX_COMMANDS,
@@ -38,21 +42,8 @@ from constants import (
 )
 
 
-# 延遲 import 避免循環依賴
-def _get_app_module():
-    """延遲取得 app module 避免循環 import"""
-    import app as app_module
-    return app_module
-
-def _get_table():
-    """取得 DynamoDB table"""
-    app = _get_app_module()
-    return app.table
-
-def _get_accounts_table():
-    """取得 accounts DynamoDB table"""
-    app = _get_app_module()
-    return app.accounts_table
+# DynamoDB tables imported from db.py (no circular dependency)
+# Notification functions imported from notifications.py
 
 
 # 預設上傳帳號 ID（Bouncer 所在帳號）
@@ -259,7 +250,7 @@ def _check_compliance(ctx: ExecuteContext) -> Optional[dict]:
         if not is_compliant:
             print(f"[COMPLIANCE] Blocked: {violation.rule_id} - {violation.rule_name}")
             log_decision(
-                table=_get_table(),
+                table=table,
                 request_id=generate_request_id(ctx.command),
                 command=ctx.command,
                 reason=ctx.reason,
@@ -295,7 +286,7 @@ def _check_blocked(ctx: ExecuteContext) -> Optional[dict]:
     """Layer 1: blocked commands."""
     if is_blocked(ctx.command):
         log_decision(
-            table=_get_table(),
+            table=table,
             request_id=generate_request_id(ctx.command),
             command=ctx.command,
             reason=ctx.reason,
@@ -329,7 +320,7 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
     paged = store_paged_output(generate_request_id(ctx.command), result)
 
     log_decision(
-        table=_get_table(),
+        table=table,
         request_id=generate_request_id(ctx.command),
         command=ctx.command,
         reason=ctx.reason,
@@ -401,7 +392,6 @@ def _check_rate_limit(ctx: ExecuteContext) -> Optional[dict]:
 
 def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
     """Trust session auto-approve — execute if trusted."""
-    app = _get_app_module()
     should_trust, trust_session, trust_reason = should_trust_approve(
         ctx.command, ctx.source, ctx.account_id
     )
@@ -420,13 +410,13 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
     remaining_str = f"{remaining // 60}:{remaining % 60:02d}" if remaining > 0 else "0:00"
 
     # 發送靜默通知
-    app.send_trust_auto_approve_notification(
+    send_trust_auto_approve_notification(
         ctx.command, trust_session['request_id'], remaining_str, new_count, result,
         source=ctx.source
     )
 
     log_decision(
-        table=_get_table(),
+        table=table,
         request_id=generate_request_id(ctx.command),
         command=ctx.command,
         reason=ctx.reason,
@@ -469,8 +459,6 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
 
 def _submit_for_approval(ctx: ExecuteContext) -> dict:
     """Layer 3: submit for human approval — always returns a result."""
-    app = _get_app_module()
-    table = _get_table()
 
     request_id = generate_request_id(ctx.command)
     ttl = int(time.time()) + ctx.timeout + APPROVAL_TTL_BUFFER
@@ -499,7 +487,7 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
     table.put_item(Item=item)
 
     # 發送 Telegram 審批請求
-    app.send_approval_request(
+    send_approval_request(
         request_id, ctx.command, ctx.reason, ctx.timeout, ctx.source,
         ctx.account_id, ctx.account_name, context=ctx.context
     )
@@ -526,7 +514,7 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
 # Public Entry Point
 # =============================================================================
 
-def mcp_tool_execute(req_id, arguments: dict) -> dict:
+def mcp_tool_execute(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_execute（預設異步，立即返回 request_id）"""
     # Phase 1: Parse & validate request, resolve account
     ctx = _parse_execute_request(req_id, arguments)
@@ -549,9 +537,8 @@ def mcp_tool_execute(req_id, arguments: dict) -> dict:
     return result
 
 
-def mcp_tool_status(req_id, arguments: dict) -> dict:
+def mcp_tool_status(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_status"""
-    table = _get_table()
     request_id = arguments.get('request_id', '')
 
     if not request_id:
@@ -584,7 +571,7 @@ def mcp_tool_status(req_id, arguments: dict) -> dict:
         return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
 
 
-def mcp_tool_help(req_id, arguments: dict) -> dict:
+def mcp_tool_help(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_help - 查詢 AWS CLI 命令說明"""
     try:
         from help_command import get_command_help, get_service_operations, format_help_text
@@ -615,9 +602,8 @@ def mcp_tool_help(req_id, arguments: dict) -> dict:
     })
 
 
-def mcp_tool_trust_status(req_id, arguments: dict) -> dict:
+def mcp_tool_trust_status(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_trust_status"""
-    table = _get_table()
     source = arguments.get('source')
     now = int(time.time())
 
@@ -675,7 +661,7 @@ def mcp_tool_trust_status(req_id, arguments: dict) -> dict:
         return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
 
 
-def mcp_tool_trust_revoke(req_id, arguments: dict) -> dict:
+def mcp_tool_trust_revoke(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_trust_revoke"""
     trust_id = arguments.get('trust_id', '')
 
@@ -697,10 +683,8 @@ def mcp_tool_trust_revoke(req_id, arguments: dict) -> dict:
     })
 
 
-def mcp_tool_add_account(req_id, arguments: dict) -> dict:
+def mcp_tool_add_account(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_add_account（需要 Telegram 審批）"""
-    app = _get_app_module()
-    table = _get_table()
 
     account_id = str(arguments.get('account_id', '')).strip()
     name = str(arguments.get('name', '')).strip()
@@ -749,7 +733,7 @@ def mcp_tool_add_account(req_id, arguments: dict) -> dict:
     table.put_item(Item=item)
 
     # 發送 Telegram 審批
-    app.send_account_approval_request(request_id, 'add', account_id, name, role_arn, source, context=context)
+    send_account_approval_request(request_id, 'add', account_id, name, role_arn, source, context=context)
 
     # 一律異步返回（sync long-polling 已移除）
     return mcp_result(req_id, {
@@ -762,7 +746,7 @@ def mcp_tool_add_account(req_id, arguments: dict) -> dict:
     })
 
 
-def mcp_tool_list_accounts(req_id, arguments: dict) -> dict:
+def mcp_tool_list_accounts(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_list_accounts"""
     init_default_account()
     accounts = list_accounts()
@@ -777,7 +761,7 @@ def mcp_tool_list_accounts(req_id, arguments: dict) -> dict:
     })
 
 
-def mcp_tool_get_page(req_id, arguments: dict) -> dict:
+def mcp_tool_get_page(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_get_page - 取得長輸出的下一頁"""
     page_id = str(arguments.get('page_id', '')).strip()
 
@@ -797,9 +781,8 @@ def mcp_tool_get_page(req_id, arguments: dict) -> dict:
     })
 
 
-def mcp_tool_list_pending(req_id, arguments: dict) -> dict:
+def mcp_tool_list_pending(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_list_pending - 列出待審批請求"""
-    table = _get_table()
     source = arguments.get('source')
     limit = min(int(arguments.get('limit', 20)), 100)
 
@@ -863,10 +846,8 @@ def mcp_tool_list_pending(req_id, arguments: dict) -> dict:
         return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
 
 
-def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
+def mcp_tool_remove_account(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_remove_account（需要 Telegram 審批）"""
-    app = _get_app_module()
-    table = _get_table()
 
     account_id = str(arguments.get('account_id', '')).strip()
     source = arguments.get('source', None)
@@ -914,7 +895,7 @@ def mcp_tool_remove_account(req_id, arguments: dict) -> dict:
     table.put_item(Item=item)
 
     # 發送 Telegram 審批
-    app.send_account_approval_request(request_id, 'remove', account_id, account.get('name', ''), None, source, context=context)
+    send_account_approval_request(request_id, 'remove', account_id, account.get('name', ''), None, source, context=context)
 
     # 一律異步返回（sync long-polling 已移除）
     return mcp_result(req_id, {
@@ -1101,7 +1082,6 @@ def _check_upload_rate_limit(ctx: UploadContext) -> Optional[dict]:
 
 def _submit_upload_for_approval(ctx: UploadContext) -> dict:
     """Submit upload for human approval — always returns a result."""
-    table = _get_table()
 
     # 固定桶模式在 _resolve_upload_target 時 request_id 尚未設定
     if ctx.legacy_bucket and ctx.legacy_key:
@@ -1180,7 +1160,7 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
     })
 
 
-def mcp_tool_upload(req_id, arguments: dict) -> dict:
+def mcp_tool_upload(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_upload（上傳檔案到 S3 桶，支援跨帳號，需要 Telegram 審批）"""
     # Phase 1: Parse & validate request, resolve account
     ctx = _parse_upload_request(req_id, arguments)

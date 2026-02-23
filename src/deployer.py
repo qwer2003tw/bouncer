@@ -343,7 +343,7 @@ def get_deploy_status(deploy_id: str) -> dict:
 # MCP Tool Handlers
 # ============================================================================
 
-def mcp_tool_deploy(req_id, arguments: dict, table, send_approval_func) -> dict:
+def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> dict:
     """MCP tool: bouncer_deploy（需要審批）"""
     from app import mcp_result, mcp_error, generate_request_id
 
@@ -429,7 +429,7 @@ def mcp_tool_deploy(req_id, arguments: dict, table, send_approval_func) -> dict:
     })
 
 
-def mcp_tool_deploy_status(req_id, arguments: dict) -> dict:
+def mcp_tool_deploy_status(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_deploy_status"""
     from app import mcp_result, mcp_error, decimal_to_native
 
@@ -450,7 +450,7 @@ def mcp_tool_deploy_status(req_id, arguments: dict) -> dict:
     })
 
 
-def mcp_tool_deploy_cancel(req_id, arguments: dict) -> dict:
+def mcp_tool_deploy_cancel(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_deploy_cancel"""
     from app import mcp_result, mcp_error
 
@@ -466,7 +466,7 @@ def mcp_tool_deploy_cancel(req_id, arguments: dict) -> dict:
     })
 
 
-def mcp_tool_deploy_history(req_id, arguments: dict) -> dict:
+def mcp_tool_deploy_history(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_deploy_history"""
     from app import mcp_result, mcp_error, decimal_to_native
 

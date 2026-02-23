@@ -71,7 +71,8 @@ def app_module(mock_dynamodb):
     os.environ['MCP_MAX_WAIT'] = '5'  # 測試用短時間
     
     # 重新載入模組（包括新模組）
-    for mod in ['app', 'telegram', 'paging', 'trust', 'commands',
+    for mod in ['app', 'telegram', 'paging', 'trust', 'commands', 'notifications', 'db',
+                'callbacks', 'mcp_tools', 'accounts', 'rate_limit', 'smart_approval',
                 'src.app', 'src.telegram', 'src.paging', 'src.trust', 'src.commands']:
         if mod in sys.modules:
             del sys.modules[mod]
@@ -80,8 +81,11 @@ def app_module(mock_dynamodb):
     import app
     
     # 注入 mock table
+    import db
     app.table = mock_dynamodb.Table('clawdbot-approval-requests')
     app.dynamodb = mock_dynamodb
+    db.table = app.table
+    db.accounts_table = app.accounts_table if hasattr(app, 'accounts_table') else mock_dynamodb.Table('bouncer-accounts')
     
     yield app
     
@@ -217,7 +221,7 @@ class TestMCPExecuteBlocked:
 class TestMCPExecuteApproval:
     """MCP bouncer_execute APPROVAL 測試"""
     
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_execute_needs_approval_async(self, mock_telegram, app_module):
         """測試需要審批的命令（預設異步，立即返回 pending_approval）"""
         event = {
@@ -247,7 +251,7 @@ class TestMCPExecuteApproval:
         assert 'request_id' in content
         assert mock_telegram.called
     
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_execute_approved(self, mock_telegram, app_module):
         """測試審批通過的命令"""
         
@@ -452,7 +456,7 @@ class TestRESTBlocked:
 class TestRESTApproval:
     """REST API APPROVAL 測試"""
     
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_approval_pending(self, mock_telegram, app_module):
         """測試 REST API 待審批（非等待模式）"""
         event = {
@@ -2274,7 +2278,9 @@ class TestTelegramCallbackHandlers:
         }
         
         # Mock accounts_table
-        with patch.object(app_module, 'accounts_table') as mock_accounts:
+        import db
+        with patch.object(app_module, 'accounts_table') as mock_accounts, \
+             patch.object(db, 'accounts_table', mock_accounts):
             mock_accounts.put_item = MagicMock()
             result = app_module.lambda_handler(event, None)
             assert result['statusCode'] == 200
@@ -2344,7 +2350,9 @@ class TestTelegramCallbackHandlers:
         }
         
         # Mock accounts_table
-        with patch.object(app_module, 'accounts_table') as mock_accounts:
+        import db
+        with patch.object(app_module, 'accounts_table') as mock_accounts, \
+             patch.object(db, 'accounts_table', mock_accounts):
             mock_accounts.delete_item = MagicMock()
             result = app_module.lambda_handler(event, None)
             assert result['statusCode'] == 200
@@ -2973,7 +2981,7 @@ class TestTrustModuleAdditional:
 class TestUploadFunctionality:
     """Upload 功能測試"""
     
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_mcp_tool_upload_missing_filename(self, mock_telegram, app_module):
         """上傳缺少 filename"""
         result = app_module.mcp_tool_upload('test-1', {
@@ -2986,7 +2994,7 @@ class TestUploadFunctionality:
         assert content['status'] == 'error'
         assert 'filename' in content['error']
     
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_mcp_tool_upload_missing_content(self, mock_telegram, app_module):
         """上傳缺少 content"""
         result = app_module.mcp_tool_upload('test-1', {
@@ -2999,7 +3007,7 @@ class TestUploadFunctionality:
         assert content['status'] == 'error'
         assert 'content' in content['error']
     
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_mcp_tool_upload_invalid_base64(self, mock_telegram, app_module):
         """上傳無效 base64"""
         result = app_module.mcp_tool_upload('test-1', {
@@ -3013,7 +3021,7 @@ class TestUploadFunctionality:
         assert content['status'] == 'error'
         assert 'base64' in content['error'].lower()
     
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_mcp_tool_upload_too_large(self, mock_telegram, app_module):
         """上傳檔案過大"""
         import base64
@@ -3031,7 +3039,7 @@ class TestUploadFunctionality:
         assert content['status'] == 'error'
         assert 'too large' in content['error'].lower() or 'large' in content['error'].lower()
     
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_mcp_tool_upload_success_async(self, mock_telegram, app_module):
         """上傳成功（異步模式）"""
         import base64
@@ -3223,7 +3231,7 @@ class TestMCPToolHandlersAdditional:
         # 可能有 error 或 result，都是預期行為
         assert 'result' in body or 'error' in body
     
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_mcp_tool_add_account_missing_name(self, mock_telegram, app_module):
         """新增帳號缺少名稱"""
         result = app_module.mcp_tool_add_account('test-1', {
@@ -3236,7 +3244,7 @@ class TestMCPToolHandlersAdditional:
         assert content['status'] == 'error'
         assert '名稱' in content['error'] or 'name' in content['error'].lower()
     
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_mcp_tool_add_account_invalid_role_arn(self, mock_telegram, app_module):
         """新增帳號無效 Role ARN"""
         result = app_module.mcp_tool_add_account('test-1', {
@@ -3250,7 +3258,7 @@ class TestMCPToolHandlersAdditional:
         assert content['status'] == 'error'
         assert 'arn:aws:iam' in content['error']
     
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_mcp_tool_remove_account_default(self, mock_telegram, app_module):
         """不能移除預設帳號"""
         import mcp_tools
@@ -3268,7 +3276,7 @@ class TestMCPToolHandlersAdditional:
         finally:
             mcp_tools.DEFAULT_ACCOUNT_ID = original
     
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_mcp_tool_remove_account_not_exists(self, mock_telegram, app_module):
         """移除不存在的帳號"""
         with patch.object(app_module, 'get_account', return_value=None):
@@ -3657,7 +3665,7 @@ class TestTelegramMessageFunctions:
     
     def test_send_approval_request(self, app_module):
         """發送審批請求"""
-        with patch.object(app_module, 'send_telegram_message') as mock_send:
+        with patch('telegram.send_telegram_message') as mock_send:
             app_module.send_approval_request(
                 'test-req-123',
                 'aws ec2 start-instances --instance-ids i-123',
@@ -3671,7 +3679,7 @@ class TestTelegramMessageFunctions:
     
     def test_send_approval_request_dangerous(self, app_module):
         """發送高危命令審批請求"""
-        with patch.object(app_module, 'send_telegram_message') as mock_send:
+        with patch('telegram.send_telegram_message') as mock_send:
             app_module.send_approval_request(
                 'test-req-456',
                 'aws ec2 terminate-instances --instance-ids i-123',  # 高危
@@ -4431,7 +4439,7 @@ class TestAccountsModuleFull:
 class TestMCPAddAccountFull:
     """MCP Add Account 完整測試"""
     
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_add_account_success_async(self, mock_telegram, app_module):
         """新增帳號成功（異步）"""
         result = app_module.mcp_tool_add_account('test-1', {
@@ -4446,7 +4454,7 @@ class TestMCPAddAccountFull:
         assert content['status'] == 'pending_approval'
         assert 'request_id' in content
     
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_add_account_empty_role_arn(self, mock_telegram, app_module):
         """新增帳號空 Role ARN（允許）"""
         result = app_module.mcp_tool_add_account('test-1', {
@@ -4468,7 +4476,7 @@ class TestMCPAddAccountFull:
 class TestRESTAPIFull:
     """REST API 完整測試"""
     
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_rest_api_approval_wait(self, mock_telegram, app_module):
         """REST API 等待審批（短超時）"""
         event = {
@@ -4859,7 +4867,7 @@ class TestCoverage80Sprint:
             assert content['status'] == 'auto_approved'
             assert content['account'] == '555555555555'
     
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_send_approval_request_with_assume_role(self, mock_telegram, app_module):
         """發送審批請求帶 assume_role"""
         app_module.send_approval_request(
@@ -4967,7 +4975,7 @@ class TestCoverage80Sprint:
         assert '\\`' in escaped
         assert '\\[' in escaped
     
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_mcp_upload_with_legacy_bucket(self, mock_telegram, app_module):
         """上傳使用舊版 bucket/key 參數"""
         import base64
@@ -5253,7 +5261,7 @@ class TestCallbackHandlers:
 class TestMCPRemoveAccount:
     """MCP Remove Account 測試"""
     
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_remove_default_account_blocked(self, mock_telegram, app_module):
         """不能移除預設帳號"""
         import mcp_tools
@@ -5270,7 +5278,7 @@ class TestMCPRemoveAccount:
         finally:
             mcp_tools.DEFAULT_ACCOUNT_ID = original
     
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_remove_nonexistent_account(self, mock_telegram, app_module):
         """移除不存在的帳號"""
         result = app_module.mcp_tool_remove_account('test-1', {
@@ -5560,7 +5568,7 @@ class TestDecimalConversion:
 class TestMCPAddAccount:
     """MCP Add Account 測試"""
     
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_add_account_invalid_id(self, mock_telegram, app_module):
         """新增無效帳號 ID"""
         result = app_module.mcp_tool_add_account('test-1', {
@@ -5571,7 +5579,7 @@ class TestMCPAddAccount:
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'error'
     
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_add_account_missing_name(self, mock_telegram, app_module):
         """新增帳號缺少名稱"""
         result = app_module.mcp_tool_add_account('test-1', {
@@ -6366,7 +6374,7 @@ class TestSyncModeExecute:
         assert content['status'] == 'auto_approved'
         assert '{"Instances": []}' in content['result']
 
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_async_default_pending(self, mock_telegram, app_module):
         """async 預設 → 立即返回 pending_approval"""
         event = {
@@ -6417,7 +6425,7 @@ class TestCrossAccountExecuteFlow:
             pass  # 表可能已存在
 
     @patch('mcp_tools.execute_command')
-    @patch('app.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_cross_account_with_assume_role(self, mock_telegram, mock_execute, app_module):
         """mock execute_command 驗證帶 assume_role 的調用"""
         mock_execute.return_value = '{"Account": "992382394211"}'

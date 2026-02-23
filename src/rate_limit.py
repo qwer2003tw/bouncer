@@ -2,13 +2,10 @@
 Bouncer - Rate Limiting 模組
 處理請求頻率限制和 pending 請求上限
 """
-import os
-import sys
 import time
 
 import boto3
 
-sys.path.insert(0, os.path.dirname(__file__))
 
 from constants import (
     TABLE_NAME,

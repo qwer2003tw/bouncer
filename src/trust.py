@@ -2,15 +2,12 @@
 Bouncer - Trust Session 模組
 處理信任時段的建立、查詢、撤銷和自動批准判斷
 """
-import os
-import sys
 import time
 import hashlib
 from typing import Optional, Dict
 
 import boto3
 
-sys.path.insert(0, os.path.dirname(__file__))
 
 from constants import (
     TABLE_NAME,

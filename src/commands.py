@@ -9,7 +9,6 @@ from io import StringIO
 
 import boto3
 
-sys.path.insert(0, os.path.dirname(__file__))
 
 from constants import BLOCKED_PATTERNS, DANGEROUS_PATTERNS, AUTO_APPROVE_PREFIXES
 
