@@ -62,10 +62,8 @@ from constants import (  # noqa: F401
 )
 
 
-# DynamoDB
-dynamodb = boto3.resource('dynamodb')
-table = dynamodb.Table(TABLE_NAME)
-accounts_table = dynamodb.Table(ACCOUNTS_TABLE_NAME)
+# DynamoDB — canonical references in db.py; re-exported for backward compat
+from db import table, accounts_table  # noqa: F401
 
 
 # ============================================================================
@@ -767,197 +765,12 @@ def verify_hmac(headers: dict, body: str) -> bool:
     return hmac.compare_digest(signature, expected)
 
 
-def send_approval_request(request_id: str, command: str, reason: str, timeout: int = COMMAND_APPROVAL_TIMEOUT,
-                          source: str = None, account_id: str = None, account_name: str = None,
-                          assume_role: str = None, context: str = None):
-    """發送 Telegram 審批請求
-
-    Args:
-        request_id: 請求 ID
-        command: AWS CLI 命令
-        reason: 執行原因
-        timeout: 超時秒數
-        source: 來源識別（哪個 agent/系統發的請求）
-        account_id: AWS 帳號 ID
-        account_name: 帳號名稱
-        assume_role: Role ARN（向後相容，如果沒有 account_id 會從這裡解析）
-    """
-    cmd_preview = command if len(command) <= 500 else command[:500] + '...'
-    # 轉義用戶輸入的 Markdown 特殊字元
-    cmd_preview = escape_markdown(cmd_preview)
-    reason = escape_markdown(reason)
-    source = escape_markdown(source) if source else None
-
-    # 檢查是否是高危操作
-    dangerous = is_dangerous(command)
-
-    # 顯示時間（秒或分鐘）
-    if timeout < 60:
-        timeout_str = f"{timeout} 秒"
-    elif timeout < 3600:
-        timeout_str = f"{timeout // 60} 分鐘"
-    else:
-        timeout_str = f"{timeout // 3600} 小時"
-
-    # 來源資訊
-    source_line = f"🤖 *來源：* {source}\n" if source else ""
-    context_line = f"📝 *任務：* {escape_markdown(context)}\n" if context else ""
-
-    # 帳號資訊
-    if account_id and account_name:
-        account_line = f"🏢 *帳號：* `{account_id}` ({account_name})\n"
-    elif assume_role:
-        # 向後相容：從 assume_role 解析帳號
-        try:
-            parsed_account_id = assume_role.split(':')[4]
-            role_name = assume_role.split('/')[-1]
-            account_line = f"🏢 *帳號：* `{parsed_account_id}` ({role_name})\n"
-        except Exception as e:
-            print(f"Error: {e}")
-            account_line = f"🏢 *Role：* `{assume_role}`\n"
-    else:
-        # 預設帳號
-        default_account = os.environ.get('AWS_ACCOUNT_ID', '')
-        account_line = f"🏢 *帳號：* `{default_account}` (預設)\n"
-
-    # 根據是否高危決定訊息格式
-    if dangerous:
-        text = (
-            f"⚠️ *高危操作請求* ⚠️\n\n"
-            f"{source_line}"
-            f"{context_line}"
-            f"{account_line}"
-            f"📋 *命令：*\n`{cmd_preview}`\n\n"
-            f"💬 *原因：* {reason}\n\n"
-            f"⚠️ *此操作可能不可逆，請仔細確認！*\n\n"
-            f"🆔 *ID：* `{request_id}`\n"
-            f"⏰ *{timeout_str}後過期*"
-        )
-        # 高危操作不提供信任選項
-        keyboard = {
-            'inline_keyboard': [
-                [
-                    {'text': '⚠️ 確認執行', 'callback_data': f'approve:{request_id}'},
-                    {'text': '❌ 拒絕', 'callback_data': f'deny:{request_id}'}
-                ]
-            ]
-        }
-    else:
-        text = (
-            f"🔐 *AWS 執行請求*\n\n"
-            f"{source_line}"
-            f"{context_line}"
-            f"{account_line}"
-            f"📋 *命令：*\n`{cmd_preview}`\n\n"
-            f"💬 *原因：* {reason}\n\n"
-            f"🆔 *ID：* `{request_id}`\n"
-            f"⏰ *{timeout_str}後過期*"
-        )
-        keyboard = {
-            'inline_keyboard': [
-                [
-                    {'text': '✅ 批准', 'callback_data': f'approve:{request_id}'},
-                    {'text': '🔓 信任10分鐘', 'callback_data': f'approve_trust:{request_id}'},
-                    {'text': '❌ 拒絕', 'callback_data': f'deny:{request_id}'}
-                ]
-            ]
-        }
-
-    send_telegram_message(text, keyboard)
-
-
-def send_account_approval_request(request_id: str, action: str, account_id: str, name: str, role_arn: str, source: str, context: str = None):
-    """發送帳號管理的 Telegram 審批請求"""
-    # 轉義用戶輸入
-    name = escape_markdown(name) if name else name
-    source = escape_markdown(source) if source else None
-    source_line = f"🤖 *來源：* {source}\n" if source else ""
-    context_line = f"📝 *任務：* {escape_markdown(context)}\n" if context else ""
-
-    if action == 'add':
-        text = (
-            f"🔐 *新增 AWS 帳號請求*\n\n"
-            f"{source_line}"
-            f"{context_line}"
-            f"🆔 *帳號 ID：* `{account_id}`\n"
-            f"📛 *名稱：* {name}\n"
-            f"🔗 *Role：* `{role_arn}`\n\n"
-            f"📋 *請求 ID：* `{request_id}`\n"
-            f"⏰ *5 分鐘後過期*"
-        )
-    else:  # remove
-        text = (
-            f"🔐 *移除 AWS 帳號請求*\n\n"
-            f"{source_line}"
-            f"{context_line}"
-            f"🆔 *帳號 ID：* `{account_id}`\n"
-            f"📛 *名稱：* {name}\n\n"
-            f"📋 *請求 ID：* `{request_id}`\n"
-            f"⏰ *5 分鐘後過期*"
-        )
-
-    keyboard = {
-        'inline_keyboard': [[
-            {'text': '✅ 批准', 'callback_data': f'approve:{request_id}'},
-            {'text': '❌ 拒絕', 'callback_data': f'deny:{request_id}'}
-        ]]
-    }
-
-    send_telegram_message(text, keyboard)
-
-
-def send_trust_auto_approve_notification(command: str, trust_id: str, remaining: str, count: int,
-                                         result: str = None, source: str = None):
-    """
-    發送 Trust Session 自動批准的靜默通知
-
-    Args:
-        command: 執行的命令
-        trust_id: 信任時段 ID
-        remaining: 剩餘時間
-        count: 已執行命令數
-        result: 執行結果（可選）
-        source: 信任時段的來源（可選）
-    """
-    cmd_preview = command if len(command) <= 100 else command[:100] + '...'
-    cmd_preview = escape_markdown(cmd_preview)
-
-    # 結果摘要
-    result_preview = ""
-    if result:
-        # 判斷成功/失敗
-        if result.startswith('❌') or 'error' in result.lower()[:100]:
-            result_status = "❌"
-        else:
-            result_status = "✅"
-        # 取前 200 字元
-        result_text = result[:200] + '...' if len(result) > 200 else result
-        result_text = escape_markdown(result_text)
-        result_preview = f"\n{result_status} `{result_text}`"
-
-    # 來源 + 剩餘時間
-    source_line = f"🤖 `{escape_markdown(source)}` · " if source else ""
-    remaining_line = f"⏱ {remaining}" if remaining else ""
-    session_info = f"{source_line}{remaining_line}".strip()
-    session_line = f"\n{session_info}" if session_info else ""
-
-    text = (
-        f"🔓 *自動批准* \\(信任中\\)\n"
-        f"📋 `{cmd_preview}`\n"
-        f"📊 {count}/{TRUST_SESSION_MAX_COMMANDS}"
-        f"{session_line}"
-        f"{result_preview}"
-    )
-
-    keyboard = {
-        'inline_keyboard': [[
-            {'text': '🛑 結束信任', 'callback_data': f'revoke_trust:{trust_id}'}
-        ]]
-    }
-
-    # 靜默通知
-    send_telegram_message_silent(text, keyboard)
-
+# Notification functions moved to notifications.py — re-exported for backward compat
+from notifications import (  # noqa: F401, E402
+    send_approval_request,
+    send_account_approval_request,
+    send_trust_auto_approve_notification,
+)
 
 # ============================================================================
 # 向後兼容 - re-export 移到子模組的函數 (測試用)

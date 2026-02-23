@@ -16,21 +16,22 @@ from telegram import escape_markdown, update_message, answer_callback, update_an
 from constants import DEFAULT_ACCOUNT_ID
 
 
-# 延遲 import 避免循環依賴
+# DynamoDB tables from db.py (no circular dependency)
+import db as _db
+
+
 def _get_app_module():
-    """延遲取得 app module 避免循環 import"""
+    """延遲取得 app module — 只用於 execute_upload"""
     import app as app_module
     return app_module
 
 def _get_table():
     """取得 DynamoDB table"""
-    app = _get_app_module()
-    return app.table
+    return _db.table
 
 def _get_accounts_table():
     """取得 accounts DynamoDB table"""
-    app = _get_app_module()
-    return app.accounts_table
+    return _db.accounts_table
 
 
 # ============================================================================
