@@ -1,6 +1,6 @@
 ---
 name: bouncer
-description: Execute AWS CLI commands with Telegram approval. Safe commands auto-execute, dangerous commands require human approval via Telegram.
+description: Execute AWS CLI commands with Telegram approval. Safe commands auto-execute, dangerous commands require human approval via Telegram. Supports trust sessions, batch uploads, and grant sessions.
 metadata: {"openclaw": {"emoji": "🔐", "requires": {"bins": ["mcporter"]}}}
 ---
 
@@ -8,273 +8,303 @@ metadata: {"openclaw": {"emoji": "🔐", "requires": {"bins": ["mcporter"]}}}
 
 Use `mcporter` to execute AWS CLI commands through the Bouncer approval system.
 
-**API:** `https://YOUR_API_GATEWAY_URL/`
+**API:** `https://n8s3f1mus6.execute-api.us-east-1.amazonaws.com/prod/`
 **GitHub:** https://github.com/qwer2003tw/bouncer
 **MCP Source:** `/home/ec2-user/projects/bouncer/bouncer_mcp.py`
 
-## 異步設計
+## 異步設計（重要！必讀！）
 
 所有需要審批的操作**預設異步**返回，避免 API Gateway 29 秒超時：
 
 ```bash
 # 1. 發送請求（立即返回 request_id）
-mcporter call bouncer bouncer_execute command="aws s3 mb s3://test" reason="建桶" source="Clawd"
+mcporter call bouncer bouncer_execute \
+  command="aws s3 mb s3://test" \
+  reason="建桶" \
+  source="Private Bot (task)" \
+  trust_scope="private-bot-main"
 # 返回: {"status": "pending_approval", "request_id": "abc123", ...}
 
-# 2. 查詢結果
+# 2. 輪詢結果（必須！不會自動通知！）
 mcporter call bouncer bouncer_status request_id="abc123"
 # 返回: {"status": "approved", "result": "..."} 或 {"status": "pending_approval"}
 ```
 
-mcporter 會自動輪詢直到超時（預設 60 秒），所以一般使用時感覺像同步。
+### ⚠️ 審批輪詢規則（強制）
 
-如需強制同步等待（不推薦），加 `sync=true`。
+收到 `pending_approval` 後，**你必須主動輪詢 `bouncer_status`**，Bouncer 不會主動通知你結果：
 
-## Available Tools
+```
+1. 等 10 秒後第一次查 bouncer_status
+2. 如果還是 pending，每 10-15 秒查一次
+3. 最多輪詢 5 分鐘
+4. 超過 5 分鐘仍 pending → 回報「等待審批中，request_id: xxx」
+```
+
+## ⚠️ 必填參數
+
+### trust_scope（bouncer_execute 必填）
+
+`trust_scope` 是穩定的呼叫者識別符，用於信任匹配。**bouncer_execute 必須帶此參數**。
+
+- 使用 session key 或其他穩定 ID（不要用 source，source 是顯示用）
+- 同一個 bot 不同任務應有不同 trust_scope
+- 上傳 tools（bouncer_upload / bouncer_upload_batch）trust_scope 是 optional
+
+### source（所有操作必填）
+
+`source` 是顯示用的來源描述，出現在 Telegram 通知中。
+
+格式：`{Bot名稱} ({專案/任務})`
+- ✅ `source="Private Bot (Bouncer 部署)"`
+- ❌ `source="Private Bot"`（太模糊）
+
+---
+
+## Core Tools
 
 ### bouncer_execute
 執行 AWS CLI 命令。安全命令自動執行，危險命令需要 Telegram 審批。
 
 ```bash
-mcporter call bouncer bouncer_execute command="<aws command>" reason="<why>" source="<your name>"
+mcporter call bouncer bouncer_execute \
+  command="aws ec2 describe-instances" \
+  reason="檢查 EC2 狀態" \
+  source="Private Bot (infra check)" \
+  trust_scope="private-bot-main"
 ```
 
 **Parameters:**
-- `command` (required): AWS CLI 命令（例如：`aws ec2 describe-instances`）
-- `reason` (required): 執行原因，會顯示在審批請求中
-- `source` (required): 來源標識，格式：`{Bot名稱} ({專案/任務})`
-  - ✅ 好：`Private Bot (Bouncer - 部署修復)`
-  - ✅ 好：`Public Bot (AgentCoreNexus - 建立 ECS)`
-  - ❌ 差：`Private Bot`（太模糊，不知道在做什麼）
-- `account` (optional): 目標 AWS 帳號 ID（12 位數字），不填使用預設帳號
-- `sync` (optional): 同步模式，等待審批結果（預設 false，不推薦）
+| 參數 | 必填 | 說明 |
+|------|------|------|
+| `command` | ✅ | AWS CLI 命令 |
+| `reason` | ✅ | 執行原因（顯示在審批通知） |
+| `source` | ✅ | 來源標識 |
+| `trust_scope` | ✅ | 穩定呼叫者 ID（session key） |
+| `account` | ❌ | 目標 AWS 帳號 ID（預設 190825685292） |
+| `sync` | ❌ | 同步模式（不推薦） |
+
+**Returns:**
+- `auto_approved` — 安全命令，已自動執行
+- `pending_approval` — 需要 Telegram 審批
+- `blocked` — 被封鎖（含 `block_reason` 和 `suggestion`）
+- `trust_auto_approved` — 信任期間自動執行
 
 ### bouncer_status
-查詢審批請求狀態（用於異步模式輪詢）。
+查詢審批請求狀態。
 
 ```bash
-mcporter call bouncer bouncer_status request_id="<id>"
-```
-
-### bouncer_list_accounts
-列出已配置的 AWS 帳號。
-
-```bash
-mcporter call bouncer bouncer_list_accounts
+mcporter call bouncer bouncer_status request_id="abc123"
 ```
 
 ### bouncer_list_pending
 列出待審批的請求。
 
 ```bash
-mcporter call bouncer bouncer_list_pending
-mcporter call bouncer bouncer_list_pending source="Steven's Private Bot"
-mcporter call bouncer bouncer_list_pending limit=10
+mcporter call bouncer bouncer_list_pending source="Private Bot"
 ```
 
-### bouncer_list_safelist
-列出命令分類規則（哪些自動執行、哪些被封鎖）。
+---
 
-```bash
-mcporter call bouncer bouncer_list_safelist
-```
-
-### bouncer_add_account
-新增或更新 AWS 帳號配置（需要 Telegram 審批）。
-
-```bash
-mcporter call bouncer bouncer_add_account account_id="111111111111" name="Production" role_arn="arn:aws:iam::111111111111:role/BouncerRole" source="<your name>"
-```
-
-**Parameters:**
-- `account_id` (required): 12 位 AWS 帳號 ID
-- `name` (required): 帳號名稱（顯示用）
-- `role_arn` (required): 該帳號的 BouncerRole ARN
-- `upload_bucket` (optional): 自訂 upload 桶名（預設 `bouncer-uploads-{account_id}`）
-- `source` (required): 來源標識
-
-### bouncer_remove_account
-移除 AWS 帳號配置（需要 Telegram 審批）。
-
-```bash
-mcporter call bouncer bouncer_remove_account account_id="111111111111" source="<your name>"
-```
+## Upload Tools
 
 ### bouncer_upload
-上傳檔案到 S3 桶（需要 Telegram 審批）。檔案會上傳到 `bouncer-uploads-{account_id}` 桶，30 天後自動刪除。支援跨帳號上傳。
+上傳單一檔案到 S3。
 
 ```bash
-# 先把檔案 base64 encode
-CONTENT=$(base64 -w0 template.yaml)
-
+CONTENT=$(base64 -w0 config.json)
 mcporter call bouncer bouncer_upload \
-  filename="template.yaml" \
+  filename="config.json" \
   content="$CONTENT" \
-  content_type="text/yaml" \
-  reason="上傳 CloudFormation template" \
-  source="<your name>"
+  content_type="application/json" \
+  reason="上傳設定檔" \
+  source="Private Bot (config)" \
+  trust_scope="private-bot-main"
 ```
 
 **Parameters:**
-- `filename` (required): 檔案名稱（例如 `template.yaml`）
-- `content` (required): 檔案內容（base64 encoded）
-- `content_type` (optional): Content-Type（預設 `application/octet-stream`）
-- `reason` (required): 上傳原因
-- `source` (required): 來源標識
-- `account` (optional): 目標 AWS 帳號 ID，上傳到該帳號的 `bouncer-uploads-{account_id}` 桶
+| 參數 | 必填 | 說明 |
+|------|------|------|
+| `filename` | ✅ | 檔案名稱 |
+| `content` | ✅ | 檔案內容（base64 encoded） |
+| `reason` | ✅ | 上傳原因 |
+| `source` | ✅ | 來源標識 |
+| `content_type` | ❌ | MIME type（預設 `application/octet-stream`） |
+| `trust_scope` | ❌ | 信任範圍 ID（帶了才能走信任上傳） |
+| `account` | ❌ | 目標帳號 |
 
-**限制：** 檔案大小最大 4.5 MB（Lambda payload 限制）
+**信任上傳（Trust Upload）：**
+- 信任期間 + 帶 trust_scope → 自動上傳（不需審批）
+- 每個信任時段最多 5 次上傳
+- 每檔 5MB、每 session 20MB 上限
+- 副檔名黑名單：`.sh .exe .py .jar .zip .tar.gz .7z .bat .ps1 .rb .war .bin .bash`
+- Custom s3_uri 不會走信任（只允許預設路徑）
 
-**返回：**
-```json
-{
-  "status": "approved",
-  "s3_uri": "s3://bouncer-uploads-{account_id}/{source}/{timestamp}_{uuid}/{filename}",
-  "s3_url": "https://bouncer-uploads-{account_id}.s3.amazonaws.com/..."
-}
+### bouncer_upload_batch
+批量上傳多個檔案，**一次審批**。
+
+```bash
+mcporter call bouncer bouncer_upload_batch \
+  files='[
+    {"filename":"index.html","content":"'$(base64 -w0 index.html)'"},
+    {"filename":"style.css","content":"'$(base64 -w0 style.css)'"},
+    {"filename":"app.js","content":"'$(base64 -w0 app.js)'"}
+  ]' \
+  reason="前端部署" \
+  source="Private Bot (ZTP Files deploy)" \
+  trust_scope="private-bot-main"
 ```
 
-**特性：**
-- 自動產生唯一路徑：`{date}/{request_id}/{filename}`
-- 30 天 lifecycle 自動刪除
-- 跨帳號讀取權限已設定（Dev/1st/AgentCoreNexusTest）
+**Parameters:**
+| 參數 | 必填 | 說明 |
+|------|------|------|
+| `files` | ✅ | JSON array: `[{filename, content, content_type?}]` |
+| `reason` | ✅ | 上傳原因 |
+| `source` | ✅ | 來源標識 |
+| `trust_scope` | ❌ | 信任範圍 ID |
+| `account` | ❌ | 目標帳號 |
+
+**Limits:**
+- 最多 50 個檔案
+- 每檔 5MB、總計 20MB
+- 副檔名黑名單（同 bouncer_upload）
+- 檔名自動消毒（path traversal、null bytes 等）
+
+**審批按鈕：**
+- `[📁 批准上傳]` — 只批准這批
+- `[🔓 批准 + 信任10分鐘]` — 批准 + 開信任（含 5 次上傳 quota）
+- `[❌ 拒絕]`
+
+**信任 batch：** 如果有 active trust session + 足夠 quota → 全部自動執行
+
+---
+
+## Trust Session
+
+審批時選「🔓 信任10分鐘」，期間同 trust_scope 的操作自動執行。
+
+### 特性
+- 時長：10 分鐘
+- 命令上限：20 次/session
+- 上傳上限：5 次/session（5MB/檔, 20MB/session total）
+- 匹配方式：`trust_scope + account_id`（不是 source）
+
+### 排除（即使信任中仍需審批）
+- **高危服務**：iam, sts, organizations, kms, secretsmanager, cloudformation, cloudtrail
+- **高危操作**：delete-*, terminate-*, stop-*, modify-*, s3 rm, update-function-code 等
+- **危險旗標**：--force, --recursive, --skip-final-snapshot 等
+- **上傳排除**：blocked 副檔名、custom s3_uri
+
+### Tools
+```bash
+mcporter call bouncer bouncer_trust_status
+mcporter call bouncer bouncer_trust_status source="Private Bot"
+mcporter call bouncer bouncer_trust_revoke trust_id="trust-xxx-yyy"
 ```
+
+---
+
+## Grant Session（批次授權）
+
+預先申請一組命令的執行權限，審批後可在 TTL 內重複或一次性執行。
+
+### bouncer_request_grant
+```bash
+mcporter call bouncer bouncer_request_grant \
+  commands='["aws ec2 describe-instances", "aws s3 ls"]' \
+  reason="基礎設施檢查" \
+  source="Private Bot (infra)" \
+  trust_scope="private-bot-main" \
+  ttl_minutes=30 \
+  allow_repeat=true
+```
+
+**Parameters:**
+| 參數 | 必填 | 說明 |
+|------|------|------|
+| `commands` | ✅ | JSON array of AWS CLI commands |
+| `reason` | ✅ | 授權原因 |
+| `source` | ✅ | 來源標識 |
+| `trust_scope` | ✅ | 呼叫者 ID |
+| `ttl_minutes` | ❌ | 授權時長（1-60 分鐘，預設 30） |
+| `allow_repeat` | ❌ | 可重複執行（預設 true） |
+| `account` | ❌ | 目標帳號 |
+
+### bouncer_grant_execute
+在已批准的 grant 內執行命令（**精確匹配**）。
+
+```bash
+mcporter call bouncer bouncer_grant_execute \
+  grant_id="grant-abc123" \
+  command="aws ec2 describe-instances" \
+  trust_scope="private-bot-main"
+```
+
+### bouncer_grant_status
+```bash
+mcporter call bouncer bouncer_grant_status grant_id="grant-abc123"
+```
+
+### Grant vs Trust
+| 維度 | Grant Session | Trust Session |
+|------|---------------|---------------|
+| 模式 | 白名單（精確命令） | 黑名單（排除高危） |
+| 觸發 | Agent 主動申請 | 審批者選擇信任 |
+| 匹配 | 命令精確匹配 | trust_scope + account |
+| 適用 | 可預測的命令清單 | 互動式探索 |
+| 上傳 | 不支援 | 支援（quota 限制） |
+
+---
+
+## SAM Deployer
+
+### bouncer_deploy
+```bash
+mcporter call bouncer bouncer_deploy \
+  project="bouncer" \
+  reason="更新功能" \
+  source="Private Bot (Bouncer deploy)"
+```
+
+### bouncer_deploy_status / bouncer_deploy_cancel / bouncer_deploy_history / bouncer_project_list
+```bash
+mcporter call bouncer bouncer_deploy_status deploy_id="deploy-xxx"
+mcporter call bouncer bouncer_deploy_cancel deploy_id="deploy-xxx"
+mcporter call bouncer bouncer_deploy_history project="bouncer" limit=5
+mcporter call bouncer bouncer_project_list
+```
+
+---
+
+## Account Management
+
+### bouncer_list_accounts / bouncer_add_account / bouncer_remove_account
+```bash
+mcporter call bouncer bouncer_list_accounts
+mcporter call bouncer bouncer_add_account account_id="111111111111" name="Production" role_arn="arn:aws:iam::111111111111:role/BouncerRole" source="Bot"
+mcporter call bouncer bouncer_remove_account account_id="111111111111" source="Bot"
+```
+
+### AWS 帳號
+| 帳號 | ID | 說明 |
+|------|-----|------|
+| 2nd (主帳號) | 190825685292 | 直接使用 Lambda execution role |
+| Dev | 992382394211 | 透過 assume role `BouncerExecutionRole` |
+| 1st | 841882238387 | 透過 assume role `BouncerExecutionRole` |
+
+---
+
+## Other Tools
 
 ### bouncer_get_page
-取得長輸出的下一頁。當命令輸出超過 3500 字元時會自動分頁。
+當命令輸出超過 3500 字元自動分頁，用此 tool 取後續頁面。
 
 ```bash
 mcporter call bouncer bouncer_get_page page_id="abc123:page:2"
 ```
 
-**When to use:**
-當 `bouncer_execute` 返回 `paged: true` 和 `next_page` 欄位時，用這個 tool 取得後續頁面。
-
----
-
-## Trust Session Tools
-
-Trust Session 讓你在審批時選擇「信任10分鐘」，期間同 source 的命令會自動批准（高危操作除外）。
-信任時段自動批准時，Telegram 通知會顯示來源、剩餘時間和已執行命令數。
-
-### bouncer_trust_status
-查詢當前的信任時段狀態。
-
-```bash
-mcporter call bouncer bouncer_trust_status
-mcporter call bouncer bouncer_trust_status source="Steven's Private Bot"
-```
-
-### bouncer_trust_revoke
-撤銷信任時段。
-
-```bash
-mcporter call bouncer bouncer_trust_revoke trust_id="trust-xxx-yyy"
-```
-
-### Trust Session 規則
-- 時長固定 10 分鐘
-- 每個 source 最多 1 個活躍時段
-- 每個時段最多 20 個命令
-- **排除的高危服務**：iam, sts, organizations, kms, secretsmanager, cloudformation, cloudtrail
-- **排除的高危操作**：delete-*, terminate-*, stop-*, modify-*, s3 rm, update-function-code 等
-- **排除的危險旗標**：--force, --recursive, --skip-final-snapshot 等
-
----
-
-## Grant Session Tools (批次權限授予)
-
-Agent 可以預先申請一批命令的執行權限，經人工審批後在 TTL 內自動執行。
-
-### bouncer_request_grant
-```bash
-mcporter call bouncer bouncer_request_grant \
-  commands='["aws s3 ls s3://bucket", "aws ec2 describe-instances"]' \
-  reason="部署前檢查" source="Private-Bot" ttl_minutes=30
-```
-- 每個命令會預檢 compliance、blocked、risk score
-- 分類為 grantable / requires_individual / blocked
-- Steven 收到 Telegram 訊息 + [全部批准] / [只批准安全的] / [拒絕]
-- 回傳 `grant_request_id`
-
-### bouncer_grant_status
-```bash
-mcporter call bouncer bouncer_grant_status grant_id="grant_xxx" source="Private-Bot"
-```
-- 查詢 grant 狀態、剩餘命令、剩餘時間
-
-### bouncer_revoke_grant
-```bash
-mcporter call bouncer bouncer_revoke_grant grant_id="grant_xxx"
-```
-
-### 使用 Grant 執行命令
-```bash
-mcporter call bouncer bouncer_execute \
-  command="aws s3 ls s3://bucket" grant_id="grant_xxx" \
-  reason="部署前檢查" source="Private-Bot"
-```
-- 帶 `grant_id` 的命令會自動比對授權清單
-- 匹配成功 → 自動執行（不需審批）
-- 匹配失敗 → fallthrough 到正常審批流程
-
-### Grant Session 規則
-- **僅精確匹配**（normalized: 空白壓縮 + 小寫）
-- TTL 最長 60 分鐘（預設 30）
-- 每個 grant 最多 20 個命令
-- 每個 grant 最多 50 次執行（含重複）
-- TTL 從**批准時**算起
-- 128-bit grant ID（`grant_` + 32 hex chars）
-- Source + Account 綁定
-- Compliance/Blocked 仍優先於 Grant 檢查
-- 高危命令（TRUST_EXCLUDED_*）分類為 requires_individual
-
----
-
-## SAM Deployer Tools
-
-### bouncer_deploy
-部署 SAM 專案（需要 Telegram 審批）。
-
-```bash
-mcporter call bouncer bouncer_deploy project="bouncer" reason="更新功能" source="<your name>"
-```
-
-**Parameters:**
-- `project` (required): 專案 ID（例如：`bouncer`）
-- `reason` (required): 部署原因
-- `source` (required): 來源標識
-- `branch` (optional): Git 分支（預設使用專案設定的分支）
-
-**Note:** 跨帳號部署透過專案配置的 `target_account` 控制，不是呼叫時傳參。用 `bouncer_project_list` 查看專案配置。
-
-### bouncer_deploy_status
-查詢部署狀態。
-
-```bash
-mcporter call bouncer bouncer_deploy_status deploy_id="<id>"
-```
-
-### bouncer_deploy_cancel
-取消進行中的部署。
-
-```bash
-mcporter call bouncer bouncer_deploy_cancel deploy_id="<id>"
-```
-
-### bouncer_deploy_history
-查詢專案部署歷史。
-
-```bash
-mcporter call bouncer bouncer_deploy_history project="bouncer" limit=10
-```
-
-### bouncer_project_list
-列出可部署的專案。
-
-```bash
-mcporter call bouncer bouncer_project_list
-```
+### bouncer_list_safelist
+列出命令分類規則。
 
 ---
 
@@ -282,74 +312,12 @@ mcporter call bouncer bouncer_project_list
 
 | Type | Behavior | Examples |
 |------|----------|----------|
-| **BLOCKED** | 永遠拒絕 | `iam create-*`, `iam delete-*`, `sts assume-role` |
-| **DANGEROUS** | 特殊審批（⚠️ 高危警告） | `delete-bucket`, `terminate-instances`, `delete-stack` |
+| **BLOCKED** | 永遠拒絕（含原因 + 建議） | `iam create-*`, `sts assume-role` |
+| **DANGEROUS** | 特殊審批（⚠️ 高危警告） | `delete-bucket`, `terminate-instances` |
 | **SAFELIST** | 自動執行 | `describe-*`, `list-*`, `get-*` |
 | **APPROVAL** | 需要 Telegram 審批 | `start-*`, `stop-*`, `create-*` |
 
-### Telegram 審批按鈕
-
-**一般命令：**
-- `[✅ 批准]` - 只批准這一次
-- `[🔓 信任10分鐘]` - 批准並啟動信任時段
-- `[❌ 拒絕]`
-
-**高危命令（DANGEROUS）：**
-- `[⚠️ 確認執行]` - 確認執行（無信任選項）
-- `[❌ 拒絕]`
-
 ---
-
-## AWS 帳號
-
-用 `bouncer_list_accounts` 查看當前設定的帳號。
-
-Cross-account 透過 assume role 到目標帳號的 `BouncerRole` 執行。
-新增帳號前需先在目標帳號部署 `target-account/template.yaml`。
-
----
-
-## Examples
-
-### 列出 S3 buckets（自動執行）
-```bash
-mcporter call bouncer bouncer_execute command="aws s3 ls" reason="檢查現有的 S3 buckets" source="Steven's Private Bot"
-```
-
-### 啟動 EC2 instance（需要審批）
-```bash
-mcporter call bouncer bouncer_execute command="aws ec2 start-instances --instance-ids i-xxx" reason="啟動開發環境" source="Steven's Private Bot"
-```
-
-### 在其他帳號執行
-```bash
-mcporter call bouncer bouncer_execute command="aws lambda list-functions" reason="檢查 Dev Lambda" account="222222222222" source="Steven's Private Bot"
-```
-
-### 部署 Bouncer
-```bash
-mcporter call bouncer bouncer_deploy project="bouncer" reason="修復 bug" source="Steven's Private Bot"
-```
-
-### 查看信任時段狀態
-```bash
-mcporter call bouncer bouncer_trust_status
-```
-
-### 查看待審批請求
-```bash
-mcporter call bouncer bouncer_list_pending
-```
-
----
-
-## Important Notes
-
-1. **Always provide source** - 讓 Steven 知道是誰發的請求
-2. **Always provide a clear reason** - 審批者會在 Telegram 看到
-3. **Wait for response** - 需要審批的命令會 block 直到 approved/denied/timeout
-4. **Multi-account** - 用 `account` 參數指定不同 AWS 帳號
-5. **Trust Session** - 審批時選「信任10分鐘」可以加速後續操作
 
 ## CloudFormation Stacks
 - `clawdbot-bouncer` - 主要 Bouncer
