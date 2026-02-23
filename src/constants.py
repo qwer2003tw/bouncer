@@ -102,6 +102,15 @@ TRUST_SESSION_DURATION = 600  # 10 分鐘
 TRUST_SESSION_MAX_COMMANDS = 20  # 信任時段內最多執行 20 個命令
 TRUST_SESSION_ENABLED = os.environ.get('TRUST_SESSION_ENABLED', 'true').lower() == 'true'
 
+# Trust Upload Quota
+TRUST_SESSION_MAX_UPLOADS = 5  # 信任時段內最多上傳 5 個檔案（0=不信任上傳）
+TRUST_UPLOAD_MAX_BYTES_PER_FILE = 5 * 1024 * 1024  # 5MB per file
+TRUST_UPLOAD_MAX_BYTES_TOTAL = 20 * 1024 * 1024  # 20MB per trust session
+TRUST_UPLOAD_BLOCKED_EXTENSIONS = [
+    '.sh', '.bash', '.exe', '.bat', '.ps1', '.py', '.rb',
+    '.jar', '.war', '.zip', '.tar.gz', '.7z', '.bin',
+]
+
 # 高危服務 - 即使在信任時段也需要審批
 TRUST_EXCLUDED_SERVICES = [
     'iam', 'sts', 'organizations', 'kms', 'secretsmanager',

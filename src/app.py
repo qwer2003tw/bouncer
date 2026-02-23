@@ -36,10 +36,11 @@ from mcp_tools import (
     mcp_tool_add_account, mcp_tool_list_accounts, mcp_tool_get_page,
     mcp_tool_list_pending, mcp_tool_remove_account, mcp_tool_upload,
     mcp_tool_request_grant, mcp_tool_grant_status, mcp_tool_revoke_grant,
+    mcp_tool_upload_batch,
 )
 from callbacks import (
     handle_command_callback, handle_account_add_callback, handle_account_remove_callback,
-    handle_deploy_callback, handle_upload_callback,
+    handle_deploy_callback, handle_upload_callback, handle_upload_batch_callback,
     handle_grant_approve_all, handle_grant_approve_safe, handle_grant_deny,
 )
 from telegram_commands import handle_telegram_command
@@ -237,6 +238,9 @@ def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
 
     elif tool_name == 'bouncer_upload':
         return mcp_tool_upload(req_id, arguments)
+
+    elif tool_name == 'bouncer_upload_batch':
+        return mcp_tool_upload_batch(req_id, arguments)
 
     # Grant Session tools
     elif tool_name == 'bouncer_request_grant':
@@ -763,6 +767,8 @@ def handle_telegram_webhook(event: dict) -> dict:
         return handle_deploy_callback(action, request_id, item, message_id, callback['id'], user_id)
     elif request_action == 'upload':
         return handle_upload_callback(action, request_id, item, message_id, callback['id'], user_id)
+    elif request_action == 'upload_batch':
+        return handle_upload_batch_callback(action, request_id, item, message_id, callback['id'], user_id)
     else:
         return handle_command_callback(action, request_id, item, message_id, callback['id'], user_id)
 

@@ -14,7 +14,7 @@ from paging import store_paged_output, send_remaining_pages
 from trust import create_trust_session
 from telegram import escape_markdown, update_message, answer_callback, update_and_answer
 from notifications import send_trust_auto_approve_notification
-from constants import DEFAULT_ACCOUNT_ID
+from constants import DEFAULT_ACCOUNT_ID, TRUST_SESSION_MAX_UPLOADS, TRUST_SESSION_MAX_COMMANDS
 from metrics import emit_metric
 
 
@@ -278,8 +278,14 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         # 信任模式
         trust_line = ""
         if action == 'approve_trust':
-            trust_id = create_trust_session(trust_scope, account_id, user_id, source=source)
-            trust_line = f"\n\n🔓 信任時段已啟動：`{trust_id}`"
+            trust_id = create_trust_session(
+                trust_scope, account_id, user_id, source=source,
+                max_uploads=TRUST_SESSION_MAX_UPLOADS,
+            )
+            trust_line = (
+                f"\n\n🔓 信任時段已啟動：`{trust_id}`"
+                f"\n📊 命令: 0/{TRUST_SESSION_MAX_COMMANDS} | 上傳: 0/{TRUST_SESSION_MAX_UPLOADS}"
+            )
 
             # 自動執行同 trust_scope + account 的排隊中請求
             try:
@@ -603,6 +609,172 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
             f"📁 目標： {s3_uri}\n"
             f"📊 大小： {size_str}\n"
             f"💬 原因： {reason}"
+        )
+        answer_callback(callback_id, '❌ 已拒絕')
+
+    return response(200, {'ok': True})
+
+
+# ============================================================================
+# Upload Batch Callback
+# ============================================================================
+
+def handle_upload_batch_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str) -> dict:
+    """處理批量上傳的審批 callback"""
+    import json as _json
+    import base64
+    import boto3
+
+    table = _get_table()
+
+    bucket = item.get('bucket', '')
+    file_count = int(item.get('file_count', 0))
+    total_size = int(item.get('total_size', 0))
+    source = item.get('source', '')
+    reason = item.get('reason', '')
+    account_id = item.get('account_id', '')
+    account_name = item.get('account_name', '')
+    trust_scope = item.get('trust_scope', '')
+    assume_role = item.get('assume_role', None)
+
+    if total_size >= 1024 * 1024:
+        size_str = f"{total_size / 1024 / 1024:.2f} MB"
+    elif total_size >= 1024:
+        size_str = f"{total_size / 1024:.2f} KB"
+    else:
+        size_str = f"{total_size} bytes"
+
+    source_line = f"🤖 來源： {source}\n" if source else ""
+    account_line = f"🏦 帳號： {account_id} ({account_name})\n" if account_id else ""
+
+    if action in ('approve', 'approve_trust'):
+        # Parse files manifest
+        try:
+            files_manifest = _json.loads(item.get('files', '[]'))
+        except Exception:
+            answer_callback(callback_id, '❌ 檔案清單解析失敗')
+            return response(500, {'error': 'Failed to parse files manifest'})
+
+        # Update message to show progress
+        update_message(
+            message_id,
+            f"⏳ 批量上傳中...\n\n"
+            f"📋 請求 ID： `{request_id}`\n"
+            f"{source_line}"
+            f"{account_line}"
+            f"📄 {file_count} 個檔案 ({size_str})\n"
+            f"💬 原因： {reason}\n\n"
+            f"進度: 0/{file_count}",
+            remove_buttons=True,
+        )
+        answer_callback(callback_id, '⏳ 上傳中...')
+
+        # Get S3 client
+        try:
+            if assume_role:
+                sts = boto3.client('sts')
+                creds = sts.assume_role(
+                    RoleArn=assume_role,
+                    RoleSessionName='bouncer-batch-upload',
+                )['Credentials']
+                s3 = boto3.client(
+                    's3',
+                    aws_access_key_id=creds['AccessKeyId'],
+                    aws_secret_access_key=creds['SecretAccessKey'],
+                    aws_session_token=creds['SessionToken'],
+                )
+            else:
+                s3 = boto3.client('s3')
+        except Exception as e:
+            _update_request_status(table, request_id, 'error', user_id, extra_attrs={'error_message': str(e)})
+            update_message(
+                message_id,
+                f"❌ 批量上傳失敗（S3 連線錯誤）\n\n"
+                f"📋 請求 ID： `{request_id}`\n"
+                f"❗ 錯誤： {str(e)[:200]}",
+            )
+            return response(500, {'error': str(e)})
+
+        import time as _time
+        date_str = _time.strftime('%Y-%m-%d')
+        uploaded = []
+        errors = []
+
+        for i, fm in enumerate(files_manifest):
+            fname = fm.get('filename', 'unknown')
+            try:
+                content_bytes = base64.b64decode(fm.get('content_b64', ''))
+                from utils import generate_request_id as _gen_id
+                fkey = f"{date_str}/{_gen_id('batch')}/{fname}"
+                s3.put_object(
+                    Bucket=bucket,
+                    Key=fkey,
+                    Body=content_bytes,
+                    ContentType=fm.get('content_type', 'application/octet-stream'),
+                )
+                uploaded.append({
+                    'filename': fname,
+                    's3_uri': f"s3://{bucket}/{fkey}",
+                    'size': fm.get('size', 0),
+                })
+            except Exception as e:
+                errors.append(f"{fname}: {str(e)[:80]}")
+
+            # Update progress every 5 files
+            if (i + 1) % 5 == 0 or i == len(files_manifest) - 1:
+                try:
+                    update_message(
+                        message_id,
+                        f"⏳ 批量上傳中...\n\n"
+                        f"📋 請求 ID： `{request_id}`\n"
+                        f"進度: {i + 1}/{file_count}",
+                    )
+                except Exception:
+                    pass  # Progress update failure is non-critical
+
+        # Update DB
+        _update_request_status(table, request_id, 'approved', user_id, extra_attrs={
+            'uploaded_count': len(uploaded),
+            'error_count': len(errors),
+        })
+
+        # Build trust session if approve_trust
+        trust_line = ""
+        if action == 'approve_trust' and trust_scope:
+            trust_id = create_trust_session(
+                trust_scope, account_id, user_id, source=source,
+                max_uploads=TRUST_SESSION_MAX_UPLOADS,
+            )
+            trust_line = (
+                f"\n\n🔓 信任時段已啟動：`{trust_id}`"
+                f"\n📊 命令: 0/{TRUST_SESSION_MAX_COMMANDS} | 上傳: 0/{TRUST_SESSION_MAX_UPLOADS}"
+            )
+
+        error_line = f"\n❗ 失敗: {len(errors)} 個" if errors else ""
+
+        update_message(
+            message_id,
+            f"✅ 批量上傳完成\n\n"
+            f"📋 請求 ID： `{request_id}`\n"
+            f"{source_line}"
+            f"{account_line}"
+            f"📄 成功: {len(uploaded)}/{file_count} 個檔案 ({size_str})"
+            f"{error_line}"
+            f"\n💬 原因： {reason}"
+            f"{trust_line}",
+        )
+
+    elif action == 'deny':
+        _update_request_status(table, request_id, 'denied', user_id)
+
+        update_message(
+            message_id,
+            f"❌ 已拒絕批量上傳\n\n"
+            f"📋 請求 ID： `{request_id}`\n"
+            f"{source_line}"
+            f"{account_line}"
+            f"📄 {file_count} 個檔案 ({size_str})\n"
+            f"💬 原因： {reason}",
         )
         answer_callback(callback_id, '❌ 已拒絕')
 

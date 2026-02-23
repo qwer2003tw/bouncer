@@ -17,6 +17,8 @@ from constants import (
     TABLE_NAME,
     TRUST_SESSION_ENABLED, TRUST_SESSION_DURATION, TRUST_SESSION_MAX_COMMANDS,
     TRUST_EXCLUDED_SERVICES, TRUST_EXCLUDED_ACTIONS, TRUST_EXCLUDED_FLAGS,
+    TRUST_UPLOAD_MAX_BYTES_PER_FILE,
+    TRUST_UPLOAD_MAX_BYTES_TOTAL, TRUST_UPLOAD_BLOCKED_EXTENSIONS,
 )
 
 __all__ = [
@@ -24,8 +26,10 @@ __all__ = [
     'create_trust_session',
     'revoke_trust_session',
     'increment_trust_command_count',
+    'increment_trust_upload_count',
     'is_trust_excluded',
     'should_trust_approve',
+    'should_trust_approve_upload',
 ]
 
 # DynamoDB - lazy init
@@ -83,7 +87,7 @@ def get_trust_session(trust_scope: str, account_id: str) -> Optional[Dict]:
 
 
 def create_trust_session(trust_scope: str, account_id: str, approved_by: str,
-                         source: str = '') -> str:
+                         source: str = '', max_uploads: int = 0) -> str:
     """
     建立信任時段
 
@@ -92,6 +96,7 @@ def create_trust_session(trust_scope: str, account_id: str, approved_by: str,
         account_id: AWS 帳號 ID
         approved_by: 批准者 ID
         source: 顯示用來源描述（不參與匹配）
+        max_uploads: 信任期間最大上傳次數（0=不允許信任上傳）
 
     Returns:
         trust_id
@@ -112,6 +117,9 @@ def create_trust_session(trust_scope: str, account_id: str, approved_by: str,
         'created_at': now,
         'expires_at': expires_at,
         'command_count': 0,
+        'max_uploads': max_uploads,
+        'upload_count': 0,
+        'upload_bytes_total': 0,
         'ttl': expires_at
     }
 
@@ -224,3 +232,141 @@ def should_trust_approve(command: str, trust_scope: str, account_id: str) -> tup
         return False, None, "Trust session expired"
 
     return True, session, f"Trust session active ({remaining}s remaining)"
+
+
+def _is_upload_filename_safe(filename: str) -> bool:
+    """
+    檢查檔名是否安全（無 path traversal、null bytes 等）
+
+    Args:
+        filename: 檔案名稱
+
+    Returns:
+        True 如果安全
+    """
+    if not filename:
+        return False
+    # null bytes
+    if '\x00' in filename:
+        return False
+    # path traversal
+    if '..' in filename:
+        return False
+    # absolute paths or directory separators
+    if '/' in filename or '\\' in filename:
+        return False
+    return True
+
+
+def _is_upload_extension_blocked(filename: str) -> bool:
+    """
+    檢查檔案副檔名是否在黑名單
+
+    Args:
+        filename: 檔案名稱
+
+    Returns:
+        True 如果副檔名被封鎖
+    """
+    lower = filename.lower()
+    for ext in TRUST_UPLOAD_BLOCKED_EXTENSIONS:
+        if lower.endswith(ext):
+            return True
+    return False
+
+
+def should_trust_approve_upload(trust_scope: str, account_id: str,
+                                filename: str, content_size: int) -> tuple:
+    """
+    檢查是否應該透過信任時段自動批准上傳
+
+    Args:
+        trust_scope: 信任範圍識別符
+        account_id: AWS 帳號 ID
+        filename: 上傳檔案名稱
+        content_size: 檔案大小（bytes）
+
+    Returns:
+        (should_approve: bool, trust_session: dict or None, reason: str)
+    """
+    if not TRUST_SESSION_ENABLED or not trust_scope:
+        return False, None, "Trust session disabled or no trust_scope"
+
+    # 檔名安全檢查
+    if not _is_upload_filename_safe(filename):
+        return False, None, "Filename contains unsafe characters"
+
+    # 副檔名黑名單
+    if _is_upload_extension_blocked(filename):
+        return False, None, f"File extension blocked: {filename}"
+
+    # 查詢信任時段
+    session = get_trust_session(trust_scope, account_id)
+    if not session:
+        return False, None, "No active trust session"
+
+    # 過期檢查
+    remaining = int(session.get('expires_at', 0)) - int(time.time())
+    if remaining <= 0:
+        return False, None, "Trust session expired"
+
+    max_uploads = int(session.get('max_uploads', 0))
+    if max_uploads <= 0:
+        return False, session, "Trust session upload not enabled"
+
+    # 上傳次數檢查
+    upload_count = int(session.get('upload_count', 0))
+    if upload_count >= max_uploads:
+        return False, session, f"Upload quota exhausted ({upload_count}/{max_uploads})"
+
+    # 單檔大小檢查
+    if content_size > TRUST_UPLOAD_MAX_BYTES_PER_FILE:
+        return False, session, f"File too large: {content_size} > {TRUST_UPLOAD_MAX_BYTES_PER_FILE}"
+
+    # 累計 bytes 檢查
+    upload_bytes_total = int(session.get('upload_bytes_total', 0))
+    if upload_bytes_total + content_size > TRUST_UPLOAD_MAX_BYTES_TOTAL:
+        return False, session, "Total upload bytes would exceed limit"
+
+    return True, session, f"Trust upload approved ({upload_count + 1}/{max_uploads})"
+
+
+def increment_trust_upload_count(trust_id: str, content_size: int) -> bool:
+    """
+    原子性增加信任時段的上傳計數和字節計數
+
+    使用 DynamoDB conditional update 確保並發安全。
+
+    Args:
+        trust_id: 信任時段 ID
+        content_size: 本次上傳的字節數
+
+    Returns:
+        是否成功（False = 條件不滿足，如 quota 已滿或過期）
+    """
+    now = int(time.time())
+    try:
+        _get_table().update_item(
+            Key={'request_id': trust_id},
+            UpdateExpression=(
+                'SET upload_count = if_not_exists(upload_count, :zero) + :one, '
+                'upload_bytes_total = if_not_exists(upload_bytes_total, :zero) + :size'
+            ),
+            ConditionExpression=(
+                'upload_count < max_uploads '
+                'AND expires_at > :now'
+            ),
+            ExpressionAttributeValues={
+                ':zero': 0,
+                ':one': 1,
+                ':size': content_size,
+                ':now': now,
+            },
+        )
+        return True
+    except _get_table().meta.client.exceptions.ConditionalCheckFailedException:
+        print(f"Trust upload conditional update failed for {trust_id}")
+        return False
+    except Exception as e:
+        print(f"Increment trust upload count error: {e}")
+        return False

@@ -352,7 +352,7 @@ MCP_TOOLS = {
     },
     # ========== Upload Tool ==========
     'bouncer_upload': {
-        'description': '上傳檔案到 S3 桶（需要 Telegram 審批）。支援跨帳號上傳，檔案會上傳到 bouncer-uploads-{account_id} 桶，30 天後自動刪除。',
+        'description': '上傳檔案到 S3 桶（需要 Telegram 審批）。支援跨帳號上傳，檔案會上傳到 bouncer-uploads-{account_id} 桶，30 天後自動刪除。如果有活躍的 Trust Session 且 trust_scope 匹配，可自動上傳（不需審批）。',
         'parameters': {
             'type': 'object',
             'properties': {
@@ -377,6 +377,10 @@ MCP_TOOLS = {
                     'type': 'string',
                     'description': '請求來源標識'
                 },
+                'trust_scope': {
+                    'type': 'string',
+                    'description': '信任範圍識別符（可選，有 Trust Session 時可自動上傳）'
+                },
                 'account': {
                     'type': 'string',
                     'description': '目標 AWS 帳號 ID（預設使用 Bouncer 所在帳號）'
@@ -388,6 +392,44 @@ MCP_TOOLS = {
                 }
             },
             'required': ['filename', 'content', 'reason', 'source']
+        }
+    },
+    'bouncer_upload_batch': {
+        'description': '批量上傳多個檔案到 S3，一次審批。如果有活躍的 Trust Session，可自動上傳。',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'files': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'filename': {'type': 'string'},
+                            'content': {'type': 'string', 'description': 'base64 encoded'},
+                            'content_type': {'type': 'string'}
+                        },
+                        'required': ['filename', 'content']
+                    },
+                    'description': '要上傳的檔案清單'
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': '上傳原因'
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '請求來源標識'
+                },
+                'trust_scope': {
+                    'type': 'string',
+                    'description': '信任範圍識別符（可選，有 Trust Session 時可自動上傳）'
+                },
+                'account': {
+                    'type': 'string',
+                    'description': '目標 AWS 帳號 ID（預設使用 Bouncer 所在帳號）'
+                }
+            },
+            'required': ['files', 'reason', 'source']
         }
     }
 }

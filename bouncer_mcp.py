@@ -302,7 +302,7 @@ TOOLS = [
     },
     {
         'name': 'bouncer_upload',
-        'description': '上傳檔案到固定 S3 桶（需要 Telegram 審批）。預設異步返回 request_id，用 bouncer_status 查詢結果。檔案大小限制 4.5 MB。',
+        'description': '上傳檔案到固定 S3 桶（需要 Telegram 審批）。預設異步返回 request_id，用 bouncer_status 查詢結果。檔案大小限制 4.5 MB。有 Trust Session 時可自動上傳。',
         'inputSchema': {
             'type': 'object',
             'properties': {
@@ -326,12 +326,55 @@ TOOLS = [
                     'type': 'string',
                     'description': '請求來源標識'
                 },
+                'trust_scope': {
+                    'type': 'string',
+                    'description': '信任範圍識別符（可選，有 Trust Session 時可自動上傳）'
+                },
                 'sync': {
                     'type': 'boolean',
                     'description': '同步模式：等待審批結果（可能超時），預設 false'
                 }
             },
             'required': ['filename', 'content', 'reason', 'source']
+        }
+    },
+    {
+        'name': 'bouncer_upload_batch',
+        'description': '批量上傳多個檔案到 S3，一次審批。有 Trust Session 時可自動上傳。',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'files': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'filename': {'type': 'string'},
+                            'content': {'type': 'string', 'description': 'base64 encoded'},
+                            'content_type': {'type': 'string'}
+                        },
+                        'required': ['filename', 'content']
+                    },
+                    'description': '要上傳的檔案清單'
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': '上傳原因'
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '請求來源標識'
+                },
+                'trust_scope': {
+                    'type': 'string',
+                    'description': '信任範圍識別符（可選，有 Trust Session 時可自動上傳）'
+                },
+                'account': {
+                    'type': 'string',
+                    'description': '目標 AWS 帳號 ID'
+                }
+            },
+            'required': ['files', 'reason', 'source']
         }
     },
     {
@@ -427,7 +470,7 @@ def http_request(method: str, path: str, data: dict = None) -> dict:
         error_body = e.read().decode() if e.fp else str(e)
         try:
             return json.loads(error_body)
-        except:
+        except Exception:
             return {'error': error_body, 'status_code': e.code}
     except Exception as e:
         return {'error': str(e)}
@@ -595,7 +638,7 @@ def tool_list_accounts(arguments: dict) -> dict:
         if content and content[0].get('type') == 'text':
             try:
                 return json.loads(content[0]['text'])
-            except:
+            except Exception:
                 return content[0]
     return result
 
@@ -852,6 +895,25 @@ def tool_upload(arguments: dict) -> dict:
     return parse_mcp_result(result) or result
 
 
+def tool_upload_batch(arguments: dict) -> dict:
+    """批量上傳檔案到 S3"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'upload_batch',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_upload_batch',
+            'arguments': arguments
+        }
+    }
+
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
 def tool_request_grant(arguments: dict) -> dict:
     """申請批次權限授予"""
     if not SECRET:
@@ -916,7 +978,7 @@ def parse_mcp_result(result: dict) -> dict:
         if content and content[0].get('type') == 'text':
             try:
                 return json.loads(content[0]['text'])
-            except:
+            except Exception:
                 pass
     return None
 
@@ -990,6 +1052,8 @@ def handle_request(request: dict) -> dict:
             result = tool_trust_revoke(arguments)
         elif tool_name == 'bouncer_upload':
             result = tool_upload(arguments)
+        elif tool_name == 'bouncer_upload_batch':
+            result = tool_upload_batch(arguments)
         # Grant session tools
         elif tool_name == 'bouncer_request_grant':
             result = tool_request_grant(arguments)

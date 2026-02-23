@@ -359,3 +359,106 @@ def send_blocked_notification(
 
     except Exception as e:
         print(f"[BLOCKED] send_blocked_notification error: {e}")
+
+
+# ============================================================================
+# Trust Upload Notifications
+# ============================================================================
+
+def send_trust_upload_notification(
+    filename: str,
+    content_size: int,
+    sha256_hash: str,
+    trust_id: str,
+    upload_count: int,
+    max_uploads: int,
+    source: str = '',
+) -> None:
+    """發送 Trust Upload 自動批准的靜默通知"""
+    try:
+        if content_size >= 1024 * 1024:
+            size_str = f"{content_size / 1024 / 1024:.2f} MB"
+        elif content_size >= 1024:
+            size_str = f"{content_size / 1024:.2f} KB"
+        else:
+            size_str = f"{content_size} bytes"
+
+        source_line = f"🤖 `{source}`\n" if source else ""
+        hash_short = sha256_hash[:16] if sha256_hash != 'batch' else 'batch'
+
+        text = (
+            f"📤 *信任上傳* (自動)\n"
+            f"📁 `{filename}`\n"
+            f"📊 {size_str} | SHA256: `{hash_short}`\n"
+            f"📈 上傳: {upload_count}/{max_uploads}\n"
+            f"{source_line}"
+            f"🔑 `{trust_id}`"
+        )
+
+        keyboard = {
+            'inline_keyboard': [[
+                {'text': '🛑 結束信任', 'callback_data': f'revoke_trust:{trust_id}'}
+            ]]
+        }
+
+        _send_message_silent(text, keyboard)
+
+    except Exception as e:
+        print(f"[TRUST UPLOAD] send_trust_upload_notification error: {e}")
+
+
+def send_batch_upload_notification(
+    batch_id: str,
+    file_count: int,
+    total_size: int,
+    ext_counts: dict,
+    reason: str,
+    source: str = '',
+    account_name: str = '',
+    trust_scope: str = '',
+) -> None:
+    """發送批量上傳審批請求通知"""
+    try:
+        if total_size >= 1024 * 1024:
+            size_str = f"{total_size / 1024 / 1024:.2f} MB"
+        elif total_size >= 1024:
+            size_str = f"{total_size / 1024:.2f} KB"
+        else:
+            size_str = f"{total_size} bytes"
+
+        safe_source = _escape_markdown(source or 'Unknown')
+        safe_reason = _escape_markdown(reason)
+        safe_account = _escape_markdown(account_name)
+
+        # Format extension groups
+        ext_parts = []
+        for ext, count in sorted(ext_counts.items()):
+            ext_parts.append(f"{ext}: {count}")
+        ext_line = ', '.join(ext_parts)
+
+        text = (
+            f"📁 *批量上傳請求*\n\n"
+            f"🤖 *來源：* {safe_source}\n"
+            f"💬 *原因：* {safe_reason}\n"
+            f"🏦 *帳號：* {safe_account}\n\n"
+            f"📄 *{file_count} 個檔案* ({size_str})\n"
+            f"📊 {ext_line}\n\n"
+            f"🆔 `{batch_id}`"
+        )
+
+        keyboard = {
+            'inline_keyboard': [
+                [
+                    {'text': '📁 批准上傳', 'callback_data': f'approve:{batch_id}'},
+                    {'text': '❌ 拒絕', 'callback_data': f'deny:{batch_id}'},
+                ],
+                [
+                    {'text': '🔓 批准 + 信任10分鐘', 'callback_data': f'approve_trust:{batch_id}'},
+                ],
+            ]
+        }
+
+        _send_message(text, keyboard)
+
+    except Exception as e:
+        print(f"[BATCH UPLOAD] send_batch_upload_notification error: {e}")
