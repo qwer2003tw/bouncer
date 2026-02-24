@@ -8,7 +8,7 @@ import time
 
 
 # 從其他模組導入
-from utils import response
+from utils import response, format_size_human, build_info_lines
 from commands import execute_command
 from paging import store_paged_output, send_remaining_pages
 from trust import create_trust_session
@@ -40,8 +40,14 @@ def _get_accounts_table():
 # Grant Session Callbacks
 # ============================================================================
 
-def handle_grant_approve_all(query: dict, grant_id: str) -> dict:
-    """處理 Grant 全部批准 callback"""
+def handle_grant_approve(query: dict, grant_id: str, mode: str = 'all') -> dict:
+    """處理 Grant 批准 callback
+
+    Args:
+        query: Telegram callback query
+        grant_id: Grant session ID
+        mode: 'all' 全部批准 | 'safe_only' 只批准安全命令
+    """
     from grant import approve_grant
     from telegram import update_and_answer
 
@@ -49,8 +55,10 @@ def handle_grant_approve_all(query: dict, grant_id: str) -> dict:
     user_id = str(query.get('from', {}).get('id', ''))
     message_id = query.get('message', {}).get('message_id')
 
+    mode_label = '全部' if mode == 'all' else '僅安全'
+
     try:
-        grant = approve_grant(grant_id, user_id, mode='all')
+        grant = approve_grant(grant_id, user_id, mode=mode)
         if not grant:
             answer_callback(callback_id, '❌ Grant 不存在或已處理')
             return response(200, {'ok': True})
@@ -58,60 +66,36 @@ def handle_grant_approve_all(query: dict, grant_id: str) -> dict:
         granted = grant.get('granted_commands', [])
         ttl_minutes = grant.get('ttl_minutes', 30)
 
+        cb_suffix = '命令' if mode == 'all' else '安全命令'
+
         update_and_answer(
             message_id,
-            f"✅ *Grant 已批准（全部）*\n\n"
+            f"✅ *Grant 已批准（{mode_label}）*\n\n"
             f"🔑 *Grant ID：* `{grant_id}`\n"
             f"📋 *已授權命令：* {len(granted)} 個\n"
             f"⏱ *有效時間：* {ttl_minutes} 分鐘\n"
             f"👤 *批准者：* {user_id}",
             callback_id,
-            f'✅ 已批准 {len(granted)} 個命令'
+            f'✅ 已批准 {len(granted)} 個{cb_suffix}'
         )
 
         return response(200, {'ok': True})
 
     except Exception as e:
-        print(f"[GRANT] handle_grant_approve_all error: {e}")
+        print(f"[GRANT] handle_grant_approve error (mode={mode}): {e}")
         answer_callback(callback_id, f'❌ 批准失敗: {str(e)[:50]}')
         return response(500, {'error': str(e)})
+
+
+# Backward-compatible aliases
+def handle_grant_approve_all(query: dict, grant_id: str) -> dict:
+    """處理 Grant 全部批准 callback"""
+    return handle_grant_approve(query, grant_id, mode='all')
 
 
 def handle_grant_approve_safe(query: dict, grant_id: str) -> dict:
     """處理 Grant 只批准安全命令 callback"""
-    from grant import approve_grant
-    from telegram import update_and_answer
-
-    callback_id = query.get('id', '')
-    user_id = str(query.get('from', {}).get('id', ''))
-    message_id = query.get('message', {}).get('message_id')
-
-    try:
-        grant = approve_grant(grant_id, user_id, mode='safe_only')
-        if not grant:
-            answer_callback(callback_id, '❌ Grant 不存在或已處理')
-            return response(200, {'ok': True})
-
-        granted = grant.get('granted_commands', [])
-        ttl_minutes = grant.get('ttl_minutes', 30)
-
-        update_and_answer(
-            message_id,
-            f"✅ *Grant 已批准（僅安全）*\n\n"
-            f"🔑 *Grant ID：* `{grant_id}`\n"
-            f"📋 *已授權命令：* {len(granted)} 個\n"
-            f"⏱ *有效時間：* {ttl_minutes} 分鐘\n"
-            f"👤 *批准者：* {user_id}",
-            callback_id,
-            f'✅ 已批准 {len(granted)} 個安全命令'
-        )
-
-        return response(200, {'ok': True})
-
-    except Exception as e:
-        print(f"[GRANT] handle_grant_approve_safe error: {e}")
-        answer_callback(callback_id, f'❌ 批准失敗: {str(e)[:50]}')
-        return response(500, {'error': str(e)})
+    return handle_grant_approve(query, grant_id, mode='safe_only')
 
 
 def handle_grant_deny(query: dict, grant_id: str) -> dict:
@@ -199,18 +183,13 @@ def _send_status_update(message_id: int, status_emoji: str, title: str, item: di
         extra_lines: 額外要加在訊息中的行
     """
     request_id = item.get('request_id', '')
-    source = item.get('source', '')
-    context = item.get('context', '')
-
-    source_line = f"🤖 *來源：* {source}\n" if source else ""
-    context_line = f"📝 *任務：* {context}\n" if context else ""
+    info = build_info_lines(source=item.get('source', ''), context=item.get('context', ''))
 
     update_message(
         message_id,
         f"{status_emoji} *{title}*\n\n"
         f"📋 *請求 ID：* `{request_id}`\n"
-        f"{source_line}"
-        f"{context_line}"
+        f"{info}"
         f"{extra_lines}"
     )
 
@@ -232,8 +211,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
     account_id = item.get('account_id', DEFAULT_ACCOUNT_ID)
     account_name = item.get('account_name', 'Default')
 
-    source_line = f"🤖 *來源：* {source}\n" if source else ""
-    context_line = f"📝 *任務：* {context}\n" if context else ""
+    source_line = build_info_lines(source=source, context=context)
     account_line = f"🏢 *帳號：* `{account_id}` ({account_name})\n"
 
     if action in ('approve', 'approve_trust'):
@@ -308,7 +286,6 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             f"{title}\n\n"
             f"🆔 *ID：* `{request_id}`\n"
             f"{source_line}"
-            f"{context_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{command}`\n\n"
             f"💬 *原因：* {reason}\n\n"
@@ -336,7 +313,6 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             f"❌ *已拒絕*\n\n"
             f"🆔 *ID：* `{request_id}`\n"
             f"{source_line}"
-            f"{context_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{command}`\n\n"
             f"💬 *原因：* {reason}",
@@ -472,8 +448,7 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
     reason = item.get('reason', '')
     context = item.get('context', '')
 
-    source_line = f"🤖 *來源：* {source}\n" if source else ""
-    context_line = f"📝 *任務：* {context}\n" if context else ""
+    source_line = build_info_lines(source=source, context=context)
 
     if action == 'approve':
         _update_request_status(table, request_id, 'approved', user_id)
@@ -487,7 +462,6 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
                 f"❌ *部署啟動失敗*\n\n"
                 f"📋 *請求 ID：* `{request_id}`\n"
                 f"{source_line}"
-                f"{context_line}"
                 f"📦 *專案：* {project_name}\n"
                 f"🌿 *分支：* {branch}\n\n"
                 f"❗ *錯誤：* {result['error']}"
@@ -501,7 +475,6 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
                 f"🚀 *部署已啟動*\n\n"
                 f"📋 *請求 ID：* `{request_id}`\n"
                 f"{source_line}"
-                f"{context_line}"
                 f"📦 *專案：* {project_name}\n"
                 f"🌿 *分支：* {branch}\n"
                 f"{reason_line}"
@@ -519,7 +492,6 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
             f"❌ *已拒絕部署*\n\n"
             f"📋 *請求 ID：* `{request_id}`\n"
             f"{source_line}"
-            f"{context_line}"
             f"📦 *專案：* {project_name}\n"
             f"🌿 *分支：* {branch}\n"
             f"📋 *Stack：* {stack_name}\n\n"
@@ -549,17 +521,13 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
     account_name = item.get('account_name', '')
 
     s3_uri = f"s3://{bucket}/{key}"
-    source_line = f"🤖 來源： {source}\n" if source else ""
-    context_line = f"📝 任務： {context}\n" if context else ""
-    account_line = f"🏦 帳號： {account_id} ({account_name})\n" if account_id else ""
+    info_lines = build_info_lines(
+        source=source, context=context,
+        account_name=account_name, account_id=account_id,
+        bold=False,
+    )
 
-    # 格式化大小
-    if content_size >= 1024 * 1024:
-        size_str = f"{content_size / 1024 / 1024:.2f} MB"
-    elif content_size >= 1024:
-        size_str = f"{content_size / 1024:.2f} KB"
-    else:
-        size_str = f"{content_size} bytes"
+    size_str = format_size_human(content_size)
 
     if action == 'approve':
         # 執行上傳
@@ -570,9 +538,7 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
                 message_id,
                 f"✅ 已上傳\n\n"
                 f"📋 請求 ID： `{request_id}`\n"
-                f"{source_line}"
-                f"{context_line}"
-                f"{account_line}"
+                f"{info_lines}"
                 f"📁 目標： {s3_uri}\n"
                 f"📊 大小： {size_str}\n"
                 f"🔗 URL： {result.get('s3_url', '')}\n"
@@ -586,9 +552,7 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
                 message_id,
                 f"❌ 上傳失敗\n\n"
                 f"📋 請求 ID： `{request_id}`\n"
-                f"{source_line}"
-                f"{context_line}"
-                f"{account_line}"
+                f"{info_lines}"
                 f"📁 目標： {s3_uri}\n"
                 f"📊 大小： {size_str}\n"
                 f"❗ 錯誤： {error}\n"
@@ -603,9 +567,7 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
             message_id,
             f"❌ 已拒絕上傳\n\n"
             f"📋 請求 ID： `{request_id}`\n"
-            f"{source_line}"
-            f"{context_line}"
-            f"{account_line}"
+            f"{info_lines}"
             f"📁 目標： {s3_uri}\n"
             f"📊 大小： {size_str}\n"
             f"💬 原因： {reason}"
@@ -637,15 +599,12 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
     trust_scope = item.get('trust_scope', '')
     assume_role = item.get('assume_role', None)
 
-    if total_size >= 1024 * 1024:
-        size_str = f"{total_size / 1024 / 1024:.2f} MB"
-    elif total_size >= 1024:
-        size_str = f"{total_size / 1024:.2f} KB"
-    else:
-        size_str = f"{total_size} bytes"
+    size_str = format_size_human(total_size)
 
-    source_line = f"🤖 來源： {source}\n" if source else ""
-    account_line = f"🏦 帳號： {account_id} ({account_name})\n" if account_id else ""
+    source_line = build_info_lines(
+        source=source, account_name=account_name, account_id=account_id,
+        bold=False,
+    )
 
     if action in ('approve', 'approve_trust'):
         # Parse files manifest
@@ -661,7 +620,6 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
             f"⏳ 批量上傳中...\n\n"
             f"📋 請求 ID： `{request_id}`\n"
             f"{source_line}"
-            f"{account_line}"
             f"📄 {file_count} 個檔案 ({size_str})\n"
             f"💬 原因： {reason}\n\n"
             f"進度: 0/{file_count}",
@@ -757,7 +715,6 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
             f"✅ 批量上傳完成\n\n"
             f"📋 請求 ID： `{request_id}`\n"
             f"{source_line}"
-            f"{account_line}"
             f"📄 成功: {len(uploaded)}/{file_count} 個檔案 ({size_str})"
             f"{error_line}"
             f"\n💬 原因： {reason}"
@@ -772,7 +729,6 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
             f"❌ 已拒絕批量上傳\n\n"
             f"📋 請求 ID： `{request_id}`\n"
             f"{source_line}"
-            f"{account_line}"
             f"📄 {file_count} 個檔案 ({size_str})\n"
             f"💬 原因： {reason}",
         )

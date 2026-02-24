@@ -72,7 +72,8 @@ def app_module(mock_dynamodb):
     
     # 重新載入模組（包括新模組）
     for mod in ['app', 'telegram', 'paging', 'trust', 'commands', 'notifications', 'db',
-                'callbacks', 'mcp_tools', 'accounts', 'rate_limit', 'smart_approval',
+                'callbacks', 'mcp_tools', 'mcp_execute', 'mcp_upload', 'mcp_admin',
+                'accounts', 'rate_limit', 'smart_approval',
                 'src.app', 'src.telegram', 'src.paging', 'src.trust', 'src.commands']:
         if mod in sys.modules:
             del sys.modules[mod]
@@ -158,9 +159,10 @@ class TestMCPExecuteSafelist:
     
     def test_execute_safelist_command(self, app_module):
         """測試自動批准的命令"""
+        import mcp_execute
         import mcp_tools
         # 需要 mock mcp_tools.execute_command
-        with patch.object(mcp_tools, 'execute_command', return_value='{"Reservations": []}'):
+        with patch.object(mcp_execute, 'execute_command', return_value='{"Reservations": []}'):
             event = {
                 'rawPath': '/mcp',
                 'headers': {'x-approval-secret': 'test-secret'},
@@ -744,8 +746,9 @@ class TestIntegration:
     
     def test_full_mcp_flow_safelist(self, app_module):
         """測試完整 MCP 流程（SAFELIST）"""
+        import mcp_execute
         import mcp_tools
-        with patch.object(mcp_tools, 'execute_command', return_value='{"UserId": "123", "Account": "456", "Arn": "arn:aws:iam::456:user/test"}'):
+        with patch.object(mcp_execute, 'execute_command', return_value='{"UserId": "123", "Account": "456", "Arn": "arn:aws:iam::456:user/test"}'):
             # Initialize
             init_event = {
                 'rawPath': '/mcp',
@@ -1455,13 +1458,13 @@ class TestTelegramCommands:
         """測試 /accounts 命令"""
         with patch.object(app_module, 'list_accounts', return_value=[
             {'account_id': '123456789012', 'name': 'Test', 'enabled': True}
-        ]), patch.object(app_module, 'send_telegram_message_to'):
+        ]), patch('telegram_commands.send_telegram_message_to'):
             result = app_module.handle_accounts_command('12345')
             assert result['statusCode'] == 200
     
     def test_handle_help_command(self, app_module):
         """測試 /help 命令"""
-        with patch.object(app_module, 'send_telegram_message_to'):
+        with patch('telegram_commands.send_telegram_message_to'):
             result = app_module.handle_help_command('12345')
             assert result['statusCode'] == 200
 
@@ -1578,7 +1581,7 @@ class TestTelegramWebhookHandler:
                 'text': 'hello'
             }
         })}
-        with patch.object(app_module, 'send_telegram_message_to'):
+        with patch('telegram_commands.send_telegram_message_to'):
             result = app_module.handle_telegram_webhook(event)
             assert result['statusCode'] == 200
 
@@ -1593,7 +1596,7 @@ class TestTelegramCommandHandler:
     
     def test_handle_telegram_command_unknown(self, app_module):
         """未知命令"""
-        with patch.object(app_module, 'send_telegram_message_to'):
+        with patch('telegram_commands.send_telegram_message_to'):
             result = app_module.handle_telegram_command({
                 'chat': {'id': 123},
                 'text': '/unknown'
@@ -1610,13 +1613,15 @@ class TestMCPToolCallRouting:
     
     def test_handle_mcp_tool_call_execute(self, app_module):
         """bouncer_execute 路由"""
-        with patch.object(app_module, 'mcp_tool_execute', return_value={'test': 'result'}):
+        mock_handler = MagicMock(return_value={'test': 'result'})
+        with patch.dict(app_module.TOOL_HANDLERS, {'bouncer_execute': mock_handler}):
             result = app_module.handle_mcp_tool_call('req-1', 'bouncer_execute', {'command': 'aws s3 ls'})
             assert result == {'test': 'result'}
     
     def test_handle_mcp_tool_call_status(self, app_module):
         """bouncer_status 路由"""
-        with patch.object(app_module, 'mcp_tool_status', return_value={'test': 'result'}):
+        mock_handler = MagicMock(return_value={'test': 'result'})
+        with patch.dict(app_module.TOOL_HANDLERS, {'bouncer_status': mock_handler}):
             result = app_module.handle_mcp_tool_call('req-1', 'bouncer_status', {'request_id': 'abc'})
             assert result == {'test': 'result'}
     
@@ -1636,7 +1641,7 @@ class TestTrustCommandHandler:
     
     def test_handle_trust_command(self, app_module):
         """trust 命令"""
-        with patch.object(app_module, 'send_telegram_message_to'):
+        with patch('telegram_commands.send_telegram_message_to'):
             result = app_module.handle_trust_command('12345')
             assert result['statusCode'] == 200
 
@@ -1647,7 +1652,7 @@ class TestPendingCommandHandler:
     def test_handle_pending_command_empty(self, app_module):
         """無 pending 請求"""
         with patch.object(app_module.table, 'query', return_value={'Items': []}), \
-             patch.object(app_module, 'send_telegram_message_to'):
+             patch('telegram_commands.send_telegram_message_to'):
             result = app_module.handle_pending_command('12345')
             assert result['statusCode'] == 200
 
@@ -1913,7 +1918,7 @@ class TestAccountValidationErrorPaths:
         }
         
         # Mock get_account 返回 None
-        with patch.object(app_module, 'get_account', return_value=None), \
+        with patch('accounts.get_account', return_value=None), \
              patch.object(app_module, 'list_accounts', return_value=[{'account_id': '123456789012'}]):
             result = app_module.lambda_handler(event, None)
             body = json.loads(result['body'])
@@ -1928,6 +1933,7 @@ class TestAccountValidationErrorPaths:
     def test_execute_account_disabled(self, app_module):
         """帳號已停用"""
         import mcp_tools
+        import mcp_execute
         event = {
             'rawPath': '/mcp',
             'headers': {'x-approval-secret': 'test-secret'},
@@ -1948,7 +1954,7 @@ class TestAccountValidationErrorPaths:
         }
         
         # Mock get_account 返回停用的帳號
-        with patch.object(mcp_tools, 'get_account', return_value={
+        with patch.object(mcp_execute, 'get_account', return_value={
             'account_id': '123456789012',
             'name': 'Test',
             'enabled': False
@@ -2034,6 +2040,7 @@ class TestRateLimitErrors:
     def test_rate_limit_exceeded_error(self, app_module):
         """Rate limit 超過應返回錯誤"""
         import mcp_tools
+        import mcp_execute
         event = {
             'rawPath': '/mcp',
             'headers': {'x-approval-secret': 'test-secret'},
@@ -2054,8 +2061,8 @@ class TestRateLimitErrors:
         }
         
         # Mock check_rate_limit 拋出 RateLimitExceeded
-        with patch.object(mcp_tools, 'check_rate_limit', 
-                          side_effect=mcp_tools.RateLimitExceeded('Rate limit exceeded')):
+        with patch.object(mcp_execute, 'check_rate_limit', 
+                          side_effect=mcp_execute.RateLimitExceeded('Rate limit exceeded')):
             result = app_module.lambda_handler(event, None)
             body = json.loads(result['body'])
             
@@ -2086,8 +2093,8 @@ class TestRateLimitErrors:
         }
         
         # Mock check_rate_limit 拋出 PendingLimitExceeded
-        with patch.object(mcp_tools, 'check_rate_limit', 
-                          side_effect=mcp_tools.PendingLimitExceeded('Too many pending')):
+        with patch('mcp_execute.check_rate_limit',
+                          side_effect=app_module.PendingLimitExceeded('Too many pending')):
             result = app_module.lambda_handler(event, None)
             body = json.loads(result['body'])
             
@@ -2291,7 +2298,7 @@ class TestTelegramCallbackHandlers:
         
         # Mock accounts_table
         import db
-        with patch.object(app_module, 'accounts_table') as mock_accounts, \
+        with patch('db.accounts_table') as mock_accounts, \
              patch.object(db, 'accounts_table', mock_accounts):
             mock_accounts.put_item = MagicMock()
             result = app_module.lambda_handler(event, None)
@@ -2363,7 +2370,7 @@ class TestTelegramCallbackHandlers:
         
         # Mock accounts_table
         import db
-        with patch.object(app_module, 'accounts_table') as mock_accounts, \
+        with patch('db.accounts_table') as mock_accounts, \
              patch.object(db, 'accounts_table', mock_accounts):
             mock_accounts.delete_item = MagicMock()
             result = app_module.lambda_handler(event, None)
@@ -3079,6 +3086,7 @@ class TestTrustAutoApprove:
     @patch('telegram.send_telegram_message_silent')
     def test_trust_auto_approve_flow(self, mock_silent, app_module):
         """信任時段內的自動批准流程"""
+        import mcp_execute
         import mcp_tools
         source = 'trust-auto-test'
         account_id = '111111111111'
@@ -3087,7 +3095,7 @@ class TestTrustAutoApprove:
         trust_id = app_module.create_trust_session(source, account_id, '999999999')
         
         # 執行命令（應該被自動批准）
-        with patch.object(mcp_tools, 'execute_command', return_value='{"result": "ok"}'):
+        with patch.object(mcp_execute, 'execute_command', return_value='{"result": "ok"}'):
             event = {
                 'rawPath': '/mcp',
                 'headers': {'x-approval-secret': 'test-secret'},
@@ -3109,7 +3117,7 @@ class TestTrustAutoApprove:
             }
             
             # Mock get_account 返回有效帳號
-            with patch.object(mcp_tools, 'get_account', return_value={
+            with patch.object(mcp_execute, 'get_account', return_value={
                 'account_id': account_id,
                 'name': 'Test',
                 'enabled': True,
@@ -3275,9 +3283,10 @@ class TestMCPToolHandlersAdditional:
     def test_mcp_tool_remove_account_default(self, mock_telegram, app_module):
         """不能移除預設帳號"""
         import mcp_tools
-        original = mcp_tools.DEFAULT_ACCOUNT_ID
+        import mcp_admin
+        original = mcp_admin.DEFAULT_ACCOUNT_ID
         try:
-            mcp_tools.DEFAULT_ACCOUNT_ID = '111111111111'
+            mcp_admin.DEFAULT_ACCOUNT_ID = '111111111111'
             result = app_module.mcp_tool_remove_account('test-1', {
                 'account_id': '111111111111'
             })
@@ -3287,12 +3296,12 @@ class TestMCPToolHandlersAdditional:
             assert content['status'] == 'error'
             assert '預設' in content['error']
         finally:
-            mcp_tools.DEFAULT_ACCOUNT_ID = original
+            mcp_admin.DEFAULT_ACCOUNT_ID = original
     
     @patch('telegram.send_telegram_message')
     def test_mcp_tool_remove_account_not_exists(self, mock_telegram, app_module):
         """移除不存在的帳號"""
-        with patch.object(app_module, 'get_account', return_value=None):
+        with patch('accounts.get_account', return_value=None):
             result = app_module.mcp_tool_remove_account('test-1', {
                 'account_id': '999999999999'
             })
@@ -3469,7 +3478,7 @@ class TestTelegramCommandsAdditional:
     
     def test_handle_trust_command_empty(self, app_module):
         """/trust 命令沒有活躍時段"""
-        with patch.object(app_module, 'send_telegram_message_to'):
+        with patch('telegram_commands.send_telegram_message_to'):
             result = app_module.handle_trust_command('12345')
             assert result['statusCode'] == 200
     
@@ -3484,7 +3493,7 @@ class TestTelegramCommandsAdditional:
             'created_at': int(time.time())
         })
         
-        with patch.object(app_module, 'send_telegram_message_to'):
+        with patch('telegram_commands.send_telegram_message_to'):
             result = app_module.handle_pending_command('999999999')
             assert result['statusCode'] == 200
 
@@ -4851,13 +4860,14 @@ class TestCoverage80Sprint:
     @patch('mcp_tools.send_telegram_message')
     def test_mcp_execute_with_configured_account(self, mock_telegram, app_module):
         """執行命令使用配置的帳號"""
+        import mcp_execute
         import mcp_tools
-        with patch.object(mcp_tools, 'get_account', return_value={
+        with patch.object(mcp_execute, 'get_account', return_value={
             'account_id': '555555555555',
             'name': 'Configured Account',
             'enabled': True,
             'role_arn': 'arn:aws:iam::555555555555:role/TestRole'
-        }), patch.object(mcp_tools, 'execute_command', return_value='{"result": "ok"}'):
+        }), patch.object(mcp_execute, 'execute_command', return_value='{"result": "ok"}'):
             event = {
                 'rawPath': '/mcp',
                 'headers': {'x-approval-secret': 'test-secret'},
@@ -5282,9 +5292,10 @@ class TestMCPRemoveAccount:
     def test_remove_default_account_blocked(self, mock_telegram, app_module):
         """不能移除預設帳號"""
         import mcp_tools
-        original = mcp_tools.DEFAULT_ACCOUNT_ID
+        import mcp_admin
+        original = mcp_admin.DEFAULT_ACCOUNT_ID
         try:
-            mcp_tools.DEFAULT_ACCOUNT_ID = '111111111111'
+            mcp_admin.DEFAULT_ACCOUNT_ID = '111111111111'
             result = app_module.mcp_tool_remove_account('test-1', {
                 'account_id': '111111111111'
             })
@@ -5293,7 +5304,7 @@ class TestMCPRemoveAccount:
             assert content['status'] == 'error'
             assert '預設帳號' in content['error']
         finally:
-            mcp_tools.DEFAULT_ACCOUNT_ID = original
+            mcp_admin.DEFAULT_ACCOUNT_ID = original
     
     @patch('telegram.send_telegram_message')
     def test_remove_nonexistent_account(self, mock_telegram, app_module):
@@ -5672,7 +5683,8 @@ class TestCrossAccountUpload:
     def setup_default_account(self, monkeypatch, app_module):
         """設定預設帳號 ID for upload tests"""
         import mcp_tools
-        monkeypatch.setattr(mcp_tools, 'DEFAULT_ACCOUNT_ID', '111111111111')
+        import mcp_upload
+        monkeypatch.setattr(mcp_upload, 'DEFAULT_ACCOUNT_ID', '111111111111')
 
     @pytest.fixture(autouse=True)
     def setup_accounts_table(self, mock_dynamodb, app_module):
@@ -5689,7 +5701,7 @@ class TestCrossAccountUpload:
         except Exception:
             pass  # 表可能已存在
 
-    @patch('mcp_tools.send_telegram_message')
+    @patch('mcp_upload.send_telegram_message')
     def test_upload_default_account_no_assume_role(self, mock_telegram, app_module):
         """不帶 account 參數 → 使用預設帳號，不 assume role"""
         import base64
@@ -5715,7 +5727,7 @@ class TestCrossAccountUpload:
         assert upload_item['account_id'] == '111111111111'
         assert upload_item['account_name'] == 'Default'
 
-    @patch('mcp_tools.send_telegram_message')
+    @patch('mcp_upload.send_telegram_message')
     def test_upload_cross_account_with_role(self, mock_telegram, app_module):
         """帶 account 參數 → 使用跨帳號，存 assume_role"""
         import base64
@@ -5752,7 +5764,7 @@ class TestCrossAccountUpload:
         assert upload_item['account_name'] == 'Dev'
         assert upload_item['bucket'] == 'bouncer-uploads-222222222222'
 
-    @patch('mcp_tools.send_telegram_message')
+    @patch('mcp_upload.send_telegram_message')
     def test_upload_invalid_account(self, mock_telegram, app_module):
         """帶不存在的 account → 錯誤"""
         import base64
@@ -5771,7 +5783,7 @@ class TestCrossAccountUpload:
         assert resp['status'] == 'error'
         assert '未配置' in resp['error']
 
-    @patch('mcp_tools.send_telegram_message')
+    @patch('mcp_upload.send_telegram_message')
     def test_upload_disabled_account(self, mock_telegram, app_module):
         """帶停用的 account → 錯誤"""
         import base64
@@ -5800,7 +5812,7 @@ class TestCrossAccountUpload:
         assert resp['status'] == 'error'
         assert '已停用' in resp['error']
 
-    @patch('mcp_tools.send_telegram_message')
+    @patch('mcp_upload.send_telegram_message')
     def test_upload_notification_includes_account(self, mock_telegram, app_module):
         """通知訊息包含帳號資訊"""
         import base64
@@ -6364,7 +6376,7 @@ class TestTrustSessionLimits:
 class TestSyncModeExecute:
     """測試同步/異步模式"""
 
-    @patch('mcp_tools.execute_command')
+    @patch('mcp_execute.execute_command')
     def test_sync_safe_command_auto_approved(self, mock_execute, app_module):
         """sync=True + safe command → 直接返回結果"""
         mock_execute.return_value = '{"Instances": []}'
@@ -6446,7 +6458,7 @@ class TestCrossAccountExecuteFlow:
         except Exception:
             pass  # 表可能已存在
 
-    @patch('mcp_tools.execute_command')
+    @patch('mcp_execute.execute_command')
     @patch('telegram.send_telegram_message')
     def test_cross_account_with_assume_role(self, mock_telegram, mock_execute, app_module):
         """mock execute_command 驗證帶 assume_role 的調用"""
@@ -6524,7 +6536,7 @@ class TestCrossAccountExecuteFlow:
         assert content['status'] == 'error'
         assert '999999999999' in content['error']
 
-    @patch('mcp_tools.execute_command')
+    @patch('mcp_execute.execute_command')
     def test_assume_role_failure(self, mock_execute, app_module):
         """assume_role 失敗 → 返回錯誤"""
         mock_execute.return_value = '❌ Assume role 失敗: Access Denied'
