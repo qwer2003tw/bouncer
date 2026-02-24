@@ -107,8 +107,8 @@ def evaluate_command(
             decision = ApprovalDecision.AUTO_APPROVE
             reason_text = f"風險分數 {final_score} <= 25，自動批准"
         elif final_score <= 45:
-            decision = ApprovalDecision.AUTO_APPROVE_LOG
-            reason_text = f"風險分數 {final_score}，自動批准並記錄"
+            decision = ApprovalDecision.NEEDS_CONFIRMATION
+            reason_text = f"風險分數 {final_score}，需要確認（中等風險）"
         elif final_score <= 65:
             decision = ApprovalDecision.NEEDS_CONFIRMATION
             reason_text = f"風險分數 {final_score}，需要確認 reason"

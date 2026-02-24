@@ -364,4 +364,21 @@ AUTO_APPROVE_PREFIXES = [
     'aws codebuild batch-get-',
     'aws codepipeline list-',
     'aws codepipeline get-',
+
+    # EKS (唯讀)
+    'aws eks list-clusters',
+    'aws eks describe-cluster',
+    'aws eks describe-nodegroup',
+    'aws eks list-nodegroups',
+    'aws eks get-token',
+    'aws eks describe-addon',
+    'aws eks list-addons',
+
+    # EC2 prefix-list (唯讀)
+    'aws ec2 get-managed-prefix-list-entries',
+    'aws ec2 describe-managed-prefix-lists',
+
+    # Pricing (唯讀)
+    'aws pricing get-products',
+    'aws pricing describe-services',
 ]
