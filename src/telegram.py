@@ -97,11 +97,18 @@ def _telegram_request(method: str, data: dict, timeout: int = 5, json_body: bool
 
 
 def escape_markdown(text: str) -> str:
-    """轉義 Telegram Markdown 特殊字元"""
+    """轉義 Telegram Markdown V1 特殊字元
+
+    V1 不支援反斜線 escape，所以用 zero-width space 斷開配對。
+    只處理 * _ ` [ 四個 V1 特殊字元。
+    """
     if not text:
         return text
+    # Zero-width space (U+200B) 插入特殊字元後，打斷 Markdown 配對
+    # 但不影響視覺顯示
+    zwsp = '\u200b'
     for char in ['*', '_', '`', '[']:
-        text = text.replace(char, '\\' + char)
+        text = text.replace(char, char + zwsp)
     return text
 
 
