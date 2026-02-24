@@ -1319,13 +1319,12 @@ class TestTelegramModule:
     """Telegram 模組測試"""
     
     def test_escape_markdown_special_chars(self, app_module):
-        """Markdown 特殊字元跳脫（用 zero-width space 斷開配對）"""
+        """Markdown 特殊字元跳脫（不含 _ — V1 無法正確 escape）"""
         from telegram import escape_markdown
-        zwsp = '\u200b'
-        assert escape_markdown('*bold*') == f'*{zwsp}bold*{zwsp}'
-        assert escape_markdown('_italic_') == f'_{zwsp}italic_{zwsp}'
-        assert escape_markdown('`code`') == f'`{zwsp}code`{zwsp}'
-        assert escape_markdown('[link') == f'[{zwsp}link'
+        assert escape_markdown('*bold*') == '\\*bold\\*'
+        assert escape_markdown('_italic_') == '_italic_'  # _ 不 escape
+        assert escape_markdown('`code`') == '\\`code\\`'
+        assert escape_markdown('[link') == '\\[link'
     
     def test_escape_markdown_none(self, app_module):
         """None 輸入應返回 None"""
@@ -4994,15 +4993,14 @@ class TestCoverage80Sprint:
         assert result['statusCode'] == 200
     
     def test_escape_markdown_all_chars(self, app_module):
-        """Markdown 跳脫所有特殊字元（zero-width space）"""
+        """Markdown 跳脫特殊字元（_ 不 escape）"""
         from telegram import escape_markdown
-        zwsp = '\u200b'
         text = '*_`['
         escaped = escape_markdown(text)
-        assert f'*{zwsp}' in escaped
-        assert f'_{zwsp}' in escaped
-        assert f'`{zwsp}' in escaped
-        assert f'[{zwsp}' in escaped
+        assert '\\*' in escaped
+        assert '\\`' in escaped
+        assert '\\[' in escaped
+        assert '\\_' not in escaped  # _ 不 escape
     
     @patch('telegram.send_telegram_message')
     def test_mcp_upload_with_legacy_bucket(self, mock_telegram, app_module):

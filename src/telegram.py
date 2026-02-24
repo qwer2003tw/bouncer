@@ -93,22 +93,50 @@ def _telegram_request(method: str, data: dict, timeout: int = 5, json_body: bool
     except Exception as e:
         elapsed = (time.time() - start_time) * 1000
         print(f"[TIMING] Telegram {method} error ({elapsed:.0f}ms): {e}")
+
+        # Fallback: if sendMessage fails with Markdown, retry without parse_mode
+        if method == 'sendMessage' and 'parse_mode' in data and '400' in str(e):
+            print(f"[FALLBACK] Retrying {method} without parse_mode")
+            fallback_data = {k: v for k, v in data.items() if k != 'parse_mode'}
+            try:
+                if json_body:
+                    req = urllib.request.Request(
+                        url,
+                        data=json.dumps(fallback_data).encode(),
+                        headers={'Content-Type': 'application/json'},
+                        method='POST'
+                    )
+                else:
+                    req = urllib.request.Request(
+                        url,
+                        data=urllib.parse.urlencode(fallback_data).encode(),
+                        method='POST'
+                    )
+                with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
+                    result = json.loads(resp.read().decode())
+                    elapsed2 = (time.time() - start_time) * 1000
+                    print(f"[TIMING] Telegram {method} fallback OK ({elapsed2:.0f}ms)")
+                    return result
+            except Exception as e2:
+                print(f"[TIMING] Telegram {method} fallback also failed: {e2}")
+
         return {}
 
 
 def escape_markdown(text: str) -> str:
     """轉義 Telegram Markdown V1 特殊字元
 
-    V1 不支援反斜線 escape，所以用 zero-width space 斷開配對。
-    只處理 * _ ` [ 四個 V1 特殊字元。
+    策略：把 user text 包在 inline code 裡不需要 escape，
+    但有時需要在非 code 上下文中使用，所以這裡 escape *, `, [。
+
+    對 _ 的處理：不 escape，因為 V1 的 \\_ 會原樣顯示反斜線。
+    改用全域的 fallback — 如果 sendMessage 失敗就重試不帶 parse_mode。
     """
     if not text:
         return text
-    # Zero-width space (U+200B) 插入特殊字元後，打斷 Markdown 配對
-    # 但不影響視覺顯示
-    zwsp = '\u200b'
-    for char in ['*', '_', '`', '[']:
-        text = text.replace(char, char + zwsp)
+    # 只 escape 會導致嚴重問題的字元（不含 _）
+    for char in ['*', '`', '[']:
+        text = text.replace(char, '\\' + char)
     return text
 
 
