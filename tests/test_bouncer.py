@@ -680,6 +680,28 @@ class TestCommandClassification:
         assert app_module.is_auto_approve('aws sts get-caller-identity')
         assert app_module.is_auto_approve('aws rds describe-db-instances')
         assert app_module.is_auto_approve('aws logs filter-log-events --log-group xxx')
+        # S3 download
+        assert app_module.is_auto_approve('aws s3 cp s3://my-bucket/file.txt /tmp/file.txt')
+        # S3→S3 copy (staging → frontend bucket)
+        assert app_module.is_auto_approve(
+            'aws s3 cp s3://bouncer-uploads-190825685292/2026-02-24/abc/index.js '
+            's3://ztp-files-dev-frontendbucket-nvvimv31xp3v/assets/index.js '
+            '--content-type application/javascript --cache-control max-age=31536000,immutable '
+            '--metadata-directive REPLACE --region us-east-1'
+        )
+        # CloudFront invalidation — ZTP Files dev distribution
+        assert app_module.is_auto_approve(
+            'aws cloudfront create-invalidation --distribution-id E176PW0SA5JF29 '
+            '--paths "/index.html" "/assets/*" --region us-east-1'
+        )
+        # CF invalidation lowercase distribution-id should also match
+        assert app_module.is_auto_approve(
+            'aws cloudfront create-invalidation --distribution-id e176pw0sa5jf29 --paths "/*"'
+        )
+        # Other CF distributions still require approval
+        assert not app_module.is_auto_approve(
+            'aws cloudfront create-invalidation --distribution-id EXXXXXXXXXX --paths "/*"'
+        )
     
     def test_approval_required(self, app_module):
         """測試需要審批的命令"""
