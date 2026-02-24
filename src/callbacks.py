@@ -680,13 +680,18 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
                     Body=content_bytes,
                     ContentType=fm.get('content_type', 'application/octet-stream'),
                 )
+                # Verify file exists after upload
+                try:
+                    s3.head_object(Bucket=bucket, Key=fkey)
+                except Exception as verify_err:
+                    raise Exception(f"HeadObject verification failed: {verify_err}")
                 uploaded.append({
                     'filename': fname,
                     's3_uri': f"s3://{bucket}/{fkey}",
                     'size': fm.get('size', 0),
                 })
             except Exception as e:
-                errors.append(f"{fname}: {str(e)[:80]}")
+                errors.append({'filename': fname, 'reason': str(e)[:120]})
 
             # Update progress every 5 files
             if (i + 1) % 5 == 0 or i == len(files_manifest) - 1:
@@ -700,10 +705,27 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
                 except Exception:
                     pass  # Progress update failure is non-critical
 
+        # Determine final status
+        total_files = len(files_manifest)
+        success_count = len(uploaded)
+        fail_count = len(errors)
+        if fail_count == 0:
+            upload_status = 'completed'
+        elif success_count == 0:
+            upload_status = 'failed'
+        else:
+            upload_status = 'partial'
+
         # Update DB
         _update_request_status(table, request_id, 'approved', user_id, extra_attrs={
-            'uploaded_count': len(uploaded),
-            'error_count': len(errors),
+            'uploaded_count': success_count,
+            'error_count': fail_count,
+            'upload_status': upload_status,
+            'uploaded_files': _json.dumps([u['filename'] for u in uploaded]),
+            'failed_files': _json.dumps([f['filename'] for f in errors]),
+            'uploaded_details': _json.dumps(uploaded),
+            'failed_details': _json.dumps(errors),
+            'total_files': total_files,
         })
         emit_metric('Bouncer', 'Upload', 1, dimensions={'Status': 'approved', 'Type': 'batch'})
 

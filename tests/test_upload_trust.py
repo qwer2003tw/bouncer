@@ -610,3 +610,238 @@ class TestBatchUploadCallback:
         session = get_trust_session('test-scope', '111111111111')
         assert session is not None
         assert int(session.get('max_uploads', 0)) > 0
+
+
+# ============================================================================
+# P0: Per-file S3 verification — partial/failed response format
+# ============================================================================
+
+class TestBatchUploadVerification:
+    """Tests for per-file HeadObject verification and new response format."""
+
+    def _create_multi_batch_item(self, table, batch_id, filenames):
+        import json as _json
+        files = [
+            {'filename': fn, 'content_b64': base64.b64encode(b'data').decode(),
+             'content_type': 'text/plain', 'size': 4, 'sha256': 'abc'}
+            for fn in filenames
+        ]
+        table.put_item(Item={
+            'request_id': batch_id,
+            'action': 'upload_batch',
+            'bucket': 'bouncer-uploads-111111111111',
+            'files': _json.dumps(files),
+            'file_count': len(files),
+            'total_size': 4 * len(files),
+            'reason': 'test deploy',
+            'source': 'test-bot',
+            'trust_scope': 'test-scope',
+            'account_id': '111111111111',
+            'account_name': 'Default',
+            'status': 'pending_approval',
+            'created_at': int(time.time()),
+            'ttl': int(time.time()) + 3600,
+            'mode': 'mcp',
+        })
+
+    @patch('callbacks.answer_callback')
+    @patch('callbacks.update_message')
+    @patch('boto3.client')
+    def test_all_succeed_status_completed(self, mock_boto_client, mock_update, mock_answer, app_module):
+        """When all files pass HeadObject, upload_status = 'completed'."""
+        from callbacks import handle_upload_batch_callback
+        fnames = ['a.js', 'b.css', 'c.html']
+        self._create_multi_batch_item(app_module.table, 'batch-verify-all-ok', fnames)
+        item = app_module.table.get_item(Key={'request_id': 'batch-verify-all-ok'})['Item']
+
+        mock_s3 = MagicMock()
+        mock_s3.head_object.return_value = {'ContentLength': 4}
+        mock_boto_client.return_value = mock_s3
+
+        handle_upload_batch_callback('approve', 'batch-verify-all-ok', item, 12345, 'cb-ok', '999')
+
+        updated = app_module.table.get_item(Key={'request_id': 'batch-verify-all-ok'})['Item']
+        assert updated['status'] == 'approved'
+        assert updated['upload_status'] == 'completed'
+        assert int(updated['uploaded_count']) == 3
+        assert int(updated['error_count']) == 0
+
+        uploaded_files = json.loads(updated['uploaded_files'])
+        assert set(uploaded_files) == set(fnames)
+        failed_files = json.loads(updated['failed_files'])
+        assert failed_files == []
+
+    @patch('callbacks.answer_callback')
+    @patch('callbacks.update_message')
+    @patch('boto3.client')
+    def test_some_fail_status_partial(self, mock_boto_client, mock_update, mock_answer, app_module):
+        """When some files fail HeadObject, upload_status = 'partial' with failed list."""
+        from callbacks import handle_upload_batch_callback
+        fnames = ['good.js', 'bad.css', 'ok.html']
+        self._create_multi_batch_item(app_module.table, 'batch-verify-partial', fnames)
+        item = app_module.table.get_item(Key={'request_id': 'batch-verify-partial'})['Item']
+
+        call_count = [0]
+
+        def head_object_side_effect(Bucket, Key):
+            call_count[0] += 1
+            # Fail on the second call (bad.css)
+            if call_count[0] == 2:
+                raise Exception('NoSuchKey')
+            return {'ContentLength': 4}
+
+        mock_s3 = MagicMock()
+        mock_s3.head_object.side_effect = head_object_side_effect
+        mock_boto_client.return_value = mock_s3
+
+        handle_upload_batch_callback('approve', 'batch-verify-partial', item, 12345, 'cb-p', '999')
+
+        updated = app_module.table.get_item(Key={'request_id': 'batch-verify-partial'})['Item']
+        assert updated['status'] == 'approved'
+        assert updated['upload_status'] == 'partial'
+        assert int(updated['uploaded_count']) == 2
+        assert int(updated['error_count']) == 1
+
+        uploaded_files = json.loads(updated['uploaded_files'])
+        failed_files = json.loads(updated['failed_files'])
+        assert 'bad.css' in failed_files
+        assert 'good.js' in uploaded_files
+        assert 'ok.html' in uploaded_files
+
+    @patch('callbacks.answer_callback')
+    @patch('callbacks.update_message')
+    @patch('boto3.client')
+    def test_all_fail_status_failed(self, mock_boto_client, mock_update, mock_answer, app_module):
+        """When all files fail, upload_status = 'failed'."""
+        from callbacks import handle_upload_batch_callback
+        fnames = ['x.js', 'y.js']
+        self._create_multi_batch_item(app_module.table, 'batch-verify-all-fail', fnames)
+        item = app_module.table.get_item(Key={'request_id': 'batch-verify-all-fail'})['Item']
+
+        mock_s3 = MagicMock()
+        mock_s3.put_object.side_effect = Exception('S3 error')
+        mock_boto_client.return_value = mock_s3
+
+        handle_upload_batch_callback('approve', 'batch-verify-all-fail', item, 12345, 'cb-f', '999')
+
+        updated = app_module.table.get_item(Key={'request_id': 'batch-verify-all-fail'})['Item']
+        assert updated['status'] == 'approved'
+        assert updated['upload_status'] == 'failed'
+        assert int(updated['uploaded_count']) == 0
+        assert int(updated['error_count']) == 2
+
+        failed_files = json.loads(updated['failed_files'])
+        assert set(failed_files) == set(fnames)
+
+    @patch('callbacks.answer_callback')
+    @patch('callbacks.update_message')
+    @patch('boto3.client')
+    def test_failed_details_contain_reason(self, mock_boto_client, mock_update, mock_answer, app_module):
+        """failed_details should include both filename and reason."""
+        from callbacks import handle_upload_batch_callback
+        fnames = ['err.js']
+        self._create_multi_batch_item(app_module.table, 'batch-verify-reason', fnames)
+        item = app_module.table.get_item(Key={'request_id': 'batch-verify-reason'})['Item']
+
+        mock_s3 = MagicMock()
+        mock_s3.head_object.side_effect = Exception('NoSuchKey')
+        mock_boto_client.return_value = mock_s3
+
+        handle_upload_batch_callback('approve', 'batch-verify-reason', item, 12345, 'cb-r', '999')
+
+        updated = app_module.table.get_item(Key={'request_id': 'batch-verify-reason'})['Item']
+        failed_details = json.loads(updated['failed_details'])
+        assert len(failed_details) == 1
+        assert failed_details[0]['filename'] == 'err.js'
+        assert 'reason' in failed_details[0]
+
+
+# ============================================================================
+# P1: Safelist silent notification on auto-approve
+# ============================================================================
+
+class TestAutoApproveSilentNotification:
+    """Tests that _check_auto_approve sends a silent Telegram notification."""
+
+    @patch('mcp_execute.send_telegram_message_silent')
+    @patch('mcp_execute.execute_command', return_value='{"ok": true}')
+    def test_silent_notification_called(self, mock_exec, mock_silent, app_module):
+        """Silent notification should be called when safelist auto-approves."""
+        import mcp_execute
+        # Build a minimal ExecuteContext
+        from mcp_execute import ExecuteContext, _check_auto_approve
+        ctx = ExecuteContext(
+            req_id='test-req-silent',
+            command='aws ec2 describe-instances',
+            reason='test reason',
+            source='test-bot',
+            account_id='111111111111',
+            account_name='Default',
+            assume_role=None,
+            trust_scope='test-scope',
+            context=None,
+            timeout=30,
+            sync_mode=False,
+            smart_decision=None,
+        )
+        result = _check_auto_approve(ctx)
+        assert result is not None
+        mock_silent.assert_called_once()
+        call_text = mock_silent.call_args[0][0]
+        assert '自動執行' in call_text
+        assert 'test-bot' in call_text
+
+    @patch('mcp_execute.send_telegram_message_silent', side_effect=Exception('Telegram down'))
+    @patch('mcp_execute.execute_command', return_value='ok output')
+    def test_notification_failure_does_not_break_execution(self, mock_exec, mock_silent, app_module):
+        """Notification failure must not break the execution result."""
+        from mcp_execute import ExecuteContext, _check_auto_approve
+        ctx = ExecuteContext(
+            req_id='test-req-notif-fail',
+            command='aws s3 ls',
+            reason='check buckets',
+            source='bot',
+            account_id='111111111111',
+            account_name='Default',
+            assume_role=None,
+            trust_scope='test-scope',
+            context=None,
+            timeout=30,
+            sync_mode=False,
+            smart_decision=None,
+        )
+        result = _check_auto_approve(ctx)
+        # Should still return a valid result despite notification failure
+        assert result is not None
+        # Result may be Lambda-style or direct MCP dict; parse accordingly
+        import json as _j
+        if 'body' in result:
+            body = _j.loads(result['body'])
+            content = _j.loads(body['result']['content'][0]['text'])
+        else:
+            content = _j.loads(result['result']['content'][0]['text'])
+        assert content['status'] == 'auto_approved'
+
+    @patch('mcp_execute.send_telegram_message_silent')
+    @patch('mcp_execute.execute_command', return_value='output')
+    def test_non_safelist_no_notification(self, mock_exec, mock_silent, app_module):
+        """Non-safelist commands should NOT trigger the silent notification."""
+        from mcp_execute import ExecuteContext, _check_auto_approve
+        ctx = ExecuteContext(
+            req_id='test-req-no-notif',
+            command='aws iam create-user --user-name hacker',
+            reason='bad',
+            source='bot',
+            account_id='111111111111',
+            account_name='Default',
+            assume_role=None,
+            trust_scope='test-scope',
+            context=None,
+            timeout=30,
+            sync_mode=False,
+            smart_decision=None,
+        )
+        result = _check_auto_approve(ctx)
+        # Command is not on safelist → returns None, no notification
+        assert result is None
+        mock_silent.assert_not_called()

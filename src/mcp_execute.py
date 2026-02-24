@@ -32,6 +32,7 @@ from notifications import (
     send_grant_execute_notification,
     send_blocked_notification,
 )
+from telegram import send_telegram_message_silent, escape_markdown
 from metrics import emit_metric
 from constants import (
     DEFAULT_ACCOUNT_ID, MCP_MAX_WAIT, RATE_LIMIT_WINDOW,
@@ -478,6 +479,18 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
     cmd_status = 'error' if result.startswith('❌') else 'success'
     emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'auto_approve'})
     paged = store_paged_output(generate_request_id(ctx.command), result)
+
+    # Silent Telegram notification for safelist auto-approve
+    try:
+        _notif_text = (
+            f"⚡ *自動執行*\n\n"
+            f"🤖 *來源：* {escape_markdown(ctx.source or '(unknown)')}\n"
+            f"📋 *命令：*\n`{escape_markdown(ctx.command[:300])}`\n\n"
+            f"✅ *結果：* {escape_markdown(result[:200] if result else '(無輸出)')}"
+        )
+        send_telegram_message_silent(_notif_text)
+    except Exception:
+        pass  # Notification failure must not break execution
 
     log_decision(
         table=table,
