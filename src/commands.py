@@ -69,11 +69,6 @@ def _get_blocked_flag(cmd_lower: str) -> str | None:
     return None
 
 
-def _has_blocked_flag(cmd_lower: str) -> bool:
-    """向後兼容包裝"""
-    return _get_blocked_flag(cmd_lower) is not None
-
-
 def _has_file_protocol(cmd_lower: str) -> bool:
     """檢查命令是否使用 file:// 或 fileb:// 協議讀取本地檔案"""
     return 'file://' in cmd_lower or 'fileb://' in cmd_lower

@@ -72,7 +72,7 @@ def grant_module(mock_dynamodb):
     # 清除可能殘留的模組
     modules_to_clear = [
         'grant', 'db', 'constants', 'trust', 'commands', 'compliance_checker',
-        'risk_scorer', 'mcp_tools', 'notifications', 'telegram', 'app',
+        'risk_scorer', 'mcp_tools', 'mcp_execute', 'mcp_upload', 'mcp_admin', 'notifications', 'telegram', 'app',
         'utils', 'accounts', 'rate_limit', 'paging', 'callbacks',
         'smart_approval', 'tool_schema', 'metrics',
     ]
@@ -106,7 +106,7 @@ def mcp_module(mock_dynamodb):
 
     modules_to_clear = [
         'grant', 'db', 'constants', 'trust', 'commands', 'compliance_checker',
-        'risk_scorer', 'mcp_tools', 'notifications', 'telegram', 'app',
+        'risk_scorer', 'mcp_tools', 'mcp_execute', 'mcp_upload', 'mcp_admin', 'notifications', 'telegram', 'app',
         'utils', 'accounts', 'rate_limit', 'paging', 'callbacks',
         'smart_approval', 'tool_schema', 'metrics',
     ]
@@ -723,8 +723,8 @@ class TestCheckGrantSession:
         result = mcp_module._check_grant_session(ctx)
         assert result is None
 
-    @patch('mcp_tools.send_grant_execute_notification')
-    @patch('mcp_tools.execute_command', return_value='bucket1\nbucket2')
+    @patch('mcp_execute.send_grant_execute_notification')
+    @patch('mcp_execute.execute_command', return_value='bucket1\nbucket2')
     @patch('risk_scorer.calculate_risk')
     @patch('trust.is_trust_excluded', return_value=False)
     @patch('commands.is_blocked', return_value=False)

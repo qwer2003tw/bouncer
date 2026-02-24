@@ -11,6 +11,60 @@ from typing import Optional
 from constants import AUDIT_TTL_SHORT, AUDIT_TTL_LONG
 
 
+def format_size_human(size_bytes: int) -> str:
+    """格式化檔案大小為人類可讀格式"""
+    if size_bytes >= 1024 * 1024:
+        return f"{size_bytes / 1024 / 1024:.2f} MB"
+    elif size_bytes >= 1024:
+        return f"{size_bytes / 1024:.2f} KB"
+    else:
+        return f"{size_bytes} bytes"
+
+
+def build_info_lines(
+    source: str = None,
+    context: str = None,
+    account_name: str = None,
+    account_id: str = None,
+    reason: str = None,
+    *,
+    bold: bool = True,
+) -> str:
+    """Build common Telegram message info lines.
+
+    Args:
+        source: 請求來源
+        context: 任務描述
+        account_name: 帳號名稱
+        account_id: 帳號 ID
+        reason: 原因
+        bold: True 使用 markdown *粗體*，False 使用純文字
+
+    Returns:
+        多行字串（每行結尾含 ``\\n``），可直接嵌入 f-string
+    """
+    lines: list[str] = []
+    if bold:
+        if source:
+            lines.append(f"🤖 *來源：* {source}")
+        if context:
+            lines.append(f"📝 *任務：* {context}")
+        if account_name and account_id:
+            lines.append(f"🏦 *帳號：* {account_id} ({account_name})")
+        if reason:
+            lines.append(f"💬 *原因：* {reason}")
+    else:
+        if source:
+            lines.append(f"🤖 來源： {source}")
+        if context:
+            lines.append(f"📝 任務： {context}")
+        if account_name and account_id:
+            lines.append(f"🏦 帳號： {account_id} ({account_name})")
+        if reason:
+            lines.append(f"💬 原因： {reason}")
+    return "\n".join(lines) + "\n" if lines else ""
+
+
 def get_header(headers: dict, key: str) -> Optional[str]:
     """Case-insensitive header lookup for API Gateway compatibility"""
     if headers is None:

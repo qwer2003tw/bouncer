@@ -17,50 +17,56 @@ import boto3
 
 # 從模組導入
 from telegram import (  # noqa: F401
-    escape_markdown, send_telegram_message, send_telegram_message_silent,
+    escape_markdown,
     update_message, answer_callback,
-    _telegram_request,
 )
-from paging import store_paged_output, get_paged_output  # noqa: F401
-from trust import revoke_trust_session, create_trust_session, increment_trust_command_count, should_trust_approve, is_trust_excluded  # noqa: F401
-from commands import is_blocked, get_block_reason, is_dangerous, is_auto_approve, execute_command, aws_cli_split  # noqa: F401
+from trust import (  # noqa: F401
+    revoke_trust_session, create_trust_session,
+    increment_trust_command_count, is_trust_excluded, should_trust_approve,
+)
+from commands import (  # noqa: F401
+    get_block_reason, is_auto_approve, execute_command,
+    is_blocked, is_dangerous, aws_cli_split,
+)
 from accounts import (  # noqa: F401
-    init_bot_commands, init_default_account, get_account, list_accounts,
-    validate_account_id, validate_role_arn,
+    init_bot_commands, validate_account_id,
+    init_default_account, list_accounts, validate_role_arn,
 )
-from rate_limit import RateLimitExceeded, PendingLimitExceeded, check_rate_limit  # noqa: F401
+from rate_limit import check_rate_limit, RateLimitExceeded, PendingLimitExceeded  # noqa: F401
+from paging import store_paged_output, get_paged_output  # noqa: F401
 from utils import response, generate_request_id, decimal_to_native, mcp_result, mcp_error, get_header, log_decision
-# 新模組
-from mcp_tools import (
-    mcp_tool_execute, mcp_tool_status, mcp_tool_help, mcp_tool_trust_status, mcp_tool_trust_revoke,
+# MCP tool handlers — split into sub-modules
+from mcp_execute import (
+    mcp_tool_execute, mcp_tool_request_grant, mcp_tool_grant_status, mcp_tool_revoke_grant,
+)
+from mcp_upload import mcp_tool_upload, mcp_tool_upload_batch
+from mcp_admin import (
+    mcp_tool_status, mcp_tool_help, mcp_tool_trust_status, mcp_tool_trust_revoke,
     mcp_tool_add_account, mcp_tool_list_accounts, mcp_tool_get_page,
-    mcp_tool_list_pending, mcp_tool_remove_account, mcp_tool_upload,
-    mcp_tool_request_grant, mcp_tool_grant_status, mcp_tool_revoke_grant,
-    mcp_tool_upload_batch,
+    mcp_tool_list_pending, mcp_tool_remove_account, mcp_tool_list_safelist,
 )
 from callbacks import (
     handle_command_callback, handle_account_add_callback, handle_account_remove_callback,
     handle_deploy_callback, handle_upload_callback, handle_upload_batch_callback,
     handle_grant_approve_all, handle_grant_approve_safe, handle_grant_deny,
 )
-from telegram_commands import handle_telegram_command
+from telegram_commands import (  # noqa: F401
+    handle_telegram_command, handle_accounts_command,
+    handle_help_command, handle_pending_command, handle_trust_command,
+)
 from tool_schema import MCP_TOOLS  # noqa: F401
 from metrics import emit_metric
 
 # 從 constants.py 導入所有常數
 from constants import (  # noqa: F401
     VERSION,
-    TELEGRAM_TOKEN, TELEGRAM_WEBHOOK_SECRET,
+    TELEGRAM_WEBHOOK_SECRET,
     APPROVED_CHAT_IDS,
-    TABLE_NAME, ACCOUNTS_TABLE_NAME,
-    DEFAULT_ACCOUNT_ID,
     REQUEST_SECRET, ENABLE_HMAC,
     MCP_MAX_WAIT,
-    RATE_LIMIT_WINDOW,
-    TRUST_SESSION_MAX_COMMANDS,
     BLOCKED_PATTERNS, AUTO_APPROVE_PREFIXES,
-    APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER, COMMAND_APPROVAL_TIMEOUT,
-    UPLOAD_TIMEOUT, TELEGRAM_TIMESTAMP_MAX_AGE,
+    APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER,
+    TELEGRAM_TIMESTAMP_MAX_AGE,
 )
 
 
@@ -170,90 +176,68 @@ def handle_mcp_request(event) -> dict:
         return mcp_error(req_id, -32601, f'Method not found: {method}')
 
 
+# ---------------------------------------------------------------------------
+# Tool handler dispatch table
+# ---------------------------------------------------------------------------
+# Standard handlers: (req_id, arguments) -> dict
+TOOL_HANDLERS = {
+    'bouncer_execute': mcp_tool_execute,
+    'bouncer_status': mcp_tool_status,
+    'bouncer_help': mcp_tool_help,
+    'bouncer_list_safelist': mcp_tool_list_safelist,
+    'bouncer_trust_status': mcp_tool_trust_status,
+    'bouncer_trust_revoke': mcp_tool_trust_revoke,
+    'bouncer_add_account': mcp_tool_add_account,
+    'bouncer_list_accounts': mcp_tool_list_accounts,
+    'bouncer_get_page': mcp_tool_get_page,
+    'bouncer_list_pending': mcp_tool_list_pending,
+    'bouncer_remove_account': mcp_tool_remove_account,
+    'bouncer_upload': mcp_tool_upload,
+    'bouncer_upload_batch': mcp_tool_upload_batch,
+    'bouncer_request_grant': mcp_tool_request_grant,
+    'bouncer_grant_status': mcp_tool_grant_status,
+    'bouncer_revoke_grant': mcp_tool_revoke_grant,
+}
+
+# Deployer handlers are lazy-imported to avoid cold-start cost
+_DEPLOYER_TOOLS = {
+    'bouncer_deploy', 'bouncer_deploy_status', 'bouncer_deploy_cancel',
+    'bouncer_deploy_history', 'bouncer_project_list',
+}
+
+
+def _get_deployer_handler(tool_name: str):
+    """Lazy-import deployer handlers (only when needed)."""
+    from deployer import (  # noqa: F811
+        mcp_tool_deploy, mcp_tool_deploy_status, mcp_tool_deploy_cancel,
+        mcp_tool_deploy_history, mcp_tool_project_list,
+    )
+    return {
+        'bouncer_deploy': mcp_tool_deploy,
+        'bouncer_deploy_status': mcp_tool_deploy_status,
+        'bouncer_deploy_cancel': mcp_tool_deploy_cancel,
+        'bouncer_deploy_history': mcp_tool_deploy_history,
+        'bouncer_project_list': mcp_tool_project_list,
+    }[tool_name]
+
+
 def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
     """處理 MCP tool 呼叫"""
     emit_metric('Bouncer', 'ToolCall', 1, dimensions={'ToolName': tool_name})
 
-    if tool_name == 'bouncer_execute':
-        return mcp_tool_execute(req_id, arguments)
+    # Standard tool handlers
+    handler = TOOL_HANDLERS.get(tool_name)
+    if handler:
+        return handler(req_id, arguments)
 
-    elif tool_name == 'bouncer_status':
-        return mcp_tool_status(req_id, arguments)
+    # Deployer tools (lazy-imported, bouncer_deploy has extra args)
+    if tool_name in _DEPLOYER_TOOLS:
+        deployer_handler = _get_deployer_handler(tool_name)
+        if tool_name == 'bouncer_deploy':
+            return deployer_handler(req_id, arguments, table, send_approval_request)
+        return deployer_handler(req_id, arguments)
 
-    elif tool_name == 'bouncer_help':
-        return mcp_tool_help(req_id, arguments)
-
-    elif tool_name == 'bouncer_list_safelist':
-        return mcp_result(req_id, {
-            'content': [{
-                'type': 'text',
-                'text': json.dumps({
-                    'safelist_prefixes': AUTO_APPROVE_PREFIXES,
-                    'blocked_patterns': BLOCKED_PATTERNS
-                }, indent=2)
-            }]
-        })
-
-    elif tool_name == 'bouncer_trust_status':
-        return mcp_tool_trust_status(req_id, arguments)
-
-    elif tool_name == 'bouncer_trust_revoke':
-        return mcp_tool_trust_revoke(req_id, arguments)
-
-    elif tool_name == 'bouncer_add_account':
-        return mcp_tool_add_account(req_id, arguments)
-
-    elif tool_name == 'bouncer_list_accounts':
-        return mcp_tool_list_accounts(req_id, arguments)
-
-    elif tool_name == 'bouncer_get_page':
-        return mcp_tool_get_page(req_id, arguments)
-
-    elif tool_name == 'bouncer_list_pending':
-        return mcp_tool_list_pending(req_id, arguments)
-
-    elif tool_name == 'bouncer_remove_account':
-        return mcp_tool_remove_account(req_id, arguments)
-
-    # Deployer tools
-    elif tool_name == 'bouncer_deploy':
-        from deployer import mcp_tool_deploy
-        return mcp_tool_deploy(req_id, arguments, table, send_approval_request)
-
-    elif tool_name == 'bouncer_deploy_status':
-        from deployer import mcp_tool_deploy_status
-        return mcp_tool_deploy_status(req_id, arguments)
-
-    elif tool_name == 'bouncer_deploy_cancel':
-        from deployer import mcp_tool_deploy_cancel
-        return mcp_tool_deploy_cancel(req_id, arguments)
-
-    elif tool_name == 'bouncer_deploy_history':
-        from deployer import mcp_tool_deploy_history
-        return mcp_tool_deploy_history(req_id, arguments)
-
-    elif tool_name == 'bouncer_project_list':
-        from deployer import mcp_tool_project_list
-        return mcp_tool_project_list(req_id, arguments)
-
-    elif tool_name == 'bouncer_upload':
-        return mcp_tool_upload(req_id, arguments)
-
-    elif tool_name == 'bouncer_upload_batch':
-        return mcp_tool_upload_batch(req_id, arguments)
-
-    # Grant Session tools
-    elif tool_name == 'bouncer_request_grant':
-        return mcp_tool_request_grant(req_id, arguments)
-
-    elif tool_name == 'bouncer_grant_status':
-        return mcp_tool_grant_status(req_id, arguments)
-
-    elif tool_name == 'bouncer_revoke_grant':
-        return mcp_tool_revoke_grant(req_id, arguments)
-
-    else:
-        return mcp_error(req_id, -32602, f'Unknown tool: {tool_name}')
+    return mcp_error(req_id, -32602, f'Unknown tool: {tool_name}')
 
 
 # ============================================================================
@@ -666,25 +650,4 @@ def verify_hmac(headers: dict, body: str) -> bool:
 
 
 # Notification functions moved to notifications.py — re-exported for backward compat
-from notifications import (  # noqa: F401, E402
-    send_approval_request,
-    send_account_approval_request,
-    send_trust_auto_approve_notification,
-    send_grant_request_notification,
-    send_grant_execute_notification,
-    send_grant_complete_notification,
-    send_blocked_notification,
-)
-
-# ============================================================================
-# 向後兼容 - re-export 移到子模組的函數 (測試用)
-# ============================================================================
-
-# 從 telegram_commands 模組 re-export (for tests)
-from telegram_commands import (  # noqa: F401, E402
-    send_telegram_message_to,
-    handle_accounts_command,
-    handle_trust_command,
-    handle_pending_command,
-    handle_help_command,
-)
+from notifications import send_approval_request  # noqa: F401, E402

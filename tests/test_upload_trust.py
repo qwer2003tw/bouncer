@@ -67,7 +67,7 @@ def app_module(mock_dynamodb):
     os.environ['MCP_MAX_WAIT'] = '5'
 
     for mod in ['app', 'telegram', 'paging', 'trust', 'commands', 'notifications', 'db',
-                'callbacks', 'mcp_tools', 'accounts', 'rate_limit', 'smart_approval',
+                'callbacks', 'mcp_tools', 'mcp_execute', 'mcp_upload', 'mcp_admin', 'accounts', 'rate_limit', 'smart_approval',
                 'tool_schema', 'constants', 'grant', 'risk_scorer',
                 'src.app', 'src.telegram', 'src.trust']:
         if mod in sys.modules:
@@ -381,7 +381,7 @@ class TestBatchUploadValidation:
         data = self._call({'files': files, 'reason': 't', 'source': 's'}, app_module)
         assert 'error' in str(data).lower()
 
-    @patch('mcp_tools.send_batch_upload_notification')
+    @patch('mcp_upload.send_batch_upload_notification')
     def test_valid_pending(self, mock_notify, app_module):
         files = [{'filename': 'index.html',
                   'content': base64.b64encode(b'<html></html>').decode()}]

@@ -10,6 +10,7 @@ import os
 import telegram as _telegram
 from commands import is_dangerous
 from constants import COMMAND_APPROVAL_TIMEOUT, TRUST_SESSION_MAX_COMMANDS
+from utils import format_size_human, build_info_lines
 
 
 def _escape_markdown(text):
@@ -42,8 +43,7 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
     else:
         timeout_str = f"{timeout // 3600} 小時"
 
-    source_line = f"🤖 *來源：* {source}\n" if source else ""
-    context_line = f"📝 *任務：* {_escape_markdown(context)}\n" if context else ""
+    source_line = build_info_lines(source=source, context=_escape_markdown(context) if context else None)
 
     if account_id and account_name:
         account_line = f"🏢 *帳號：* `{account_id}` ({account_name})\n"
@@ -63,7 +63,6 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
         text = (
             f"⚠️ *高危操作請求* ⚠️\n\n"
             f"{source_line}"
-            f"{context_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{cmd_preview}`\n\n"
             f"💬 *原因：* {reason}\n\n"
@@ -83,7 +82,6 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
         text = (
             f"🔐 *AWS 執行請求*\n\n"
             f"{source_line}"
-            f"{context_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{cmd_preview}`\n\n"
             f"💬 *原因：* {reason}\n\n"
@@ -107,14 +105,12 @@ def send_account_approval_request(request_id: str, action: str, account_id: str,
     """發送帳號管理的 Telegram 審批請求"""
     name = _escape_markdown(name) if name else name
     source = _escape_markdown(source) if source else None
-    source_line = f"🤖 *來源：* {source}\n" if source else ""
-    context_line = f"📝 *任務：* {_escape_markdown(context)}\n" if context else ""
+    source_line = build_info_lines(source=source, context=_escape_markdown(context) if context else None)
 
     if action == 'add':
         text = (
             f"🔐 *新增 AWS 帳號請求*\n\n"
             f"{source_line}"
-            f"{context_line}"
             f"🆔 *帳號 ID：* `{account_id}`\n"
             f"📛 *名稱：* {name}\n"
             f"🔗 *Role：* `{role_arn}`\n\n"
@@ -125,7 +121,6 @@ def send_account_approval_request(request_id: str, action: str, account_id: str,
         text = (
             f"🔐 *移除 AWS 帳號請求*\n\n"
             f"{source_line}"
-            f"{context_line}"
             f"🆔 *帳號 ID：* `{account_id}`\n"
             f"📛 *名稱：* {name}\n\n"
             f"📋 *請求 ID：* `{request_id}`\n"
@@ -376,12 +371,7 @@ def send_trust_upload_notification(
 ) -> None:
     """發送 Trust Upload 自動批准的靜默通知"""
     try:
-        if content_size >= 1024 * 1024:
-            size_str = f"{content_size / 1024 / 1024:.2f} MB"
-        elif content_size >= 1024:
-            size_str = f"{content_size / 1024:.2f} KB"
-        else:
-            size_str = f"{content_size} bytes"
+        size_str = format_size_human(content_size)
 
         source_line = f"🤖 `{source}`\n" if source else ""
         hash_short = sha256_hash[:16] if sha256_hash != 'batch' else 'batch'
@@ -419,12 +409,7 @@ def send_batch_upload_notification(
 ) -> None:
     """發送批量上傳審批請求通知"""
     try:
-        if total_size >= 1024 * 1024:
-            size_str = f"{total_size / 1024 / 1024:.2f} MB"
-        elif total_size >= 1024:
-            size_str = f"{total_size / 1024:.2f} KB"
-        else:
-            size_str = f"{total_size} bytes"
+        size_str = format_size_human(total_size)
 
         safe_source = _escape_markdown(source or 'Unknown')
         safe_reason = _escape_markdown(reason)
