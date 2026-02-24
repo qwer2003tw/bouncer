@@ -65,7 +65,7 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
             f"{source_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{cmd_preview}`\n\n"
-            f"💬 *原因：* {_escape_markdown(reason)}\n\n"
+            f"💬 *原因：* {reason}\n\n"
             f"⚠️ *此操作可能不可逆，請仔細確認！*\n\n"
             f"🆔 *ID：* `{request_id}`\n"
             f"⏰ *{timeout_str}後過期*"
@@ -84,7 +84,7 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
             f"{source_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{cmd_preview}`\n\n"
-            f"💬 *原因：* {_escape_markdown(reason)}\n\n"
+            f"💬 *原因：* {reason}\n\n"
             f"🆔 *ID：* `{request_id}`\n"
             f"⏰ *{timeout_str}後過期*"
         )
@@ -243,7 +243,7 @@ def send_grant_request_notification(
         text = (
             f"🔑 *批次權限申請*\n\n"
             f"🤖 *來源：* {source or 'Unknown'}\n"
-            f"💬 *原因：* {_escape_markdown(reason) if reason else ''}\n"
+            f"💬 *原因：* {reason or ''}\n"
             f"🏦 *帳號：* `{account_id}`\n"
             f"⏱ *TTL：* {ttl_minutes} 分鐘 | 模式：{mode_str}\n"
             f"{commands_text}\n\n"
@@ -325,7 +325,7 @@ def send_grant_complete_notification(grant_id: str, reason: str) -> None:
         text = (
             f"🔑 *Grant 已結束*\n\n"
             f"🆔 `{grant_short}`\n"
-            f"💬 *原因：* {_escape_markdown(reason) if reason else ''}"
+            f"💬 *原因：* {reason or ''}"
         )
 
         _send_message_silent(text)
@@ -346,7 +346,7 @@ def send_blocked_notification(
         text = (
             f"🚫 *命令被封鎖*\n\n"
             f"📋 `{cmd_preview}`\n"
-            f"❌ *原因：* {_escape_markdown(block_reason)}\n"
+            f"❌ *原因：* {block_reason}\n"
             f"🤖 *來源：* {source or 'Unknown'}"
         )
 

@@ -288,7 +288,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             f"{source_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{command}`\n\n"
-            f"💬 *原因：* {escape_markdown(reason)}\n\n"
+            f"💬 *原因：* {reason}\n\n"
             f"📤 *結果：*\n```\n{result_preview}\n```{truncate_notice}{trust_line}",
             callback_id,
             cb_text
@@ -315,7 +315,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             f"{source_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{command}`\n\n"
-            f"💬 *原因：* {escape_markdown(reason)}",
+            f"💬 *原因：* {reason}",
             callback_id,
             '❌ 已拒絕'
         )
@@ -495,7 +495,7 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
             f"📦 *專案：* {project_name}\n"
             f"🌿 *分支：* {branch}\n"
             f"📋 *Stack：* {stack_name}\n\n"
-            f"💬 *原因：* {escape_markdown(reason)}"
+            f"💬 *原因：* {reason}"
         )
         answer_callback(callback_id, '❌ 已拒絕')
 
@@ -542,7 +542,7 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
                 f"📁 目標： {s3_uri}\n"
                 f"📊 大小： {size_str}\n"
                 f"🔗 URL： {result.get('s3_url', '')}\n"
-                f"💬 原因： {escape_markdown(reason)}"
+                f"💬 原因： {reason}"
             )
             answer_callback(callback_id, '✅ 已上傳')
         else:
@@ -556,7 +556,7 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
                 f"📁 目標： {s3_uri}\n"
                 f"📊 大小： {size_str}\n"
                 f"❗ 錯誤： {error}\n"
-                f"💬 原因： {escape_markdown(reason)}"
+                f"💬 原因： {reason}"
             )
             answer_callback(callback_id, '❌ 上傳失敗')
 
@@ -570,7 +570,7 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
             f"{info_lines}"
             f"📁 目標： {s3_uri}\n"
             f"📊 大小： {size_str}\n"
-            f"💬 原因： {escape_markdown(reason)}"
+            f"💬 原因： {reason}"
         )
         answer_callback(callback_id, '❌ 已拒絕')
 
@@ -621,7 +621,7 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
             f"📋 請求 ID： `{request_id}`\n"
             f"{source_line}"
             f"📄 {file_count} 個檔案 ({size_str})\n"
-            f"💬 原因： {escape_markdown(reason)}\n\n"
+            f"💬 原因： {reason}\n\n"
             f"進度: 0/{file_count}",
             remove_buttons=True,
         )
@@ -717,7 +717,7 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
             f"{source_line}"
             f"📄 成功: {len(uploaded)}/{file_count} 個檔案 ({size_str})"
             f"{error_line}"
-            f"\n💬 原因： {escape_markdown(reason)}"
+            f"\n💬 原因： {reason}"
             f"{trust_line}",
         )
 
@@ -730,7 +730,7 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
             f"📋 請求 ID： `{request_id}`\n"
             f"{source_line}"
             f"📄 {file_count} 個檔案 ({size_str})\n"
-            f"💬 原因： {escape_markdown(reason)}",
+            f"💬 原因： {reason}",
         )
         answer_callback(callback_id, '❌ 已拒絕')
 
