@@ -149,9 +149,9 @@ def send_trust_auto_approve_notification(command: str, trust_id: str, remaining:
             result_status = "❌"
         else:
             result_status = "✅"
-        result_text = result[:200] + '...' if len(result) > 200 else result
-        # code block 內不需要 escape
-        result_preview = f"\n{result_status} `{result_text}`"
+        result_text = result[:500] + '...' if len(result) > 500 else result
+        # 用 code block（``` ）而非 inline code，避免多行內容破壞格式
+        result_preview = f"\n{result_status} *結果：*\n```\n{result_text}\n```"
 
     source_line = f"🤖 `{source}` · " if source else ""
     remaining_line = f"⏱ {remaining}" if remaining else ""
