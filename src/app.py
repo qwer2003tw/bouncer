@@ -481,16 +481,27 @@ def handle_telegram_webhook(event: dict) -> dict:
             status_emoji = '✅' if status == 'approved' else '❌' if status == 'denied' else '⏰'
             source = item.get('source', '')
             command = item.get('command', '')[:200]
+            action_type = item.get('action', '')
             reason = item.get('reason', '')
             context = item.get('context', '')
             source_line = f"🤖 *來源：* {escape_markdown(source)}\n" if source else ""
             context_line = f"📝 *任務：* {escape_markdown(context)}\n" if context else ""
+            # 不同 action 類型顯示不同摘要
+            if command:
+                cmd_display = escape_markdown(command)
+            elif action_type == 'upload_batch':
+                file_count = item.get('file_count', '?')
+                cmd_display = f"upload_batch ({file_count} 個檔案)"
+            elif action_type in ('upload', 'add_account', 'remove_account', 'deploy'):
+                cmd_display = action_type
+            else:
+                cmd_display = '(無)'
             update_message(
                 message_id,
                 f"{status_emoji} *已處理* (狀態: {status})\n\n"
                 f"{source_line}"
                 f"{context_line}"
-                f"📋 *命令：*\n`{command}`\n\n"
+                f"📋 *命令：*\n`{cmd_display}`\n\n"
                 f"💬 *原因：* {escape_markdown(reason)}",
                 remove_buttons=True
             )
