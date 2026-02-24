@@ -32,6 +32,8 @@ def build_info_lines(
 ) -> str:
     """Build common Telegram message info lines.
 
+    All user-provided text is escaped for Markdown V1 safety.
+
     Args:
         source: 請求來源
         context: 任務描述
@@ -43,25 +45,27 @@ def build_info_lines(
     Returns:
         多行字串（每行結尾含 ``\\n``），可直接嵌入 f-string
     """
+    from telegram import escape_markdown as _esc
+
     lines: list[str] = []
     if bold:
         if source:
-            lines.append(f"🤖 *來源：* {source}")
+            lines.append(f"🤖 *來源：* {_esc(source)}")
         if context:
-            lines.append(f"📝 *任務：* {context}")
+            lines.append(f"📝 *任務：* {_esc(context)}")
         if account_name and account_id:
-            lines.append(f"🏦 *帳號：* {account_id} ({account_name})")
+            lines.append(f"🏦 *帳號：* {_esc(account_id)} ({_esc(account_name)})")
         if reason:
-            lines.append(f"💬 *原因：* {reason}")
+            lines.append(f"💬 *原因：* {_esc(reason)}")
     else:
         if source:
-            lines.append(f"🤖 來源： {source}")
+            lines.append(f"🤖 來源： {_esc(source)}")
         if context:
-            lines.append(f"📝 任務： {context}")
+            lines.append(f"📝 任務： {_esc(context)}")
         if account_name and account_id:
-            lines.append(f"🏦 帳號： {account_id} ({account_name})")
+            lines.append(f"🏦 帳號： {_esc(account_id)} ({_esc(account_name)})")
         if reason:
-            lines.append(f"💬 原因： {reason}")
+            lines.append(f"💬 原因： {_esc(reason)}")
     return "\n".join(lines) + "\n" if lines else ""
 
 
