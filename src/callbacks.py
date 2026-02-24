@@ -16,16 +16,12 @@ from telegram import escape_markdown, update_message, answer_callback, update_an
 from notifications import send_trust_auto_approve_notification
 from constants import DEFAULT_ACCOUNT_ID, RESULT_TTL, TRUST_SESSION_MAX_UPLOADS, TRUST_SESSION_MAX_COMMANDS
 from metrics import emit_metric
+from mcp_upload import execute_upload
 
 
 # DynamoDB tables from db.py (no circular dependency)
 import db as _db
 
-
-def _get_app_module():
-    """延遲取得 app module — 只用於 execute_upload"""
-    import app as app_module
-    return app_module
 
 def _get_table():
     """取得 DynamoDB table"""
@@ -521,7 +517,6 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
 
 def handle_upload_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str) -> dict:
     """處理上傳的審批 callback"""
-    app = _get_app_module()
     table = _get_table()
 
     bucket = item.get('bucket', '')
@@ -544,7 +539,7 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
 
     if action == 'approve':
         # 執行上傳
-        result = app.execute_upload(request_id, user_id)
+        result = execute_upload(request_id, user_id)
 
         if result.get('success'):
             emit_metric('Bouncer', 'Upload', 1, dimensions={'Status': 'approved', 'Type': 'single'})

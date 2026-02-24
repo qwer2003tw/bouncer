@@ -9,7 +9,8 @@ import logging
 from typing import Dict
 
 
-from risk_scorer import calculate_risk, RiskCategory, RiskResult, RiskFactor
+from risk_scorer import calculate_risk, RiskCategory, RiskResult
+from utils import RiskFactor
 from sequence_analyzer import get_sequence_risk_modifier
 
 logger = logging.getLogger(__name__)

@@ -5,10 +5,41 @@ Bouncer - 工具函數模組
 import hashlib
 import json
 import time
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
 
 from constants import AUDIT_TTL_SHORT, AUDIT_TTL_LONG
+
+
+# ============================================================================
+# Data Classes (shared across modules to avoid circular imports)
+# ============================================================================
+
+@dataclass
+class RiskFactor:
+    """
+    單一風險因素，用於追蹤評分來源
+
+    Attributes:
+        name: 因素名稱（人類可讀）
+        category: 因素類別 (verb/parameter/context/account)
+        raw_score: 原始分數（0-100）
+        weighted_score: 加權後的分數
+        weight: 權重（0-1）
+        details: 額外資訊（如：哪個參數、哪個規則）
+    """
+    name: str
+    category: str
+    raw_score: int
+    weighted_score: float
+    weight: float
+    details: Optional[str] = None
+
+    def __post_init__(self):
+        """確保分數在有效範圍內"""
+        self.raw_score = max(0, min(100, self.raw_score))
+        self.weighted_score = max(0.0, min(100.0, self.weighted_score))
 
 
 def format_size_human(size_bytes: int) -> str:

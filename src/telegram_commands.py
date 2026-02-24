@@ -12,18 +12,12 @@ from utils import response
 from accounts import init_default_account, list_accounts
 from telegram import _telegram_request
 from constants import APPROVED_CHAT_IDS
+import db as _db
 
-
-# 延遲 import 避免循環依賴
-def _get_app_module():
-    """延遲取得 app module 避免循環 import"""
-    import app as app_module
-    return app_module
 
 def _get_table():
     """取得 DynamoDB table"""
-    app = _get_app_module()
-    return app.table
+    return _db.table
 
 
 def send_telegram_message_to(chat_id: str, text: str, parse_mode: str = None):

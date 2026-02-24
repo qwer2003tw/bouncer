@@ -9,6 +9,7 @@ import uuid
 import boto3
 from botocore.exceptions import ClientError
 from metrics import emit_metric
+from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native
 
 # 環境變數
 PROJECTS_TABLE = os.environ.get('PROJECTS_TABLE', 'bouncer-projects')
@@ -359,7 +360,6 @@ def get_deploy_status(deploy_id: str) -> dict:
 
 def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> dict:
     """MCP tool: bouncer_deploy（需要審批）"""
-    from app import mcp_result, mcp_error, generate_request_id
 
     project_id = str(arguments.get('project', '')).strip()
     branch = str(arguments.get('branch', '')).strip() or None
@@ -445,7 +445,6 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
 
 def mcp_tool_deploy_status(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_deploy_status"""
-    from app import mcp_result, mcp_error, decimal_to_native
 
     deploy_id = str(arguments.get('deploy_id', '')).strip()
 
@@ -466,7 +465,6 @@ def mcp_tool_deploy_status(req_id: str, arguments: dict) -> dict:
 
 def mcp_tool_deploy_cancel(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_deploy_cancel"""
-    from app import mcp_result, mcp_error
 
     deploy_id = str(arguments.get('deploy_id', '')).strip()
 
@@ -482,7 +480,6 @@ def mcp_tool_deploy_cancel(req_id: str, arguments: dict) -> dict:
 
 def mcp_tool_deploy_history(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_deploy_history"""
-    from app import mcp_result, mcp_error, decimal_to_native
 
     project_id = str(arguments.get('project', '')).strip()
     limit = int(arguments.get('limit', 10))
@@ -501,7 +498,6 @@ def mcp_tool_deploy_history(req_id: str, arguments: dict) -> dict:
 
 def mcp_tool_project_list(req_id, arguments: dict) -> dict:
     """MCP tool: bouncer_project_list"""
-    from app import mcp_result, decimal_to_native
 
     projects = list_projects()
     return mcp_result(req_id, {

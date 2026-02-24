@@ -12,7 +12,6 @@ import json
 import hashlib
 import hmac
 import time
-import boto3
 
 
 # 從模組導入
@@ -39,7 +38,7 @@ from utils import response, generate_request_id, decimal_to_native, mcp_result, 
 from mcp_execute import (
     mcp_tool_execute, mcp_tool_request_grant, mcp_tool_grant_status, mcp_tool_revoke_grant,
 )
-from mcp_upload import mcp_tool_upload, mcp_tool_upload_batch
+from mcp_upload import mcp_tool_upload, mcp_tool_upload_batch, execute_upload  # noqa: F401
 from mcp_admin import (
     mcp_tool_status, mcp_tool_help, mcp_tool_trust_status, mcp_tool_trust_revoke,
     mcp_tool_add_account, mcp_tool_list_accounts, mcp_tool_get_page,
@@ -246,92 +245,7 @@ def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
 
 
 
-def execute_upload(request_id: str, approver: str) -> dict:
-    """執行已審批的上傳（支援跨帳號）"""
-    import base64
-
-    try:
-        result = table.get_item(Key={'request_id': request_id})
-        item = result.get('Item')
-
-        if not item:
-            return {'success': False, 'error': 'Request not found'}
-
-        bucket = item.get('bucket')
-        key = item.get('key')
-        content_b64 = item.get('content')
-        content_type = item.get('content_type', 'application/octet-stream')
-        assume_role_arn = item.get('assume_role')
-
-        # 解碼內容
-        content_bytes = base64.b64decode(content_b64)
-
-        # 建立 S3 client（跨帳號時用 assume role）
-        if assume_role_arn:
-            sts = boto3.client('sts')
-            assumed = sts.assume_role(
-                RoleArn=assume_role_arn,
-                RoleSessionName='bouncer-upload'
-            )
-            creds = assumed['Credentials']
-            s3 = boto3.client(
-                's3',
-                aws_access_key_id=creds['AccessKeyId'],
-                aws_secret_access_key=creds['SecretAccessKey'],
-                aws_session_token=creds['SessionToken']
-            )
-        else:
-            # 使用 Lambda 本身的權限上傳
-            s3 = boto3.client('s3')
-
-        # 上傳
-        s3.put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=content_bytes,
-            ContentType=content_type
-        )
-
-        # 產生 S3 URL
-        region = s3.meta.region_name or 'us-east-1'
-        if region == 'us-east-1':
-            s3_url = f"https://{bucket}.s3.amazonaws.com/{key}"
-        else:
-            s3_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
-
-        # 更新 DB
-        table.update_item(
-            Key={'request_id': request_id},
-            UpdateExpression='SET #status = :status, approver = :approver, s3_url = :url, approved_at = :at',
-            ExpressionAttributeNames={'#status': 'status'},
-            ExpressionAttributeValues={
-                ':status': 'approved',
-                ':approver': approver,
-                ':url': s3_url,
-                ':at': int(time.time())
-            }
-        )
-
-        return {
-            'success': True,
-            's3_uri': f"s3://{bucket}/{key}",
-            's3_url': s3_url
-        }
-
-    except Exception as e:
-        # 記錄失敗
-        table.update_item(
-            Key={'request_id': request_id},
-            UpdateExpression='SET #status = :status, #error = :error',
-            ExpressionAttributeNames={'#status': 'status', '#error': 'error'},
-            ExpressionAttributeValues={
-                ':status': 'error',
-                ':error': str(e)
-            }
-        )
-        return {'success': False, 'error': str(e)}
-
-
+# execute_upload moved to mcp_upload.py; re-exported via import above
 
 
 # ============================================================================

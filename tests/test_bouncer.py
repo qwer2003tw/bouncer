@@ -116,6 +116,7 @@ def app_module(mock_dynamodb):
     for mod in ['app', 'telegram', 'paging', 'trust', 'commands', 'notifications', 'db',
                 'callbacks', 'mcp_tools', 'mcp_execute', 'mcp_upload', 'mcp_admin',
                 'accounts', 'rate_limit', 'smart_approval',
+                'constants', 'utils', 'risk_scorer', 'template_scanner',
                 'src.app', 'src.telegram', 'src.paging', 'src.trust', 'src.commands']:
         if mod in sys.modules:
             del sys.modules[mod]

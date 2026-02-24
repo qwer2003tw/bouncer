@@ -24,7 +24,7 @@ import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from risk_scorer import RiskFactor
+from utils import RiskFactor
 
 __all__ = [
     'extract_json_payloads',

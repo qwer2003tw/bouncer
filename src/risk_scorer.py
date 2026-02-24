@@ -30,6 +30,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
+from utils import RiskFactor  # canonical definition in utils.py
+
 __all__ = [
     # Core types
     'RiskCategory',
@@ -63,32 +65,6 @@ class RiskCategory(Enum):
     CONFIRM = "confirm"             # 46-65: 確認 reason 後可自動批准
     MANUAL = "manual"               # 66-85: 需人工審批
     BLOCK = "block"                 # 86-100: 自動拒絕
-
-
-@dataclass
-class RiskFactor:
-    """
-    單一風險因素，用於追蹤評分來源
-
-    Attributes:
-        name: 因素名稱（人類可讀）
-        category: 因素類別 (verb/parameter/context/account)
-        raw_score: 原始分數（0-100）
-        weighted_score: 加權後的分數
-        weight: 權重（0-1）
-        details: 額外資訊（如：哪個參數、哪個規則）
-    """
-    name: str
-    category: str
-    raw_score: int
-    weighted_score: float
-    weight: float
-    details: Optional[str] = None
-
-    def __post_init__(self):
-        """確保分數在有效範圍內"""
-        self.raw_score = max(0, min(100, self.raw_score))
-        self.weighted_score = max(0.0, min(100.0, self.weighted_score))
 
 
 @dataclass
