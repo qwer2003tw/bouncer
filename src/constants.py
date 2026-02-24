@@ -236,7 +236,7 @@ AUTO_APPROVE_PREFIXES = [
 
     # S3 唯讀
     'aws s3 ls',
-    'aws s3 cp s3:',  # 只允許從 S3 下載
+    'aws s3 cp s3:',  # 允許從 S3 下載或 S3→S3 copy（source 必須是 s3://）
     'aws s3api head-',
     'aws s3api get-object',
     'aws s3api list-',
@@ -324,6 +324,8 @@ AUTO_APPROVE_PREFIXES = [
     # CloudFront
     'aws cloudfront get-',
     'aws cloudfront list-',
+    # CloudFront invalidation — ZTP Files dev distribution only (low risk, max cost ~$0.005/1000 paths)
+    'aws cloudfront create-invalidation --distribution-id e176pw0sa5jf29',
 
     # Step Functions / States
     'aws states list-',
