@@ -396,6 +396,7 @@ def handle_clawdbot_request(event: dict) -> dict:
     # Layer 1: BLOCKED
     block_reason = get_block_reason(command)
     if block_reason:
+        emit_metric('Bouncer', 'BlockedCommand', 1, dimensions={'Reason': 'blocked'})
         log_decision(
             table=table,
             request_id=generate_request_id(command),
@@ -415,6 +416,8 @@ def handle_clawdbot_request(event: dict) -> dict:
     # Layer 2: SAFELIST
     if is_auto_approve(command):
         result = execute_command(command, assume_role)
+        cmd_status = 'error' if result.startswith('❌') else 'success'
+        emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'auto_approve'})
         log_decision(
             table=table,
             request_id=generate_request_id(command),
@@ -502,11 +505,12 @@ def handle_telegram_webhook(event: dict) -> dict:
         return response(400, {'error': 'Invalid callback data'})
 
     action, request_id = data.split(':', 1)
-    emit_metric('Bouncer', 'ApprovalAction', 1, dimensions={'Action': action})
 
     # 特殊處理：撤銷信任時段
     if action == 'revoke_trust':
+        emit_metric('Bouncer', 'ApprovalAction', 1, dimensions={'Action': action})
         success = revoke_trust_session(request_id)
+        emit_metric('Bouncer', 'TrustSession', 1, dimensions={'Event': 'revoked'})
         message_id = callback.get('message', {}).get('message_id')
         if success:
             update_message(message_id, f"🛑 *信任時段已結束*\n\n`{request_id}`", remove_buttons=True)
@@ -517,12 +521,16 @@ def handle_telegram_webhook(event: dict) -> dict:
 
     # 特殊處理：Grant Session callbacks
     if action == 'grant_approve_all':
+        emit_metric('Bouncer', 'ApprovalAction', 1, dimensions={'Action': action})
         return handle_grant_approve_all(callback, request_id)
     elif action == 'grant_approve_safe':
+        emit_metric('Bouncer', 'ApprovalAction', 1, dimensions={'Action': action})
         return handle_grant_approve_safe(callback, request_id)
     elif action == 'grant_deny':
+        emit_metric('Bouncer', 'ApprovalAction', 1, dimensions={'Action': action})
         return handle_grant_deny(callback, request_id)
     elif action == 'grant_revoke':
+        emit_metric('Bouncer', 'ApprovalAction', 1, dimensions={'Action': action})
         from grant import revoke_grant
         success = revoke_grant(request_id)
         message_id = callback.get('message', {}).get('message_id')
@@ -542,11 +550,14 @@ def handle_telegram_webhook(event: dict) -> dict:
         item = None
 
     if not item:
+        emit_metric('Bouncer', 'ApprovalAction', 1, dimensions={'Action': action})
         answer_callback(callback['id'], '❌ 請求已過期或不存在')
         return response(404, {'error': 'Request not found'})
 
     # 取得 message_id（用於更新訊息）
     message_id = callback.get('message', {}).get('message_id')
+    account_id = item.get('account_id', 'default')
+    emit_metric('Bouncer', 'ApprovalAction', 1, dimensions={'Action': action, 'Account': account_id})
 
     if item['status'] not in ['pending_approval', 'pending']:
         answer_callback(callback['id'], '⚠️ 此請求已處理過')

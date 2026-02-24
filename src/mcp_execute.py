@@ -32,6 +32,7 @@ from notifications import (
     send_grant_execute_notification,
     send_blocked_notification,
 )
+from metrics import emit_metric
 from constants import (
     DEFAULT_ACCOUNT_ID, MCP_MAX_WAIT, RATE_LIMIT_WINDOW,
     TRUST_SESSION_MAX_COMMANDS,
@@ -287,6 +288,7 @@ def _check_compliance(ctx: ExecuteContext) -> Optional[dict]:
         is_compliant, violation = check_compliance(ctx.command)
         if not is_compliant:
             print(f"[COMPLIANCE] Blocked: {violation.rule_id} - {violation.rule_name}")
+            emit_metric('Bouncer', 'BlockedCommand', 1, dimensions={'Reason': 'compliance'})
             log_decision(
                 table=table,
                 request_id=generate_request_id(ctx.command),
@@ -325,6 +327,7 @@ def _check_blocked(ctx: ExecuteContext) -> Optional[dict]:
     block_reason = get_block_reason(ctx.command)
     if block_reason:
         send_blocked_notification(ctx.command, block_reason, ctx.source)
+        emit_metric('Bouncer', 'BlockedCommand', 1, dimensions={'Reason': 'blocked'})
         log_decision(
             table=table,
             request_id=generate_request_id(ctx.command),
@@ -405,6 +408,8 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
 
         # 執行命令
         result = execute_command(ctx.command, ctx.assume_role)
+        cmd_status = 'error' if result.startswith('❌') else 'success'
+        emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'grant'})
         paged = store_paged_output(generate_request_id(ctx.command), result)
 
         # 計算剩餘資訊
@@ -470,6 +475,8 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
         return None
 
     result = execute_command(ctx.command, ctx.assume_role)
+    cmd_status = 'error' if result.startswith('❌') else 'success'
+    emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'auto_approve'})
     paged = store_paged_output(generate_request_id(ctx.command), result)
 
     log_decision(
@@ -556,6 +563,8 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
 
     # 執行命令
     result = execute_command(ctx.command, ctx.assume_role)
+    cmd_status = 'error' if result.startswith('❌') else 'success'
+    emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'trust'})
     paged = store_paged_output(generate_request_id(ctx.command), result)
 
     # 計算剩餘時間

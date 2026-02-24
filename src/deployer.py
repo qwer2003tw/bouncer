@@ -8,6 +8,7 @@ import time
 import uuid
 import boto3
 from botocore.exceptions import ClientError
+from metrics import emit_metric
 
 # 環境變數
 PROJECTS_TABLE = os.environ.get('PROJECTS_TABLE', 'bouncer-projects')
@@ -259,6 +260,8 @@ def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str) -
             'execution_arn': response['executionArn']
         })
 
+        emit_metric('Bouncer', 'Deploy', 1, dimensions={'Status': 'started', 'Project': project_id})
+
         return {
             'status': 'started',
             'deploy_id': deploy_id,
@@ -324,11 +327,22 @@ def get_deploy_status(deploy_id: str) -> dict:
             # 同步狀態
             if sfn_status in ['SUCCEEDED', 'FAILED', 'TIMED_OUT', 'ABORTED']:
                 new_status = 'SUCCESS' if sfn_status == 'SUCCEEDED' else 'FAILED'
+                finished_at = int(time.time())
                 update_deploy_record(deploy_id, {
                     'status': new_status,
-                    'finished_at': int(time.time())
+                    'finished_at': finished_at
                 })
                 record['status'] = new_status
+
+                project_id = record.get('project_id', '')
+                deploy_status = 'success' if new_status == 'SUCCESS' else 'failed'
+                emit_metric('Bouncer', 'Deploy', 1, dimensions={'Status': deploy_status, 'Project': project_id})
+
+                # 計算部署耗時
+                started_at = int(record.get('started_at', 0))
+                if started_at:
+                    duration_seconds = finished_at - started_at
+                    emit_metric('Bouncer', 'DeployDuration', duration_seconds, unit='Seconds', dimensions={'Project': project_id})
 
                 # 釋放鎖
                 release_lock(record.get('project_id'))

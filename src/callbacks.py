@@ -221,12 +221,14 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
     if action in ('approve', 'approve_trust'):
         result = execute_command(command, assume_role)
         cmd_status = 'failed' if result.startswith('❌') else 'success'
-        emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status})
+        emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'manual_approve'})
         paged = store_paged_output(request_id, result)
 
         now = int(time.time())
         created_at = int(item.get('created_at', 0))
         decision_latency_ms = (now - created_at) * 1000 if created_at else 0
+        if decision_latency_ms:
+            emit_metric('Bouncer', 'DecisionLatency', decision_latency_ms, unit='Milliseconds', dimensions={'Action': 'approve'})
 
         decision_type = 'manual_approved_trust' if action == 'approve_trust' else 'manual_approved'
 
@@ -264,6 +266,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
                 trust_scope, account_id, user_id, source=source,
                 max_uploads=TRUST_SESSION_MAX_UPLOADS,
             )
+            emit_metric('Bouncer', 'TrustSession', 1, dimensions={'Event': 'created'})
             trust_line = (
                 f"\n\n🔓 信任時段已啟動：`{trust_id}`"
                 f"\n📊 命令: 0/{TRUST_SESSION_MAX_COMMANDS} | 上傳: 0/{TRUST_SESSION_MAX_UPLOADS}"
@@ -305,6 +308,8 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         now = int(time.time())
         created_at = int(item.get('created_at', 0))
         decision_latency_ms = (now - created_at) * 1000 if created_at else 0
+        if decision_latency_ms:
+            emit_metric('Bouncer', 'DecisionLatency', decision_latency_ms, unit='Milliseconds', dimensions={'Action': 'deny'})
 
         _update_request_status(table, request_id, 'denied', user_id, extra_attrs={
             'decision_type': 'manual_denied',
@@ -461,6 +466,7 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
         result = start_deploy(project_id, branch, user_id, reason)
 
         if 'error' in result:
+            emit_metric('Bouncer', 'Deploy', 1, dimensions={'Status': 'failed', 'Project': project_id})
             update_message(
                 message_id,
                 f"❌ *部署啟動失敗*\n\n"
@@ -472,6 +478,7 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
             )
             answer_callback(callback_id, '❌ 部署啟動失敗')
         else:
+            emit_metric('Bouncer', 'Deploy', 1, dimensions={'Status': 'started', 'Project': project_id})
             deploy_id = result.get('deploy_id', '')
             reason_line = f"📝 *原因：* {escape_markdown(reason)}\n" if reason else ""
             update_message(
@@ -538,6 +545,7 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
         result = app.execute_upload(request_id, user_id)
 
         if result.get('success'):
+            emit_metric('Bouncer', 'Upload', 1, dimensions={'Status': 'approved', 'Type': 'single'})
             update_message(
                 message_id,
                 f"✅ *已上傳*\n\n"
@@ -565,6 +573,7 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
             answer_callback(callback_id, '❌ 上傳失敗')
 
     elif action == 'deny':
+        emit_metric('Bouncer', 'Upload', 1, dimensions={'Status': 'denied', 'Type': 'single'})
         _update_request_status(table, request_id, 'denied', user_id)
 
         update_message(
@@ -699,6 +708,7 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
             'uploaded_count': len(uploaded),
             'error_count': len(errors),
         })
+        emit_metric('Bouncer', 'Upload', 1, dimensions={'Status': 'approved', 'Type': 'batch'})
 
         # Build trust session if approve_trust
         trust_line = ""
@@ -707,6 +717,7 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
                 trust_scope, account_id, user_id, source=source,
                 max_uploads=TRUST_SESSION_MAX_UPLOADS,
             )
+            emit_metric('Bouncer', 'TrustSession', 1, dimensions={'Event': 'created'})
             trust_line = (
                 f"\n\n🔓 信任時段已啟動：`{trust_id}`"
                 f"\n📊 命令: 0/{TRUST_SESSION_MAX_COMMANDS} | 上傳: 0/{TRUST_SESSION_MAX_UPLOADS}"
@@ -726,6 +737,7 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
         )
 
     elif action == 'deny':
+        emit_metric('Bouncer', 'Upload', 1, dimensions={'Status': 'denied', 'Type': 'batch'})
         _update_request_status(table, request_id, 'denied', user_id)
 
         update_message(
@@ -783,6 +795,8 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
 
         # 執行命令
         result = execute_command(cmd, item_assume_role)
+        cmd_status = 'error' if result.startswith('❌') else 'success'
+        emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'trust_callback'})
         paged = store_paged_output(req_id, result)
 
         # 更新 DynamoDB 狀態
