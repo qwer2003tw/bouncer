@@ -126,16 +126,15 @@ def _telegram_request(method: str, data: dict, timeout: int = 5, json_body: bool
 def escape_markdown(text: str) -> str:
     """轉義 Telegram Markdown V1 特殊字元
 
-    策略：把 user text 包在 inline code 裡不需要 escape，
-    但有時需要在非 code 上下文中使用，所以這裡 escape *, `, [。
+    根據 Telegram Bot API 官方文件：
+    "To escape characters '_', '*', '`', '[' outside of an entity,
+     prepend the character '\\' before them."
 
-    對 _ 的處理：不 escape，因為 V1 的 \\_ 會原樣顯示反斜線。
-    改用全域的 fallback — 如果 sendMessage 失敗就重試不帶 parse_mode。
+    See: https://core.telegram.org/bots/api#markdown-style
     """
     if not text:
         return text
-    # 只 escape 會導致嚴重問題的字元（不含 _）
-    for char in ['*', '`', '[']:
+    for char in ['\\', '*', '_', '`', '[']:
         text = text.replace(char, '\\' + char)
     return text
 
