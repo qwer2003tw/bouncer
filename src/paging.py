@@ -7,7 +7,7 @@ import boto3
 
 
 from constants import TABLE_NAME, OUTPUT_MAX_INLINE, OUTPUT_PAGE_SIZE, OUTPUT_PAGE_TTL
-from telegram import send_telegram_message
+from telegram import send_telegram_message_silent
 
 __all__ = [
     'store_paged_output',
@@ -38,7 +38,7 @@ def send_remaining_pages(request_id: str, total_pages: int):
             result = _get_table().get_item(Key={'request_id': page_id}).get('Item')
             if result and 'content' in result:
                 content = result['content']
-                send_telegram_message(
+                send_telegram_message_silent(
                     f"📄 *第 {page_num}/{total_pages} 頁*\n\n"
                     f"```\n{content}\n```"
                 )

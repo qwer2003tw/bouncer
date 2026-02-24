@@ -31,8 +31,7 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
     """發送 Telegram 審批請求"""
     cmd_preview = command if len(command) <= 500 else command[:500] + '...'
     # cmd_preview 放在 backtick code block 裡，不需要 escape
-    reason = _escape_markdown(reason)
-    source = _escape_markdown(source) if source else None
+    # reason/source/context 由 build_info_lines 內部 escape，這裡不再手動 escape
 
     dangerous = is_dangerous(command)
 
@@ -43,21 +42,24 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
     else:
         timeout_str = f"{timeout // 3600} 小時"
 
-    source_line = build_info_lines(source=source, context=_escape_markdown(context) if context else None)
+    source_line = build_info_lines(source=source, context=context)
 
     if account_id and account_name:
-        account_line = f"🏢 *帳號：* `{account_id}` ({account_name})\n"
+        safe_account_name = _escape_markdown(account_name) if account_name else ''
+        account_line = f"🏦 *帳號：* `{account_id}` ({safe_account_name})\n"
     elif assume_role:
         try:
             parsed_account_id = assume_role.split(':')[4]
             role_name = assume_role.split('/')[-1]
-            account_line = f"🏢 *帳號：* `{parsed_account_id}` ({role_name})\n"
+            account_line = f"🏦 *帳號：* `{parsed_account_id}` ({role_name})\n"
         except Exception as e:
             print(f"Error: {e}")
-            account_line = f"🏢 *Role：* `{assume_role}`\n"
+            account_line = f"🏦 *Role：* `{assume_role}`\n"
     else:
         default_account = os.environ.get('AWS_ACCOUNT_ID', '')
-        account_line = f"🏢 *帳號：* `{default_account}` (預設)\n"
+        account_line = f"🏦 *帳號：* `{default_account}` (預設)\n"
+
+    safe_reason = _escape_markdown(reason)
 
     if dangerous:
         text = (
@@ -65,7 +67,7 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
             f"{source_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{cmd_preview}`\n\n"
-            f"💬 *原因：* {reason}\n\n"
+            f"💬 *原因：* {safe_reason}\n\n"
             f"⚠️ *此操作可能不可逆，請仔細確認！*\n\n"
             f"🆔 *ID：* `{request_id}`\n"
             f"⏰ *{timeout_str}後過期*"
@@ -84,7 +86,7 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
             f"{source_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{cmd_preview}`\n\n"
-            f"💬 *原因：* {reason}\n\n"
+            f"💬 *原因：* {safe_reason}\n\n"
             f"🆔 *ID：* `{request_id}`\n"
             f"⏰ *{timeout_str}後過期*"
         )
@@ -103,16 +105,16 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
 
 def send_account_approval_request(request_id: str, action: str, account_id: str, name: str, role_arn: str, source: str, context: str = None):
     """發送帳號管理的 Telegram 審批請求"""
-    name = _escape_markdown(name) if name else name
-    source = _escape_markdown(source) if source else None
-    source_line = build_info_lines(source=source, context=_escape_markdown(context) if context else None)
+    # build_info_lines escapes internally; name is escaped manually below
+    safe_name = _escape_markdown(name) if name else name
+    source_line = build_info_lines(source=source, context=context)
 
     if action == 'add':
         text = (
             f"🔐 *新增 AWS 帳號請求*\n\n"
             f"{source_line}"
             f"🆔 *帳號 ID：* `{account_id}`\n"
-            f"📛 *名稱：* {name}\n"
+            f"📛 *名稱：* {safe_name}\n"
             f"🔗 *Role：* `{role_arn}`\n\n"
             f"📋 *請求 ID：* `{request_id}`\n"
             f"⏰ *5 分鐘後過期*"
@@ -122,7 +124,7 @@ def send_account_approval_request(request_id: str, action: str, account_id: str,
             f"🔐 *移除 AWS 帳號請求*\n\n"
             f"{source_line}"
             f"🆔 *帳號 ID：* `{account_id}`\n"
-            f"📛 *名稱：* {name}\n\n"
+            f"📛 *名稱：* {safe_name}\n\n"
             f"📋 *請求 ID：* `{request_id}`\n"
             f"⏰ *5 分鐘後過期*"
         )
@@ -153,7 +155,7 @@ def send_trust_auto_approve_notification(command: str, trust_id: str, remaining:
         # 用 code block（``` ）而非 inline code，避免多行內容破壞格式
         result_preview = f"\n{result_status} *結果：*\n```\n{result_text}\n```"
 
-    source_line = f"🤖 `{source}` · " if source else ""
+    source_line = f"🤖 {_escape_markdown(source)} · " if source else ""
     remaining_line = f"⏱ {remaining}" if remaining else ""
     session_info = f"{source_line}{remaining_line}".strip()
     session_line = f"\n{session_info}" if session_info else ""
@@ -242,8 +244,8 @@ def send_grant_request_notification(
 
         text = (
             f"🔑 *批次權限申請*\n\n"
-            f"🤖 *來源：* {source or 'Unknown'}\n"
-            f"💬 *原因：* {reason or ''}\n"
+            f"🤖 *來源：* {_escape_markdown(source or 'Unknown')}\n"
+            f"💬 *原因：* {_escape_markdown(reason or '')}\n"
             f"🏦 *帳號：* `{account_id}`\n"
             f"⏱ *TTL：* {ttl_minutes} 分鐘 | 模式：{mode_str}\n"
             f"{commands_text}\n\n"
@@ -293,14 +295,14 @@ def send_grant_execute_notification(
         else:
             result_status = "✅"
 
-        result_text = result[:200] + '...' if result and len(result) > 200 else (result or '')
+        result_text = result[:500] + '...' if result and len(result) > 500 else (result or '')
 
         grant_short = grant_id[:20] + '...' if len(grant_id) > 20 else grant_id
 
         text = (
             f"🔑 *Grant 自動執行*\n"
             f"📋 `{cmd_preview}`\n"
-            f"{result_status} `{result_text}`\n"
+            f"{result_status} *結果：*\n```\n{result_text}\n```\n"
             f"📊 剩餘: {remaining_info}\n"
             f"🆔 `{grant_short}`"
         )
@@ -325,7 +327,7 @@ def send_grant_complete_notification(grant_id: str, reason: str) -> None:
         text = (
             f"🔑 *Grant 已結束*\n\n"
             f"🆔 `{grant_short}`\n"
-            f"💬 *原因：* {reason or ''}"
+            f"💬 *原因：* {_escape_markdown(reason or '')}"
         )
 
         _send_message_silent(text)
@@ -346,8 +348,8 @@ def send_blocked_notification(
         text = (
             f"🚫 *命令被封鎖*\n\n"
             f"📋 `{cmd_preview}`\n"
-            f"❌ *原因：* {block_reason}\n"
-            f"🤖 *來源：* {source or 'Unknown'}"
+            f"❌ *原因：* {_escape_markdown(block_reason)}\n"
+            f"🤖 *來源：* {_escape_markdown(source or 'Unknown')}"
         )
 
         _send_message_silent(text)
@@ -373,7 +375,7 @@ def send_trust_upload_notification(
     try:
         size_str = format_size_human(content_size)
 
-        source_line = f"🤖 `{source}`\n" if source else ""
+        source_line = f"🤖 {_escape_markdown(source)}\n" if source else ""
         hash_short = sha256_hash[:16] if sha256_hash != 'batch' else 'batch'
 
         text = (
@@ -411,9 +413,12 @@ def send_batch_upload_notification(
     try:
         size_str = format_size_human(total_size)
 
-        safe_source = _escape_markdown(source or 'Unknown')
-        safe_reason = _escape_markdown(reason)
-        safe_account = _escape_markdown(account_name)
+        # build_info_lines escapes internally; no manual escape needed
+        info_lines = build_info_lines(
+            source=source or 'Unknown',
+            reason=reason,
+        )
+        safe_account = _escape_markdown(account_name) if account_name else ''
 
         # Format extension groups
         ext_parts = []
@@ -421,11 +426,12 @@ def send_batch_upload_notification(
             ext_parts.append(f"{ext}: {count}")
         ext_line = ', '.join(ext_parts)
 
+        account_line = f"🏦 *帳號：* {safe_account}\n" if safe_account else ""
+
         text = (
             f"📁 *批量上傳請求*\n\n"
-            f"🤖 *來源：* {safe_source}\n"
-            f"💬 *原因：* {safe_reason}\n"
-            f"🏦 *帳號：* {safe_account}\n\n"
+            f"{info_lines}"
+            f"{account_line}\n"
             f"📄 *{file_count} 個檔案* ({size_str})\n"
             f"📊 {ext_line}\n\n"
             f"🆔 `{batch_id}`"

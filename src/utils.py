@@ -32,17 +32,33 @@ def build_info_lines(
 ) -> str:
     """Build common Telegram message info lines.
 
+    Automatically escapes user-input fields (source, context,
+    account_name, reason) for Telegram Markdown V1.
+    Callers should **not** pre-escape these values.
+
     Args:
-        source: 請求來源
-        context: 任務描述
-        account_name: 帳號名稱
-        account_id: 帳號 ID
-        reason: 原因
+        source: 請求來源（user input — will be escaped）
+        context: 任務描述（user input — will be escaped）
+        account_name: 帳號名稱（user input — will be escaped）
+        account_id: 帳號 ID（placed in inline code — not escaped）
+        reason: 原因（user input — will be escaped）
         bold: True 使用 markdown *粗體*，False 使用純文字
 
     Returns:
         多行字串（每行結尾含 ``\\n``），可直接嵌入 f-string
     """
+    from telegram import escape_markdown as _esc
+
+    # Escape user-input fields (inline code fields like account_id are not escaped)
+    if source:
+        source = _esc(source)
+    if context:
+        context = _esc(context)
+    if account_name:
+        account_name = _esc(account_name)
+    if reason:
+        reason = _esc(reason)
+
     lines: list[str] = []
     if bold:
         if source:
@@ -50,7 +66,7 @@ def build_info_lines(
         if context:
             lines.append(f"📝 *任務：* {context}")
         if account_name and account_id:
-            lines.append(f"🏦 *帳號：* {account_id} ({account_name})")
+            lines.append(f"🏦 *帳號：* `{account_id}` ({account_name})")
         if reason:
             lines.append(f"💬 *原因：* {reason}")
     else:
@@ -59,7 +75,7 @@ def build_info_lines(
         if context:
             lines.append(f"📝 任務： {context}")
         if account_name and account_id:
-            lines.append(f"🏦 帳號： {account_id} ({account_name})")
+            lines.append(f"🏦 帳號： `{account_id}` ({account_name})")
         if reason:
             lines.append(f"💬 原因： {reason}")
     return "\n".join(lines) + "\n" if lines else ""

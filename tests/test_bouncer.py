@@ -4775,14 +4775,14 @@ class TestPagingMore:
             'total_pages': 2
         })
         
-        with patch('paging.send_telegram_message') as mock_send:
+        with patch('paging.send_telegram_message_silent') as mock_send:
             from paging import send_remaining_pages
             send_remaining_pages('send-pages-test', 2)
             # 應該嘗試發送（即使失敗）
     
     def test_send_remaining_pages_single(self, app_module):
         """單頁不需要發送"""
-        with patch('paging.send_telegram_message') as mock_send:
+        with patch('paging.send_telegram_message_silent') as mock_send:
             from paging import send_remaining_pages
             send_remaining_pages('single-page', 1)
             mock_send.assert_not_called()

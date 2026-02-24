@@ -211,8 +211,12 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
     account_id = item.get('account_id', DEFAULT_ACCOUNT_ID)
     account_name = item.get('account_name', 'Default')
 
+    # build_info_lines escapes internally; pass raw values from DB
     source_line = build_info_lines(source=source, context=context)
-    account_line = f"🏢 *帳號：* `{account_id}` ({account_name})\n"
+    safe_account_name = escape_markdown(account_name) if account_name else ''
+    account_line = f"🏦 *帳號：* `{account_id}` ({safe_account_name})\n"
+    safe_reason = escape_markdown(reason)
+    cmd_preview = command[:500] + '...' if len(command) > 500 else command
 
     if action in ('approve', 'approve_trust'):
         result = execute_command(command, assume_role)
@@ -287,8 +291,8 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             f"🆔 *ID：* `{request_id}`\n"
             f"{source_line}"
             f"{account_line}"
-            f"📋 *命令：*\n`{command}`\n\n"
-            f"💬 *原因：* {reason}\n\n"
+            f"📋 *命令：*\n`{cmd_preview}`\n\n"
+            f"💬 *原因：* {safe_reason}\n\n"
             f"📤 *結果：*\n```\n{result_preview}\n```{truncate_notice}{trust_line}",
             callback_id,
             cb_text
@@ -314,8 +318,8 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             f"🆔 *ID：* `{request_id}`\n"
             f"{source_line}"
             f"{account_line}"
-            f"📋 *命令：*\n`{command}`\n\n"
-            f"💬 *原因：* {reason}",
+            f"📋 *命令：*\n`{cmd_preview}`\n\n"
+            f"💬 *原因：* {safe_reason}",
             callback_id,
             '❌ 已拒絕'
         )
@@ -495,7 +499,7 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
             f"📦 *專案：* {project_name}\n"
             f"🌿 *分支：* {branch}\n"
             f"📋 *Stack：* {stack_name}\n\n"
-            f"💬 *原因：* {reason}"
+            f"💬 *原因：* {escape_markdown(reason)}"
         )
         answer_callback(callback_id, '❌ 已拒絕')
 
@@ -524,10 +528,10 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
     info_lines = build_info_lines(
         source=source, context=context,
         account_name=account_name, account_id=account_id,
-        bold=False,
     )
 
     size_str = format_size_human(content_size)
+    safe_reason = escape_markdown(reason)
 
     if action == 'approve':
         # 執行上傳
@@ -536,13 +540,13 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
         if result.get('success'):
             update_message(
                 message_id,
-                f"✅ 已上傳\n\n"
-                f"📋 請求 ID： `{request_id}`\n"
+                f"✅ *已上傳*\n\n"
+                f"📋 *請求 ID：* `{request_id}`\n"
                 f"{info_lines}"
-                f"📁 目標： {s3_uri}\n"
-                f"📊 大小： {size_str}\n"
-                f"🔗 URL： {result.get('s3_url', '')}\n"
-                f"💬 原因： {reason}"
+                f"📁 *目標：* `{s3_uri}`\n"
+                f"📊 *大小：* {size_str}\n"
+                f"🔗 *URL：* {result.get('s3_url', '')}\n"
+                f"💬 *原因：* {safe_reason}"
             )
             answer_callback(callback_id, '✅ 已上傳')
         else:
@@ -550,13 +554,13 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
             error = result.get('error', 'Unknown error')
             update_message(
                 message_id,
-                f"❌ 上傳失敗\n\n"
-                f"📋 請求 ID： `{request_id}`\n"
+                f"❌ *上傳失敗*\n\n"
+                f"📋 *請求 ID：* `{request_id}`\n"
                 f"{info_lines}"
-                f"📁 目標： {s3_uri}\n"
-                f"📊 大小： {size_str}\n"
-                f"❗ 錯誤： {error}\n"
-                f"💬 原因： {reason}"
+                f"📁 *目標：* `{s3_uri}`\n"
+                f"📊 *大小：* {size_str}\n"
+                f"❗ *錯誤：* {error}\n"
+                f"💬 *原因：* {safe_reason}"
             )
             answer_callback(callback_id, '❌ 上傳失敗')
 
@@ -565,12 +569,12 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
 
         update_message(
             message_id,
-            f"❌ 已拒絕上傳\n\n"
-            f"📋 請求 ID： `{request_id}`\n"
+            f"❌ *已拒絕上傳*\n\n"
+            f"📋 *請求 ID：* `{request_id}`\n"
             f"{info_lines}"
-            f"📁 目標： {s3_uri}\n"
-            f"📊 大小： {size_str}\n"
-            f"💬 原因： {reason}"
+            f"📁 *目標：* `{s3_uri}`\n"
+            f"📊 *大小：* {size_str}\n"
+            f"💬 *原因：* {safe_reason}"
         )
         answer_callback(callback_id, '❌ 已拒絕')
 
@@ -600,10 +604,10 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
     assume_role = item.get('assume_role', None)
 
     size_str = format_size_human(total_size)
+    safe_reason = escape_markdown(reason)
 
     source_line = build_info_lines(
         source=source, account_name=account_name, account_id=account_id,
-        bold=False,
     )
 
     if action in ('approve', 'approve_trust'):
@@ -617,11 +621,11 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
         # Update message to show progress
         update_message(
             message_id,
-            f"⏳ 批量上傳中...\n\n"
-            f"📋 請求 ID： `{request_id}`\n"
+            f"⏳ *批量上傳中...*\n\n"
+            f"📋 *請求 ID：* `{request_id}`\n"
             f"{source_line}"
             f"📄 {file_count} 個檔案 ({size_str})\n"
-            f"💬 原因： {reason}\n\n"
+            f"💬 *原因：* {safe_reason}\n\n"
             f"進度: 0/{file_count}",
             remove_buttons=True,
         )
@@ -647,9 +651,9 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
             _update_request_status(table, request_id, 'error', user_id, extra_attrs={'error_message': str(e)})
             update_message(
                 message_id,
-                f"❌ 批量上傳失敗（S3 連線錯誤）\n\n"
-                f"📋 請求 ID： `{request_id}`\n"
-                f"❗ 錯誤： {str(e)[:200]}",
+                f"❌ *批量上傳失敗*（S3 連線錯誤）\n\n"
+                f"📋 *請求 ID：* `{request_id}`\n"
+                f"❗ *錯誤：* {str(e)[:200]}",
             )
             return response(500, {'error': str(e)})
 
@@ -683,8 +687,8 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
                 try:
                     update_message(
                         message_id,
-                        f"⏳ 批量上傳中...\n\n"
-                        f"📋 請求 ID： `{request_id}`\n"
+                        f"⏳ *批量上傳中...*\n\n"
+                        f"📋 *請求 ID：* `{request_id}`\n"
                         f"進度: {i + 1}/{file_count}",
                     )
                 except Exception:
@@ -712,12 +716,12 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
 
         update_message(
             message_id,
-            f"✅ 批量上傳完成\n\n"
-            f"📋 請求 ID： `{request_id}`\n"
+            f"✅ *批量上傳完成*\n\n"
+            f"📋 *請求 ID：* `{request_id}`\n"
             f"{source_line}"
             f"📄 成功: {len(uploaded)}/{file_count} 個檔案 ({size_str})"
             f"{error_line}"
-            f"\n💬 原因： {reason}"
+            f"\n💬 *原因：* {safe_reason}"
             f"{trust_line}",
         )
 
@@ -726,11 +730,11 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
 
         update_message(
             message_id,
-            f"❌ 已拒絕批量上傳\n\n"
-            f"📋 請求 ID： `{request_id}`\n"
+            f"❌ *已拒絕批量上傳*\n\n"
+            f"📋 *請求 ID：* `{request_id}`\n"
             f"{source_line}"
             f"📄 {file_count} 個檔案 ({size_str})\n"
-            f"💬 原因： {reason}",
+            f"💬 *原因：* {safe_reason}",
         )
         answer_callback(callback_id, '❌ 已拒絕')
 

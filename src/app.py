@@ -565,7 +565,7 @@ def handle_telegram_webhook(event: dict) -> dict:
                 f"{status_emoji} *已處理* (狀態: {status})\n\n"
                 f"{source_line}"
                 f"{context_line}"
-                f"📋 *命令：*\n`{escape_markdown(command)}`\n\n"
+                f"📋 *命令：*\n`{command}`\n\n"
                 f"💬 *原因：* {escape_markdown(reason)}",
                 remove_buttons=True
             )
@@ -595,7 +595,7 @@ def handle_telegram_webhook(event: dict) -> dict:
                 f"⏰ *已過期*\n\n"
                 f"{source_line}"
                 f"{context_line}"
-                f"📋 *命令：*\n`{escape_markdown(cmd_preview)}`\n\n"
+                f"📋 *命令：*\n`{cmd_preview}`\n\n"
                 f"💬 *原因：* {escape_markdown(reason)}",
                 remove_buttons=True
             )

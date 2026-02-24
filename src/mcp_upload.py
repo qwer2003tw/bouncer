@@ -347,7 +347,6 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
     # 發送 Telegram 審批
     s3_uri = f"s3://{ctx.bucket}/{ctx.key}"
 
-    safe_s3_uri = escape_markdown(s3_uri)
     safe_reason = escape_markdown(ctx.reason)
     safe_source = escape_markdown(ctx.source or 'Unknown')
     safe_content_type = escape_markdown(ctx.content_type)
@@ -357,7 +356,7 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
         f"📤 *上傳檔案請求*\n\n"
         f"🤖 *來源：* {safe_source}\n"
         f"🏦 *帳號：* {safe_account}\n"
-        f"📁 *目標：* `{safe_s3_uri}`\n"
+        f"📁 *目標：* `{s3_uri}`\n"
         f"📊 *大小：* {size_str}\n"
         f"📝 *類型：* {safe_content_type}\n"
         f"💬 *原因：* {safe_reason}\n\n"
