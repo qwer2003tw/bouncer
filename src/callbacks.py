@@ -14,7 +14,7 @@ from paging import store_paged_output, send_remaining_pages
 from trust import create_trust_session
 from telegram import escape_markdown, update_message, answer_callback, update_and_answer
 from notifications import send_trust_auto_approve_notification
-from constants import DEFAULT_ACCOUNT_ID, TRUST_SESSION_MAX_UPLOADS, TRUST_SESSION_MAX_COMMANDS
+from constants import DEFAULT_ACCOUNT_ID, RESULT_TTL, TRUST_SESSION_MAX_UPLOADS, TRUST_SESSION_MAX_COMMANDS
 from metrics import emit_metric
 
 
@@ -145,12 +145,13 @@ def _update_request_status(table, request_id: str, status: str, approver: str, e
         extra_attrs: 額外要更新的屬性 dict
     """
     now = int(time.time())
-    update_expr = 'SET #s = :s, approved_at = :t, approver = :a'
-    expr_names = {'#s': 'status'}
+    update_expr = 'SET #s = :s, approved_at = :t, approver = :a, #ttl = :ttl'
+    expr_names = {'#s': 'status', '#ttl': 'ttl'}
     expr_values = {
         ':s': status,
         ':t': now,
         ':a': approver,
+        ':ttl': now + RESULT_TTL,
     }
 
     if extra_attrs:
@@ -233,8 +234,8 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         decision_type = 'manual_approved_trust' if action == 'approve_trust' else 'manual_approved'
 
         # 存入 DynamoDB（包含分頁資訊）
-        update_expr = 'SET #s = :s, #r = :r, approved_at = :t, approver = :a, decision_type = :dt, decided_at = :da, decision_latency_ms = :dl'
-        expr_names = {'#s': 'status', '#r': 'result'}
+        update_expr = 'SET #s = :s, #r = :r, approved_at = :t, approver = :a, decision_type = :dt, decided_at = :da, decision_latency_ms = :dl, #ttl = :ttl'
+        expr_names = {'#s': 'status', '#r': 'result', '#ttl': 'ttl'}
         expr_values = {
             ':s': 'approved',
             ':r': paged['result'],
@@ -242,7 +243,8 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             ':a': user_id,
             ':dt': decision_type,
             ':da': now,
-            ':dl': decision_latency_ms
+            ':dl': decision_latency_ms,
+            ':ttl': now + RESULT_TTL
         }
 
         if paged.get('paged'):

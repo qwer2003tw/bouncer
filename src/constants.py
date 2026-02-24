@@ -57,6 +57,7 @@ MCP_MAX_WAIT = int(os.environ.get('MCP_MAX_WAIT', '30'))
 
 APPROVAL_TIMEOUT_DEFAULT = 300  # 5 分鐘（帳號/上傳/部署）
 APPROVAL_TTL_BUFFER = 60  # TTL 額外緩衝秒數
+RESULT_TTL = 1800  # 30 分鐘 — 審批通過/拒絕後結果保留時間
 # DEPRECATED: 不再用於 sync long-polling。保留用於 TTL 計算。
 COMMAND_APPROVAL_TIMEOUT = MCP_MAX_WAIT
 UPLOAD_TIMEOUT = 300  # 上傳審批超時
