@@ -503,7 +503,7 @@ def mcp_tool_project_list(req_id, arguments: dict) -> dict:
 
 def send_deploy_approval_request(request_id: str, project: dict, branch: str, reason: str, source: str, context: str = None):
     """發送部署審批請求到 Telegram"""
-    from telegram import send_telegram_message
+    from telegram import send_telegram_message, escape_markdown
 
     project_id = project.get('project_id', '')
     project_name = project.get('name', project_id)
@@ -519,8 +519,12 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
                 pass
 
     branch = branch or project.get('default_branch', 'master')
-    source_line = f"🤖 來源： {source}\n" if source else ""
-    context_line = f"📝 任務： {context}\n" if context else ""
+    # Escape user-provided text for Markdown V1 (underscores break formatting)
+    safe_source = escape_markdown(source) if source else ""
+    safe_reason = escape_markdown(reason) if reason else ""
+    safe_context = escape_markdown(context) if context else ""
+    source_line = f"🤖 來源： {safe_source}\n" if source else ""
+    context_line = f"📝 任務： {safe_context}\n" if context else ""
     account_line = f"🏢 帳號： {target_account}\n" if target_account else ""
 
     text = (
@@ -531,7 +535,7 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
         f"🌿 分支： {branch}\n"
         f"{account_line}"
         f"📋 Stack： {stack_name}\n\n"
-        f"💬 原因： {reason}\n\n"
+        f"💬 原因： {safe_reason}\n\n"
         f"🆔 ID： {request_id}\n"
         f"⏰ 5 分鐘後過期"
     )
