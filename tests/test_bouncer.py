@@ -20,11 +20,12 @@ import boto3
 # Fixtures
 # ============================================================================
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def mock_dynamodb():
-    """建立 mock DynamoDB 表（含 GSI）"""
+    """建立 mock DynamoDB 表（含 GSI）- module scope，只建立一次"""
     with mock_aws():
         dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
+        # Main approval-requests table
         table = dynamodb.create_table(
             TableName='clawdbot-approval-requests',
             KeySchema=[{'AttributeName': 'request_id', 'KeyType': 'HASH'}],
@@ -55,12 +56,53 @@ def mock_dynamodb():
             BillingMode='PAY_PER_REQUEST'
         )
         table.wait_until_exists()
+
+        # Deployer tables (shared by all deployer test classes)
+        dynamodb.create_table(
+            TableName='bouncer-projects',
+            KeySchema=[{'AttributeName': 'project_id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[{'AttributeName': 'project_id', 'AttributeType': 'S'}],
+            BillingMode='PAY_PER_REQUEST'
+        )
+        dynamodb.create_table(
+            TableName='bouncer-deploy-history',
+            KeySchema=[{'AttributeName': 'deploy_id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[
+                {'AttributeName': 'deploy_id', 'AttributeType': 'S'},
+                {'AttributeName': 'project_id', 'AttributeType': 'S'},
+                {'AttributeName': 'started_at', 'AttributeType': 'N'}
+            ],
+            GlobalSecondaryIndexes=[{
+                'IndexName': 'project-time-index',
+                'KeySchema': [
+                    {'AttributeName': 'project_id', 'KeyType': 'HASH'},
+                    {'AttributeName': 'started_at', 'KeyType': 'RANGE'}
+                ],
+                'Projection': {'ProjectionType': 'ALL'}
+            }],
+            BillingMode='PAY_PER_REQUEST'
+        )
+        dynamodb.create_table(
+            TableName='bouncer-deploy-locks',
+            KeySchema=[{'AttributeName': 'project_id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[{'AttributeName': 'project_id', 'AttributeType': 'S'}],
+            BillingMode='PAY_PER_REQUEST'
+        )
+
+        # Accounts table
+        dynamodb.create_table(
+            TableName='bouncer-accounts',
+            KeySchema=[{'AttributeName': 'account_id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[{'AttributeName': 'account_id', 'AttributeType': 'S'}],
+            BillingMode='PAY_PER_REQUEST'
+        )
+
         yield dynamodb
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def app_module(mock_dynamodb):
-    """載入 app 模組並注入 mock"""
+    """載入 app 模組並注入 mock - module scope，只載入一次"""
     # 設定環境變數
     os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'
     os.environ['DEFAULT_ACCOUNT_ID'] = '111111111111'
@@ -83,14 +125,45 @@ def app_module(mock_dynamodb):
     
     # 注入 mock table
     import db
+    import accounts
     app.table = mock_dynamodb.Table('clawdbot-approval-requests')
     app.dynamodb = mock_dynamodb
     db.table = app.table
     db.accounts_table = app.accounts_table if hasattr(app, 'accounts_table') else mock_dynamodb.Table('bouncer-accounts')
     
-    yield app
+    # Skip real Telegram API calls in tests
+    accounts._bot_commands_initialized = True
     
-    sys.path.pop(0)
+    yield app
+
+
+_ALL_TABLE_KEYS = {
+    'clawdbot-approval-requests': ['request_id'],
+    'bouncer-projects': ['project_id'],
+    'bouncer-deploy-history': ['deploy_id'],
+    'bouncer-deploy-locks': ['project_id'],
+    'bouncer-accounts': ['account_id'],
+}
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_tables(mock_dynamodb):
+    """每個測試後清除所有表中的資料，避免測試間資料洩漏"""
+    yield
+    for table_name, key_attrs in _ALL_TABLE_KEYS.items():
+        try:
+            table = mock_dynamodb.Table(table_name)
+            scan = table.scan(
+                ProjectionExpression=','.join(f'#k{i}' for i in range(len(key_attrs))),
+                ExpressionAttributeNames={f'#k{i}': k for i, k in enumerate(key_attrs)}
+            )
+            items = scan.get('Items', [])
+            if items:
+                with table.batch_writer() as batch:
+                    for item in items:
+                        batch.delete_item(Key=item)
+        except Exception:
+            pass
 
 
 # ============================================================================
@@ -2505,43 +2578,7 @@ class TestDeployerModule:
     
     @pytest.fixture
     def deployer_tables(self, mock_dynamodb):
-        """建立 deployer 需要的表"""
-        # Projects table
-        mock_dynamodb.create_table(
-            TableName='bouncer-projects',
-            KeySchema=[{'AttributeName': 'project_id', 'KeyType': 'HASH'}],
-            AttributeDefinitions=[{'AttributeName': 'project_id', 'AttributeType': 'S'}],
-            BillingMode='PAY_PER_REQUEST'
-        )
-        
-        # History table
-        mock_dynamodb.create_table(
-            TableName='bouncer-deploy-history',
-            KeySchema=[{'AttributeName': 'deploy_id', 'KeyType': 'HASH'}],
-            AttributeDefinitions=[
-                {'AttributeName': 'deploy_id', 'AttributeType': 'S'},
-                {'AttributeName': 'project_id', 'AttributeType': 'S'},
-                {'AttributeName': 'started_at', 'AttributeType': 'N'}
-            ],
-            GlobalSecondaryIndexes=[{
-                'IndexName': 'project-time-index',
-                'KeySchema': [
-                    {'AttributeName': 'project_id', 'KeyType': 'HASH'},
-                    {'AttributeName': 'started_at', 'KeyType': 'RANGE'}
-                ],
-                'Projection': {'ProjectionType': 'ALL'}
-            }],
-            BillingMode='PAY_PER_REQUEST'
-        )
-        
-        # Locks table
-        mock_dynamodb.create_table(
-            TableName='bouncer-deploy-locks',
-            KeySchema=[{'AttributeName': 'project_id', 'KeyType': 'HASH'}],
-            AttributeDefinitions=[{'AttributeName': 'project_id', 'AttributeType': 'S'}],
-            BillingMode='PAY_PER_REQUEST'
-        )
-        
+        """Tables already exist at session scope, just return resource"""
         return mock_dynamodb
     
     def test_list_projects_empty(self, deployer_tables):
@@ -3843,43 +3880,7 @@ class TestDeployerAdditional:
     
     @pytest.fixture
     def deployer_setup(self, mock_dynamodb):
-        """設置 deployer 測試環境"""
-        # Projects table
-        mock_dynamodb.create_table(
-            TableName='bouncer-projects',
-            KeySchema=[{'AttributeName': 'project_id', 'KeyType': 'HASH'}],
-            AttributeDefinitions=[{'AttributeName': 'project_id', 'AttributeType': 'S'}],
-            BillingMode='PAY_PER_REQUEST'
-        )
-        
-        # History table
-        mock_dynamodb.create_table(
-            TableName='bouncer-deploy-history',
-            KeySchema=[{'AttributeName': 'deploy_id', 'KeyType': 'HASH'}],
-            AttributeDefinitions=[
-                {'AttributeName': 'deploy_id', 'AttributeType': 'S'},
-                {'AttributeName': 'project_id', 'AttributeType': 'S'},
-                {'AttributeName': 'started_at', 'AttributeType': 'N'}
-            ],
-            GlobalSecondaryIndexes=[{
-                'IndexName': 'project-time-index',
-                'KeySchema': [
-                    {'AttributeName': 'project_id', 'KeyType': 'HASH'},
-                    {'AttributeName': 'started_at', 'KeyType': 'RANGE'}
-                ],
-                'Projection': {'ProjectionType': 'ALL'}
-            }],
-            BillingMode='PAY_PER_REQUEST'
-        )
-        
-        # Locks table
-        mock_dynamodb.create_table(
-            TableName='bouncer-deploy-locks',
-            KeySchema=[{'AttributeName': 'project_id', 'KeyType': 'HASH'}],
-            AttributeDefinitions=[{'AttributeName': 'project_id', 'AttributeType': 'S'}],
-            BillingMode='PAY_PER_REQUEST'
-        )
-        
+        """Tables already exist at session scope, just return resource"""
         return mock_dynamodb
     
     def test_get_project_not_exists(self, deployer_setup):
@@ -4191,43 +4192,7 @@ class TestDeployerFull:
     
     @pytest.fixture
     def deployer_full_setup(self, mock_dynamodb):
-        """完整設置 deployer 測試環境"""
-        # Projects table
-        mock_dynamodb.create_table(
-            TableName='bouncer-projects',
-            KeySchema=[{'AttributeName': 'project_id', 'KeyType': 'HASH'}],
-            AttributeDefinitions=[{'AttributeName': 'project_id', 'AttributeType': 'S'}],
-            BillingMode='PAY_PER_REQUEST'
-        )
-        
-        # History table
-        mock_dynamodb.create_table(
-            TableName='bouncer-deploy-history',
-            KeySchema=[{'AttributeName': 'deploy_id', 'KeyType': 'HASH'}],
-            AttributeDefinitions=[
-                {'AttributeName': 'deploy_id', 'AttributeType': 'S'},
-                {'AttributeName': 'project_id', 'AttributeType': 'S'},
-                {'AttributeName': 'started_at', 'AttributeType': 'N'}
-            ],
-            GlobalSecondaryIndexes=[{
-                'IndexName': 'project-time-index',
-                'KeySchema': [
-                    {'AttributeName': 'project_id', 'KeyType': 'HASH'},
-                    {'AttributeName': 'started_at', 'KeyType': 'RANGE'}
-                ],
-                'Projection': {'ProjectionType': 'ALL'}
-            }],
-            BillingMode='PAY_PER_REQUEST'
-        )
-        
-        # Locks table
-        mock_dynamodb.create_table(
-            TableName='bouncer-deploy-locks',
-            KeySchema=[{'AttributeName': 'project_id', 'KeyType': 'HASH'}],
-            AttributeDefinitions=[{'AttributeName': 'project_id', 'AttributeType': 'S'}],
-            BillingMode='PAY_PER_REQUEST'
-        )
-        
+        """Tables already exist at session scope, just return resource"""
         return mock_dynamodb
     
     def test_cancel_deploy_running(self, deployer_full_setup):
@@ -4541,7 +4506,7 @@ class TestAppModuleMore:
                     'params': {
                         'name': 'bouncer_execute',
                         'arguments': {
-                            'command': 'aws logs get-log-events --log-group-name test',
+                            'command': 'aws logs get-log-events --log-group-name test --log-stream-name test-stream',
                             'trust_scope': 'test-session',
                         }
                     }
@@ -4629,40 +4594,7 @@ class TestDeployerMore:
     
     @pytest.fixture
     def deployer_more_setup(self, mock_dynamodb):
-        """Deployer 設置"""
-        mock_dynamodb.create_table(
-            TableName='bouncer-projects',
-            KeySchema=[{'AttributeName': 'project_id', 'KeyType': 'HASH'}],
-            AttributeDefinitions=[{'AttributeName': 'project_id', 'AttributeType': 'S'}],
-            BillingMode='PAY_PER_REQUEST'
-        )
-        
-        mock_dynamodb.create_table(
-            TableName='bouncer-deploy-history',
-            KeySchema=[{'AttributeName': 'deploy_id', 'KeyType': 'HASH'}],
-            AttributeDefinitions=[
-                {'AttributeName': 'deploy_id', 'AttributeType': 'S'},
-                {'AttributeName': 'project_id', 'AttributeType': 'S'},
-                {'AttributeName': 'started_at', 'AttributeType': 'N'}
-            ],
-            GlobalSecondaryIndexes=[{
-                'IndexName': 'project-time-index',
-                'KeySchema': [
-                    {'AttributeName': 'project_id', 'KeyType': 'HASH'},
-                    {'AttributeName': 'started_at', 'KeyType': 'RANGE'}
-                ],
-                'Projection': {'ProjectionType': 'ALL'}
-            }],
-            BillingMode='PAY_PER_REQUEST'
-        )
-        
-        mock_dynamodb.create_table(
-            TableName='bouncer-deploy-locks',
-            KeySchema=[{'AttributeName': 'project_id', 'KeyType': 'HASH'}],
-            AttributeDefinitions=[{'AttributeName': 'project_id', 'AttributeType': 'S'}],
-            BillingMode='PAY_PER_REQUEST'
-        )
-        
+        """Tables already exist at session scope, just return resource"""
         return mock_dynamodb
     
     def test_start_deploy_success(self, deployer_more_setup):
@@ -5689,18 +5621,9 @@ class TestCrossAccountUpload:
 
     @pytest.fixture(autouse=True)
     def setup_accounts_table(self, mock_dynamodb, app_module):
-        """建立 accounts 表"""
+        """Accounts table already exists at session scope, just reset cache"""
         import accounts
         accounts._accounts_table = None  # 重置快取
-        try:
-            mock_dynamodb.create_table(
-                TableName='bouncer-accounts',
-                KeySchema=[{'AttributeName': 'account_id', 'KeyType': 'HASH'}],
-                AttributeDefinitions=[{'AttributeName': 'account_id', 'AttributeType': 'S'}],
-                BillingMode='PAY_PER_REQUEST'
-            )
-        except Exception:
-            pass  # 表可能已存在
 
     @patch('mcp_upload.send_telegram_message')
     def test_upload_default_account_no_assume_role(self, mock_telegram, app_module):
@@ -5992,41 +5915,8 @@ class TestCrossAccountDeploy:
 
     @pytest.fixture(autouse=True)
     def setup_deployer_tables(self, mock_dynamodb):
-        """建立 deployer 相關表"""
-        for tbl_name, key in [
-            ('bouncer-projects', 'project_id'),
-            ('bouncer-deploy-locks', 'project_id'),
-        ]:
-            try:
-                mock_dynamodb.create_table(
-                    TableName=tbl_name,
-                    KeySchema=[{'AttributeName': key, 'KeyType': 'HASH'}],
-                    AttributeDefinitions=[{'AttributeName': key, 'AttributeType': 'S'}],
-                    BillingMode='PAY_PER_REQUEST'
-                )
-            except Exception:
-                pass
-        try:
-            mock_dynamodb.create_table(
-                TableName='bouncer-deploy-history',
-                KeySchema=[{'AttributeName': 'deploy_id', 'KeyType': 'HASH'}],
-                AttributeDefinitions=[
-                    {'AttributeName': 'deploy_id', 'AttributeType': 'S'},
-                    {'AttributeName': 'project_id', 'AttributeType': 'S'},
-                    {'AttributeName': 'started_at', 'AttributeType': 'N'}
-                ],
-                GlobalSecondaryIndexes=[{
-                    'IndexName': 'project-time-index',
-                    'KeySchema': [
-                        {'AttributeName': 'project_id', 'KeyType': 'HASH'},
-                        {'AttributeName': 'started_at', 'KeyType': 'RANGE'}
-                    ],
-                    'Projection': {'ProjectionType': 'ALL'}
-                }],
-                BillingMode='PAY_PER_REQUEST'
-            )
-        except Exception:
-            pass
+        """Tables already exist at session scope, no-op"""
+        pass
 
     def test_add_project_stores_target_role_arn(self, app_module):
         """add_project 正確存 target_role_arn"""
@@ -6115,41 +6005,8 @@ class TestDeployNotificationFallback:
 
     @pytest.fixture(autouse=True)
     def setup_deployer_tables(self, mock_dynamodb):
-        """建立 deployer 相關表"""
-        for tbl_name, key in [
-            ('bouncer-projects', 'project_id'),
-            ('bouncer-deploy-locks', 'project_id'),
-        ]:
-            try:
-                mock_dynamodb.create_table(
-                    TableName=tbl_name,
-                    KeySchema=[{'AttributeName': key, 'KeyType': 'HASH'}],
-                    AttributeDefinitions=[{'AttributeName': key, 'AttributeType': 'S'}],
-                    BillingMode='PAY_PER_REQUEST'
-                )
-            except Exception:
-                pass
-        try:
-            mock_dynamodb.create_table(
-                TableName='bouncer-deploy-history',
-                KeySchema=[{'AttributeName': 'deploy_id', 'KeyType': 'HASH'}],
-                AttributeDefinitions=[
-                    {'AttributeName': 'deploy_id', 'AttributeType': 'S'},
-                    {'AttributeName': 'project_id', 'AttributeType': 'S'},
-                    {'AttributeName': 'started_at', 'AttributeType': 'N'}
-                ],
-                GlobalSecondaryIndexes=[{
-                    'IndexName': 'project-time-index',
-                    'KeySchema': [
-                        {'AttributeName': 'project_id', 'KeyType': 'HASH'},
-                        {'AttributeName': 'started_at', 'KeyType': 'RANGE'}
-                    ],
-                    'Projection': {'ProjectionType': 'ALL'}
-                }],
-                BillingMode='PAY_PER_REQUEST'
-            )
-        except Exception:
-            pass
+        """Tables already exist at session scope, no-op"""
+        pass
 
     def test_notification_fallback_from_role_arn(self, app_module):
         """target_account 空，從 target_role_arn 解析帳號 ID 顯示在通知中"""
@@ -6446,18 +6303,9 @@ class TestCrossAccountExecuteFlow:
 
     @pytest.fixture(autouse=True)
     def setup_accounts_table(self, mock_dynamodb, app_module):
-        """建立 accounts 表"""
+        """Accounts table already exists at session scope, just reset cache"""
         import accounts
         accounts._accounts_table = None  # 重置快取
-        try:
-            mock_dynamodb.create_table(
-                TableName='bouncer-accounts',
-                KeySchema=[{'AttributeName': 'account_id', 'KeyType': 'HASH'}],
-                AttributeDefinitions=[{'AttributeName': 'account_id', 'AttributeType': 'S'}],
-                BillingMode='PAY_PER_REQUEST'
-            )
-        except Exception:
-            pass  # 表可能已存在
 
     @patch('mcp_execute.execute_command')
     @patch('telegram.send_telegram_message')
