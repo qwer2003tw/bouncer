@@ -20,6 +20,8 @@ __all__ = [
     'execute_command',
     'aws_cli_split',
     '_normalize_whitespace',
+    '_has_dangerous_flag',
+    '_DANGEROUS_FLAG_MAP',
 ]
 
 
@@ -123,16 +125,51 @@ def _is_safe_s3_cp(command: str) -> bool:
     return True
 
 
+# 帶有危險旗標時需要人工審批的 prefix → flags 映射
+# 注意：prefix 必須與 AUTO_APPROVE_PREFIXES 中的項目完全相同
+_DANGEROUS_FLAG_MAP: dict[str, list[str]] = {
+    'aws ssm get-parameter': ['--with-decryption'],
+}
+
+
+def _has_dangerous_flag(cmd_lower: str, matched_prefix: str) -> bool:
+    """
+    檢查命令是否包含對應 prefix 的危險旗標。
+
+    當 AUTO_APPROVE_PREFIXES 中的某個 prefix 匹配時，
+    若命令中同時存在 _DANGEROUS_FLAG_MAP 中列出的旗標，
+    則該命令需要人工審批（回傳 True）。
+
+    Args:
+        cmd_lower: 已正規化並轉小寫的命令字串
+        matched_prefix: 從 AUTO_APPROVE_PREFIXES 中匹配到的 prefix
+
+    Returns:
+        True 表示命令含有危險旗標（不應自動批准）
+    """
+    for prefix, flags in _DANGEROUS_FLAG_MAP.items():
+        # 使用 startswith 檢查 prefix，與 AUTO_APPROVE_PREFIXES 邏輯一致
+        if cmd_lower.startswith(prefix):
+            if any(flag in cmd_lower for flag in flags):
+                return True
+    return False
+
+
 def is_auto_approve(command: str) -> bool:
     """Layer 3: 檢查命令是否可自動批准"""
     cmd_lower = _normalize_whitespace(command).lower()
-    if not any(cmd_lower.startswith(prefix) for prefix in AUTO_APPROVE_PREFIXES):
+    matched = next((prefix for prefix in AUTO_APPROVE_PREFIXES if cmd_lower.startswith(prefix)), None)
+    if matched is None:
         return False
 
     # P1-4 安全修復：aws s3 cp s3: 前綴匹配時，進一步檢查
     # 是否為 S3→S3 copy（cross-bucket exfiltration 風險）
     if cmd_lower.startswith('aws s3 cp s3:'):
         return _is_safe_s3_cp(command)
+
+    # P1-5 安全修復：即使前綴在白名單，若命令含有危險旗標，仍需人工審批
+    if _has_dangerous_flag(cmd_lower, matched):
+        return False
 
     return True
 
