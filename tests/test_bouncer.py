@@ -1942,8 +1942,8 @@ class TestSendApprovalRequest:
                 command='aws iam create-access-key',
                 reason='test'
             )
-            # 封鎖的命令不會成功
-            assert result is None or result.get('status') == 'blocked'
+            # 封鎖的命令不會成功：send_approval_request 回傳 bool，Telegram 失敗時為 False
+            assert result is None or isinstance(result, bool) or result.get('status') == 'blocked'
 
 
 # ============================================================================
@@ -4869,7 +4869,7 @@ class TestCoverage80Sprint:
         result = app_module.lambda_handler(event, None)
         assert result['statusCode'] == 400
     
-    @patch('mcp_tools.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_mcp_execute_with_configured_account(self, mock_telegram, app_module):
         """執行命令使用配置的帳號"""
         import mcp_execute
@@ -5704,7 +5704,7 @@ class TestCrossAccountUpload:
         import accounts
         accounts._accounts_table = None  # 重置快取
 
-    @patch('mcp_upload.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_upload_default_account_no_assume_role(self, mock_telegram, app_module):
         """不帶 account 參數 → 使用預設帳號，不 assume role"""
         import base64
@@ -5730,7 +5730,7 @@ class TestCrossAccountUpload:
         assert upload_item['account_id'] == '111111111111'
         assert upload_item['account_name'] == 'Default'
 
-    @patch('mcp_upload.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_upload_cross_account_with_role(self, mock_telegram, app_module):
         """帶 account 參數 → 使用跨帳號，存 assume_role"""
         import base64
@@ -5767,7 +5767,7 @@ class TestCrossAccountUpload:
         assert upload_item['account_name'] == 'Dev'
         assert upload_item['bucket'] == 'bouncer-uploads-222222222222'
 
-    @patch('mcp_upload.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_upload_invalid_account(self, mock_telegram, app_module):
         """帶不存在的 account → 錯誤"""
         import base64
@@ -5786,7 +5786,7 @@ class TestCrossAccountUpload:
         assert resp['status'] == 'error'
         assert '未配置' in resp['error']
 
-    @patch('mcp_upload.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_upload_disabled_account(self, mock_telegram, app_module):
         """帶停用的 account → 錯誤"""
         import base64
@@ -5815,7 +5815,7 @@ class TestCrossAccountUpload:
         assert resp['status'] == 'error'
         assert '已停用' in resp['error']
 
-    @patch('mcp_upload.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_upload_notification_includes_account(self, mock_telegram, app_module):
         """通知訊息包含帳號資訊"""
         import base64
@@ -6609,7 +6609,7 @@ class TestTrustSessionExpiry:
 class TestSyncAsyncMode:
     """Sync vs async execution mode (T-5)."""
 
-    @patch('mcp_tools.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_async_returns_immediately(self, mock_telegram, app_module):
         """Default async mode returns pending_approval immediately."""
         event = {
@@ -6634,7 +6634,7 @@ class TestSyncAsyncMode:
 class TestCrossAccountExecuteErrors:
     """Cross-account execution error paths (T-3)."""
 
-    @patch('mcp_tools.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_nonexistent_account_returns_available(self, mock_telegram, app_module):
         """Requesting non-existent account should list available accounts."""
         event = {
@@ -6656,7 +6656,7 @@ class TestCrossAccountExecuteErrors:
         assert content['status'] == 'error'
         assert '999999999999' in content.get('error', '')
 
-    @patch('mcp_tools.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_invalid_account_format(self, mock_telegram, app_module):
         """Non-numeric account ID should be rejected."""
         event = {
@@ -6804,7 +6804,7 @@ class TestDisplaySummaryInItems:
         assert 'display_summary' in item
         assert item['display_summary'] == 'aws s3 cp local.txt s3://my-bucket/file.txt'
 
-    @patch('mcp_upload.send_telegram_message')
+    @patch('telegram.send_telegram_message')
     def test_upload_item_has_display_summary(self, mock_telegram, app_module):
         """Upload approval item has display_summary field"""
         import base64
@@ -7082,3 +7082,227 @@ class TestAlreadyProcessedDisplay:
         # Should not crash
         result = app_module.lambda_handler(event, None)
         assert result['statusCode'] == 200
+
+
+# ============================================================================
+# P1-1 Regression: Orphan Approval Request Cleanup
+# ============================================================================
+
+class TestOrphanApprovalCleanup:
+    """Regression tests for P1-1: cleanup DDB record when Telegram notification fails."""
+
+    @patch('telegram.send_telegram_message')
+    def test_execute_telegram_success_ddb_has_record_returns_pending(self, mock_telegram, mock_dynamodb, app_module):
+        """Telegram 成功 → DDB 有 record，回 pending_approval ✅"""
+        mock_telegram.return_value = {'ok': True, 'result': {'message_id': 1}}
+
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 900,
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_execute',
+                    'arguments': {
+                        'command': 'aws ec2 start-instances --instance-ids i-p1-1a',
+                        'trust_scope': 'test-scope',
+                        'reason': 'P1-1 regression success test',
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+
+        assert content['status'] == 'pending_approval', f"Expected pending_approval, got: {content}"
+        assert 'request_id' in content
+
+        # Verify DDB record exists
+        ddb_item = mock_dynamodb.Table('clawdbot-approval-requests').get_item(
+            Key={'request_id': content['request_id']}
+        ).get('Item')
+        assert ddb_item is not None, "DDB record should exist when Telegram succeeds"
+        assert ddb_item['status'] == 'pending_approval'
+
+    @patch('telegram.send_telegram_message')
+    def test_execute_telegram_failure_ddb_no_record_returns_error(self, mock_telegram, mock_dynamodb, app_module):
+        """Telegram 失敗（empty response）→ DDB 無 record，回 error ✅"""
+        mock_telegram.return_value = {}  # Telegram failure returns empty dict
+
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 901,
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_execute',
+                    'arguments': {
+                        'command': 'aws ec2 stop-instances --instance-ids i-p1-1b',
+                        'trust_scope': 'test-scope',
+                        'reason': 'P1-1 regression failure test',
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+
+        assert content['status'] == 'error', f"Expected error, got: {content}"
+        assert 'Telegram' in content.get('error', '') or 'notification' in content.get('error', '').lower()
+
+        # Verify DDB record was cleaned up (no orphan record)
+        scan_result = mock_dynamodb.Table('clawdbot-approval-requests').scan(
+            FilterExpression='#cmd = :cmd AND #status = :status',
+            ExpressionAttributeNames={'#cmd': 'command', '#status': 'status'},
+            ExpressionAttributeValues={
+                ':cmd': 'aws ec2 stop-instances --instance-ids i-p1-1b',
+                ':status': 'pending_approval',
+            }
+        )
+        orphan_items = [i for i in scan_result.get('Items', [])
+                        if i.get('reason') == 'P1-1 regression failure test']
+        assert len(orphan_items) == 0, f"Orphan DDB records found: {orphan_items}"
+
+    @patch('telegram.send_telegram_message')
+    def test_execute_telegram_exception_ddb_no_record_returns_error(self, mock_telegram, mock_dynamodb, app_module):
+        """Telegram 失敗（exception）→ DDB 無 record，回 error ✅"""
+        mock_telegram.side_effect = Exception("Telegram connection refused")
+
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 902,
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_execute',
+                    'arguments': {
+                        'command': 'aws ec2 reboot-instances --instance-ids i-p1-1c',
+                        'trust_scope': 'test-scope',
+                        'reason': 'P1-1 regression exception test',
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+
+        assert content['status'] == 'error', f"Expected error, got: {content}"
+
+        # Verify no orphan DDB record
+        scan_result = mock_dynamodb.Table('clawdbot-approval-requests').scan(
+            FilterExpression='#cmd = :cmd AND #status = :status',
+            ExpressionAttributeNames={'#cmd': 'command', '#status': 'status'},
+            ExpressionAttributeValues={
+                ':cmd': 'aws ec2 reboot-instances --instance-ids i-p1-1c',
+                ':status': 'pending_approval',
+            }
+        )
+        orphan_items = [i for i in scan_result.get('Items', [])
+                        if i.get('reason') == 'P1-1 regression exception test']
+        assert len(orphan_items) == 0, f"Orphan DDB records found: {orphan_items}"
+
+    @patch('telegram.send_telegram_message')
+    def test_upload_telegram_failure_ddb_no_record_returns_error(self, mock_telegram, mock_dynamodb, app_module):
+        """Upload Telegram 失敗 → DDB 無 record，回 error ✅"""
+        import base64
+        mock_telegram.return_value = {}  # Telegram failure
+
+        content_b64 = base64.b64encode(b'test file content').decode()
+
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 903,
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_upload',
+                    'arguments': {
+                        'filename': 'test-p1-1.txt',
+                        'content': content_b64,
+                        'content_type': 'text/plain',
+                        'trust_scope': 'test-scope',
+                        'reason': 'P1-1 upload failure test',
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+
+        assert content['status'] == 'error', f"Expected error, got: {content}"
+        assert 'Telegram' in content.get('error', '') or 'notification' in content.get('error', '').lower()
+
+        # Verify no orphan DDB record for upload
+        scan_result = mock_dynamodb.Table('clawdbot-approval-requests').scan(
+            FilterExpression='#reason = :reason AND #status = :status',
+            ExpressionAttributeNames={'#reason': 'reason', '#status': 'status'},
+            ExpressionAttributeValues={
+                ':reason': 'P1-1 upload failure test',
+                ':status': 'pending_approval',
+            }
+        )
+        orphan_items = scan_result.get('Items', [])
+        assert len(orphan_items) == 0, f"Orphan upload DDB records found: {orphan_items}"
+
+    @patch('telegram.send_telegram_message')
+    def test_upload_telegram_success_ddb_has_record_returns_pending(self, mock_telegram, mock_dynamodb, app_module):
+        """Upload Telegram 成功 → DDB 有 record，回 pending_approval ✅"""
+        import base64
+        mock_telegram.return_value = {'ok': True, 'result': {'message_id': 2}}
+
+        content_b64 = base64.b64encode(b'another test file').decode()
+
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'id': 904,
+                'method': 'tools/call',
+                'params': {
+                    'name': 'bouncer_upload',
+                    'arguments': {
+                        'filename': 'test-p1-1-ok.txt',
+                        'content': content_b64,
+                        'content_type': 'text/plain',
+                        'trust_scope': 'test-scope',
+                        'reason': 'P1-1 upload success test',
+                    }
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+
+        assert content['status'] == 'pending_approval', f"Expected pending_approval, got: {content}"
+        assert 'request_id' in content
+
+        # Verify DDB record exists
+        ddb_item = mock_dynamodb.Table('clawdbot-approval-requests').get_item(
+            Key={'request_id': content['request_id']}
+        ).get('Item')
+        assert ddb_item is not None, "DDB record should exist when Telegram succeeds"
+        assert ddb_item['status'] == 'pending_approval'

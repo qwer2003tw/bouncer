@@ -22,7 +22,8 @@ from rate_limit import RateLimitExceeded, PendingLimitExceeded, check_rate_limit
 from trust import (
     should_trust_approve_upload, increment_trust_upload_count,
 )
-from telegram import escape_markdown, send_telegram_message
+import telegram as _telegram
+from telegram import escape_markdown
 from db import table
 from notifications import (
     send_trust_upload_notification,
@@ -347,6 +348,7 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
     table.put_item(Item=item)
 
     # 發送 Telegram 審批
+    # 若發送失敗，刪除剛寫入的 DynamoDB record，避免產生孤兒審批請求
     s3_uri = f"s3://{ctx.bucket}/{ctx.key}"
 
     safe_reason = escape_markdown(ctx.reason)
@@ -372,7 +374,25 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
         ]]
     }
 
-    send_telegram_message(message, keyboard)
+    try:
+        tg_result = _telegram.send_telegram_message(message, keyboard)
+        if not (tg_result and tg_result.get('ok')):
+            raise RuntimeError("Telegram notification returned failure (ok=False or empty response)")
+    except Exception as tg_err:
+        # Cleanup DDB to prevent orphan pending record
+        try:
+            table.delete_item(Key={'request_id': ctx.request_id})
+        except Exception as del_err:
+            print(f"[ORPHAN CLEANUP] Failed to delete DDB record {ctx.request_id}: {del_err}")
+        print(f"[ORPHAN CLEANUP] Telegram notification failed for upload {ctx.request_id}: {tg_err}")
+        return mcp_result(ctx.req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'error',
+                'error': 'Telegram notification failed; upload request was not created. Please retry.',
+                'detail': str(tg_err),
+            })}],
+            'isError': True,
+        })
 
     # 一律異步返回：讓 client 用 bouncer_status 輪詢結果。
     # sync long-polling 已移除。
