@@ -72,6 +72,9 @@ from mcp_presigned import (  # noqa: F401
     _generate_presigned_batch_urls,
 )
 
+# --- History query tool ---
+from mcp_history import mcp_tool_history  # noqa: F401
+
 # --- Admin / query tools ---
 from mcp_admin import (  # noqa: F401
     mcp_tool_status,

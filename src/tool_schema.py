@@ -498,6 +498,40 @@ MCP_TOOLS = {
             'required': ['files', 'reason'],
         },
     },
+    # ========== History Tool ==========
+    'bouncer_history': {
+        'description': '查詢 Bouncer 歷史操作記錄（從 requests 表讀取）。支援按 source、action、status 過濾，以及時間範圍限制。',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'limit': {
+                    'type': 'integer',
+                    'description': '返回筆數（預設 20，最大 50）',
+                    'default': 20,
+                    'minimum': 1,
+                    'maximum': 50,
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '過濾來源（例如 "Private Bot"）',
+                },
+                'action': {
+                    'type': 'string',
+                    'description': '過濾操作類型（例如 execute / upload / deploy）',
+                },
+                'status': {
+                    'type': 'string',
+                    'description': '過濾狀態（例如 approved / denied / error / auto_approved）',
+                },
+                'since_hours': {
+                    'type': 'integer',
+                    'description': '查詢最近 N 小時（預設 24）',
+                    'default': 24,
+                    'minimum': 1,
+                },
+            },
+        },
+    },
     'bouncer_upload_batch': {
         'description': '批量上傳多個檔案到 S3，一次審批。如果有活躍的 Trust Session，可自動上傳。',
         'parameters': {
