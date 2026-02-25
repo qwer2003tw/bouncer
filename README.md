@@ -96,8 +96,12 @@ mcporter call bouncer.bouncer_deploy \
 ### 上傳
 | Tool | 說明 | 審批 |
 |------|------|------|
-| `bouncer_upload` | 上傳單一檔案到 S3 | 需審批（信任期間可自動） |
-| `bouncer_upload_batch` | 批量上傳多個檔案 | 需審批（信任期間可自動） |
+| `bouncer_upload` | 上傳單一檔案到 S3（base64，< 500KB） | 需審批（信任期間可自動） |
+| `bouncer_upload_batch` | 批量上傳多個小檔案（base64，< 500KB/檔）⚠️ deprecated | 需審批（信任期間可自動） |
+| `bouncer_request_presigned` | 生成單檔 S3 presigned PUT URL，client 直傳，無大小限制 | **不需審批**（staging bucket）|
+| `bouncer_request_presigned_batch` | 批量生成 N 個 presigned PUT URL，前端部署推薦用法 | **不需審批**（staging bucket）|
+
+> **前端部署推薦流程：** `bouncer_request_presigned_batch` 取得所有 URL → client 並行 PUT → `bouncer_execute s3 cp` 搬到正式 bucket（需審批）
 
 ### 信任時段 (Trust Session)
 | Tool | 說明 | 審批 |
