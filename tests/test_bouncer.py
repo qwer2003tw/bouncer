@@ -702,7 +702,41 @@ class TestCommandClassification:
         assert not app_module.is_auto_approve(
             'aws cloudfront create-invalidation --distribution-id EXXXXXXXXXX --paths "/*"'
         )
-    
+
+    def test_ssm_with_decryption_requires_approval(self, app_module):
+        """P1-5 regression: ssm get-parameter(s) --with-decryption 必須需要人工審批"""
+        # ✅ 無 --with-decryption → 自動批准
+        assert app_module.is_auto_approve('aws ssm get-parameter --name /foo')
+        assert app_module.is_auto_approve('aws ssm get-parameters --names /a /b')
+        # 帶其他旗標但無 --with-decryption 仍可自動批准
+        assert app_module.is_auto_approve(
+            'aws ssm get-parameter --name /prod/app/config --region us-east-1'
+        )
+        assert app_module.is_auto_approve(
+            'aws ssm get-parameters --names /a /b --region us-east-1 --output json'
+        )
+
+        # ❌ 帶 --with-decryption → 需要人工審批（return False）
+        assert not app_module.is_auto_approve(
+            'aws ssm get-parameter --name /foo --with-decryption'
+        )
+        assert not app_module.is_auto_approve(
+            'aws ssm get-parameter --name /prod/db/password --with-decryption'
+        )
+        assert not app_module.is_auto_approve(
+            'aws ssm get-parameters --names /a /b --with-decryption'
+        )
+        assert not app_module.is_auto_approve(
+            'aws ssm get-parameters --names /prod/db/password --with-decryption'
+        )
+        # 旗標在命令中間也要被攔截
+        assert not app_module.is_auto_approve(
+            'aws ssm get-parameter --with-decryption --name /prod/api/key'
+        )
+        # 大小寫正規化：--WITH-DECRYPTION 也應被攔截（命令已轉小寫）
+        assert not app_module.is_auto_approve(
+            'aws ssm get-parameter --name /foo --WITH-DECRYPTION'
+        )
     def test_approval_required(self, app_module):
         """測試需要審批的命令"""
         # 這些不在 blocked 也不在 safelist

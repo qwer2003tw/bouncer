@@ -297,6 +297,8 @@ AUTO_APPROVE_PREFIXES = [
     'aws kms describe-',
 
     # SSM Parameter Store
+    # 注意：aws ssm get-parameter(s) 加上 --with-decryption 旗標時需要人工審批
+    # （可讀取加密的 DB 密碼、API Key 等敏感值），由 commands.py 的 is_auto_approve() 攔截。
     'aws ssm describe-',
     'aws ssm get-parameter',
     'aws ssm get-parameters',
