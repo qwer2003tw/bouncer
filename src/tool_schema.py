@@ -394,6 +394,40 @@ MCP_TOOLS = {
             'required': ['filename', 'content', 'reason', 'source']
         }
     },
+    'bouncer_request_presigned': {
+        'description': '生成 S3 Presigned PUT URL，讓 client 直接上傳大型檔案（不經過 Lambda，解除 500KB 限制）。只適用於 Staging bucket，無需審批。',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'filename': {
+                    'type': 'string',
+                    'description': '目標檔名（含路徑，例如：assets/pdf.worker.min.mjs）',
+                },
+                'content_type': {
+                    'type': 'string',
+                    'description': 'MIME type（例如：application/javascript）',
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': '上傳原因',
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '來源識別（例如：Private Bot (deploy)）',
+                },
+                'account': {
+                    'type': 'string',
+                    'description': '目標帳號 ID（預設 DEFAULT_ACCOUNT_ID）',
+                },
+                'expires_in': {
+                    'type': 'integer',
+                    'description': 'Presigned URL 有效期秒數（預設 900，最大 3600）',
+                    'default': 900,
+                },
+            },
+            'required': ['filename', 'content_type', 'reason', 'source'],
+        },
+    },
     'bouncer_upload_batch': {
         'description': '批量上傳多個檔案到 S3，一次審批。如果有活躍的 Trust Session，可自動上傳。',
         'parameters': {
