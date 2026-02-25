@@ -528,3 +528,92 @@ def test_s3_client_error_returns_detailed_message(mocked_aws):
     body = _body(result)
     assert body["status"] == "error"
     assert "AccessDenied" in body["error"] or "Access Denied" in body["error"]
+
+
+# ---------------------------------------------------------------------------
+# Tests — SEC-004a: content_size validation
+# ---------------------------------------------------------------------------
+
+
+def test_content_size_exceeds_10mb_returns_error(mocked_aws):
+    """content_size > 10MB should be rejected before URL generation."""
+    tbl, mcp_presigned = mocked_aws
+    result = mcp_presigned.mcp_tool_request_presigned(
+        "req-sec004-1", _valid_args(content_size=10 * 1024 * 1024 + 1)
+    )
+    body = _body(result)
+    assert body["status"] == "error"
+    assert "10" in body["error"] or "exceed" in body["error"].lower()
+
+
+def test_content_size_exactly_10mb_is_ok(mocked_aws):
+    """content_size == 10MB (boundary) should be accepted."""
+    tbl, mcp_presigned = mocked_aws
+    mock_s3 = MagicMock()
+    mock_s3.generate_presigned_url.return_value = "https://presigned"
+
+    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+        result = mcp_presigned.mcp_tool_request_presigned(
+            "req-sec004-2", _valid_args(content_size=10 * 1024 * 1024)
+        )
+
+    body = _body(result)
+    assert body["status"] == "ready"
+
+
+def test_content_size_small_is_ok(mocked_aws):
+    """content_size of a small file should be fine."""
+    tbl, mcp_presigned = mocked_aws
+    mock_s3 = MagicMock()
+    mock_s3.generate_presigned_url.return_value = "https://presigned"
+
+    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+        result = mcp_presigned.mcp_tool_request_presigned(
+            "req-sec004-3", _valid_args(content_size=1024)
+        )
+
+    body = _body(result)
+    assert body["status"] == "ready"
+
+
+def test_content_size_omitted_is_ok(mocked_aws):
+    """content_size is optional — omitting it should still work."""
+    tbl, mcp_presigned = mocked_aws
+    mock_s3 = MagicMock()
+    mock_s3.generate_presigned_url.return_value = "https://presigned"
+
+    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+        result = mcp_presigned.mcp_tool_request_presigned(
+            "req-sec004-4", _valid_args()
+        )
+
+    body = _body(result)
+    assert body["status"] == "ready"
+
+
+def test_content_size_non_integer_returns_error(mocked_aws):
+    """content_size='abc' should return a validation error."""
+    tbl, mcp_presigned = mocked_aws
+    result = mcp_presigned.mcp_tool_request_presigned(
+        "req-sec004-5", _valid_args(content_size="not-a-number")
+    )
+    body = _body(result)
+    assert body["status"] == "error"
+    assert "content_size" in body["error"]
+
+
+def test_response_includes_max_size_bytes(mocked_aws):
+    """Happy-path response must include max_size_bytes hint."""
+    tbl, mcp_presigned = mocked_aws
+    mock_s3 = MagicMock()
+    mock_s3.generate_presigned_url.return_value = "https://presigned"
+
+    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+        result = mcp_presigned.mcp_tool_request_presigned(
+            "req-sec004-6", _valid_args()
+        )
+
+    body = _body(result)
+    assert body["status"] == "ready"
+    assert "max_size_bytes" in body
+    assert body["max_size_bytes"] == 10 * 1024 * 1024

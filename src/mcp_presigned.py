@@ -29,6 +29,9 @@ _MIN_EXPIRES_IN = 60
 _DEFAULT_EXPIRES_IN = 900
 _MAX_EXPIRES_IN = 3600
 
+# SEC-004a: Maximum allowed upload size (client-side validation + response hint)
+_MAX_CONTENT_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+
 
 @dataclass
 class PresignedContext:
@@ -112,6 +115,51 @@ def _parse_presigned_request(
     reason = str(arguments.get("reason", "")).strip()
     source = str(arguments.get("source", "")).strip()
     account_id = str(arguments.get("account", DEFAULT_ACCOUNT_ID or "")).strip()
+
+    # SEC-004a: optional content_size pre-validation — reject before URL generation
+    content_size = arguments.get("content_size")
+    if content_size is not None:
+        try:
+            content_size = int(content_size)
+        except (TypeError, ValueError):
+            return mcp_result(
+                req_id,
+                {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(
+                                {
+                                    "status": "error",
+                                    "error": "content_size must be an integer",
+                                }
+                            ),
+                        }
+                    ],
+                    "isError": True,
+                },
+            )
+        if content_size > _MAX_CONTENT_SIZE_BYTES:
+            return mcp_result(
+                req_id,
+                {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(
+                                {
+                                    "status": "error",
+                                    "error": (
+                                        f"content_size {content_size} exceeds maximum allowed "
+                                        f"size of {_MAX_CONTENT_SIZE_BYTES} bytes (10 MB)"
+                                    ),
+                                }
+                            ),
+                        }
+                    ],
+                    "isError": True,
+                },
+            )
 
     try:
         expires_in = int(arguments.get("expires_in", _DEFAULT_EXPIRES_IN))
@@ -293,6 +341,10 @@ def _generate_presigned_url(ctx: PresignedContext) -> dict:
         "expires_at": expires_at_iso,
         "method": "PUT",
         "headers": {"Content-Type": ctx.content_type},
+        # SEC-004a: max_size_bytes is a client hint — the PUT request must not exceed this size.
+        # S3 presigned PUT URLs do not enforce ContentLengthRange server-side; the client is
+        # responsible for validating before uploading.  Use content_size parameter to pre-validate.
+        "max_size_bytes": _MAX_CONTENT_SIZE_BYTES,
     }
     return mcp_result(
         ctx.req_id,
@@ -435,6 +487,19 @@ def _parse_presigned_batch_request(
         if not ct:
             return _error(f"files[{i}].content_type is required")
 
+        # SEC-004a: per-file content_size pre-validation
+        file_size = entry.get("content_size")
+        if file_size is not None:
+            try:
+                file_size = int(file_size)
+            except (TypeError, ValueError):
+                return _error(f"files[{i}].content_size must be an integer")
+            if file_size > _MAX_CONTENT_SIZE_BYTES:
+                return _error(
+                    f"files[{i}].content_size {file_size} exceeds maximum allowed "
+                    f"size of {_MAX_CONTENT_SIZE_BYTES} bytes (10 MB)"
+                )
+
         validated_files.append({"filename": fn, "content_type": ct})
 
     return PresignedBatchContext(
@@ -552,6 +617,8 @@ def _generate_presigned_batch_urls(ctx: PresignedBatchContext) -> dict:
         "files": file_results,
         "expires_at": expires_at_iso,
         "bucket": ctx.bucket,
+        # SEC-004a: per-file size limit hint (client-side enforcement)
+        "max_size_bytes_per_file": _MAX_CONTENT_SIZE_BYTES,
     }
     return mcp_result(
         ctx.req_id,

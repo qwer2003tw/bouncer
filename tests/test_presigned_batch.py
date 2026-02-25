@@ -748,3 +748,57 @@ def test_s3_failure_on_second_file(mocked_aws):
         result = mp.mcp_tool_request_presigned_batch("req-b36", _valid_batch_args(files=files))
     body = _body(result)
     assert body["status"] == "error"
+
+
+# ===========================================================================
+# SEC-004a: content_size validation (batch)
+# ===========================================================================
+
+
+def test_batch_file_content_size_exceeds_10mb_returns_error(mocked_aws):
+    """A file with content_size > 10MB should be rejected before URL generation."""
+    tbl, mp = mocked_aws
+    files = [
+        {"filename": "small.js", "content_type": "application/javascript"},
+        {"filename": "huge.bin", "content_type": "application/octet-stream", "content_size": 10 * 1024 * 1024 + 1},
+    ]
+    result = mp.mcp_tool_request_presigned_batch("req-b-sec004-1", _valid_batch_args(files=files))
+    body = _body(result)
+    assert body["status"] == "error"
+    assert "10" in body["error"] or "exceed" in body["error"].lower()
+
+
+def test_batch_file_content_size_exactly_10mb_is_ok(mocked_aws):
+    """content_size == 10MB (boundary) should be accepted."""
+    tbl, mp = mocked_aws
+    files = [
+        {"filename": "exact.bin", "content_type": "application/octet-stream", "content_size": 10 * 1024 * 1024},
+    ]
+    with patch("mcp_presigned.boto3.client", return_value=_mock_s3(1)):
+        result = mp.mcp_tool_request_presigned_batch("req-b-sec004-2", _valid_batch_args(files=files))
+    body = _body(result)
+    assert body["status"] == "ready"
+
+
+def test_batch_file_content_size_non_integer_returns_error(mocked_aws):
+    """content_size='abc' in a batch file entry should return error."""
+    tbl, mp = mocked_aws
+    files = [
+        {"filename": "test.js", "content_type": "application/javascript", "content_size": "not-a-number"},
+    ]
+    result = mp.mcp_tool_request_presigned_batch("req-b-sec004-3", _valid_batch_args(files=files))
+    body = _body(result)
+    assert body["status"] == "error"
+    assert "content_size" in body["error"]
+
+
+def test_batch_response_includes_max_size_bytes_per_file(mocked_aws):
+    """Happy-path batch response must include max_size_bytes_per_file hint."""
+    tbl, mp = mocked_aws
+    files = _make_files(2)
+    with patch("mcp_presigned.boto3.client", return_value=_mock_s3(2)):
+        result = mp.mcp_tool_request_presigned_batch("req-b-sec004-4", _valid_batch_args(files=files))
+    body = _body(result)
+    assert body["status"] == "ready"
+    assert "max_size_bytes_per_file" in body
+    assert body["max_size_bytes_per_file"] == 10 * 1024 * 1024
