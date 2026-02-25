@@ -310,6 +310,33 @@ def handle_clawdbot_request(event: dict) -> dict:
     if not command:
         return response(400, {'error': 'Missing command'})
 
+    # SEC-011: Compliance check for REST endpoint
+    try:
+        from compliance_checker import check_compliance
+        is_compliant, violation = check_compliance(command)
+        if not is_compliant:
+            emit_metric('Bouncer', 'BlockedCommand', 1, dimensions={'Reason': 'compliance'})
+            log_decision(
+                table=table,
+                request_id=generate_request_id(command),
+                command=command,
+                reason=reason,
+                source=source,
+                account_id=None,
+                decision_type='compliance_violation',
+            )
+            return response(400, {
+                'error': 'Compliance violation',
+                'violations': [{
+                    'rule_id': violation.rule_id,
+                    'rule_name': violation.rule_name,
+                    'description': violation.description,
+                    'remediation': violation.remediation,
+                }]
+            })
+    except ImportError:
+        pass  # compliance_checker 不存在時跳過
+
     # Layer 1: BLOCKED
     block_reason = get_block_reason(command)
     if block_reason:

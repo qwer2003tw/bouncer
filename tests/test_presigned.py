@@ -80,7 +80,19 @@ def mocked_aws(aws_env):
             TableName="clawdbot-approval-requests",
             KeySchema=[{"AttributeName": "request_id", "KeyType": "HASH"}],
             AttributeDefinitions=[
-                {"AttributeName": "request_id", "AttributeType": "S"}
+                {"AttributeName": "request_id", "AttributeType": "S"},
+                {"AttributeName": "source", "AttributeType": "S"},
+                {"AttributeName": "created_at", "AttributeType": "N"},
+            ],
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": "source-created-index",
+                    "KeySchema": [
+                        {"AttributeName": "source", "KeyType": "HASH"},
+                        {"AttributeName": "created_at", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                }
             ],
             BillingMode="PAY_PER_REQUEST",
         )

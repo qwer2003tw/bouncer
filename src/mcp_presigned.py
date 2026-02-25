@@ -387,7 +387,7 @@ def _parse_presigned_batch_request(
 
     # --- required string fields ---
     reason = str(arguments.get("reason", "")).strip()
-    source = str(arguments.get("source", "")).strip()
+    source = str(arguments.get("source", "")).strip() or "__anonymous__"
     account_id = str(
         arguments.get("account", DEFAULT_ACCOUNT_ID or "")
     ).strip() or (DEFAULT_ACCOUNT_ID or "")

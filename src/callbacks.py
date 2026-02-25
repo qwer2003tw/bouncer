@@ -832,6 +832,28 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
         item_source = item.get('source', source)
         item_assume_role = item.get('assume_role', assume_role)
 
+        # SEC-013: 重跑 compliance check，不合規的 pending 命令拒絕執行
+        try:
+            from compliance_checker import check_compliance
+            is_compliant, violation = check_compliance(cmd)
+            if not is_compliant:
+                print(f"[TRUST][SEC-013] Pending request {req_id} failed compliance: {violation.rule_id if violation else 'unknown'}")
+                # 更新狀態為 compliance_rejected
+                now_rej = int(time.time())
+                table.update_item(
+                    Key={'request_id': req_id},
+                    UpdateExpression='SET #s = :s, compliance_rejected_at = :t, compliance_rule = :rule',
+                    ExpressionAttributeNames={'#s': 'status'},
+                    ExpressionAttributeValues={
+                        ':s': 'compliance_rejected',
+                        ':t': now_rej,
+                        ':rule': violation.rule_id if violation else 'unknown',
+                    },
+                )
+                continue
+        except ImportError:
+            pass  # compliance_checker 不存在時跳過
+
         # 執行命令
         result = execute_command(cmd, item_assume_role)
         cmd_status = 'error' if result.startswith('❌') else 'success'
