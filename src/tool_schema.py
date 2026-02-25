@@ -432,6 +432,58 @@ MCP_TOOLS = {
             'required': ['filename', 'content_type', 'reason', 'source'],
         },
     },
+    # ========== Presigned Batch Upload Tool ==========
+    'bouncer_request_presigned_batch': {
+        'description': (
+            '一次呼叫，為多個檔案（最多 50 個）生成 presigned S3 PUT URL。'
+            '所有檔案共用同一個 batch_id prefix，方便後續 s3 cp 搬移。'
+            '不需要審批，直接上傳到 staging bucket。'
+        ),
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'files': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'filename': {
+                                'type': 'string',
+                                'description': '目標檔名（含相對路徑，例如 assets/foo.js）',
+                            },
+                            'content_type': {
+                                'type': 'string',
+                                'description': 'MIME type（例如 application/javascript）',
+                            },
+                        },
+                        'required': ['filename', 'content_type'],
+                    },
+                    'description': '要上傳的檔案列表，最多 50 個',
+                    'maxItems': 50,
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': '上傳原因',
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '請求來源標識（例如 Private Bot (deploy)）',
+                },
+                'account': {
+                    'type': 'string',
+                    'description': '目標帳號 ID（預設 DEFAULT_ACCOUNT_ID）',
+                },
+                'expires_in': {
+                    'type': 'integer',
+                    'description': 'presigned URL 有效期秒數（預設 900，min 60，max 3600）',
+                    'default': 900,
+                    'minimum': 60,
+                    'maximum': 3600,
+                },
+            },
+            'required': ['files', 'reason'],
+        },
+    },
     'bouncer_upload_batch': {
         'description': '批量上傳多個檔案到 S3，一次審批。如果有活躍的 Trust Session，可自動上傳。',
         'parameters': {

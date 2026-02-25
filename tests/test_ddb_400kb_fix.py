@@ -68,6 +68,8 @@ def mock_aws_resources(aws_credentials):
         # Create the staging/upload S3 bucket
         s3 = boto3.client('s3', region_name='us-east-1')
         s3.create_bucket(Bucket='bouncer-uploads-111111111111')
+        # Also create the default account staging bucket (used by execute_upload after PR #3 hotfix)
+        s3.create_bucket(Bucket='bouncer-uploads-190825685292')
 
         yield {'dynamodb': dynamodb, 'table': table, 's3': s3}
 
@@ -319,18 +321,19 @@ class TestBatchUploadDDBFix:
 class TestApproveCallbackS3Copy:
     """execute_upload should use s3.copy_object, not put_object."""
 
-    def test_single_approve_uses_copy_object(self, mock_aws_resources):
+    def test_single_approve_uses_copy_object(self, mock_aws_resources, monkeypatch):
         """approve 時從 S3 讀取並 copy 到目標 bucket"""
+        monkeypatch.setenv('DEFAULT_ACCOUNT_ID', '190825685292')
         s3 = mock_aws_resources['s3']
         table = mock_aws_resources['table']
 
         # Create target bucket
         s3.create_bucket(Bucket='target-bucket')
 
-        # Stage the file in pending/
+        # Stage the file in pending/ — use DEFAULT_ACCOUNT_ID bucket (fixed in PR #3)
         content = b'staged content'
         s3.put_object(
-            Bucket='bouncer-uploads-111111111111',
+            Bucket='bouncer-uploads-190825685292',
             Key='pending/req-approve-1/hello.txt',
             Body=content,
             ContentType='text/plain',
@@ -360,6 +363,8 @@ class TestApproveCallbackS3Copy:
         db.table = table
         import mcp_upload
         mcp_upload.table = table
+        # Patch DEFAULT_ACCOUNT_ID directly in the reloaded module
+        monkeypatch.setattr(mcp_upload, 'DEFAULT_ACCOUNT_ID', '190825685292')
 
         result = mcp_upload.execute_upload('req-approve-1', 'approver-123')
 
@@ -369,10 +374,10 @@ class TestApproveCallbackS3Copy:
         target_obj = s3.get_object(Bucket='target-bucket', Key='2026-02-25/req-approve-1/hello.txt')
         assert target_obj['Body'].read() == content
 
-        # Verify staging object is deleted
+        # Verify staging object is deleted from DEFAULT_ACCOUNT_ID bucket
         import botocore.exceptions
         with pytest.raises(Exception):
-            s3.head_object(Bucket='bouncer-uploads-111111111111', Key='pending/req-approve-1/hello.txt')
+            s3.head_object(Bucket='bouncer-uploads-190825685292', Key='pending/req-approve-1/hello.txt')
 
         # DDB status updated
         item = table.get_item(Key={'request_id': 'req-approve-1'})['Item']
