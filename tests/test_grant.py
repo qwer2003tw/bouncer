@@ -542,6 +542,66 @@ class TestIsCommandInGrant:
         assert grant_module.is_command_in_grant('AWS S3 LS', grant) is False
         assert grant_module.is_command_in_grant('aws s3 ls', grant) is True
 
+    # ------------------------------------------------------------------
+    # Pattern matching tests (UX-003)
+    # ------------------------------------------------------------------
+
+    def test_single_star_matches_uuid(self, grant_module):
+        """* wildcard 匹配不含空格的任意字串（如 UUID、帳號 ID）"""
+        grant = {'granted_commands': ['aws s3 cp s3://bouncer-uploads-*/2026-02-25/*/index.html s3://target/index.html']}
+        cmd = 'aws s3 cp s3://bouncer-uploads-190825685292/2026-02-25/abc123def456/index.html s3://target/index.html'
+        assert grant_module.is_command_in_grant(cmd, grant) is True
+
+    def test_single_star_does_not_cross_spaces(self, grant_module):
+        """* 不應匹配含空格的字串"""
+        grant = {'granted_commands': ['aws s3 cp *']}
+        # 'aws s3 cp ' 後面有空格，* 不能同時匹配 src 和 dst
+        cmd = 'aws s3 cp s3://bucket/file s3://dest/file'
+        assert grant_module.is_command_in_grant(cmd, grant) is False
+
+    def test_double_star_matches_with_spaces(self, grant_module):
+        """** 匹配含空格的任意字串"""
+        grant = {'granted_commands': ['aws s3 cp **']}
+        cmd = 'aws s3 cp s3://bucket/file s3://dest/file'
+        assert grant_module.is_command_in_grant(cmd, grant) is True
+
+    def test_exact_match_still_works_with_no_star(self, grant_module):
+        """精確匹配不受 pattern 邏輯影響（向下相容）"""
+        grant = {'granted_commands': ['aws ec2 describe-instances --region us-east-1']}
+        assert grant_module.is_command_in_grant('aws ec2 describe-instances --region us-east-1', grant) is True
+        assert grant_module.is_command_in_grant('aws ec2 describe-instances --region us-west-2', grant) is False
+
+    def test_pattern_no_match_fallthrough(self, grant_module):
+        """Pattern 不匹配時應回傳 False（fallthrough）"""
+        grant = {'granted_commands': ['aws s3 cp s3://specific-bucket/*/file.html s3://dest/file.html']}
+        # 路徑結構不匹配
+        cmd = 'aws ec2 describe-instances --instance-ids i-12345'
+        assert grant_module.is_command_in_grant(cmd, grant) is False
+
+    def test_s3_cp_frontend_deploy_scenario(self, grant_module):
+        """真實場景：前端部署 — Grant 申請含 bucket ID 萬用字元，實際執行帶具體帳號 ID"""
+        # Grant 申請時使用萬用字元
+        grant = {'granted_commands': [
+            'aws s3 cp s3://bouncer-uploads-*/2026-02-25/*/index.html s3://ztp-files-dev-frontendbucket-nvvimv31xp3v/index.html --content-type text/html --cache-control no-cache,no-store,must-revalidate --region us-east-1',
+            'aws s3 cp s3://bouncer-uploads-*/2026-02-25/*/assets/*.js s3://ztp-files-dev-frontendbucket-nvvimv31xp3v/assets/*.js --content-type application/javascript --cache-control max-age=31536000,immutable --region us-east-1',
+        ]}
+        # 實際執行命令（帶真實帳號 ID 和 UUID）
+        cmd_index = 'aws s3 cp s3://bouncer-uploads-190825685292/2026-02-25/abc123/index.html s3://ztp-files-dev-frontendbucket-nvvimv31xp3v/index.html --content-type text/html --cache-control no-cache,no-store,must-revalidate --region us-east-1'
+        cmd_js = 'aws s3 cp s3://bouncer-uploads-190825685292/2026-02-25/abc123/assets/main.abc123.js s3://ztp-files-dev-frontendbucket-nvvimv31xp3v/assets/main.abc123.js --content-type application/javascript --cache-control max-age=31536000,immutable --region us-east-1'
+
+        assert grant_module.is_command_in_grant(cmd_index, grant) is True
+        assert grant_module.is_command_in_grant(cmd_js, grant) is True
+
+    def test_multiple_patterns_first_match_wins(self, grant_module):
+        """多個 pattern 時，任一匹配即返回 True"""
+        grant = {'granted_commands': [
+            'aws s3 ls',                          # exact
+            'aws ec2 describe-instances **',      # ** pattern (含空格)
+        ]}
+        assert grant_module.is_command_in_grant('aws s3 ls', grant) is True
+        assert grant_module.is_command_in_grant('aws ec2 describe-instances --region us-east-1', grant) is True
+        assert grant_module.is_command_in_grant('aws iam list-users', grant) is False
+
 
 # ============================================================================
 # try_use_grant_command Tests

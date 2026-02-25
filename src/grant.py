@@ -374,7 +374,16 @@ def revoke_grant(grant_id: str) -> bool:
 def is_command_in_grant(normalized_cmd: str, grant: Dict) -> bool:
     """檢查正規化命令是否在 Grant 授權清單中
 
-    使用 exact match（正規化後比較）。
+    先嘗試精確匹配（向下相容），若 pattern 含 * 則嘗試 glob 匹配：
+    - `*`  → 匹配任意非空白字元（不含空格）
+    - `**` → 匹配任意字元（含空格）
+
+    Matching 流程：
+    1. 精確比對 pattern == normalized_cmd
+    2. 若 pattern 含 `*`，使用正規表示式：
+       先將 `**` 替換為 `.*`（貪婪，含空格），
+       再將剩餘的單個 `*` 替換為 `[^\\s]+?`（不含空格），
+       整體加上 `^...$` 做完整比對。
 
     Args:
         normalized_cmd: 已正規化的命令
@@ -383,9 +392,39 @@ def is_command_in_grant(normalized_cmd: str, grant: Dict) -> bool:
     Returns:
         命令是否在授權清單
     """
+    import re
+
     try:
         granted_commands = grant.get('granted_commands', [])
-        return normalized_cmd in granted_commands
+        for pattern in granted_commands:
+            # 1. 精確匹配（向下相容）
+            if pattern == normalized_cmd:
+                return True
+            # 2. Pattern matching（含 * 時才嘗試）
+            if '*' in pattern:
+                # 將 glob pattern 轉換為 regex
+                # 先處理 ** (含空格)，再處理單個 * (不含空格)
+                # 步驟：
+                #   a. 把 ** 替換為唯一 placeholder
+                #   b. 對其餘部分做 re.escape
+                #   c. 把 \* (escaped single *) 替換為 [^\s]* (不含空格)
+                #   d. 把 placeholder 替換回 .* (含空格)
+                _DOUBLE = '\x00'
+                # a. 替換 ** → placeholder
+                pat = pattern.replace('**', _DOUBLE)
+                # b. 分割 placeholder 與其他部分，分別 escape
+                segments = pat.split('\x00')
+                re_segments = []
+                for seg in segments:
+                    # 在每個 segment 內，處理單個 *
+                    sub_parts = seg.split('*')
+                    re_segments.append(r'[^\s]*'.join(re.escape(p) for p in sub_parts))
+                # c. segments 之間是 **（用 .* 連接）
+                re_pattern = '.*'.join(re_segments)
+                re_pattern = '^' + re_pattern + '$'
+                if re.match(re_pattern, normalized_cmd):
+                    return True
+        return False
     except Exception as e:
         print(f"[GRANT] is_command_in_grant error: {e}")
         return False
