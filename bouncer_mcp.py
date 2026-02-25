@@ -378,6 +378,48 @@ TOOLS = [
         }
     },
     {
+        'name': 'bouncer_request_presigned',
+        'description': '生成單檔 S3 presigned PUT URL，client 直接 PUT 大檔案，不經 Lambda，無大小限制，不需審批。',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'filename': {'type': 'string', 'description': '目標檔名（含路徑，如 assets/foo.js）'},
+                'content_type': {'type': 'string', 'description': 'MIME type'},
+                'reason': {'type': 'string', 'description': '上傳原因'},
+                'source': {'type': 'string', 'description': '請求來源標識'},
+                'account': {'type': 'string', 'description': '目標帳號（選填）'},
+                'expires_in': {'type': 'integer', 'description': 'URL 有效期秒數（預設 900，min 60，max 3600）'}
+            },
+            'required': ['filename', 'content_type', 'reason', 'source']
+        }
+    },
+    {
+        'name': 'bouncer_request_presigned_batch',
+        'description': '批量生成 N 個 presigned PUT URL，前端部署推薦用法。一次呼叫，所有檔案共用 batch_id prefix，不需審批。',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'files': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'filename': {'type': 'string'},
+                            'content_type': {'type': 'string'}
+                        },
+                        'required': ['filename', 'content_type']
+                    },
+                    'description': '檔案清單（最多 50 個）'
+                },
+                'reason': {'type': 'string', 'description': '上傳原因'},
+                'source': {'type': 'string', 'description': '請求來源標識'},
+                'account': {'type': 'string', 'description': '目標帳號（選填）'},
+                'expires_in': {'type': 'integer', 'description': 'URL 有效期秒數（預設 900）'}
+            },
+            'required': ['files', 'reason', 'source']
+        }
+    },
+    {
         'name': 'bouncer_request_grant',
         'description': '申請批次權限授予。Agent 預先列出需要的命令，Steven 一鍵審批後，Agent 可在 TTL 內自動執行。',
         'inputSchema': {
@@ -914,6 +956,44 @@ def tool_upload_batch(arguments: dict) -> dict:
     return parse_mcp_result(result) or result
 
 
+def tool_request_presigned(arguments: dict) -> dict:
+    """生成單檔 S3 presigned PUT URL（不過 Lambda，無大小限制）"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'request_presigned',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_request_presigned',
+            'arguments': arguments
+        }
+    }
+
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
+def tool_request_presigned_batch(arguments: dict) -> dict:
+    """批量生成 S3 presigned PUT URL，前端部署推薦用法"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'request_presigned_batch',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_request_presigned_batch',
+            'arguments': arguments
+        }
+    }
+
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
 def tool_request_grant(arguments: dict) -> dict:
     """申請批次權限授予"""
     if not SECRET:
@@ -1054,6 +1134,10 @@ def handle_request(request: dict) -> dict:
             result = tool_upload(arguments)
         elif tool_name == 'bouncer_upload_batch':
             result = tool_upload_batch(arguments)
+        elif tool_name == 'bouncer_request_presigned':
+            result = tool_request_presigned(arguments)
+        elif tool_name == 'bouncer_request_presigned_batch':
+            result = tool_request_presigned_batch(arguments)
         # Grant session tools
         elif tool_name == 'bouncer_request_grant':
             result = tool_request_grant(arguments)
