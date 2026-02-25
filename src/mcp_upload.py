@@ -768,7 +768,9 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
 
     # Upload each file to S3 staging BEFORE writing to DDB.
     # This avoids storing base64 content in DynamoDB items (400KB limit).
-    # Staging bucket 固定用主帳號 bucket（Lambda IAM policy 只允許此 bucket）
+    # Staging bucket 固定用主帳號（DEFAULT_ACCOUNT_ID）
+    # Lambda IAM policy 只允許存取此 bucket
+    # target_account_id 是執行命令的帳號，與 staging 無關
     staging_bucket = f"bouncer-uploads-{DEFAULT_ACCOUNT_ID}"
     s3_staging = boto3.client('s3')
     files_manifest = []

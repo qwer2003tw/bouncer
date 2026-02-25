@@ -478,42 +478,9 @@ def handle_telegram_webhook(event: dict) -> dict:
     emit_metric('Bouncer', 'ApprovalAction', 1, dimensions={'Action': action, 'Account': account_id})
 
     if item['status'] not in ['pending_approval', 'pending']:
+        # 已處理 fallback：只彈 toast，不覆蓋原本的完整訊息
+        # update_message() 已移除，避免覆蓋原訊息內容
         answer_callback(callback['id'], '⚠️ 此請求已處理過')
-        # 更新訊息移除按鈕
-        if message_id:
-            status = item.get('status', 'unknown')
-            status_emoji = '✅' if status == 'approved' else '❌' if status == 'denied' else '⏰'
-            source = item.get('source', '')
-            reason = item.get('reason', '')
-            context = item.get('context', '')
-            source_line = f"🤖 *來源：* {escape_markdown(source)}\n" if source else ""
-            context_line = f"📝 *任務：* {escape_markdown(context)}\n" if context else ""
-            # 優先使用 display_summary，fallback 到舊邏輯
-            display_summary = item.get('display_summary', '')
-            if display_summary:
-                cmd_display = escape_markdown(display_summary)
-            else:
-                # Legacy fallback: 不同 action 類型顯示不同摘要
-                command = item.get('command', '')[:200]
-                action_type = item.get('action', '')
-                if command:
-                    cmd_display = escape_markdown(command)
-                elif action_type == 'upload_batch':
-                    file_count = item.get('file_count', '?')
-                    cmd_display = f"upload\\_batch ({file_count} 個檔案)"
-                elif action_type in ('upload', 'add_account', 'remove_account', 'deploy'):
-                    cmd_display = escape_markdown(action_type)
-                else:
-                    cmd_display = '(無)'
-            update_message(
-                message_id,
-                f"{status_emoji} *已處理* (狀態: {status})\n\n"
-                f"{source_line}"
-                f"{context_line}"
-                f"📋 *命令：*\n`{cmd_display}`\n\n"
-                f"💬 *原因：* {escape_markdown(reason)}",
-                remove_buttons=True
-            )
         return response(200, {'ok': True})
 
     # 檢查是否過期
