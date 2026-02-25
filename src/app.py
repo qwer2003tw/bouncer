@@ -33,7 +33,7 @@ from accounts import (  # noqa: F401
 )
 from rate_limit import check_rate_limit, RateLimitExceeded, PendingLimitExceeded  # noqa: F401
 from paging import store_paged_output, get_paged_output  # noqa: F401
-from utils import response, generate_request_id, decimal_to_native, mcp_result, mcp_error, get_header, log_decision
+from utils import response, generate_request_id, decimal_to_native, mcp_result, mcp_error, get_header, log_decision, generate_display_summary
 # MCP tool handlers — split into sub-modules
 from mcp_execute import (
     mcp_tool_execute, mcp_tool_request_grant, mcp_tool_grant_status, mcp_tool_revoke_grant,
@@ -363,6 +363,7 @@ def handle_clawdbot_request(event: dict) -> dict:
         'ttl': ttl,
         'mode': 'rest',
         'decision_type': 'pending',
+        'display_summary': generate_display_summary('execute', command=command),
     }
     table.put_item(Item=item)
 
@@ -480,22 +481,27 @@ def handle_telegram_webhook(event: dict) -> dict:
             status = item.get('status', 'unknown')
             status_emoji = '✅' if status == 'approved' else '❌' if status == 'denied' else '⏰'
             source = item.get('source', '')
-            command = item.get('command', '')[:200]
-            action_type = item.get('action', '')
             reason = item.get('reason', '')
             context = item.get('context', '')
             source_line = f"🤖 *來源：* {escape_markdown(source)}\n" if source else ""
             context_line = f"📝 *任務：* {escape_markdown(context)}\n" if context else ""
-            # 不同 action 類型顯示不同摘要
-            if command:
-                cmd_display = escape_markdown(command)
-            elif action_type == 'upload_batch':
-                file_count = item.get('file_count', '?')
-                cmd_display = f"upload_batch ({file_count} 個檔案)"
-            elif action_type in ('upload', 'add_account', 'remove_account', 'deploy'):
-                cmd_display = action_type
+            # 優先使用 display_summary，fallback 到舊邏輯
+            display_summary = item.get('display_summary', '')
+            if display_summary:
+                cmd_display = escape_markdown(display_summary)
             else:
-                cmd_display = '(無)'
+                # Legacy fallback: 不同 action 類型顯示不同摘要
+                command = item.get('command', '')[:200]
+                action_type = item.get('action', '')
+                if command:
+                    cmd_display = escape_markdown(command)
+                elif action_type == 'upload_batch':
+                    file_count = item.get('file_count', '?')
+                    cmd_display = f"upload\\_batch ({file_count} 個檔案)"
+                elif action_type in ('upload', 'add_account', 'remove_account', 'deploy'):
+                    cmd_display = escape_markdown(action_type)
+                else:
+                    cmd_display = '(無)'
             update_message(
                 message_id,
                 f"{status_emoji} *已處理* (狀態: {status})\n\n"
