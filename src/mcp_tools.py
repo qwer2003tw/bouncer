@@ -86,6 +86,12 @@ from mcp_admin import (  # noqa: F401
     mcp_tool_list_safelist,
 )
 
+# --- History / stats tools ---
+from mcp_history import (  # noqa: F401
+    mcp_tool_history,
+    mcp_tool_stats,
+)
+
 # ---------------------------------------------------------------------------
 # Re-export names that tests patch via 'mcp_tools.<name>'.
 # These were previously imported at module-level in the old monolith.

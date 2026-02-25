@@ -498,6 +498,54 @@ MCP_TOOLS = {
             'required': ['files', 'reason'],
         },
     },
+    # ========== History / Stats Tools ==========
+    'bouncer_history': {
+        'description': '查詢 Bouncer 請求歷史記錄，支援 source/action/status/account_id 過濾及分頁。action=execute 時同時查詢 command-history table（如存在）。',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'limit': {
+                    'type': 'integer',
+                    'description': '每頁筆數（預設 20，最大 50）',
+                    'default': 20,
+                    'minimum': 1,
+                    'maximum': 50,
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '過濾來源識別符（例如：Private Bot (Bouncer)）',
+                },
+                'action': {
+                    'type': 'string',
+                    'description': '過濾動作類型：execute / upload / upload_batch / deploy / presigned_upload 等',
+                },
+                'status': {
+                    'type': 'string',
+                    'description': '過濾狀態：approved / denied / error / pending_approval 等',
+                },
+                'account_id': {
+                    'type': 'string',
+                    'description': '過濾目標 AWS 帳號 ID',
+                },
+                'since_hours': {
+                    'type': 'integer',
+                    'description': '查詢最近幾小時的記錄（預設 24）',
+                    'default': 24,
+                },
+                'page_token': {
+                    'type': 'string',
+                    'description': '分頁 token（從上一次回應的 next_page_token 取得）',
+                },
+            },
+        },
+    },
+    'bouncer_stats': {
+        'description': '查詢最近 24 小時的 Bouncer 請求統計：各狀態數量（approved/denied/pending）及各 source 的請求數。',
+        'parameters': {
+            'type': 'object',
+            'properties': {},
+        },
+    },
     'bouncer_upload_batch': {
         'description': '批量上傳多個檔案到 S3，一次審批。如果有活躍的 Trust Session，可自動上傳。',
         'parameters': {
