@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 
-from utils import mcp_result, generate_request_id
+from utils import mcp_result, generate_request_id, generate_display_summary
 from accounts import (
     init_default_account, get_account, list_accounts,
     validate_account_id,
@@ -339,7 +339,8 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
         'status': 'pending_approval',
         'created_at': int(time.time()),
         'ttl': ttl,
-        'mode': 'mcp'
+        'mode': 'mcp',
+        'display_summary': generate_display_summary('upload', filename=ctx.filename, content_size=ctx.content_size),
     }
     if ctx.assume_role:
         item['assume_role'] = ctx.assume_role
@@ -731,6 +732,7 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
         'created_at': int(time.time()),
         'ttl': ttl,
         'mode': 'mcp',
+        'display_summary': generate_display_summary('upload_batch', file_count=len(processed_files), total_size=total_size),
     }
     if assume_role:
         item['assume_role'] = assume_role

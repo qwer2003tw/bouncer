@@ -10,7 +10,7 @@ import json
 import time
 
 
-from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native
+from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native, generate_display_summary
 from accounts import (
     init_default_account, get_account, list_accounts,
     validate_account_id, validate_role_arn,
@@ -217,7 +217,8 @@ def mcp_tool_add_account(req_id: str, arguments: dict) -> dict:
         'status': 'pending_approval',
         'created_at': int(time.time()),
         'ttl': ttl,
-        'mode': 'mcp'
+        'mode': 'mcp',
+        'display_summary': generate_display_summary('add_account', account_name=name, account_id=account_id),
     }
     table.put_item(Item=item)
 
@@ -379,7 +380,8 @@ def mcp_tool_remove_account(req_id: str, arguments: dict) -> dict:
         'status': 'pending_approval',
         'created_at': int(time.time()),
         'ttl': ttl,
-        'mode': 'mcp'
+        'mode': 'mcp',
+        'display_summary': generate_display_summary('remove_account', account_name=account.get('name', account_id), account_id=account_id),
     }
     table.put_item(Item=item)
 

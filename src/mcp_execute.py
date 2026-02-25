@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 
-from utils import mcp_result, mcp_error, generate_request_id, log_decision
+from utils import mcp_result, mcp_error, generate_request_id, log_decision, generate_display_summary
 from commands import get_block_reason, is_auto_approve, execute_command
 from accounts import (
     init_default_account, get_account, list_accounts,
@@ -653,7 +653,8 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
         'status': 'pending_approval',
         'created_at': int(time.time()),
         'ttl': ttl,
-        'mode': 'mcp'
+        'mode': 'mcp',
+        'display_summary': generate_display_summary('execute', command=ctx.command),
     }
     if ctx.smart_decision:
         from decimal import Decimal as _Dec

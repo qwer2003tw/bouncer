@@ -9,7 +9,7 @@ import uuid
 import boto3
 from botocore.exceptions import ClientError
 from metrics import emit_metric
-from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native
+from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native, generate_display_summary
 
 # 環境變數
 PROJECTS_TABLE = os.environ.get('PROJECTS_TABLE', 'bouncer-projects')
@@ -416,7 +416,8 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
         'status': 'pending_approval',
         'created_at': int(time.time()),
         'ttl': ttl,
-        'mode': 'mcp'
+        'mode': 'mcp',
+        'display_summary': generate_display_summary('deploy', project_id=project_id),
     }
     table.put_item(Item=item)
 

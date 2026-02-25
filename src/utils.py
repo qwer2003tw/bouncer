@@ -112,6 +112,68 @@ def build_info_lines(
     return "\n".join(lines) + "\n" if lines else ""
 
 
+def generate_display_summary(action: str, **kwargs) -> str:
+    """Generate a human-readable display_summary for a DynamoDB approval request item.
+
+    Args:
+        action: Request type ('execute', 'upload', 'upload_batch',
+                'add_account', 'remove_account', 'deploy')
+        **kwargs: Action-specific fields:
+            - command: str (for execute)
+            - filename: str (for upload)
+            - content_size: int (for upload)
+            - file_count: int (for upload_batch)
+            - total_size: int (for upload_batch)
+            - account_name: str (for add/remove_account)
+            - account_id: str (for add/remove_account)
+            - project_id: str (for deploy)
+
+    Returns:
+        Human-readable summary string, ≤100 chars
+    """
+    if action == 'execute' or not action:
+        command = kwargs.get('command', '')
+        return command[:100] if command else '(empty command)'
+
+    if action == 'upload':
+        filename = kwargs.get('filename', 'unknown')
+        content_size = kwargs.get('content_size')
+        if content_size is not None:
+            size_str = format_size_human(int(content_size))
+            return f"upload: {filename} ({size_str})"
+        return f"upload: {filename}"
+
+    if action == 'upload_batch':
+        file_count = kwargs.get('file_count')
+        total_size = kwargs.get('total_size')
+        count_str = str(file_count) if file_count else 'unknown'
+        if total_size is not None:
+            size_str = format_size_human(int(total_size))
+            return f"upload_batch ({count_str} 個檔案, {size_str})"
+        return f"upload_batch ({count_str} 個檔案)"
+
+    if action == 'add_account':
+        account_name = kwargs.get('account_name', '')
+        account_id = kwargs.get('account_id', '')
+        if account_name and account_id:
+            return f"add_account: {account_name} ({account_id})"
+        return f"add_account: {account_id or account_name or 'unknown'}"
+
+    if action == 'remove_account':
+        account_name = kwargs.get('account_name', '')
+        account_id = kwargs.get('account_id', '')
+        if account_name and account_id:
+            return f"remove_account: {account_name} ({account_id})"
+        return f"remove_account: {account_id or account_name or 'unknown'}"
+
+    if action == 'deploy':
+        project_id = kwargs.get('project_id', 'unknown project')
+        return f"deploy: {project_id}"
+
+    # Fallback for unknown action types
+    return action or '(unknown)'
+
+
 def get_header(headers: dict, key: str) -> Optional[str]:
     """Case-insensitive header lookup for API Gateway compatibility"""
     if headers is None:

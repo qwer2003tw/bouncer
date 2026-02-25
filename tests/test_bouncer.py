@@ -6620,3 +6620,409 @@ class TestCrossAccountExecuteErrors:
         body = json.loads(result['body'])
         content = json.loads(body['result']['content'][0]['text'])
         assert content.get('status') == 'error' or body.get('error')
+
+
+# ============================================================================
+# Display Summary Tests
+# ============================================================================
+
+class TestGenerateDisplaySummary:
+    """Tests for generate_display_summary() helper function in utils.py"""
+
+    def test_execute_command(self, app_module):
+        """Execute action uses command[:100]"""
+        from utils import generate_display_summary
+        result = generate_display_summary('execute', command='aws s3 ls --region us-east-1')
+        assert result == 'aws s3 ls --region us-east-1'
+
+    def test_execute_command_truncation(self, app_module):
+        """Execute command truncated to 100 chars"""
+        from utils import generate_display_summary
+        long_cmd = 'aws s3 cp ' + 'x' * 200
+        result = generate_display_summary('execute', command=long_cmd)
+        assert len(result) == 100
+        assert result == long_cmd[:100]
+
+    def test_execute_empty_command(self, app_module):
+        """Execute with empty command shows fallback"""
+        from utils import generate_display_summary
+        result = generate_display_summary('execute', command='')
+        assert result == '(empty command)'
+
+    def test_execute_no_action(self, app_module):
+        """No action defaults to execute behavior"""
+        from utils import generate_display_summary
+        result = generate_display_summary('', command='aws sts get-caller-identity')
+        assert result == 'aws sts get-caller-identity'
+
+    def test_upload_with_size(self, app_module):
+        """Upload shows filename and size"""
+        from utils import generate_display_summary
+        result = generate_display_summary('upload', filename='index.html', content_size=12288)
+        assert result == 'upload: index.html (12.00 KB)'
+
+    def test_upload_without_size(self, app_module):
+        """Upload without size shows just filename"""
+        from utils import generate_display_summary
+        result = generate_display_summary('upload', filename='index.html')
+        assert result == 'upload: index.html'
+
+    def test_upload_batch_with_size(self, app_module):
+        """Upload batch shows count and total size"""
+        from utils import generate_display_summary
+        result = generate_display_summary('upload_batch', file_count=9, total_size=250880)
+        assert result == 'upload_batch (9 個檔案, 245.00 KB)'
+
+    def test_upload_batch_without_size(self, app_module):
+        """Upload batch without total_size shows just count"""
+        from utils import generate_display_summary
+        result = generate_display_summary('upload_batch', file_count=5)
+        assert result == 'upload_batch (5 個檔案)'
+
+    def test_upload_batch_missing_count(self, app_module):
+        """Upload batch with missing file_count shows 'unknown'"""
+        from utils import generate_display_summary
+        result = generate_display_summary('upload_batch')
+        assert 'unknown' in result
+
+    def test_add_account(self, app_module):
+        """Add account shows name and ID"""
+        from utils import generate_display_summary
+        result = generate_display_summary('add_account', account_name='Dev', account_id='992382394211')
+        assert result == 'add_account: Dev (992382394211)'
+
+    def test_remove_account(self, app_module):
+        """Remove account shows name and ID"""
+        from utils import generate_display_summary
+        result = generate_display_summary('remove_account', account_name='Dev', account_id='992382394211')
+        assert result == 'remove_account: Dev (992382394211)'
+
+    def test_deploy(self, app_module):
+        """Deploy shows project_id"""
+        from utils import generate_display_summary
+        result = generate_display_summary('deploy', project_id='bouncer')
+        assert result == 'deploy: bouncer'
+
+    def test_deploy_missing_project(self, app_module):
+        """Deploy with missing project_id shows fallback"""
+        from utils import generate_display_summary
+        result = generate_display_summary('deploy')
+        assert result == 'deploy: unknown project'
+
+    def test_unknown_action(self, app_module):
+        """Unknown action returns action name"""
+        from utils import generate_display_summary
+        result = generate_display_summary('some_future_action')
+        assert result == 'some_future_action'
+
+
+class TestDisplaySummaryInItems:
+    """Tests that display_summary is written to DynamoDB items"""
+
+    @patch('mcp_execute.send_approval_request')
+    @patch('mcp_execute.send_blocked_notification')
+    def test_execute_item_has_display_summary(self, mock_blocked, mock_approval, app_module):
+        """Execute approval item has display_summary field"""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': os.environ.get('REQUEST_SECRET', 'test-secret')},
+            'body': json.dumps({
+                'jsonrpc': '2.0', 'id': 'ds-exec-1', 'method': 'tools/call',
+                'params': {'name': 'bouncer_execute', 'arguments': {
+                    'command': 'aws s3 cp local.txt s3://my-bucket/file.txt',
+                    'trust_scope': 'test-session',
+                    'reason': 'test display summary',
+                    'source': 'test-bot',
+                }}
+            })
+        }
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        request_id = content.get('request_id')
+        assert request_id
+
+        # Check DynamoDB item
+        item = app_module.table.get_item(Key={'request_id': request_id}).get('Item')
+        assert item is not None
+        assert 'display_summary' in item
+        assert item['display_summary'] == 'aws s3 cp local.txt s3://my-bucket/file.txt'
+
+    @patch('mcp_upload.send_telegram_message')
+    def test_upload_item_has_display_summary(self, mock_telegram, app_module):
+        """Upload approval item has display_summary field"""
+        import base64
+        content_b64 = base64.b64encode(b'test content').decode()
+
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': os.environ.get('REQUEST_SECRET', 'test-secret')},
+            'body': json.dumps({
+                'jsonrpc': '2.0', 'id': 'ds-upload-1', 'method': 'tools/call',
+                'params': {'name': 'bouncer_upload', 'arguments': {
+                    'filename': 'test.js',
+                    'content': content_b64,
+                    'content_type': 'application/javascript',
+                    'reason': 'test display summary',
+                    'source': 'test-bot',
+                }}
+            })
+        }
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        request_id = content.get('request_id')
+        assert request_id
+
+        # Check DynamoDB item
+        item = app_module.table.get_item(Key={'request_id': request_id}).get('Item')
+        assert item is not None
+        assert 'display_summary' in item
+        assert item['display_summary'].startswith('upload: test.js')
+
+    @patch('mcp_upload.send_batch_upload_notification')
+    def test_upload_batch_item_has_display_summary(self, mock_notification, app_module):
+        """Upload batch approval item has display_summary field"""
+        import base64
+        content_b64 = base64.b64encode(b'test content').decode()
+
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': os.environ.get('REQUEST_SECRET', 'test-secret')},
+            'body': json.dumps({
+                'jsonrpc': '2.0', 'id': 'ds-batch-1', 'method': 'tools/call',
+                'params': {'name': 'bouncer_upload_batch', 'arguments': {
+                    'files': [
+                        {'filename': 'a.js', 'content': content_b64, 'content_type': 'application/javascript'},
+                        {'filename': 'b.js', 'content': content_b64, 'content_type': 'application/javascript'},
+                    ],
+                    'reason': 'test display summary',
+                    'source': 'test-bot',
+                }}
+            })
+        }
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        request_id = content.get('request_id')
+        assert request_id
+
+        # Check DynamoDB item
+        item = app_module.table.get_item(Key={'request_id': request_id}).get('Item')
+        assert item is not None
+        assert 'display_summary' in item
+        assert 'upload_batch' in item['display_summary']
+        assert '2 個檔案' in item['display_summary']
+
+    @patch('mcp_admin.send_account_approval_request')
+    def test_add_account_item_has_display_summary(self, mock_approval, app_module):
+        """Add account approval item has display_summary field"""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': os.environ.get('REQUEST_SECRET', 'test-secret')},
+            'body': json.dumps({
+                'jsonrpc': '2.0', 'id': 'ds-add-1', 'method': 'tools/call',
+                'params': {'name': 'bouncer_add_account', 'arguments': {
+                    'account_id': '222222222222',
+                    'name': 'TestAccount',
+                    'role_arn': 'arn:aws:iam::222222222222:role/BouncerExecutionRole',
+                    'source': 'test-bot',
+                }}
+            })
+        }
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        request_id = content.get('request_id')
+        assert request_id
+
+        # Check DynamoDB item
+        item = app_module.table.get_item(Key={'request_id': request_id}).get('Item')
+        assert item is not None
+        assert 'display_summary' in item
+        assert item['display_summary'] == 'add_account: TestAccount (222222222222)'
+
+    @patch('mcp_admin.send_account_approval_request')
+    def test_remove_account_item_has_display_summary(self, mock_approval, app_module):
+        """Remove account approval item has display_summary field"""
+        # First add the account so it exists for removal
+        import accounts
+        import db
+        db.accounts_table.put_item(Item={
+            'account_id': '333333333333',
+            'name': 'RemoveMe',
+            'role_arn': 'arn:aws:iam::333333333333:role/BouncerExecutionRole',
+            'enabled': True,
+        })
+        # Clear cache
+        if hasattr(accounts, '_accounts_cache'):
+            accounts._accounts_cache = {}
+
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': os.environ.get('REQUEST_SECRET', 'test-secret')},
+            'body': json.dumps({
+                'jsonrpc': '2.0', 'id': 'ds-remove-1', 'method': 'tools/call',
+                'params': {'name': 'bouncer_remove_account', 'arguments': {
+                    'account_id': '333333333333',
+                    'source': 'test-bot',
+                }}
+            })
+        }
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        request_id = content.get('request_id')
+        assert request_id
+
+        # Check DynamoDB item
+        item = app_module.table.get_item(Key={'request_id': request_id}).get('Item')
+        assert item is not None
+        assert 'display_summary' in item
+        assert 'remove_account' in item['display_summary']
+        assert '333333333333' in item['display_summary']
+
+
+class TestAlreadyProcessedDisplay:
+    """Tests for the 'already processed' callback display logic"""
+
+    @patch('app.update_message')
+    @patch('app.answer_callback')
+    def test_already_processed_uses_display_summary(self, mock_answer, mock_update, app_module):
+        """Already-processed callback uses display_summary when available"""
+        request_id = 'display-summary-test-1'
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'action': 'upload_batch',
+            'status': 'approved',
+            'source': 'test-bot',
+            'reason': 'test',
+            'file_count': 9,
+            'display_summary': 'upload_batch (9 個檔案, 245.00 KB)',
+        })
+
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb-ds-1',
+                    'from': {'id': 999999999},
+                    'data': f'approve:{request_id}',
+                    'message': {'message_id': 888}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+        mock_answer.assert_called_with('cb-ds-1', '⚠️ 此請求已處理過')
+
+        # Check the update_message call includes the display_summary
+        call_args = mock_update.call_args
+        message_text = call_args[0][1] if call_args[0] else call_args[1].get('text', '')
+        assert 'upload\\_batch' in message_text or 'upload_batch' in message_text
+        assert '245' in message_text
+
+    @patch('app.update_message')
+    @patch('app.answer_callback')
+    def test_already_processed_legacy_fallback(self, mock_answer, mock_update, app_module):
+        """Already-processed callback falls back to action-type logic for legacy items"""
+        request_id = 'legacy-no-summary-1'
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'command': 'aws s3 ls',
+            'status': 'approved',
+            'source': 'test-bot',
+            'reason': 'test',
+            # No display_summary field (legacy item)
+        })
+
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb-legacy-1',
+                    'from': {'id': 999999999},
+                    'data': f'approve:{request_id}',
+                    'message': {'message_id': 887}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+
+        # Check the update_message was called and shows the command
+        call_args = mock_update.call_args
+        message_text = call_args[0][1] if call_args[0] else call_args[1].get('text', '')
+        assert 'aws s3 ls' in message_text
+
+    @patch('app.update_message')
+    @patch('app.answer_callback')
+    def test_already_processed_legacy_upload_batch(self, mock_answer, mock_update, app_module):
+        """Legacy upload_batch items (no display_summary) still show file count"""
+        request_id = 'legacy-batch-1'
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'action': 'upload_batch',
+            'status': 'approved',
+            'source': 'test-bot',
+            'reason': 'test',
+            'file_count': 5,
+            # No display_summary (legacy)
+        })
+
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb-legacy-batch-1',
+                    'from': {'id': 999999999},
+                    'data': f'approve:{request_id}',
+                    'message': {'message_id': 886}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+
+        call_args = mock_update.call_args
+        message_text = call_args[0][1] if call_args[0] else call_args[1].get('text', '')
+        assert '5' in message_text
+        assert 'upload' in message_text.lower()
+
+    @patch('app.update_message')
+    @patch('app.answer_callback')
+    def test_already_processed_no_crash_on_empty_item(self, mock_answer, mock_update, app_module):
+        """Already-processed callback doesn't crash on items with minimal fields"""
+        request_id = 'minimal-item-1'
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'status': 'denied',
+            # No command, no action, no display_summary, no source, no reason
+        })
+
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb-minimal-1',
+                    'from': {'id': 999999999},
+                    'data': f'approve:{request_id}',
+                    'message': {'message_id': 885}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+
+        # Should not crash
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
