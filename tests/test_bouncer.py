@@ -97,6 +97,15 @@ def mock_dynamodb():
             BillingMode='PAY_PER_REQUEST'
         )
 
+        # S3 buckets needed for upload staging (P1-2 fix: content stored in S3, not DDB)
+        s3 = boto3.client('s3', region_name='us-east-1')
+        for bucket_name in [
+            'bouncer-uploads-111111111111',
+            'bouncer-uploads-222222222222',
+            'legacy-bucket',
+        ]:
+            s3.create_bucket(Bucket=bucket_name)
+
         yield dynamodb
 
 

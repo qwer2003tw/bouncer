@@ -594,7 +594,6 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
 def handle_upload_batch_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str) -> dict:
     """處理批量上傳的審批 callback"""
     import json as _json
-    import base64
     import boto3
 
     table = _get_table()
@@ -671,15 +670,34 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
         for i, fm in enumerate(files_manifest):
             fname = fm.get('filename', 'unknown')
             try:
-                content_bytes = base64.b64decode(fm.get('content_b64', ''))
+                s3_key = fm.get('s3_key')  # new format
+                content_b64_legacy = fm.get('content_b64')  # old format fallback
                 from utils import generate_request_id as _gen_id
                 fkey = f"{date_str}/{_gen_id('batch')}/{fname}"
-                s3.put_object(
-                    Bucket=bucket,
-                    Key=fkey,
-                    Body=content_bytes,
-                    ContentType=fm.get('content_type', 'application/octet-stream'),
-                )
+                if s3_key:
+                    # New path: S3-to-S3 copy from staging
+                    s3.copy_object(
+                        CopySource={'Bucket': bucket, 'Key': s3_key},
+                        Bucket=bucket,
+                        Key=fkey,
+                        ContentType=fm.get('content_type', 'application/octet-stream'),
+                        MetadataDirective='REPLACE',
+                    )
+                    # Cleanup staging object
+                    try:
+                        s3.delete_object(Bucket=bucket, Key=s3_key)
+                    except Exception:
+                        pass  # Non-critical
+                else:
+                    # Legacy path: decode base64 and upload
+                    import base64 as _b64
+                    content_bytes = _b64.b64decode(content_b64_legacy or '')
+                    s3.put_object(
+                        Bucket=bucket,
+                        Key=fkey,
+                        Body=content_bytes,
+                        ContentType=fm.get('content_type', 'application/octet-stream'),
+                    )
                 # Verify file exists after upload
                 try:
                     s3.head_object(Bucket=bucket, Key=fkey)

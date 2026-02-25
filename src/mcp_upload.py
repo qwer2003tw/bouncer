@@ -310,6 +310,7 @@ def _check_upload_trust(ctx: UploadContext) -> Optional[dict]:
 
 def _submit_upload_for_approval(ctx: UploadContext) -> dict:
     """Submit upload for human approval — always returns a result."""
+    import base64 as _base64
 
     # 固定桶模式在 _resolve_upload_target 時 request_id 尚未設定
     if ctx.legacy_bucket and ctx.legacy_key:
@@ -324,12 +325,34 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
     else:
         size_str = f"{ctx.content_size} bytes"
 
+    # Upload content to S3 staging (pending/) BEFORE writing to DDB
+    # This avoids storing large base64 content directly in DynamoDB (400KB limit).
+    staging_bucket = f"bouncer-uploads-{ctx.target_account_id}"
+    content_s3_key = f"pending/{ctx.request_id}/{ctx.filename or ctx.legacy_key or 'file'}"
+    try:
+        content_bytes = _base64.b64decode(ctx.content_b64)
+        _s3 = boto3.client('s3')
+        _s3.put_object(
+            Bucket=staging_bucket,
+            Key=content_s3_key,
+            Body=content_bytes,
+            ContentType=ctx.content_type,
+        )
+    except Exception as e:
+        return mcp_result(ctx.req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'error',
+                'error': f'Failed to stage file to S3: {str(e)}',
+            })}],
+            'isError': True,
+        })
+
     item = {
         'request_id': ctx.request_id,
         'action': 'upload',
         'bucket': ctx.bucket,
         'key': ctx.key,
-        'content': ctx.content_b64,  # 存 base64，審批後再上傳
+        'content_s3_key': content_s3_key,   # S3 reference instead of raw base64
         'content_type': ctx.content_type,
         'content_size': ctx.content_size,
         'reason': ctx.reason,
@@ -705,12 +728,39 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
         ext = pf['filename'].rsplit('.', 1)[-1].upper() if '.' in pf['filename'] else 'OTHER'
         ext_counts[ext] = ext_counts.get(ext, 0) + 1
 
-    # Store each file's info (without content_bytes in manifest)
+    # Upload each file to S3 staging BEFORE writing to DDB.
+    # This avoids storing base64 content in DynamoDB items (400KB limit).
+    staging_bucket = bucket  # same bucket, different prefix
+    s3_staging = boto3.client('s3')
     files_manifest = []
+    staged_keys = []  # track for rollback on failure
     for pf in processed_files:
+        s3_key = f"pending/{batch_id}/{pf['filename']}"
+        try:
+            s3_staging.put_object(
+                Bucket=staging_bucket,
+                Key=s3_key,
+                Body=pf['content_bytes'],
+                ContentType=pf['content_type'],
+            )
+            staged_keys.append(s3_key)
+        except Exception as e:
+            # Rollback: delete any already-staged objects
+            for rk in staged_keys:
+                try:
+                    s3_staging.delete_object(Bucket=staging_bucket, Key=rk)
+                except Exception:
+                    pass
+            return mcp_result(req_id, {
+                'content': [{'type': 'text', 'text': json.dumps({
+                    'status': 'error',
+                    'error': f'Failed to stage file {pf["filename"]} to S3: {str(e)}',
+                })}],
+                'isError': True,
+            })
         files_manifest.append({
             'filename': pf['filename'],
-            'content_b64': pf['content_b64'],
+            's3_key': s3_key,           # S3 reference instead of content_b64
             'content_type': pf['content_type'],
             'size': pf['size'],
             'sha256': pf['sha256'],
@@ -770,9 +820,11 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
 # ============================================================================
 
 def execute_upload(request_id: str, approver: str) -> dict:
-    """執行已審批的上傳（支援跨帳號）"""
-    import base64
+    """執行已審批的上傳（支援跨帳號）
 
+    Content is read from S3 staging (pending/) and copied to the target bucket.
+    The staging object is deleted after a successful copy.
+    """
     try:
         result = table.get_item(Key={'request_id': request_id})
         item = result.get('Item')
@@ -782,12 +834,13 @@ def execute_upload(request_id: str, approver: str) -> dict:
 
         bucket = item.get('bucket')
         key = item.get('key')
-        content_b64 = item.get('content')
         content_type = item.get('content_type', 'application/octet-stream')
         assume_role_arn = item.get('assume_role')
+        account_id = item.get('account_id', '')
 
-        # 解碼內容
-        content_bytes = base64.b64decode(content_b64)
+        # Support both old (content) and new (content_s3_key) formats
+        content_s3_key = item.get('content_s3_key')
+        content_b64_legacy = item.get('content')  # backward compat for old items
 
         # 建立 S3 client（跨帳號時用 assume role）
         if assume_role_arn:
@@ -807,13 +860,31 @@ def execute_upload(request_id: str, approver: str) -> dict:
             # 使用 Lambda 本身的權限上傳
             s3 = boto3.client('s3')
 
-        # 上傳
-        s3.put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=content_bytes,
-            ContentType=content_type
-        )
+        if content_s3_key:
+            # New path: S3-to-S3 copy (no download needed)
+            staging_bucket = f"bouncer-uploads-{account_id}"
+            s3.copy_object(
+                CopySource={'Bucket': staging_bucket, 'Key': content_s3_key},
+                Bucket=bucket,
+                Key=key,
+                ContentType=content_type,
+                MetadataDirective='REPLACE',
+            )
+            # Cleanup staging object
+            try:
+                s3.delete_object(Bucket=staging_bucket, Key=content_s3_key)
+            except Exception:
+                pass  # Non-critical; TTL on the bucket lifecycle will handle it
+        else:
+            # Legacy path: base64-decode from DDB item then upload
+            import base64
+            content_bytes = base64.b64decode(content_b64_legacy)
+            s3.put_object(
+                Bucket=bucket,
+                Key=key,
+                Body=content_bytes,
+                ContentType=content_type
+            )
 
         # 產生 S3 URL
         region = s3.meta.region_name or 'us-east-1'
