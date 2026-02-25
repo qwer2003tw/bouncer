@@ -61,10 +61,15 @@ from mcp_upload import (  # noqa: F401
 from mcp_presigned import (  # noqa: F401
     PresignedContext,
     mcp_tool_request_presigned,
+    mcp_tool_request_presigned_batch,
+    PresignedBatchContext,
     _sanitize_filename as _sanitize_presigned_filename,
     _parse_presigned_request,
     _resolve_presigned_target,
     _generate_presigned_url,
+    _parse_presigned_batch_request,
+    _resolve_batch_target,
+    _generate_presigned_batch_urls,
 )
 
 # --- Admin / query tools ---
