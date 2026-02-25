@@ -158,7 +158,20 @@ _ALL_TABLE_KEYS = {
 
 @pytest.fixture(autouse=True)
 def _cleanup_tables(mock_dynamodb):
-    """每個測試後清除所有表中的資料，避免測試間資料洩漏"""
+    """每個測試後清除所有表中的資料，避免測試間資料洩漏
+
+    在每個測試執行前也重新注入 db module 的 table references，
+    防止跨 test file 的 sys.modules 清除造成 db 重新 import 時指向真實 AWS。
+    """
+    # Re-inject db references before each test (guard against cross-file sys.modules pollution)
+    # Other test files (test_ddb_400kb_fix.py, test_grant.py) delete sys.modules['db'],
+    # which causes db to be re-imported with real boto3 when interleaved via pytest-randomly.
+    try:
+        import db as _db
+        _db.table = mock_dynamodb.Table('clawdbot-approval-requests')
+        _db.accounts_table = mock_dynamodb.Table('bouncer-accounts')
+    except Exception:
+        pass
     yield
     for table_name, key_attrs in _ALL_TABLE_KEYS.items():
         try:
