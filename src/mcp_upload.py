@@ -332,7 +332,23 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
     content_s3_key = f"pending/{ctx.request_id}/{ctx.filename or ctx.legacy_key or 'file'}"
     try:
         content_bytes = _base64.b64decode(ctx.content_b64)
-        _s3 = boto3.client('s3')
+        # Use assume_role credentials if available (e.g. BouncerRole has S3 access)
+        # The Lambda execution role may not have direct S3 PutObject permissions.
+        if ctx.assume_role:
+            _sts = boto3.client('sts')
+            _creds = _sts.assume_role(
+                RoleArn=ctx.assume_role,
+                RoleSessionName='bouncer-upload-staging',
+                DurationSeconds=900,
+            )['Credentials']
+            _s3 = boto3.client(
+                's3',
+                aws_access_key_id=_creds['AccessKeyId'],
+                aws_secret_access_key=_creds['SecretAccessKey'],
+                aws_session_token=_creds['SessionToken'],
+            )
+        else:
+            _s3 = boto3.client('s3')
         _s3.put_object(
             Bucket=staging_bucket,
             Key=content_s3_key,
@@ -751,7 +767,23 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
     # Upload each file to S3 staging BEFORE writing to DDB.
     # This avoids storing base64 content in DynamoDB items (400KB limit).
     staging_bucket = bucket  # same bucket, different prefix
-    s3_staging = boto3.client('s3')
+    # Use assume_role credentials if available (e.g. BouncerRole has S3 access)
+    if assume_role:
+        import boto3 as _boto3_staging
+        _sts_staging = _boto3_staging.client('sts')
+        _stage_creds = _sts_staging.assume_role(
+            RoleArn=assume_role,
+            RoleSessionName='bouncer-batch-staging',
+            DurationSeconds=900,
+        )['Credentials']
+        s3_staging = _boto3_staging.client(
+            's3',
+            aws_access_key_id=_stage_creds['AccessKeyId'],
+            aws_secret_access_key=_stage_creds['SecretAccessKey'],
+            aws_session_token=_stage_creds['SessionToken'],
+        )
+    else:
+        s3_staging = boto3.client('s3')
     files_manifest = []
     staged_keys = []  # track for rollback on failure
     for pf in processed_files:
