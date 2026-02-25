@@ -339,6 +339,19 @@ Resources:
             TableName: bouncer-deploy-history
         - DynamoDBCrudPolicy:
             TableName: bouncer-deploy-locks
+        # S3 Upload Staging Bucket — bouncer_upload / bouncer_upload_batch tools
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: AllowUploadStagingBucket
+              Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+                - s3:DeleteObject
+                - s3:ListBucket
+              Resource:
+                - !Sub 'arn:aws:s3:::bouncer-uploads-${DefaultAccountId}'
+                - !Sub 'arn:aws:s3:::bouncer-uploads-${DefaultAccountId}/*'
         - Version: '2012-10-17'
           Statement:
             # Assume BouncerRole — 所有帳號都走 assume role 執行命令
