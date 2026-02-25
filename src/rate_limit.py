@@ -116,5 +116,5 @@ def check_rate_limit(source: str) -> None:
     except (RateLimitExceeded, PendingLimitExceeded):
         raise
     except Exception as e:
-        # GSI 不存在或其他錯誤，記錄但不阻擋（fail-open）
-        print(f"Rate limit check error (allowing): {e}")
+        # SEC-006: fail-close — DynamoDB 故障時拒絕而非放行
+        raise RateLimitExceeded(f"Rate limit check failed: {e}") from e

@@ -147,22 +147,37 @@ def revoke_trust_session(trust_id: str) -> bool:
 
 def increment_trust_command_count(trust_id: str) -> int:
     """
-    增加信任時段的命令計數
+    原子性增加信任時段的命令計數（SEC-007）
+
+    使用 DynamoDB conditional update 確保並發安全：
+    - 只有在 command_count 未超限且 session 仍有效時才增加
+    - ConditionalCheckFailedException → return 0 (拒絕)
 
     Returns:
-        新的計數值
+        新的計數值，或 0（條件不滿足）
     """
+    now = int(time.time())
     try:
         response = _get_table().update_item(
             Key={'request_id': trust_id},
             UpdateExpression='SET command_count = if_not_exists(command_count, :zero) + :one',
+            ConditionExpression='command_count < :max AND #status = :active AND expires_at > :now',
+            ExpressionAttributeNames={
+                '#status': 'type',  # 'type' = 'trust_session' is our status indicator
+            },
             ExpressionAttributeValues={
                 ':zero': 0,
-                ':one': 1
+                ':one': 1,
+                ':max': TRUST_SESSION_MAX_COMMANDS,
+                ':active': 'trust_session',
+                ':now': now,
             },
             ReturnValues='UPDATED_NEW'
         )
-        return response.get('Attributes', {}).get('command_count', 0)
+        return int(response.get('Attributes', {}).get('command_count', 0))
+    except _get_table().meta.client.exceptions.ConditionalCheckFailedException:
+        print(f"Trust command count conditional update failed for {trust_id} (limit or expired)")
+        return 0
     except Exception as e:
         print(f"Increment trust command count error: {e}")
         return 0

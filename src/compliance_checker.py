@@ -7,6 +7,7 @@ Compliance Checker - 三份安規合規檢查
 - P-S1~S5: Palisade 安全規則
 - CS: Code Scanning 規則
 """
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -274,6 +275,30 @@ COMPLIANCE_RULES = [
 ]
 
 
+def _normalize_json_payload(command: str) -> str:
+    """
+    SEC-008: 嘗試 parse + re-serialize JSON payload 正規化。
+
+    目標：將 {"Key": "val"} 和 { "Key" :  "val" } 正規化成同一形式，
+    避免透過 JSON 格式變化（多空白、換行、key 順序）繞過正則。
+
+    只對能成功 parse 的 JSON 片段做；無法 parse 則 fallback 原始命令。
+    """
+    # 找出命令中可能的 JSON 片段（用 { ... } 包住）並嘗試正規化
+    def _try_normalize(m: re.Match) -> str:
+        fragment = m.group(0)
+        try:
+            parsed = json.loads(fragment)
+            return json.dumps(parsed, separators=(',', ':'))
+        except (json.JSONDecodeError, ValueError):
+            return fragment
+
+    try:
+        return re.sub(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)?\}', _try_normalize, command)
+    except Exception:
+        return command
+
+
 def check_compliance(command: str) -> tuple[bool, Optional[ComplianceViolation]]:
     """
     檢查命令是否違反合規規則
@@ -287,8 +312,12 @@ def check_compliance(command: str) -> tuple[bool, Optional[ComplianceViolation]]
     if not command:
         return True, None
 
+    # SEC-008: 正規化 JSON payload，防止格式變化繞過正則
+    normalized_command = _normalize_json_payload(command)
+
     for pattern, rule_id, rule_name, description, remediation in COMPLIANCE_RULES:
-        if re.search(pattern, command, re.IGNORECASE):
+        # 同時對原始命令和正規化命令做檢查
+        if re.search(pattern, command, re.IGNORECASE) or re.search(pattern, normalized_command, re.IGNORECASE):
             return False, ComplianceViolation(
                 rule_id=rule_id,
                 rule_name=rule_name,
