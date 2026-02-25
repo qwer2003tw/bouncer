@@ -139,8 +139,12 @@ def escape_markdown(text: str) -> str:
     return text
 
 
-def send_telegram_message(text: str, reply_markup: dict = None):
-    """發送 Telegram 消息"""
+def send_telegram_message(text: str, reply_markup: dict = None) -> dict:
+    """發送 Telegram 消息
+
+    Returns:
+        API 回應 dict（成功時含 'ok': True，失敗時為空 dict {}）
+    """
     data = {
         'chat_id': APPROVED_CHAT_ID,
         'text': text,
@@ -148,7 +152,7 @@ def send_telegram_message(text: str, reply_markup: dict = None):
     }
     if reply_markup:
         data['reply_markup'] = json.dumps(reply_markup)
-    _telegram_request('sendMessage', data)
+    return _telegram_request('sendMessage', data)
 
 
 def send_telegram_message_silent(text: str, reply_markup: dict = None):

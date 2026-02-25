@@ -17,8 +17,13 @@ def _escape_markdown(text):
     return _telegram.escape_markdown(text)
 
 
-def _send_message(text, keyboard=None):
-    _telegram.send_telegram_message(text, keyboard)
+def _send_message(text, keyboard=None) -> dict:
+    """Send a Telegram message and return the API response dict.
+
+    Returns the raw API response (``{'ok': True, ...}`` on success, ``{}`` on
+    any failure so callers can check ``result.get('ok')``).
+    """
+    return _telegram.send_telegram_message(text, keyboard)
 
 
 def _send_message_silent(text, keyboard=None):
@@ -27,8 +32,12 @@ def _send_message_silent(text, keyboard=None):
 
 def send_approval_request(request_id: str, command: str, reason: str, timeout: int = COMMAND_APPROVAL_TIMEOUT,
                           source: str = None, account_id: str = None, account_name: str = None,
-                          assume_role: str = None, context: str = None):
-    """發送 Telegram 審批請求"""
+                          assume_role: str = None, context: str = None) -> bool:
+    """發送 Telegram 審批請求
+
+    Returns:
+        True if the Telegram message was sent successfully, False otherwise.
+    """
     cmd_preview = command if len(command) <= 500 else command[:500] + '...'
     # cmd_preview 放在 backtick code block 裡，不需要 escape
     # reason/source/context 由 build_info_lines 內部 escape，這裡不再手動 escape
@@ -100,7 +109,8 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
             ]
         }
 
-    _send_message(text, keyboard)
+    result = _send_message(text, keyboard)
+    return bool(result and result.get('ok'))
 
 
 def send_account_approval_request(request_id: str, action: str, account_id: str, name: str, role_arn: str, source: str, context: str = None):

@@ -665,10 +665,32 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
     table.put_item(Item=item)
 
     # 發送 Telegram 審批請求
-    send_approval_request(
-        request_id, ctx.command, ctx.reason, ctx.timeout, ctx.source,
-        ctx.account_id, ctx.account_name, context=ctx.context
-    )
+    # 若發送失敗，刪除剛寫入的 DynamoDB record，避免產生孤兒審批請求
+    try:
+        notified = send_approval_request(
+            request_id, ctx.command, ctx.reason, ctx.timeout, ctx.source,
+            ctx.account_id, ctx.account_name, context=ctx.context
+        )
+        if not notified:
+            raise RuntimeError("Telegram notification returned failure (ok=False or empty response)")
+    except Exception as tg_err:
+        # Cleanup DDB to prevent orphan pending record
+        try:
+            table.delete_item(Key={'request_id': request_id})
+        except Exception as del_err:
+            print(f"[ORPHAN CLEANUP] Failed to delete DDB record {request_id}: {del_err}")
+        print(f"[ORPHAN CLEANUP] Telegram notification failed for {request_id}: {tg_err}")
+        return mcp_result(ctx.req_id, {
+            'content': [{
+                'type': 'text',
+                'text': json.dumps({
+                    'status': 'error',
+                    'error': 'Telegram notification failed; approval request was not created. Please retry.',
+                    'detail': str(tg_err),
+                })
+            }],
+            'isError': True,
+        })
 
     # 一律異步返回：讓 client 用 bouncer_status 輪詢結果。
     # sync long-polling 已移除（Lambda 60s timeout + API Gateway 29s timeout 使其無意義）。
