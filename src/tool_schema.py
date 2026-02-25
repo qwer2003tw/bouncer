@@ -397,8 +397,14 @@ MCP_TOOLS = {
     # ========== Presigned Upload Tool ==========
     'bouncer_request_presigned': {
         'description': (
-            '為 S3 staging bucket 生成 presigned PUT URL，讓 client 直接上傳大檔案（不經 Lambda）。'
-            '不需要審批，上傳後檔案在 staging bucket，需要用 bouncer_execute s3 cp 搬到目標位置。'
+            '為 S3 staging bucket 生成單檔 presigned PUT URL，讓 client 直接 PUT 大檔案（不經 Lambda，無大小限制）。\n'
+            '不需要審批。\n\n'
+            '使用流程：\n'
+            '  Step 1: 呼叫此工具取得 presigned_url + s3_key\n'
+            '  Step 2: curl -X PUT -H "Content-Type: {content_type}" --data-binary @{file} "{presigned_url}"\n'
+            '  Step 3: 確認上傳後，用 bouncer_execute s3 cp 從 staging 搬到目標 bucket（需審批）\n\n'
+            '適用情境：單一大檔案（> 500KB）直傳。多檔請用 bouncer_request_presigned_batch。\n'
+            '上傳目標固定為 staging bucket（bouncer-uploads-{DEFAULT_ACCOUNT_ID}），s3_key 格式：{date}/{request_id}/{filename}。'
         ),
         'parameters': {
             'type': 'object',
@@ -435,9 +441,17 @@ MCP_TOOLS = {
     # ========== Presigned Batch Upload Tool ==========
     'bouncer_request_presigned_batch': {
         'description': (
-            '一次呼叫，為多個檔案（最多 50 個）生成 presigned S3 PUT URL。'
-            '所有檔案共用同一個 batch_id prefix，方便後續 s3 cp 搬移。'
-            '不需要審批，直接上傳到 staging bucket。'
+            '一次呼叫，為多個檔案（最多 50 個）批量生成 presigned S3 PUT URL。前端部署推薦用法。\n'
+            '不需要審批。所有檔案共用同一 batch_id prefix，s3_key 格式：{date}/{batch_id}/{filename}。\n\n'
+            '使用流程：\n'
+            '  Step 1: 呼叫此工具，傳入 [{filename, content_type}, ...]\n'
+            '  Step 2: 對每個回傳的 presigned_url 執行 PUT（可並行）\n'
+            '          curl -X PUT -H "Content-Type: {type}" --data-binary @{file} "{url}"\n'
+            '  Step 3: 全部 PUT 完成後，用 bouncer_execute s3 cp 從 staging 搬到目標 bucket（需審批）\n'
+            '          aws s3 cp s3://staging/{batch_id}/ s3://target-bucket/ --recursive\n'
+            '  Step 4: 如需 CloudFront，用 bouncer_execute cloudfront create-invalidation（需審批）\n\n'
+            '與 bouncer_upload_batch 的差異：本工具不經 Lambda，無 500KB 限制，支援任意大小檔案（推薦）。\n'
+            'bouncer_upload_batch 已 deprecated，新專案請改用此工具。'
         ),
         'parameters': {
             'type': 'object',
