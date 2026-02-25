@@ -57,6 +57,16 @@ from mcp_upload import (  # noqa: F401
     _resolve_upload_target,
 )
 
+# --- Presigned upload ---
+from mcp_presigned import (  # noqa: F401
+    PresignedContext,
+    mcp_tool_request_presigned,
+    _sanitize_filename as _sanitize_presigned_filename,
+    _parse_presigned_request,
+    _resolve_presigned_target,
+    _generate_presigned_url,
+)
+
 # --- Admin / query tools ---
 from mcp_admin import (  # noqa: F401
     mcp_tool_status,
