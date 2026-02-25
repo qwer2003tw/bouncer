@@ -469,5 +469,55 @@ MCP_TOOLS = {
             },
             'required': ['files', 'reason', 'source']
         }
-    }
+    },
+    # ========== Presigned Batch Upload Tool ==========
+    'bouncer_request_presigned_batch': {
+        'description': (
+            '為多個檔案批量生成 presigned S3 PUT URL，讓 client 直接上傳（不經 Lambda）。'
+            '不需要審批，最多 50 個檔案，所有檔案共用同一個 batch_id prefix。'
+            '若任一 URL 生成失敗，整批回傳錯誤（rollback）。'
+        ),
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'files': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'filename': {
+                                'type': 'string',
+                                'description': '目標檔名（含路徑，例如 assets/foo.js）',
+                            },
+                            'content_type': {
+                                'type': 'string',
+                                'description': 'MIME type（例如 application/javascript）',
+                            },
+                        },
+                        'required': ['filename', 'content_type'],
+                    },
+                    'description': '要上傳的檔案清單（最多 50 個）',
+                    'maxItems': 50,
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': '上傳原因',
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '請求來源標識（例如 Private Bot (deploy)）',
+                },
+                'account': {
+                    'type': 'string',
+                    'description': '目標帳號 ID（預設 DEFAULT_ACCOUNT_ID）',
+                },
+                'expires_in': {
+                    'type': 'integer',
+                    'description': 'presigned URL 有效期秒數（預設 900，min 60，最大 3600）',
+                    'default': 900,
+                },
+            },
+            'required': ['files', 'reason'],
+        },
+    },
 }
