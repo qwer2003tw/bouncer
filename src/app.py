@@ -39,6 +39,7 @@ from mcp_execute import (
     mcp_tool_execute, mcp_tool_request_grant, mcp_tool_grant_status, mcp_tool_revoke_grant,
 )
 from mcp_upload import mcp_tool_upload, mcp_tool_upload_batch, execute_upload  # noqa: F401
+from mcp_presigned import mcp_tool_request_presigned
 from mcp_admin import (
     mcp_tool_status, mcp_tool_help, mcp_tool_trust_status, mcp_tool_trust_revoke,
     mcp_tool_add_account, mcp_tool_list_accounts, mcp_tool_get_page,
@@ -193,6 +194,7 @@ TOOL_HANDLERS = {
     'bouncer_remove_account': mcp_tool_remove_account,
     'bouncer_upload': mcp_tool_upload,
     'bouncer_upload_batch': mcp_tool_upload_batch,
+    'bouncer_request_presigned': mcp_tool_request_presigned,
     'bouncer_request_grant': mcp_tool_request_grant,
     'bouncer_grant_status': mcp_tool_grant_status,
     'bouncer_revoke_grant': mcp_tool_revoke_grant,

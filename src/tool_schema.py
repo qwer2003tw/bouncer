@@ -394,6 +394,44 @@ MCP_TOOLS = {
             'required': ['filename', 'content', 'reason', 'source']
         }
     },
+    # ========== Presigned Upload Tool ==========
+    'bouncer_request_presigned': {
+        'description': (
+            '為 S3 staging bucket 生成 presigned PUT URL，讓 client 直接上傳大檔案（不經 Lambda）。'
+            '不需要審批，上傳後檔案在 staging bucket，需要用 bouncer_execute s3 cp 搬到目標位置。'
+        ),
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'filename': {
+                    'type': 'string',
+                    'description': '目標檔名（含路徑，例如 assets/pdf.worker.min.mjs）',
+                },
+                'content_type': {
+                    'type': 'string',
+                    'description': 'MIME type（例如 application/javascript）',
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': '上傳原因',
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '請求來源標識（例如 Private Bot (deploy)）',
+                },
+                'account': {
+                    'type': 'string',
+                    'description': '目標帳號 ID（預設 DEFAULT_ACCOUNT_ID）',
+                },
+                'expires_in': {
+                    'type': 'integer',
+                    'description': 'presigned URL 有效期秒數（預設 900，最大 3600）',
+                    'default': 900,
+                },
+            },
+            'required': ['filename', 'content_type', 'reason', 'source'],
+        },
+    },
     'bouncer_upload_batch': {
         'description': '批量上傳多個檔案到 S3，一次審批。如果有活躍的 Trust Session，可自動上傳。',
         'parameters': {
