@@ -5,6 +5,7 @@ Bouncer - Grant Session 模組
 Grant Session 允許 Agent 預先申請一批命令的執行權限，
 經人工審批後，Agent 可以在 TTL 內自動執行已授權的命令。
 """
+import fnmatch
 import secrets
 import time
 from typing import Optional, Dict, List, Any
@@ -371,21 +372,56 @@ def revoke_grant(grant_id: str) -> bool:
         return False
 
 
+def _match_command_pattern(normalized_cmd: str, pattern: str) -> bool:
+    """使用 fnmatch glob 比對正規化命令與 pattern
+
+    支援：
+    - 精確匹配（向下相容）
+    - `*`  匹配任意非空字元序列（包含空格）
+    - `**` 等同 `*`（語意上表示跨 segment）
+    - `?`  匹配任意單一字元
+
+    比對前 pattern 也會被正規化（strip + 連續空白壓縮 + 小寫），
+    確保大小寫一致性。
+
+    Args:
+        normalized_cmd: 已正規化的命令（小寫、單一空格）
+        pattern: 授權 pattern（可含 glob 字元）
+
+    Returns:
+        是否匹配
+    """
+    # 正規化 pattern（與命令相同規則）
+    normalized_pattern = ' '.join(pattern.strip().split()).lower()
+    # 使用 fnmatch 進行 glob 比對
+    return fnmatch.fnmatch(normalized_cmd, normalized_pattern)
+
+
 def is_command_in_grant(normalized_cmd: str, grant: Dict) -> bool:
     """檢查正規化命令是否在 Grant 授權清單中
 
-    使用 exact match（正規化後比較）。
+    支援 exact match（向下相容）及 glob pattern matching。
+    遍歷 granted_commands，任一 pattern 匹配即回傳 True。
+
+    Pattern 規則（fnmatch）：
+    - 無 glob 字元：精確比對（向下相容）
+    - `*`  匹配任意字元序列（含空格）→ 可比對 UUID/日期等動態 segment
+    - `**` 等同 `*`
+    - `?`  匹配任意單一字元
 
     Args:
         normalized_cmd: 已正規化的命令
         grant: Grant session dict
 
     Returns:
-        命令是否在授權清單
+        命令是否在授權清單（任一 pattern 匹配）
     """
     try:
         granted_commands = grant.get('granted_commands', [])
-        return normalized_cmd in granted_commands
+        for pattern in granted_commands:
+            if _match_command_pattern(normalized_cmd, pattern):
+                return True
+        return False
     except Exception as e:
         print(f"[GRANT] is_command_in_grant error: {e}")
         return False
