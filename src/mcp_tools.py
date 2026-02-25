@@ -57,6 +57,13 @@ from mcp_upload import (  # noqa: F401
     _resolve_upload_target,
 )
 
+# --- Presigned upload ---
+from mcp_presigned import (  # noqa: F401
+    mcp_tool_request_presigned,
+    _sanitize_filename_presigned,
+    _check_presigned_rate_limit,
+)
+
 # --- Admin / query tools ---
 from mcp_admin import (  # noqa: F401
     mcp_tool_status,

@@ -431,5 +431,45 @@ MCP_TOOLS = {
             },
             'required': ['files', 'reason', 'source']
         }
-    }
+    },
+    # ========== Presigned Upload Tool ==========
+    'bouncer_request_presigned': {
+        'description': (
+            '取得 S3 presigned PUT URL，讓 client 直接上傳大型檔案到 staging bucket，'
+            '不經過 Lambda（解除 ~500KB 限制）。上傳後仍需 bouncer_execute s3 cp 將檔案搬到正式 bucket。'
+        ),
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'filename': {
+                    'type': 'string',
+                    'description': '目標檔名（含相對路徑，例如 assets/pdf.worker.min.mjs）',
+                },
+                'content_type': {
+                    'type': 'string',
+                    'description': 'MIME type（例如 application/javascript）',
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': '上傳原因（用於審計記錄）',
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '請求來源標識（例如 Private Bot (deploy)）',
+                },
+                'account': {
+                    'type': 'string',
+                    'description': '目標帳號 ID（預設使用 DEFAULT_ACCOUNT_ID）',
+                },
+                'expires_in': {
+                    'type': 'integer',
+                    'description': 'Presigned URL 有效期秒數（預設 900，最小 60，最大 3600）',
+                    'default': 900,
+                    'minimum': 60,
+                    'maximum': 3600,
+                },
+            },
+            'required': ['filename', 'content_type', 'reason', 'source'],
+        },
+    },
 }
