@@ -233,6 +233,73 @@ curl -X PUT \
 
 ---
 
+### bouncer_request_presigned_batch
+**批量大檔案直傳**：一次呼叫取得 N 個 presigned PUT URL，client 各自直接 PUT，不過 Lambda。解決前端部署 10+ 檔案有大有小的問題。
+
+```bash
+# Step 1: 一次取得所有 presigned URL
+result=$(mcporter call bouncer bouncer_request_presigned_batch \
+  --args '{
+    "files": [
+      {"filename": "index.html", "content_type": "text/html"},
+      {"filename": "assets/index-xxx.js", "content_type": "application/javascript"},
+      {"filename": "assets/pdf.worker.min.mjs", "content_type": "application/javascript"}
+    ],
+    "reason": "ZTP Files 前端部署",
+    "source": "Private Bot (ZTP Files deploy)"
+  }')
+
+# Step 2: 各自 PUT（可並行）
+echo $result | python3 -c "
+import sys, json, subprocess
+data = json.load(sys.stdin)
+for f in data['files']:
+    subprocess.run(['curl', '-s', '-X', 'PUT',
+      '-H', f'Content-Type: {f[\"headers\"][\"Content-Type\"]}',
+      '--data-binary', f'@{f[\"filename\"]}',
+      f['presigned_url']])
+    print(f'Uploaded: {f[\"filename\"]} -> {f[\"s3_uri\"]}')
+"
+```
+
+**Parameters:**
+| 參數 | 必填 | 說明 |
+|------|------|------|
+| `files` | ✅ | `[{filename, content_type}]`，最多 50 個 |
+| `reason` | ✅ | 上傳原因 |
+| `source` | ✅ | 來源標識 |
+| `account` | ❌ | 目標帳號（預設主帳號）|
+| `expires_in` | ❌ | URL 有效期秒數（預設 900，min 60，max 3600）|
+
+**Response:**
+```json
+{
+  "status": "ready",
+  "batch_id": "batch-abc123",
+  "file_count": 3,
+  "files": [
+    {
+      "filename": "index.html",
+      "presigned_url": "https://...",
+      "s3_key": "2026-02-25/batch-abc123/index.html",
+      "s3_uri": "s3://bouncer-uploads-190825685292/...",
+      "method": "PUT",
+      "headers": {"Content-Type": "text/html"}
+    }
+  ],
+  "expires_at": "2026-02-25T07:00:00Z",
+  "bucket": "bouncer-uploads-190825685292"
+}
+```
+
+**特性：**
+- **不需審批**（只上傳到 staging bucket）
+- 所有檔案共用同一 `batch_id` prefix，方便後續 `s3 cp` 批量搬到正式 bucket
+- Duplicate filename 自動加 suffix（`_1`, `_2`, ...）
+- DynamoDB 單筆 batch audit record
+
+---
+
 ## Trust Session
 
 審批時選「🔓 信任10分鐘」，期間同 trust_scope 的操作自動執行。
