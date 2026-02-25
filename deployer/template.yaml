@@ -509,10 +509,11 @@ Resources:
                   # Download deploy script from S3 (before assume-role, uses CodeBuild's own creds)
                   # Source: deployer/scripts/sam_deploy.py | To update: make -C deployer upload-deploy-script
                   aws s3 cp "s3://${ARTIFACTS_BUCKET}/deployer-scripts/sam_deploy.py" /tmp/sam_deploy.py
-                  # Cross-account: assume role if TARGET_ROLE_ARN is set
-                  if [ -n "$TARGET_ROLE_ARN" ]; then
-                    echo "Assuming role $TARGET_ROLE_ARN for cross-account deploy..."
-                    CREDS=$(aws sts assume-role --role-arn "$TARGET_ROLE_ARN" --role-session-name "bouncer-deploy-${DEPLOY_ID}" --output json) || { echo "ERROR: Failed to assume role $TARGET_ROLE_ARN"; exit 1; }
+                  # Cross-account: assume role if TARGET_ROLE_ARN is set (non-empty after trim)
+                  TRIMMED_ROLE_ARN=$(echo "$TARGET_ROLE_ARN" | tr -d '[:space:]')
+                  if [ -n "$TRIMMED_ROLE_ARN" ]; then
+                    echo "Assuming role $TRIMMED_ROLE_ARN for cross-account deploy..."
+                    CREDS=$(aws sts assume-role --role-arn "$TRIMMED_ROLE_ARN" --role-session-name "bouncer-deploy-${DEPLOY_ID}" --output json) || { echo "ERROR: Failed to assume role $TRIMMED_ROLE_ARN"; exit 1; }
                     export AWS_ACCESS_KEY_ID=$(echo "$CREDS" | python3 -c "import sys,json; print(json.load(sys.stdin)['Credentials']['AccessKeyId'])")
                     export AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | python3 -c "import sys,json; print(json.load(sys.stdin)['Credentials']['SecretAccessKey'])")
                     export AWS_SESSION_TOKEN=$(echo "$CREDS" | python3 -c "import sys,json; print(json.load(sys.stdin)['Credentials']['SessionToken'])")
