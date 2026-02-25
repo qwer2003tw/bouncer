@@ -6973,7 +6973,7 @@ class TestAlreadyProcessedDisplay:
     @patch('app.update_message')
     @patch('app.answer_callback')
     def test_already_processed_uses_display_summary(self, mock_answer, mock_update, app_module):
-        """Already-processed callback uses display_summary when available"""
+        """Already-processed callback: only toast, original message preserved (not overwritten)"""
         request_id = 'display-summary-test-1'
         app_module.table.put_item(Item={
             'request_id': request_id,
@@ -7003,16 +7003,14 @@ class TestAlreadyProcessedDisplay:
         assert result['statusCode'] == 200
         mock_answer.assert_called_with('cb-ds-1', '⚠️ 此請求已處理過')
 
-        # Check the update_message call includes the display_summary
-        call_args = mock_update.call_args
-        message_text = call_args[0][1] if call_args[0] else call_args[1].get('text', '')
-        assert 'upload\\_batch' in message_text or 'upload_batch' in message_text
-        assert '245' in message_text
+        # Fix: update_message must NOT be called for already-handled requests
+        # Original message should be preserved; only a toast notification is shown
+        mock_update.assert_not_called()
 
     @patch('app.update_message')
     @patch('app.answer_callback')
     def test_already_processed_legacy_fallback(self, mock_answer, mock_update, app_module):
-        """Already-processed callback falls back to action-type logic for legacy items"""
+        """Already-processed callback: update_message NOT called (original message preserved)"""
         request_id = 'legacy-no-summary-1'
         app_module.table.put_item(Item={
             'request_id': request_id,
@@ -7039,16 +7037,15 @@ class TestAlreadyProcessedDisplay:
 
         result = app_module.lambda_handler(event, None)
         assert result['statusCode'] == 200
+        mock_answer.assert_called_with('cb-legacy-1', '⚠️ 此請求已處理過')
 
-        # Check the update_message was called and shows the command
-        call_args = mock_update.call_args
-        message_text = call_args[0][1] if call_args[0] else call_args[1].get('text', '')
-        assert 'aws s3 ls' in message_text
+        # Fix: update_message must NOT be called — original message is preserved
+        mock_update.assert_not_called()
 
     @patch('app.update_message')
     @patch('app.answer_callback')
     def test_already_processed_legacy_upload_batch(self, mock_answer, mock_update, app_module):
-        """Legacy upload_batch items (no display_summary) still show file count"""
+        """Legacy upload_batch already-processed: update_message NOT called"""
         request_id = 'legacy-batch-1'
         app_module.table.put_item(Item={
             'request_id': request_id,
@@ -7076,11 +7073,10 @@ class TestAlreadyProcessedDisplay:
 
         result = app_module.lambda_handler(event, None)
         assert result['statusCode'] == 200
+        mock_answer.assert_called_with('cb-legacy-batch-1', '⚠️ 此請求已處理過')
 
-        call_args = mock_update.call_args
-        message_text = call_args[0][1] if call_args[0] else call_args[1].get('text', '')
-        assert '5' in message_text
-        assert 'upload' in message_text.lower()
+        # Fix: update_message must NOT be called — original message is preserved
+        mock_update.assert_not_called()
 
     @patch('app.update_message')
     @patch('app.answer_callback')

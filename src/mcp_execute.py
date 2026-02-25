@@ -7,6 +7,7 @@ Also includes grant-session tools: request_grant, grant_status, revoke_grant.
 
 import json
 import os
+import re
 import secrets
 import time
 from dataclasses import dataclass
@@ -45,6 +46,41 @@ from constants import (
 
 # Shadow mode 表名（用於收集智慧審批數據）
 SHADOW_TABLE_NAME = os.environ.get('SHADOW_TABLE', 'bouncer-shadow-approvals')
+
+
+# =============================================================================
+# SEC-003: Unicode 正規化
+# =============================================================================
+
+# 零寬 / 不可見字元（直接移除）
+_INVISIBLE_CHARS_RE = re.compile(
+    r'[\u200b\u200c\u200d\ufeff\u2060\u180e\u00ad]'
+)
+
+# Unicode 空白字元（替換為普通空白）
+_UNICODE_SPACE_RE = re.compile(
+    r'[\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\u2003\u2002\u2001]'
+)
+
+
+def _normalize_command(cmd: str) -> str:
+    """
+    SEC-003: 正規化命令字串，防止 Unicode 注入繞過：
+    1. 移除零寬 / 不可見字元
+    2. 替換 Unicode 空白為普通空白
+    3. 折疊多餘空白
+    4. strip 前後空白
+    """
+    if not cmd:
+        return cmd
+    # 1. 移除不可見字元
+    cmd = _INVISIBLE_CHARS_RE.sub('', cmd)
+    # 2. Unicode 空白 → 普通空白
+    cmd = _UNICODE_SPACE_RE.sub(' ', cmd)
+    # 3. 折疊多餘空白
+    cmd = re.sub(r' {2,}', ' ', cmd)
+    # 4. strip
+    return cmd.strip()
 
 
 def _safe_risk_category(smart_decision):
@@ -150,6 +186,7 @@ def _parse_execute_request(req_id, arguments: dict) -> 'dict | ExecuteContext':
     validation failure (caller should return immediately).
     """
     command = str(arguments.get('command', '')).strip()
+    command = _normalize_command(command)  # SEC-003: normalize unicode before any check
     reason = str(arguments.get('reason', 'No reason provided'))
     source = arguments.get('source', None)
     trust_scope = str(arguments.get('trust_scope', '')).strip()

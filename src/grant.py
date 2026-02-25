@@ -400,6 +400,8 @@ def try_use_grant_command(
 
     防並發：使用 ConditionExpression 確保原子性。
 
+    SEC-009: allow_repeat=True 的危險命令限制最多執行 3 次。
+
     Args:
         grant_id: Grant ID
         normalized_cmd: 已正規化的命令
@@ -408,8 +410,26 @@ def try_use_grant_command(
     Returns:
         True 如果成功標記, False 如果已用過或並發衝突
     """
+    _DANGEROUS_REPEAT_LIMIT = 3
+
     try:
         if allow_repeat:
+            # SEC-009: 危險命令檢查 — 即使 allow_repeat 也限制最多 3 次
+            from commands import is_dangerous
+            if is_dangerous(normalized_cmd):
+                # 讀取目前計數
+                try:
+                    result = table.get_item(Key={'request_id': grant_id})
+                    grant_item = result.get('Item', {})
+                    used_commands = grant_item.get('used_commands', {})
+                    current_count = int(used_commands.get(normalized_cmd, 0))
+                    if current_count >= _DANGEROUS_REPEAT_LIMIT:
+                        print(f"[GRANT][SEC-009] Dangerous command repeat limit reached: {normalized_cmd[:80]!r}")
+                        return False
+                except Exception as e:
+                    print(f"[GRANT][SEC-009] Failed to read repeat count: {e}")
+                    return False
+
             # 允許重複：只增加計數 + 總次數
             table.update_item(
                 Key={'request_id': grant_id},
