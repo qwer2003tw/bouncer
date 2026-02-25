@@ -8,7 +8,9 @@ Follows the same dataclass pipeline style as mcp_upload.py (UploadContext).
 import json
 import re
 import time
+import uuid
 from dataclasses import dataclass, field
+from typing import List
 
 import boto3
 from botocore.exceptions import ClientError
@@ -348,3 +350,270 @@ def mcp_tool_request_presigned(req_id: str, arguments: dict) -> dict:
 
     # Phase 4: generate URL + write audit record
     return _generate_presigned_url(ctx)
+
+
+# =============================================================================
+# Presigned Batch Pipeline — Context + Step Functions
+# =============================================================================
+
+_BATCH_MAX_FILES = 50
+
+
+@dataclass
+class PresignedBatchContext:
+    """Pipeline context for mcp_tool_request_presigned_batch."""
+
+    req_id: str
+    files: List[dict]          # validated [{filename, content_type}]
+    reason: str
+    source: str
+    account_id: str
+    expires_in: int
+    # Resolved in _resolve_batch_target
+    batch_id: str = field(default="")
+    bucket: str = field(default="")
+    date_str: str = field(default="")
+
+
+def _parse_presigned_batch_request(
+    req_id: str, arguments: dict
+) -> "PresignedBatchContext | dict":
+    """Parse and validate batch request arguments."""
+
+    def _error(msg: str) -> dict:
+        return mcp_result(
+            req_id,
+            {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps({"status": "error", "error": msg}),
+                    }
+                ],
+                "isError": True,
+            },
+        )
+
+    # --- required string fields ---
+    reason = str(arguments.get("reason", "")).strip()
+    source = str(arguments.get("source", "")).strip()
+    account_id = str(
+        arguments.get("account", DEFAULT_ACCOUNT_ID or "")
+    ).strip() or (DEFAULT_ACCOUNT_ID or "")
+
+    if not reason:
+        return _error("reason is required")
+
+    # --- expires_in ---
+    try:
+        expires_in = int(arguments.get("expires_in", _DEFAULT_EXPIRES_IN))
+    except (TypeError, ValueError):
+        return _error("expires_in must be an integer")
+
+    if expires_in <= 0:
+        return _error("expires_in must be a positive integer")
+    if expires_in < _MIN_EXPIRES_IN:
+        return _error(
+            f"expires_in must be at least {_MIN_EXPIRES_IN} seconds"
+        )
+    if expires_in > _MAX_EXPIRES_IN:
+        return _error(
+            f"expires_in exceeds maximum allowed value of {_MAX_EXPIRES_IN} seconds"
+        )
+
+    # --- files array ---
+    files_raw = arguments.get("files")
+    if not isinstance(files_raw, list) or len(files_raw) == 0:
+        return _error("files must be a non-empty array")
+
+    if len(files_raw) > _BATCH_MAX_FILES:
+        return _error(
+            f"files exceeds maximum of {_BATCH_MAX_FILES} items"
+        )
+
+    validated_files: List[dict] = []
+    for i, entry in enumerate(files_raw):
+        if not isinstance(entry, dict):
+            return _error(f"files[{i}] must be an object")
+
+        fn = str(entry.get("filename", "")).strip()
+        ct = str(entry.get("content_type", "")).strip()
+
+        if not fn:
+            return _error(f"files[{i}].filename is required")
+        if not ct:
+            return _error(f"files[{i}].content_type is required")
+
+        validated_files.append({"filename": fn, "content_type": ct})
+
+    return PresignedBatchContext(
+        req_id=req_id,
+        files=validated_files,
+        reason=reason,
+        source=source,
+        account_id=account_id,
+        expires_in=expires_in,
+    )
+
+
+def _resolve_batch_target(ctx: PresignedBatchContext) -> None:
+    """Assign batch_id, bucket, date_str.  Mutates *ctx* in-place."""
+    ctx.batch_id = f"batch-{uuid.uuid4().hex[:12]}"
+    ctx.date_str = time.strftime("%Y-%m-%d")
+    ctx.bucket = f"bouncer-uploads-{ctx.account_id}"
+
+
+def _generate_presigned_batch_urls(ctx: PresignedBatchContext) -> dict:
+    """Generate presigned URLs for all files and write one audit record."""
+
+    def _error(msg: str) -> dict:
+        return mcp_result(
+            ctx.req_id,
+            {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps({"status": "error", "error": msg}),
+                    }
+                ],
+                "isError": True,
+            },
+        )
+
+    s3_client = boto3.client("s3")
+    now = int(time.time())
+    expires_at_ts = now + ctx.expires_in
+    expires_at_iso = time.strftime(
+        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(expires_at_ts)
+    )
+
+    file_results = []
+    seen_filenames: set = set()
+
+    for entry in ctx.files:
+        raw_filename = entry["filename"]
+        content_type = entry["content_type"]
+
+        # Deduplicate: append index suffix if filename already seen
+        safe_fn = _sanitize_filename(raw_filename)
+        original_safe = safe_fn
+        suffix_idx = 1
+        while safe_fn in seen_filenames:
+            base, _, ext = original_safe.rpartition(".")
+            if base:
+                safe_fn = f"{base}_{suffix_idx}.{ext}"
+            else:
+                safe_fn = f"{original_safe}_{suffix_idx}"
+            suffix_idx += 1
+        seen_filenames.add(safe_fn)
+
+        s3_key = f"{ctx.date_str}/{ctx.batch_id}/{safe_fn}"
+
+        try:
+            presigned_url = s3_client.generate_presigned_url(
+                "put_object",
+                Params={
+                    "Bucket": ctx.bucket,
+                    "Key": s3_key,
+                    "ContentType": content_type,
+                },
+                ExpiresIn=ctx.expires_in,
+            )
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code", "Unknown")
+            msg = exc.response.get("Error", {}).get("Message", str(exc))
+            return _error(f"S3 error [{code}]: {msg}")
+        except Exception as exc:
+            return _error(f"Failed to generate presigned URL for {raw_filename}: {exc}")
+
+        file_results.append(
+            {
+                "filename": raw_filename,
+                "presigned_url": presigned_url,
+                "s3_key": s3_key,
+                "s3_uri": f"s3://{ctx.bucket}/{s3_key}",
+                "method": "PUT",
+                "headers": {"Content-Type": content_type},
+            }
+        )
+
+    # Write single batch audit record
+    audit_item = {
+        "request_id": ctx.batch_id,
+        "action": "presigned_upload_batch",
+        "status": "urls_issued",
+        "filenames": [f["filename"] for f in ctx.files],
+        "file_count": len(ctx.files),
+        "bucket": ctx.bucket,
+        "source": ctx.source,
+        "reason": ctx.reason,
+        "account_id": ctx.account_id,
+        "expires_at": expires_at_ts,
+        "created_at": now,
+        "ttl": expires_at_ts + 60,
+    }
+    table.put_item(Item=audit_item)
+
+    payload = {
+        "status": "ready",
+        "batch_id": ctx.batch_id,
+        "file_count": len(file_results),
+        "files": file_results,
+        "expires_at": expires_at_iso,
+        "bucket": ctx.bucket,
+    }
+    return mcp_result(
+        ctx.req_id,
+        {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps(payload),
+                }
+            ]
+        },
+    )
+
+
+# =============================================================================
+# Public MCP tool entry-point (batch)
+# =============================================================================
+
+
+def mcp_tool_request_presigned_batch(req_id: str, arguments: dict) -> dict:
+    """MCP tool: bouncer_request_presigned_batch.
+
+    Issues presigned S3 PUT URLs for up to 50 files in a single call.
+    All files share the same batch_id prefix in the staging bucket.
+    No human approval is required.
+    """
+    # Phase 1: parse & validate
+    ctx = _parse_presigned_batch_request(req_id, arguments)
+    if not isinstance(ctx, PresignedBatchContext):
+        return ctx  # validation error dict
+
+    # Phase 2: rate limit check
+    if ctx.source:
+        try:
+            check_rate_limit(ctx.source)
+        except (RateLimitExceeded, PendingLimitExceeded) as exc:
+            return mcp_result(
+                req_id,
+                {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(
+                                {"status": "error", "error": str(exc)}
+                            ),
+                        }
+                    ],
+                    "isError": True,
+                },
+            )
+
+    # Phase 3: resolve batch target (batch_id / bucket / date_str)
+    _resolve_batch_target(ctx)
+
+    # Phase 4: generate URLs + write audit record
+    return _generate_presigned_batch_urls(ctx)
