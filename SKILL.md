@@ -179,6 +179,60 @@ mcporter call bouncer bouncer_upload_batch \
 
 ---
 
+### bouncer_request_presigned
+**大檔案直傳**：生成 S3 presigned PUT URL，client 直接 PUT，不過 Lambda（解除 500KB 限制）。
+
+```bash
+# Step 1: 取得 presigned URL
+result=$(mcporter call bouncer bouncer_request_presigned \
+  --args '{
+    "filename": "assets/pdf.worker.min.mjs",
+    "content_type": "application/javascript",
+    "reason": "ZTP Files 前端部署",
+    "source": "Private Bot (ZTP Files deploy)"
+  }')
+
+# Step 2: 直接 PUT（不過 Lambda）
+presigned_url=$(echo $result | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('presigned_url',''))")
+curl -X PUT \
+  -H "Content-Type: application/javascript" \
+  --data-binary @pdf.worker.min.mjs \
+  "$presigned_url"
+```
+
+**Parameters:**
+| 參數 | 必填 | 說明 |
+|------|------|------|
+| `filename` | ✅ | 目標檔名（含路徑，如 `assets/foo.js`）|
+| `content_type` | ✅ | MIME type |
+| `reason` | ✅ | 上傳原因 |
+| `source` | ✅ | 來源標識 |
+| `account` | ❌ | 目標帳號（預設主帳號）|
+| `expires_in` | ❌ | URL 有效期秒數（預設 900，min 60，max 3600）|
+
+**Response:**
+```json
+{
+  "status": "ready",
+  "presigned_url": "https://...",
+  "s3_key": "2026-02-25/{request_id}/assets/foo.js",
+  "s3_uri": "s3://bouncer-uploads-190825685292/...",
+  "request_id": "abc123",
+  "expires_at": "2026-02-25T06:00:00Z",
+  "method": "PUT",
+  "headers": {"Content-Type": "application/javascript"}
+}
+```
+
+**特性：**
+- **不需審批**（只上傳到 staging bucket）
+- Staging bucket 固定用主帳號（`bouncer-uploads-{DEFAULT_ACCOUNT_ID}`）
+- 後續搬到正式 bucket 仍需 `bouncer_execute s3 cp`（那步才審批）
+- 寫 DynamoDB audit record（`action=presigned_upload`, `status=url_issued`）
+- filename sanitization 保留子目錄結構（`assets/foo.js` 完整保留）
+
+---
+
 ## Trust Session
 
 審批時選「🔓 信任10分鐘」，期間同 trust_scope 的操作自動執行。
