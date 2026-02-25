@@ -315,6 +315,376 @@ def _generate_presigned_url(ctx: PresignedContext) -> dict:
 
 
 # =============================================================================
+# Batch Presigned Upload Pipeline
+# =============================================================================
+
+_MAX_FILES_PER_BATCH = 50
+
+
+@dataclass
+class PresignedBatchContext:
+    """Pipeline context for mcp_tool_request_presigned_batch."""
+
+    req_id: str
+    files: list  # list of {filename, content_type}
+    reason: str
+    source: str
+    account_id: str
+    expires_in: int
+    # Resolved later
+    batch_id: str = field(default="")
+    bucket: str = field(default="")
+
+
+def _parse_presigned_batch_request(
+    req_id: str, arguments: dict
+) -> "PresignedBatchContext | dict":
+    """Parse and validate batch request arguments."""
+    files = arguments.get("files")
+    reason = str(arguments.get("reason", "")).strip()
+    source = str(arguments.get("source", "")).strip()
+    account_id = str(arguments.get("account", DEFAULT_ACCOUNT_ID or "")).strip()
+
+    # Validate required fields
+    for param, value in [("reason", reason), ("source", source)]:
+        if not value:
+            return mcp_result(
+                req_id,
+                {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(
+                                {"status": "error", "error": f"{param} is required"}
+                            ),
+                        }
+                    ],
+                    "isError": True,
+                },
+            )
+
+    if not files:
+        return mcp_result(
+            req_id,
+            {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps(
+                            {"status": "error", "error": "files is required and must not be empty"}
+                        ),
+                    }
+                ],
+                "isError": True,
+            },
+        )
+
+    if not isinstance(files, list) or len(files) == 0:
+        return mcp_result(
+            req_id,
+            {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps(
+                            {"status": "error", "error": "files is required and must not be empty"}
+                        ),
+                    }
+                ],
+                "isError": True,
+            },
+        )
+
+    if len(files) > _MAX_FILES_PER_BATCH:
+        return mcp_result(
+            req_id,
+            {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps(
+                            {
+                                "status": "error",
+                                "error": (
+                                    f"files exceeds maximum allowed count "
+                                    f"of {_MAX_FILES_PER_BATCH}"
+                                ),
+                            }
+                        ),
+                    }
+                ],
+                "isError": True,
+            },
+        )
+
+    # Validate each file entry has filename and content_type
+    for i, f in enumerate(files):
+        if not isinstance(f, dict):
+            return mcp_result(
+                req_id,
+                {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(
+                                {"status": "error", "error": f"files[{i}] must be an object"}
+                            ),
+                        }
+                    ],
+                    "isError": True,
+                },
+            )
+        for field_name in ("filename", "content_type"):
+            if not str(f.get(field_name, "")).strip():
+                return mcp_result(
+                    req_id,
+                    {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": json.dumps(
+                                    {
+                                        "status": "error",
+                                        "error": f"files[{i}].{field_name} is required",
+                                    }
+                                ),
+                            }
+                        ],
+                        "isError": True,
+                    },
+                )
+
+    try:
+        expires_in = int(arguments.get("expires_in", _DEFAULT_EXPIRES_IN))
+    except (TypeError, ValueError):
+        return mcp_result(
+            req_id,
+            {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps(
+                            {"status": "error", "error": "expires_in must be an integer"}
+                        ),
+                    }
+                ],
+                "isError": True,
+            },
+        )
+
+    if expires_in > _MAX_EXPIRES_IN:
+        return mcp_result(
+            req_id,
+            {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps(
+                            {
+                                "status": "error",
+                                "error": (
+                                    f"expires_in exceeds maximum allowed value "
+                                    f"of {_MAX_EXPIRES_IN} seconds"
+                                ),
+                            }
+                        ),
+                    }
+                ],
+                "isError": True,
+            },
+        )
+
+    if expires_in <= 0:
+        return mcp_result(
+            req_id,
+            {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps(
+                            {"status": "error", "error": "expires_in must be a positive integer"}
+                        ),
+                    }
+                ],
+                "isError": True,
+            },
+        )
+
+    if expires_in < _MIN_EXPIRES_IN:
+        return mcp_result(
+            req_id,
+            {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps(
+                            {
+                                "status": "error",
+                                "error": f"expires_in must be at least {_MIN_EXPIRES_IN} seconds",
+                            }
+                        ),
+                    }
+                ],
+                "isError": True,
+            },
+        )
+
+    return PresignedBatchContext(
+        req_id=req_id,
+        files=files,
+        reason=reason,
+        source=source,
+        account_id=account_id or DEFAULT_ACCOUNT_ID or "",
+        expires_in=expires_in,
+    )
+
+
+def _generate_presigned_batch(ctx: PresignedBatchContext) -> dict:
+    """Generate presigned PUT URLs for all files and write a batch audit record.
+
+    Returns an MCP result dict on success, or an MCP error dict on failure.
+    """
+    date_str = time.strftime("%Y-%m-%d")
+    bucket = f"bouncer-uploads-{ctx.account_id}"
+
+    try:
+        s3_client = boto3.client("s3")
+        file_results = []
+        for f in ctx.files:
+            safe_filename = _sanitize_filename(str(f["filename"]))
+            s3_key = f"{date_str}/{ctx.batch_id}/{safe_filename}"
+            content_type = str(f["content_type"])
+            presigned_url = s3_client.generate_presigned_url(
+                "put_object",
+                Params={
+                    "Bucket": bucket,
+                    "Key": s3_key,
+                    "ContentType": content_type,
+                },
+                ExpiresIn=ctx.expires_in,
+            )
+            file_results.append(
+                {
+                    "filename": safe_filename,
+                    "presigned_url": presigned_url,
+                    "s3_key": s3_key,
+                    "s3_uri": f"s3://{bucket}/{s3_key}",
+                    "method": "PUT",
+                    "headers": {"Content-Type": content_type},
+                }
+            )
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "Unknown")
+        msg = exc.response.get("Error", {}).get("Message", str(exc))
+        return mcp_result(
+            ctx.req_id,
+            {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps(
+                            {"status": "error", "error": f"S3 error [{code}]: {msg}"}
+                        ),
+                    }
+                ],
+                "isError": True,
+            },
+        )
+    except Exception as exc:
+        return mcp_result(
+            ctx.req_id,
+            {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps(
+                            {"status": "error", "error": f"Failed to generate presigned URLs: {exc}"}
+                        ),
+                    }
+                ],
+                "isError": True,
+            },
+        )
+
+    now = int(time.time())
+    expires_at_ts = now + ctx.expires_in
+    expires_at_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(expires_at_ts))
+
+    # Write DynamoDB batch audit record
+    audit_item = {
+        "request_id": ctx.batch_id,
+        "action": "presigned_upload_batch",
+        "status": "urls_issued",
+        "filenames": [str(f["filename"]) for f in ctx.files],
+        "file_count": len(ctx.files),
+        "bucket": bucket,
+        "source": ctx.source,
+        "reason": ctx.reason,
+        "account_id": ctx.account_id,
+        "expires_at": expires_at_ts,
+        "created_at": now,
+        "ttl": expires_at_ts + 60,
+    }
+    table.put_item(Item=audit_item)
+
+    payload = {
+        "status": "ready",
+        "batch_id": ctx.batch_id,
+        "file_count": len(file_results),
+        "files": file_results,
+        "expires_at": expires_at_iso,
+        "bucket": bucket,
+    }
+    return mcp_result(
+        ctx.req_id,
+        {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps(payload),
+                }
+            ]
+        },
+    )
+
+
+def mcp_tool_request_presigned_batch(req_id: str, arguments: dict) -> dict:
+    """MCP tool: bouncer_request_presigned_batch.
+
+    Issues presigned S3 PUT URLs for multiple files in a single batch.
+    All files share the same batch_id prefix.  No human approval required.
+    """
+    # Phase 1: parse & validate
+    ctx = _parse_presigned_batch_request(req_id, arguments)
+    if not isinstance(ctx, PresignedBatchContext):
+        return ctx  # validation error dict
+
+    # Phase 2: rate limit check
+    if ctx.source:
+        try:
+            check_rate_limit(ctx.source)
+        except (RateLimitExceeded, PendingLimitExceeded) as e:
+            return mcp_result(
+                req_id,
+                {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps({"status": "error", "error": str(e)}),
+                        }
+                    ],
+                    "isError": True,
+                },
+            )
+
+    # Phase 3: generate batch_id and bucket
+    ctx.batch_id = generate_request_id("presigned_batch")
+
+    # Phase 4: generate URLs + write audit record
+    return _generate_presigned_batch(ctx)
+
+
+# =============================================================================
 # Public MCP tool entry-point
 # =============================================================================
 

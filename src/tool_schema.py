@@ -432,6 +432,55 @@ MCP_TOOLS = {
             'required': ['filename', 'content_type', 'reason', 'source'],
         },
     },
+    'bouncer_request_presigned_batch': {
+        'description': (
+            '為多個檔案一次性生成 presigned PUT URL（批次版本）。'
+            '所有檔案共用同一個 batch_id prefix，不需審批。'
+            '適合前端部署等需要上傳多個大檔案的場景。'
+        ),
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'files': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'filename': {
+                                'type': 'string',
+                                'description': '目標檔名（含路徑，例如 assets/pdf.worker.min.mjs）',
+                            },
+                            'content_type': {
+                                'type': 'string',
+                                'description': 'MIME type（例如 application/javascript）',
+                            },
+                        },
+                        'required': ['filename', 'content_type'],
+                    },
+                    'description': '要生成 presigned URL 的檔案清單（最多 50 個）',
+                    'maxItems': 50,
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': '上傳原因',
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '請求來源標識（例如 Private Bot (deploy)）',
+                },
+                'account': {
+                    'type': 'string',
+                    'description': '目標帳號 ID（預設 DEFAULT_ACCOUNT_ID）',
+                },
+                'expires_in': {
+                    'type': 'integer',
+                    'description': 'presigned URL 有效期秒數（預設 900，min 60，max 3600）',
+                    'default': 900,
+                },
+            },
+            'required': ['files', 'reason', 'source'],
+        },
+    },
     'bouncer_upload_batch': {
         'description': '批量上傳多個檔案到 S3，一次審批。如果有活躍的 Trust Session，可自動上傳。',
         'parameters': {
