@@ -261,34 +261,6 @@ Resources:
   # SEC-004b: Staging bucket with lifecycle rules for automatic cleanup.
   # - pending/ prefix files expire after 7 days (covers typical review window)
   # - All other files expire after 30 days (safety net for orphaned uploads)
-  StagingUploadsBucket:
-    Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      BucketName: !Sub "bouncer-uploads-${DefaultAccountId}"
-      VersioningConfiguration:
-        Status: Suspended
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-      LifecycleConfiguration:
-        Rules:
-          - Id: CleanStagingFiles
-            Status: Enabled
-            Prefix: pending/
-            ExpirationInDays: 7
-          - Id: CleanExpiredUploads
-            Status: Enabled
-            ExpirationInDays: 30
-      Tags:
-        - Key: Project
-          Value: Bouncer
-        - Key: auto-delete
-          Value: "no"
-
   # ============================================================
   # Lambda - 主函數
   # ============================================================
