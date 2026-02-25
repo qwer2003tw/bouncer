@@ -4,7 +4,31 @@ Bouncer - Grant Session 模組
 
 Grant Session 允許 Agent 預先申請一批命令的執行權限，
 經人工審批後，Agent 可以在 TTL 內自動執行已授權的命令。
+
+Pattern Matching（Approach B — 積極）
+--------------------------------------
+granted_commands 中每一條可以是：
+  1. 精確字串（原有行為）
+  2. Glob pattern：支援 * 和 **（fnmatch 語意）
+  3. Named placeholder：{uuid}, {date}, {any}, {bucket}, {key}, {name}, ...
+
+Named placeholder 語意：
+  {uuid}    → 12-36 位 hex 字元（含連字號，例如 UUID v4）
+  {date}    → YYYY-MM-DD 格式日期
+  {any}     → 任意非空白字元序列（不跨空格）
+  {bucket}  → 任意非空白字元（S3 bucket/key 友善，不含空格）
+  {key}     → 同 {any}，S3 key 語意（允許 / 及特殊字元）
+  {name}    → 同 {any}，通用命名語意
+  {<other>} → 任意非空白字元序列（與 {any} 相同）
+
+** 在 S3 路徑等場合匹配任意字串（含空白、/），
+*  匹配任意非空白字元序列（不含空格）。
+
+範例：
+  aws s3 cp s3://bouncer-uploads-190825685292/{date}/{uuid}/*.html \\
+      s3://ztp-files-dev-frontendbucket-nvvimv31xp3v/*.html
 """
+import re
 import secrets
 import time
 from typing import Optional, Dict, List, Any
@@ -22,6 +46,8 @@ from constants import (
 
 __all__ = [
     'normalize_command',
+    'compile_pattern',
+    'match_pattern',
     'create_grant_request',
     'get_grant_session',
     'approve_grant',
@@ -31,6 +57,115 @@ __all__ = [
     'try_use_grant_command',
     'get_grant_status',
 ]
+
+# ---------------------------------------------------------------------------
+# Named placeholder regex map
+# Each value is a raw regex fragment (no anchors, no groups needed by user).
+# ---------------------------------------------------------------------------
+_PLACEHOLDER_PATTERNS: Dict[str, str] = {
+    # UUID: hex chars + optional hyphens, 12-36 chars total
+    'uuid':   r'[0-9a-f][0-9a-f\-]{10,34}[0-9a-f]',
+    # ISO date: YYYY-MM-DD
+    'date':   r'\d{4}-\d{2}-\d{2}',
+    # Generic non-whitespace sequences
+    'any':    r'\S+',
+    'bucket': r'\S+',
+    'key':    r'\S+',
+    'name':   r'\S+',
+}
+_DEFAULT_PLACEHOLDER_RE = r'\S+'  # fallback for unknown placeholder names
+
+
+def _is_pattern(s: str) -> bool:
+    """判斷字串是否含有 pattern 語法（glob 萬用字元或 named placeholder）。"""
+    return '*' in s or ('{' in s and '}' in s)
+
+
+def compile_pattern(pattern: str) -> re.Pattern:
+    """將 pattern 字串編譯為正規表示式物件。
+
+    支援：
+      - Named placeholder：{uuid}, {date}, {any}, {bucket}, {key}, {name},
+        以及任意未知名稱（fallback 為 \\S+）
+      - Glob wildcards：** 匹配任意字元（含空白、/）；* 匹配任意非空白序列
+
+    Args:
+        pattern: 原始 pattern 字串（應已正規化，即全小寫、空白壓縮）
+
+    Returns:
+        編譯後的 re.Pattern，使用全字串匹配（re.IGNORECASE）
+
+    Raises:
+        re.error: 如果最終 regex 編譯失敗（不應發生於合法 pattern）
+    """
+    # Step 1: 先把 named placeholder 替換為 sentinel，避免後續轉義干擾
+    # 格式：{name}  → 只允許合法識別符（字母 + 底線）
+    placeholder_re = re.compile(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}')
+
+    parts: List[str] = []
+    last_end = 0
+
+    for m in placeholder_re.finditer(pattern):
+        # 把 placeholder 前面的文字先 regex-escape，再處理 glob
+        before = pattern[last_end:m.start()]
+        parts.append(_glob_to_regex(before))
+        # 把 placeholder 轉為對應 regex fragment
+        name = m.group(1).lower()
+        frag = _PLACEHOLDER_PATTERNS.get(name, _DEFAULT_PLACEHOLDER_RE)
+        parts.append(f'(?:{frag})')
+        last_end = m.end()
+
+    # 剩餘尾部
+    parts.append(_glob_to_regex(pattern[last_end:]))
+
+    full_regex = ''.join(parts)
+    return re.compile(f'^{full_regex}$', re.IGNORECASE)
+
+
+def _glob_to_regex(text: str) -> str:
+    """將 glob 語法片段（含 * 和 **）轉為 regex 字串（不含錨點）。
+
+    處理順序：
+      1. 先 re.escape 整個字串（保護所有特殊字元）
+      2. 將 escaped ** → 匹配任意字元（含空白）
+      3. 將 escaped *  → 匹配非空白序列
+
+    Note: re.escape('**') == r'\\*\\*'，re.escape('*') == r'\\*'
+    """
+    if not text:
+        return ''
+
+    # Replace ** first (before single *), then *
+    escaped = re.escape(text)
+    # re.escape turns * into \* and ** into \*\*
+    # Replace \*\* → .*  (match anything including spaces and slashes)
+    escaped = escaped.replace(r'\*\*', '.*')
+    # Replace remaining \* → \S* (match non-whitespace, 0 or more)
+    escaped = escaped.replace(r'\*', r'\S*')
+    return escaped
+
+
+def match_pattern(pattern: str, normalized_cmd: str) -> bool:
+    """判斷正規化命令是否符合 pattern。
+
+    Pattern 會被 compile_pattern 編譯後與命令做全字串比對。
+    如果 pattern 不含任何 pattern 語法，退化為 exact match（等同 ==）。
+
+    Args:
+        pattern: grant pattern（已正規化）
+        normalized_cmd: 待比對的正規化命令
+
+    Returns:
+        True 如果匹配，False 否則
+    """
+    try:
+        if not _is_pattern(pattern):
+            return pattern == normalized_cmd
+        compiled = compile_pattern(pattern)
+        return bool(compiled.match(normalized_cmd))
+    except Exception as e:
+        print(f"[GRANT] match_pattern error for pattern={pattern!r}: {e}")
+        return False
 
 
 def normalize_command(command: str) -> str:
@@ -374,18 +509,31 @@ def revoke_grant(grant_id: str) -> bool:
 def is_command_in_grant(normalized_cmd: str, grant: Dict) -> bool:
     """檢查正規化命令是否在 Grant 授權清單中
 
-    使用 exact match（正規化後比較）。
+    比對策略（Approach B — 積極）：
+      1. 先做 O(1) exact match（向後相容，效能最佳）
+      2. Exact match 不命中時，逐一對每條 granted pattern 做 match_pattern()
+         - 支援 glob（* / **）及 named placeholder（{uuid}/{date}/{any}/...）
 
     Args:
         normalized_cmd: 已正規化的命令
         grant: Grant session dict
 
     Returns:
-        命令是否在授權清單
+        命令是否在授權清單（包含 pattern 匹配）
     """
     try:
         granted_commands = grant.get('granted_commands', [])
-        return normalized_cmd in granted_commands
+
+        # Fast path: exact match
+        if normalized_cmd in granted_commands:
+            return True
+
+        # Pattern match path
+        for pat in granted_commands:
+            if _is_pattern(pat) and match_pattern(pat, normalized_cmd):
+                return True
+
+        return False
     except Exception as e:
         print(f"[GRANT] is_command_in_grant error: {e}")
         return False
