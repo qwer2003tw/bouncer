@@ -328,7 +328,9 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
 
     # Upload content to S3 staging (pending/) BEFORE writing to DDB
     # This avoids storing large base64 content directly in DynamoDB (400KB limit).
-    staging_bucket = f"bouncer-uploads-{ctx.target_account_id}"
+    # Staging bucket 固定用主帳號 bucket（Lambda IAM policy 只允許此 bucket）
+    # target_account_id 是執行命令的帳號，staging 與之無關
+    staging_bucket = f"bouncer-uploads-{DEFAULT_ACCOUNT_ID}"
     content_s3_key = f"pending/{ctx.request_id}/{ctx.filename or ctx.legacy_key or 'file'}"
     try:
         content_bytes = _base64.b64decode(ctx.content_b64)
@@ -766,24 +768,9 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
 
     # Upload each file to S3 staging BEFORE writing to DDB.
     # This avoids storing base64 content in DynamoDB items (400KB limit).
-    staging_bucket = bucket  # same bucket, different prefix
-    # Use assume_role credentials if available (e.g. BouncerRole has S3 access)
-    if assume_role:
-        import boto3 as _boto3_staging
-        _sts_staging = _boto3_staging.client('sts')
-        _stage_creds = _sts_staging.assume_role(
-            RoleArn=assume_role,
-            RoleSessionName='bouncer-batch-staging',
-            DurationSeconds=900,
-        )['Credentials']
-        s3_staging = _boto3_staging.client(
-            's3',
-            aws_access_key_id=_stage_creds['AccessKeyId'],
-            aws_secret_access_key=_stage_creds['SecretAccessKey'],
-            aws_session_token=_stage_creds['SessionToken'],
-        )
-    else:
-        s3_staging = boto3.client('s3')
+    # Staging bucket 固定用主帳號 bucket（Lambda IAM policy 只允許此 bucket）
+    staging_bucket = f"bouncer-uploads-{DEFAULT_ACCOUNT_ID}"
+    s3_staging = boto3.client('s3')
     files_manifest = []
     staged_keys = []  # track for rollback on failure
     for pf in processed_files:
@@ -888,7 +875,6 @@ def execute_upload(request_id: str, approver: str) -> dict:
         key = item.get('key')
         content_type = item.get('content_type', 'application/octet-stream')
         assume_role_arn = item.get('assume_role')
-        account_id = item.get('account_id', '')
 
         # Support both old (content) and new (content_s3_key) formats
         content_s3_key = item.get('content_s3_key')
@@ -914,7 +900,8 @@ def execute_upload(request_id: str, approver: str) -> dict:
 
         if content_s3_key:
             # New path: S3-to-S3 copy (no download needed)
-            staging_bucket = f"bouncer-uploads-{account_id}"
+            # Staging bucket 固定用主帳號 bucket（與 submit 時一致）
+            staging_bucket = f"bouncer-uploads-{DEFAULT_ACCOUNT_ID}"
             s3.copy_object(
                 CopySource={'Bucket': staging_bucket, 'Key': content_s3_key},
                 Bucket=bucket,

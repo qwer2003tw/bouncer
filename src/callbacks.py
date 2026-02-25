@@ -675,9 +675,11 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
                 from utils import generate_request_id as _gen_id
                 fkey = f"{date_str}/{_gen_id('batch')}/{fname}"
                 if s3_key:
-                    # New path: S3-to-S3 copy from staging
+                    # New path: S3-to-S3 copy from staging bucket (主帳號) to target bucket
+                    from constants import DEFAULT_ACCOUNT_ID as _DEFAULT_ACCOUNT_ID
+                    staging_bucket = f"bouncer-uploads-{_DEFAULT_ACCOUNT_ID}"
                     s3.copy_object(
-                        CopySource={'Bucket': bucket, 'Key': s3_key},
+                        CopySource={'Bucket': staging_bucket, 'Key': s3_key},
                         Bucket=bucket,
                         Key=fkey,
                         ContentType=fm.get('content_type', 'application/octet-stream'),
@@ -685,7 +687,7 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
                     )
                     # Cleanup staging object
                     try:
-                        s3.delete_object(Bucket=bucket, Key=s3_key)
+                        s3.delete_object(Bucket=staging_bucket, Key=s3_key)
                     except Exception:
                         pass  # Non-critical
                 else:
