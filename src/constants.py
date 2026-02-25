@@ -236,7 +236,7 @@ AUTO_APPROVE_PREFIXES = [
 
     # S3 唯讀
     'aws s3 ls',
-    'aws s3 cp s3:',  # 允許從 S3 下載或 S3→S3 copy（source 必須是 s3://）
+    'aws s3 cp s3:',  # 允許 S3→local download（source 必須是 s3://）；S3→S3 copy 由 commands._is_safe_s3_cp() 攔截（P1-4）
     'aws s3api head-',
     'aws s3api get-object',
     'aws s3api list-',
