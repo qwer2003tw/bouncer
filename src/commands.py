@@ -80,10 +80,61 @@ def is_dangerous(command: str) -> bool:
     return any(pattern in cmd_lower for pattern in DANGEROUS_PATTERNS)
 
 
+def _is_safe_s3_cp(command: str) -> bool:
+    """
+    檢查 `aws s3 cp` 命令是否安全（只允許 S3→local download）。
+
+    S3→S3 copy（destination 以 s3:// 開頭）有 cross-bucket exfiltration 風險，
+    不允許自動批准。只有 S3→local（destination 是本地路徑）才允許自動批准。
+
+    Returns:
+        True  → S3→local download，可自動批准
+        False → S3→S3 copy 或無法解析，需人工審批
+    """
+    try:
+        argv = aws_cli_split(_normalize_whitespace(command))
+    except Exception:
+        return False
+
+    # 收集位置參數（非 --flag 開頭）
+    # argv 格式：['aws', 's3', 'cp', <source>, <destination>, ...]
+    positional = [arg for arg in argv if not arg.startswith('-')]
+
+    # 需要找到 'aws', 's3', 'cp' 後的 source 與 destination
+    try:
+        cp_idx = next(
+            i for i, arg in enumerate(positional)
+            if i >= 2 and positional[i - 2].lower() == 'aws'
+            and positional[i - 1].lower() == 's3'
+            and arg.lower() == 'cp'
+        )
+    except StopIteration:
+        return False
+
+    params = positional[cp_idx + 1:]  # source, destination, ...
+    if len(params) < 2:
+        return False
+
+    destination = params[1]
+    # 如果 destination 是 s3:// 開頭 → S3→S3 copy → 不安全
+    if destination.lower().startswith('s3://'):
+        return False
+
+    return True
+
+
 def is_auto_approve(command: str) -> bool:
     """Layer 3: 檢查命令是否可自動批准"""
     cmd_lower = _normalize_whitespace(command).lower()
-    return any(cmd_lower.startswith(prefix) for prefix in AUTO_APPROVE_PREFIXES)
+    if not any(cmd_lower.startswith(prefix) for prefix in AUTO_APPROVE_PREFIXES):
+        return False
+
+    # P1-4 安全修復：aws s3 cp s3: 前綴匹配時，進一步檢查
+    # 是否為 S3→S3 copy（cross-bucket exfiltration 風險）
+    if cmd_lower.startswith('aws s3 cp s3:'):
+        return _is_safe_s3_cp(command)
+
+    return True
 
 
 def aws_cli_split(command: str) -> list:
