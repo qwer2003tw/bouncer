@@ -72,6 +72,11 @@ from mcp_presigned import (  # noqa: F401
     _generate_presigned_batch_urls,
 )
 
+# --- Confirm upload ---
+from mcp_confirm import (  # noqa: F401
+    handle_confirm_upload,
+)
+
 # --- Admin / query tools ---
 from mcp_admin import (  # noqa: F401
     mcp_tool_status,

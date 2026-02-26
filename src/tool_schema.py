@@ -546,6 +546,45 @@ MCP_TOOLS = {
             'properties': {},
         },
     },
+    # ========== Confirm Upload Tool ==========
+    'bouncer_confirm_upload': {
+        'description': (
+            '驗證透過 presigned URL 上傳的檔案是否確實存在於 staging bucket。\n'
+            '使用 list_objects_v2 一次批量檢查整個 batch，回傳每個檔案的驗證結果。\n'
+            '驗證結果會寫入 DynamoDB（TTL 7 天），可用 bouncer_status 查詢歷史。\n\n'
+            '使用流程（接在 bouncer_request_presigned_batch 之後）：\n'
+            '  Step 1: 呼叫 bouncer_request_presigned_batch 取得 batch_id + presigned URLs\n'
+            '  Step 2: 對每個 URL 執行 PUT 上傳\n'
+            '  Step 3: 呼叫 bouncer_confirm_upload 確認所有檔案都上傳成功\n'
+            '  Step 4: verified=true 後，再執行 bouncer_execute s3 cp 搬到目標 bucket\n\n'
+            '一次最多 50 個檔案。'
+        ),
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'batch_id': {
+                    'type': 'string',
+                    'description': 'Batch ID（從 bouncer_request_presigned_batch 回傳的 batch_id）',
+                },
+                'files': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            's3_key': {
+                                'type': 'string',
+                                'description': 'S3 key（從 bouncer_request_presigned_batch 回傳的 s3_key）',
+                            },
+                        },
+                        'required': ['s3_key'],
+                    },
+                    'description': '要驗證的檔案列表，每個項目包含 s3_key',
+                    'maxItems': 50,
+                },
+            },
+            'required': ['batch_id', 'files'],
+        },
+    },
     'bouncer_upload_batch': {
         'description': '批量上傳多個檔案到 S3，一次審批。如果有活躍的 Trust Session，可自動上傳。',
         'parameters': {
