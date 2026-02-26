@@ -35,6 +35,13 @@ ACCOUNTS_TABLE_NAME = os.environ.get('ACCOUNTS_TABLE_NAME', 'bouncer-accounts')
 
 DEFAULT_ACCOUNT_ID = os.environ.get('DEFAULT_ACCOUNT_ID', '')
 
+# Staging bucket for presigned uploads (bouncer-uploads-{account_id})
+# Override via env var for testing; defaults to account-specific bucket name.
+STAGING_BUCKET = os.environ.get(
+    'STAGING_BUCKET',
+    f"bouncer-uploads-{DEFAULT_ACCOUNT_ID}" if DEFAULT_ACCOUNT_ID else "bouncer-uploads",
+)
+
 # ============================================================================
 # 環境變數 - 安全
 # ============================================================================
