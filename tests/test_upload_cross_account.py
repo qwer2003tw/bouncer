@@ -119,24 +119,43 @@ def mock_infra(aws_env):
 
 @pytest.fixture
 def mcp_upload_module(mock_infra, monkeypatch):
-    """Load mcp_upload with all modules cleared to get fresh state."""
+    """Load mcp_upload with all modules cleared to get fresh state.
+
+    bouncer-bug-014 fix (Approach B):
+    Use monkeypatch to restore accounts._accounts_table so that state is
+    always cleaned up regardless of test outcome or ordering.  Previously
+    the manual ``accounts._accounts_table = None`` in the yield block could
+    be skipped on exception, leaking the moto-backed resource into
+    subsequent tests that import accounts from a cached sys.modules entry.
+    """
+    # Purge all relevant cached modules so we get a truly fresh import
+    # inside the moto context provided by mock_infra.
+    _modules_to_purge = [
+        'mcp_upload', 'src.mcp_upload',
+        'accounts', 'src.accounts',
+        'db', 'src.db',
+        'constants', 'src.constants',
+    ]
     for mod in list(sys.modules.keys()):
-        if mod in ('mcp_upload', 'src.mcp_upload', 'accounts', 'src.accounts',
-                   'db', 'src.db', 'constants', 'src.constants'):
+        if mod in _modules_to_purge:
             del sys.modules[mod]
 
     import mcp_upload
     import accounts
 
+    # Patch mcp_upload module-level constants using monkeypatch (auto-undone)
     monkeypatch.setattr(mcp_upload, 'DEFAULT_ACCOUNT_ID', DEFAULT_ACCOUNT)
     monkeypatch.setattr(mcp_upload, 'table', mock_infra['table'])
-    # Patch accounts table
-    accounts._accounts_table = mock_infra['accounts_table']
+
+    # Use monkeypatch to set accounts._accounts_table so it is *guaranteed*
+    # to be restored to its pre-test value after the test completes (even on
+    # failure or exception).  This is the core fix for bouncer-bug-014:
+    # the previous manual cleanup in a yield block could be skipped.
+    monkeypatch.setattr(accounts, '_accounts_table', mock_infra['accounts_table'])
 
     yield mcp_upload
 
-    # Cleanup
-    accounts._accounts_table = None
+    # Note: monkeypatch handles teardown automatically - no manual cleanup needed.
 
 
 # ---------------------------------------------------------------------------

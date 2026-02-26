@@ -270,8 +270,10 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
                 f"\n📊 命令: 0/{TRUST_SESSION_MAX_COMMANDS} | 上傳: 0/{TRUST_SESSION_MAX_UPLOADS}"
             )
 
-            # 查詢同 trust_scope 的 pending 數量（顯示用）
-            pending_count = 0
+            # 查詢同 trust_scope 的 pending 請求（顯示 display_summary）
+            # bouncer-trust-batch-flow (Approach B): show each pending request's
+            # display_summary instead of just the count.
+            pending_items = []
             try:
                 pending_resp = _db.table.query(
                     IndexName='status-created-index',
@@ -283,14 +285,21 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
                         ':scope': trust_scope,
                         ':account': account_id,
                     },
-                    Select='COUNT',
+                    ScanIndexForward=True,
+                    Limit=20,
                 )
-                pending_count = pending_resp.get('Count', 0)
+                pending_items = pending_resp.get('Items', [])
             except Exception:
                 pass
 
+            pending_count = len(pending_items)
             if pending_count > 0:
-                trust_line += f"\n⚡ 自動執行排隊中的 {pending_count} 個請求…"
+                trust_line += f"\n⚡ 自動執行 {pending_count} 個排隊請求："
+                for pi in pending_items[:5]:
+                    summary = pi.get('display_summary') or pi.get('command', '')[:60]
+                    trust_line += f"\n  • {escape_markdown(str(summary))}"
+                if pending_count > 5:
+                    trust_line += f"\n  _...及其他 {pending_count - 5} 個請求_"
 
             # 自動執行同 trust_scope + account 的排隊中請求
             try:

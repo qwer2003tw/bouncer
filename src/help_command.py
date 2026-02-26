@@ -5,6 +5,82 @@ Bouncer Help Command
 import re
 from typing import Optional
 
+# ---------------------------------------------------------------------------
+# Bouncer Built-in Commands
+# ---------------------------------------------------------------------------
+
+# 內建 Bouncer 命令說明（不依賴 botocore）
+_BOUNCER_BUILTIN_HELP: dict[str, dict] = {
+    "batch-deploy": {
+        "name": "batch-deploy",
+        "description": (
+            "批次部署完整流程：透過 presigned_batch → confirm_upload → "
+            "trust session → grant session，以最小審批次數完成多檔案上傳與部署。"
+        ),
+        "steps": [
+            "1. presigned_batch  — 取得多個 S3 presigned URLs",
+            "2. confirm_upload   — 確認上傳完成，建立 DynamoDB 記錄",
+            "3. bouncer_trust    — 開啟信任時段（減少逐一審批）",
+            "4. bouncer_execute (grant) — 在信任/grant 下執行部署命令",
+        ],
+        "example": (
+            "# Step 1: 取得 presigned URLs\n"
+            "mcporter call bouncer bouncer_presigned_batch \\\n"
+            "  files='[{\"filename\":\"app.zip\",\"content_type\":\"application/zip\"}]' \\\n"
+            "  reason='部署 app' source='Bot'\n\n"
+            "# Step 2: 上傳後確認\n"
+            "mcporter call bouncer bouncer_confirm_upload \\\n"
+            "  batch_id='<batch_id>' source='Bot'\n\n"
+            "# Step 3: 申請 grant session\n"
+            "mcporter call bouncer bouncer_request_grant \\\n"
+            "  commands='[\"aws s3 cp ...\",\"aws lambda update-function-code ...\"]' \\\n"
+            "  reason='部署 app' source='Bot' account_id='190825685292'\n\n"
+            "# Step 4: 在 grant 下執行命令\n"
+            "mcporter call bouncer bouncer_grant_execute \\\n"
+            "  grant_id='<grant_id>' \\\n"
+            "  command='aws lambda update-function-code --function-name MyFunc --zip-file fileb://app.zip'"
+        ),
+        "see_also": ["bouncer_presigned_batch", "bouncer_confirm_upload",
+                     "bouncer_request_grant", "bouncer_grant_execute"],
+    },
+}
+
+
+def get_bouncer_command_help(command: str) -> dict | None:
+    """Return built-in Bouncer command help, or None if not found."""
+    key = command.strip().lower().lstrip("/")
+    # Support both "batch-deploy" and "bouncer batch-deploy"
+    if key.startswith("bouncer "):
+        key = key[len("bouncer "):]
+    return _BOUNCER_BUILTIN_HELP.get(key)
+
+
+def format_bouncer_help_text(help_data: dict) -> str:
+    """Format a built-in Bouncer command help entry as readable text."""
+    lines = [
+        f"📖 /bouncer help {help_data['name']}",
+        "",
+        help_data.get("description", ""),
+        "",
+        "流程步驟:",
+    ]
+    for step in help_data.get("steps", []):
+        lines.append(f"  {step}")
+
+    example = help_data.get("example", "")
+    if example:
+        lines.append("")
+        lines.append("範例:")
+        lines.append(example)
+
+    see_also = help_data.get("see_also", [])
+    if see_also:
+        lines.append("")
+        lines.append(f"相關工具: {', '.join(see_also)}")
+
+    return '\n'.join(lines)
+
+
 
 def get_command_help(command: str) -> dict:
     """

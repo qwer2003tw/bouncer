@@ -300,13 +300,18 @@ def mcp_tool_history(req_id: str, arguments: dict) -> dict:
 
 
 def mcp_tool_stats(req_id: str, arguments: dict) -> dict:
-    """MCP tool: bouncer_stats
+    """MCP tool: bouncer_stats (Approach B — enhanced)
 
     Returns summary statistics for the last 24 hours:
     - Count by status (approved, denied, pending, error, …)
-    - Count by source
+    - Count by source and action
+    - top_sources: top 5 sources by request count
+    - top_commands: top 5 most-requested commands (execute action only)
+    - approval_rate: fraction of decided requests that were approved
+    - avg_execution_time_seconds: average time from created_at to approved_at
     """
-    since_ts = int(time.time()) - 24 * 3600
+    now_ts = int(time.time())
+    since_ts = now_ts - 24 * 3600
 
     try:
         resp = table.scan(
@@ -327,10 +332,12 @@ def mcp_tool_stats(req_id: str, arguments: dict) -> dict:
     except Exception as e:
         return mcp_error(req_id, -32603, f"Internal error: {e}")
 
-    # Tally by status
-    status_counts: dict[str, int] = {}
-    source_counts: dict[str, int] = {}
-    action_counts: dict[str, int] = {}
+    # Tally by status, source, action, command
+    status_counts: dict = {}
+    source_counts: dict = {}
+    action_counts: dict = {}
+    command_counts: dict = {}
+    execution_durations: list = []
 
     for item in items:
         status_val = str(item.get("status", "unknown"))
@@ -340,6 +347,17 @@ def mcp_tool_stats(req_id: str, arguments: dict) -> dict:
         status_counts[status_val] = status_counts.get(status_val, 0) + 1
         source_counts[source_val] = source_counts.get(source_val, 0) + 1
         action_counts[action_val] = action_counts.get(action_val, 0) + 1
+
+        # Track command frequencies — use smart command key extraction
+        cmd_key = _extract_command_key(str(item.get("command", "")), action_val)
+        command_counts[cmd_key] = command_counts.get(cmd_key, 0) + 1
+
+        # Collect execution durations for approved requests
+        duration = _compute_duration(item)
+        if duration is not None and status_val in (
+            "approved", "auto_approved", "trust_approved", "grant_approved"
+        ):
+            execution_durations.append(duration)
 
     # Friendly top-level numbers
     approved_count = sum(
@@ -355,6 +373,24 @@ def mcp_tool_stats(req_id: str, arguments: dict) -> dict:
         if k in ("pending", "pending_approval")
     )
 
+    # Approval rate: approved / (approved + denied)  — ignores pending
+    decided_count = approved_count + denied_count
+    approval_rate = round(approved_count / decided_count, 4) if decided_count > 0 else None
+
+    # Average execution time
+    avg_execution_time = (
+        round(sum(execution_durations) / len(execution_durations), 3)
+        if execution_durations
+        else None
+    )
+
+    # Top 5 sources / commands (using helper)
+    top_sources = _top_n(source_counts, 5)
+    top_commands = _top_n(command_counts, 5)
+
+    # Hourly breakdown for past 24 hours (cherry-pick from Approach C)
+    hourly_breakdown = _compute_hourly_breakdown(items, now_ts)
+
     result = {
         "window_hours": 24,
         "total_requests": len(items),
@@ -364,6 +400,11 @@ def mcp_tool_stats(req_id: str, arguments: dict) -> dict:
             "denied": denied_count,
             "pending": pending_count,
         },
+        "approval_rate": approval_rate,
+        "avg_execution_time_seconds": avg_execution_time,
+        "top_sources": top_sources,
+        "top_commands": top_commands,
+        "hourly_breakdown": hourly_breakdown,
         "by_status": status_counts,
         "by_source": source_counts,
         "by_action": action_counts,
@@ -372,3 +413,65 @@ def mcp_tool_stats(req_id: str, arguments: dict) -> dict:
     return mcp_result(req_id, {
         "content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}]
     })
+
+
+# ============================================================================
+# Stats helper functions (cherry-picked from Approach C)
+# ============================================================================
+
+def _top_n(counter: dict, n: int = 5) -> list:
+    """Return top-N entries from a counter dict, sorted by count descending."""
+    sorted_items = sorted(counter.items(), key=lambda kv: kv[1], reverse=True)
+    return [{"key": k, "count": v} for k, v in sorted_items[:n]]
+
+
+def _compute_hourly_breakdown(items: list, now_ts: int) -> dict:
+    """Return per-hour request counts for the past 24 hours.
+
+    Keys are ISO-hour strings like ``"2026-02-26T14"``.
+    Hours with no requests are included with a count of 0.
+    """
+    import datetime
+
+    breakdown: dict = {}
+    for offset in range(23, -1, -1):
+        ts = now_ts - offset * 3600
+        dt = datetime.datetime.utcfromtimestamp(ts)
+        hour_key = dt.strftime("%Y-%m-%dT%H")
+        breakdown[hour_key] = 0
+
+    for item in items:
+        created_at = item.get("created_at")
+        if created_at is None:
+            continue
+        try:
+            ts = int(float(str(created_at)))
+            dt = datetime.datetime.utcfromtimestamp(ts)
+            hour_key = dt.strftime("%Y-%m-%dT%H")
+            if hour_key in breakdown:
+                breakdown[hour_key] += 1
+        except Exception:
+            continue
+
+    return breakdown
+
+
+def _extract_command_key(command_str: str, action_val: str) -> str:
+    """Extract a compact service+action key from a command string.
+
+    Examples:
+        "aws ec2 describe-instances ..." -> "ec2/describe-instances"
+        "" with action_val "upload"      -> "upload"
+    """
+    if not command_str:
+        return action_val
+
+    parts = command_str.strip().split()
+    if parts and parts[0] == "aws":
+        parts = parts[1:]
+
+    if len(parts) >= 2:
+        return f"{parts[0]}/{parts[1]}"
+    if len(parts) == 1:
+        return parts[0]
+    return action_val
