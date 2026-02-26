@@ -270,6 +270,28 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
                 f"\n📊 命令: 0/{TRUST_SESSION_MAX_COMMANDS} | 上傳: 0/{TRUST_SESSION_MAX_UPLOADS}"
             )
 
+            # 查詢同 trust_scope 的 pending 數量（顯示用）
+            pending_count = 0
+            try:
+                pending_resp = _db.table.query(
+                    IndexName='status-created-index',
+                    KeyConditionExpression='#status = :status',
+                    FilterExpression='trust_scope = :scope AND account_id = :account',
+                    ExpressionAttributeNames={'#status': 'status'},
+                    ExpressionAttributeValues={
+                        ':status': 'pending',
+                        ':scope': trust_scope,
+                        ':account': account_id,
+                    },
+                    Select='COUNT',
+                )
+                pending_count = pending_resp.get('Count', 0)
+            except Exception:
+                pass
+
+            if pending_count > 0:
+                trust_line += f"\n⚡ 自動執行排隊中的 {pending_count} 個請求…"
+
             # 自動執行同 trust_scope + account 的排隊中請求
             try:
                 _auto_execute_pending_requests(trust_scope, account_id, assume_role, trust_id, source)
