@@ -382,8 +382,11 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
             if not output.strip():
                 output = '✅ 命令執行成功（無輸出）'
         else:
-            if not output.strip():
-                output = f'❌ 命令失敗 (exit code: {exit_code})'
+            # 顯示完整原始輸出（和直接跑 CLI 一樣），加上 exit code 提示
+            if output.strip():
+                output = f'{output}\n\n(exit code: {exit_code})'
+            else:
+                output = f'(exit code: {exit_code})'
 
         return output  # 不截斷，讓呼叫端用 store_paged_output 處理
 
