@@ -498,6 +498,91 @@ mcporter call bouncer bouncer_get_page page_id="abc123:page:2"
 
 ---
 
+## 批次部署完整流程（bouncer-trust-batch-flow）
+
+使用 `presigned_batch → confirm_upload → trust → grant` 達成多檔案部署，最小化審批次數。
+
+### 前置說明
+
+| 步驟 | 工具 | 說明 |
+|------|------|------|
+| 1 | `bouncer_presigned_batch` | 取得多個 S3 presigned URL（無需審批） |
+| 2 | 直接 PUT（curl/SDK）| 用 presigned URL 上傳檔案到暫存 bucket |
+| 3 | `bouncer_confirm_upload` | 確認上傳完成，建立 DynamoDB 請求記錄 |
+| 4 | `bouncer_request_grant` | 申請批次 grant（列出所有部署命令，**一次審批**）|
+| 5 | `bouncer_grant_execute` | 在 grant 內逐一執行命令（無需再次審批）|
+
+### 完整 Bash 範例
+
+```bash
+# ─── Step 1: 取得 presigned URLs ───────────────────────────────────────────
+BATCH=$(mcporter call bouncer bouncer_presigned_batch \
+  files='[
+    {"filename":"app.zip","content_type":"application/zip"},
+    {"filename":"index.html","content_type":"text/html"}
+  ]' \
+  reason="部署 app v2.0" \
+  source="Private Bot (batch-deploy)")
+
+BATCH_ID=$(echo "$BATCH" | jq -r '.batch_id')
+echo "batch_id: $BATCH_ID"
+
+# ─── Step 2: 用 presigned URL 上傳（curl）──────────────────────────────────
+APP_URL=$(echo "$BATCH" | jq -r '.presigned_urls[] | select(.filename=="app.zip") | .url')
+curl -s -X PUT \
+  -H "Content-Type: application/zip" \
+  --data-binary @app.zip \
+  "$APP_URL"
+
+HTML_URL=$(echo "$BATCH" | jq -r '.presigned_urls[] | select(.filename=="index.html") | .url')
+curl -s -X PUT \
+  -H "Content-Type: text/html" \
+  --data-binary @index.html \
+  "$HTML_URL"
+
+# ─── Step 3: 確認上傳完成 ──────────────────────────────────────────────────
+mcporter call bouncer bouncer_confirm_upload \
+  batch_id="$BATCH_ID" \
+  source="Private Bot (batch-deploy)"
+
+# ─── Step 4: 申請 grant session（一次審批所有命令）────────────────────────
+GRANT=$(mcporter call bouncer bouncer_request_grant \
+  commands='[
+    "aws s3 cp s3://bouncer-uploads-190825685292/pending/app.zip s3://my-deploy-bucket/app.zip",
+    "aws lambda update-function-code --function-name MyApp --s3-bucket my-deploy-bucket --s3-key app.zip",
+    "aws cloudfront create-invalidation --distribution-id EXXXXX --paths /index.html"
+  ]' \
+  reason="部署 app v2.0" \
+  source="Private Bot (batch-deploy)" \
+  account_id="190825685292" \
+  ttl_minutes=30)
+
+GRANT_ID=$(echo "$GRANT" | jq -r '.grant_id')
+echo "grant_id: $GRANT_ID"
+# → Telegram 會收到審批請求，等待 Steven 批准
+
+# ─── Step 5: grant 批准後，逐一執行（無需再審批）─────────────────────────
+mcporter call bouncer bouncer_grant_execute \
+  grant_id="$GRANT_ID" \
+  command="aws s3 cp s3://bouncer-uploads-190825685292/pending/app.zip s3://my-deploy-bucket/app.zip"
+
+mcporter call bouncer bouncer_grant_execute \
+  grant_id="$GRANT_ID" \
+  command="aws lambda update-function-code --function-name MyApp --s3-bucket my-deploy-bucket --s3-key app.zip"
+
+mcporter call bouncer bouncer_grant_execute \
+  grant_id="$GRANT_ID" \
+  command="aws cloudfront create-invalidation --distribution-id EXXXXX --paths /index.html"
+```
+
+### 查詢 help
+
+```bash
+mcporter call bouncer bouncer_help command="batch-deploy"
+```
+
+---
+
 ## CloudFormation Stacks
 - `clawdbot-bouncer` - 主要 Bouncer
 - `bouncer-deployer` - SAM Deployer 基礎建設

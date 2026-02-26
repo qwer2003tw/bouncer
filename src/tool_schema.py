@@ -540,7 +540,15 @@ MCP_TOOLS = {
         },
     },
     'bouncer_stats': {
-        'description': '查詢最近 24 小時的 Bouncer 請求統計：各狀態數量（approved/denied/pending）及各 source 的請求數。',
+        'description': (
+            '查詢最近 24 小時的 Bouncer 請求統計：\n'
+            '- summary: approved/denied/pending 總數\n'
+            '- approval_rate: 審批通過率（0.0–1.0，不含 pending）\n'
+            '- avg_execution_time_seconds: 平均執行時間（從提交到批准）\n'
+            '- top_sources: 前 5 大來源（依請求數排序）\n'
+            '- top_commands: 前 5 大命令（僅 execute 動作，依頻率排序）\n'
+            '- by_status / by_source / by_action: 完整分類統計'
+        ),
         'parameters': {
             'type': 'object',
             'properties': {},

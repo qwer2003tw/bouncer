@@ -32,7 +32,8 @@ def _send_message_silent(text, keyboard=None):
 
 def send_approval_request(request_id: str, command: str, reason: str, timeout: int = COMMAND_APPROVAL_TIMEOUT,
                           source: str = None, account_id: str = None, account_name: str = None,
-                          assume_role: str = None, context: str = None) -> bool:
+                          assume_role: str = None, context: str = None,
+                          template_scan_result: dict = None) -> bool:
     """發送 Telegram 審批請求
 
     Returns:
@@ -70,14 +71,44 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
 
     safe_reason = _escape_markdown(reason)
 
+    # Build optional template scan block (Phase 4)
+    template_scan_block = ""
+    if template_scan_result and template_scan_result.get('hit_count', 0) > 0:
+        severity = template_scan_result.get('severity', 'unknown')
+        hit_count = template_scan_result.get('hit_count', 0)
+        max_score = template_scan_result.get('max_score', 0)
+        escalate = template_scan_result.get('escalate', False)
+
+        severity_emoji = {
+            'critical': '🔴',
+            'high': '🟠',
+            'medium': '🟡',
+            'low': '🟢',
+        }.get(severity, '⚪')
+
+        escalate_note = " ⚠️ *強制人工審批*" if escalate else ""
+        template_scan_block = (
+            f"\n🔍 *Template Scan：* {severity_emoji} {severity.upper()} "
+            f"({hit_count} hits, score={max_score}){escalate_note}\n"
+        )
+
+        # Show first 3 factor details
+        factors = template_scan_result.get('factors', [])
+        for factor in factors[:3]:
+            details = _escape_markdown(str(factor.get('details', '')))
+            template_scan_block += f"  • `{details}`\n"
+        if len(factors) > 3:
+            template_scan_block += f"  _...及其他 {len(factors) - 3} 個風險_\n"
+
     if dangerous:
         text = (
             f"⚠️ *高危操作請求* ⚠️\n\n"
             f"{source_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{cmd_preview}`\n\n"
-            f"💬 *原因：* {safe_reason}\n\n"
-            f"⚠️ *此操作可能不可逆，請仔細確認！*\n\n"
+            f"💬 *原因：* {safe_reason}\n"
+            f"{template_scan_block}"
+            f"\n⚠️ *此操作可能不可逆，請仔細確認！*\n\n"
             f"🆔 *ID：* `{request_id}`\n"
             f"⏰ *{timeout_str}後過期*"
         )
@@ -95,8 +126,9 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
             f"{source_line}"
             f"{account_line}"
             f"📋 *命令：*\n`{cmd_preview}`\n\n"
-            f"💬 *原因：* {safe_reason}\n\n"
-            f"🆔 *ID：* `{request_id}`\n"
+            f"💬 *原因：* {safe_reason}\n"
+            f"{template_scan_block}"
+            f"\n🆔 *ID：* `{request_id}`\n"
             f"⏰ *{timeout_str}後過期*"
         )
         keyboard = {

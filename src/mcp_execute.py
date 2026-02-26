@@ -177,6 +177,7 @@ class ExecuteContext:
     smart_decision: object = None  # smart_approval result (or None)
     mode: str = 'mcp'
     grant_id: Optional[str] = None
+    template_scan_result: Optional[dict] = None  # Layer 2.5 template scan result
 
 
 def _parse_execute_request(req_id, arguments: dict) -> 'dict | ExecuteContext':
@@ -276,6 +277,74 @@ def _score_risk(ctx: ExecuteContext) -> None:
         )
     except Exception as e:
         print(f"[SHADOW] Smart approval error: {e}")
+
+
+def _scan_template(ctx: ExecuteContext) -> None:
+    """Layer 2.5: Template scan — detect HIGH/CRITICAL risks in inline JSON payloads.
+
+    Mutates ctx.template_scan_result in-place.  Never raises.
+    Result shape:
+        {
+            'max_score': int,          # 0–100
+            'hit_count': int,
+            'severity': str,           # 'none' | 'low' | 'medium' | 'high' | 'critical'
+            'factors': [...],          # list of RiskFactor details
+            'escalate': bool,          # True when HIGH or CRITICAL → force MANUAL
+        }
+    """
+    ctx.template_scan_result = {
+        'max_score': 0,
+        'hit_count': 0,
+        'severity': 'none',
+        'factors': [],
+        'escalate': False,
+    }
+    try:
+        from template_scanner import scan_command_payloads
+        from risk_scorer import load_risk_rules
+
+        rules = load_risk_rules()
+        template_rules = rules.template_rules if hasattr(rules, 'template_rules') else []
+
+        max_score, factors = scan_command_payloads(ctx.command, template_rules)
+
+        hit_count = len(factors)
+
+        # Severity buckets (align with risk_scorer thresholds)
+        if max_score >= 90:
+            severity = 'critical'
+        elif max_score >= 75:
+            severity = 'high'
+        elif max_score >= 50:
+            severity = 'medium'
+        elif max_score > 0:
+            severity = 'low'
+        else:
+            severity = 'none'
+
+        escalate = severity in ('high', 'critical')
+
+        ctx.template_scan_result = {
+            'max_score': max_score,
+            'hit_count': hit_count,
+            'severity': severity,
+            'factors': [
+                {'name': f.name, 'details': f.details, 'score': f.raw_score}
+                for f in factors
+            ],
+            'escalate': escalate,
+        }
+
+        if escalate:
+            print(
+                f"[TEMPLATE] Escalating to MANUAL: {hit_count} hits, "
+                f"max_score={max_score}, severity={severity}"
+            )
+
+    except ImportError as e:
+        print(f"[TEMPLATE] template_scanner or load_risk_rules not available: {e}")
+    except Exception as e:
+        print(f"[TEMPLATE] Scan error (non-fatal): {e}")
 
 
 def _extract_actual_decision(result: dict) -> str:
@@ -706,7 +775,8 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
     try:
         notified = send_approval_request(
             request_id, ctx.command, ctx.reason, ctx.timeout, ctx.source,
-            ctx.account_id, ctx.account_name, context=ctx.context
+            ctx.account_id, ctx.account_name, context=ctx.context,
+            template_scan_result=ctx.template_scan_result,
         )
         if not notified:
             raise RuntimeError("Telegram notification returned failure (ok=False or empty response)")
@@ -761,16 +831,28 @@ def mcp_tool_execute(req_id: str, arguments: dict) -> dict:
     # Phase 2: Smart approval shadow scoring (before any decision)
     _score_risk(ctx)
 
+    # Phase 2.5: Template scan — escalate to MANUAL on HIGH/CRITICAL hits
+    _scan_template(ctx)
+
     # Phase 3: Pipeline — first non-None result wins
-    result = (
-        _check_compliance(ctx)
-        or _check_blocked(ctx)
-        or _check_grant_session(ctx)
-        or _check_auto_approve(ctx)
-        or _check_rate_limit(ctx)
-        or _check_trust_session(ctx)
-        or _submit_for_approval(ctx)
-    )
+    # NOTE: if template_scan says escalate, skip auto_approve and trust layers
+    if ctx.template_scan_result and ctx.template_scan_result.get('escalate'):
+        result = (
+            _check_compliance(ctx)
+            or _check_blocked(ctx)
+            or _check_rate_limit(ctx)
+            or _submit_for_approval(ctx)
+        )
+    else:
+        result = (
+            _check_compliance(ctx)
+            or _check_blocked(ctx)
+            or _check_grant_session(ctx)
+            or _check_auto_approve(ctx)
+            or _check_rate_limit(ctx)
+            or _check_trust_session(ctx)
+            or _submit_for_approval(ctx)
+        )
 
     # Phase 4: Log shadow with actual decision for comparison
     if ctx.smart_decision:
