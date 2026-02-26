@@ -149,6 +149,11 @@ def create_deploy_record(deploy_id: str, project_id: str, config: dict) -> dict:
         'reason': config.get('reason', ''),
         'ttl': int(time.time()) + 30 * 24 * 3600  # 30 天
     }
+    # 加入 commit SHA（若有）
+    if config.get('commit_sha'):
+        item['commit_sha'] = config.get('commit_sha')
+    if config.get('commit_message'):
+        item['commit_message'] = config.get('commit_message')
     history_table.put_item(Item=item)
     return item
 
@@ -199,7 +204,8 @@ def get_deploy_history(project_id: str, limit: int = 10) -> list:
 # Deploy Trigger
 # ============================================================================
 
-def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str) -> dict:
+def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str,
+                 commit_sha: str = None, commit_message: str = None) -> dict:
     """啟動部署"""
     # 取得專案配置
     project = get_project(project_id)
@@ -230,7 +236,9 @@ def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str) -
     create_deploy_record(deploy_id, project_id, {
         'branch': branch,
         'triggered_by': triggered_by,
-        'reason': reason
+        'reason': reason,
+        'commit_sha': commit_sha,
+        'commit_message': commit_message,
     })
 
     # 準備 Step Functions 輸入
@@ -263,13 +271,18 @@ def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str) -
 
         emit_metric('Bouncer', 'Deploy', 1, dimensions={'Status': 'started', 'Project': project_id})
 
-        return {
+        result = {
             'status': 'started',
             'deploy_id': deploy_id,
             'execution_arn': response['executionArn'],
             'project_id': project_id,
             'branch': sfn_input['branch']
         }
+        if commit_sha:
+            result['commit_sha'] = commit_sha
+        if commit_message:
+            result['commit_message'] = commit_message
+        return result
 
     except Exception as e:
         # 失敗時釋放鎖
@@ -367,6 +380,8 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
     source = arguments.get('source', None)
     context = arguments.get('context', None)
     async_mode = arguments.get('async', True)
+    commit_sha = str(arguments.get('commit_sha', '')).strip() or None
+    commit_message = str(arguments.get('commit_message', '')).strip() or None
 
     if not project_id:
         return mcp_error(req_id, -32602, 'Missing required parameter: project')
@@ -390,12 +405,31 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
     # 檢查並行鎖
     existing_lock = get_lock(project_id)
     if existing_lock:
+        # Task 3: 加入 running deploy 詳細資訊
+        lock_id = existing_lock.get('lock_id')
+        locked_at = existing_lock.get('locked_at')
+        conflict_info = {
+            'status': 'error',
+            'error': '此專案有部署正在進行中',
+            'current_deploy': lock_id,
+        }
+        # 嘗試從 history 查詢 running deploy 詳細資訊
+        if lock_id:
+            running_record = get_deploy_record(lock_id)
+            if running_record:
+                conflict_info['running_deploy_id'] = lock_id
+                started = running_record.get('started_at', locked_at)
+                # Decimal → int for JSON serialisation
+                started_int = int(started) if started is not None else None
+                conflict_info['started_at'] = started_int
+                # 估計剩餘時間（假設平均部署時間 5 分鐘）
+                if started_int:
+                    elapsed = int(time.time()) - started_int
+                    avg_deploy_secs = 300  # 5 分鐘
+                    estimated_remaining = max(0, avg_deploy_secs - elapsed)
+                    conflict_info['estimated_remaining'] = estimated_remaining
         return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps({
-                'status': 'error',
-                'error': '此專案有部署正在進行中',
-                'current_deploy': existing_lock.get('lock_id')
-            })}],
+            'content': [{'type': 'text', 'text': json.dumps(conflict_info)}],
             'isError': True
         })
 
@@ -419,10 +453,18 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
         'mode': 'mcp',
         'display_summary': generate_display_summary('deploy', project_id=project_id),
     }
+    # 加入 commit 資訊（若有）
+    if commit_sha:
+        item['commit_sha'] = commit_sha
+    if commit_message:
+        item['commit_message'] = commit_message
     table.put_item(Item=item)
 
     # 發送 Telegram 審批請求
-    send_deploy_approval_request(request_id, project, branch, reason, source, context=context)
+    send_deploy_approval_request(
+        request_id, project, branch, reason, source,
+        context=context, commit_sha=commit_sha, commit_message=commit_message
+    )
 
     if async_mode:
         return mcp_result(req_id, {
@@ -512,7 +554,8 @@ def mcp_tool_project_list(req_id, arguments: dict) -> dict:
 # Telegram Notifications
 # ============================================================================
 
-def send_deploy_approval_request(request_id: str, project: dict, branch: str, reason: str, source: str, context: str = None):
+def send_deploy_approval_request(request_id: str, project: dict, branch: str, reason: str, source: str,
+                                  context: str = None, commit_sha: str = None, commit_message: str = None):
     """發送部署審批請求到 Telegram"""
     from telegram import send_telegram_message, escape_markdown
     from utils import build_info_lines
@@ -535,11 +578,20 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
     info_lines = build_info_lines(source=source, context=context, reason=reason)
     account_line = f"🏦 *帳號：* `{target_account}`\n" if target_account else ""
 
+    # Commit SHA 行（若有）
+    commit_line = ""
+    if commit_sha:
+        sha_short = commit_sha[:7]
+        if commit_message:
+            commit_line = f"🔖 *Commit：* `{sha_short}` — {escape_markdown(commit_message)}\n"
+        else:
+            commit_line = f"🔖 *Commit：* `{sha_short}`\n"
     text = (
         f"🚀 *SAM 部署請求*\n\n"
         f"{info_lines}"
         f"📦 *專案：* {escape_markdown(project_name)}\n"
         f"🌿 *分支：* {branch}\n"
+        f"{commit_line}"
         f"{account_line}"
         f"📋 *Stack：* {stack_name}\n\n"
         f"🆔 *ID：* `{request_id}`\n"

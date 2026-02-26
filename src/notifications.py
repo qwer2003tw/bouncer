@@ -8,7 +8,7 @@ Now: mcp_tools.py → notifications.py (no cycle)
 import os
 
 import telegram as _telegram
-from commands import is_dangerous
+from commands import is_dangerous, check_lambda_env_update
 from constants import COMMAND_APPROVAL_TIMEOUT, TRUST_SESSION_MAX_COMMANDS
 from utils import format_size_human, build_info_lines
 
@@ -44,6 +44,12 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
     # reason/source/context 由 build_info_lines 內部 escape，這裡不再手動 escape
 
     dangerous = is_dangerous(command)
+
+    # 特殊警告：lambda update-function-configuration --environment
+    lambda_env_level, lambda_env_msg = check_lambda_env_update(command)
+    lambda_env_warning = ""
+    if lambda_env_level == 'DANGEROUS' and lambda_env_msg:
+        lambda_env_warning = f"\n🔴 *{_escape_markdown(lambda_env_msg)}*\n"
 
     if timeout < 60:
         timeout_str = f"{timeout} 秒"
@@ -107,6 +113,7 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
             f"{account_line}"
             f"📋 *命令：*\n`{cmd_preview}`\n\n"
             f"💬 *原因：* {safe_reason}\n"
+            f"{lambda_env_warning}"
             f"{template_scan_block}"
             f"\n⚠️ *此操作可能不可逆，請仔細確認！*\n\n"
             f"🆔 *ID：* `{request_id}`\n"

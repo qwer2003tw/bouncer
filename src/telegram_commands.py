@@ -53,6 +53,18 @@ def handle_telegram_command(message: dict) -> dict:
     if text == '/pending' or text.startswith('/pending@'):
         return handle_pending_command(chat_id)
 
+    # /stats [hours] - 統計資訊
+    if text == '/stats' or text.startswith('/stats ') or text.startswith('/stats@'):
+        # 解析小時數
+        hours = 24
+        parts = text.split()
+        if len(parts) >= 2:
+            try:
+                hours = int(parts[1])
+            except ValueError:
+                pass
+        return handle_stats_command(chat_id, hours=hours)
+
     # /help - 顯示指令列表
     if text == '/help' or text.startswith('/help@') or text == '/start' or text.startswith('/start@'):
         return handle_help_command(chat_id)
@@ -146,6 +158,87 @@ def handle_pending_command(chat_id: str) -> dict:
     return response(200, {'ok': True})
 
 
+def handle_stats_command(chat_id: str, hours: int = 24) -> dict:
+    """處理 /stats [hours] 指令
+
+    Args:
+        chat_id: Telegram chat ID
+        hours: 查詢過去 N 小時（預設 24）
+    """
+    table = _get_table()
+    now = int(time.time())
+    since_ts = now - hours * 3600
+
+    try:
+        from boto3.dynamodb.conditions import Attr
+        resp = table.scan(
+            FilterExpression=Attr('created_at').gte(since_ts)
+        )
+        items = resp.get('Items', [])
+        # 處理分頁
+        while 'LastEvaluatedKey' in resp:
+            resp = table.scan(
+                FilterExpression=Attr('created_at').gte(since_ts),
+                ExclusiveStartKey=resp['LastEvaluatedKey']
+            )
+            items.extend(resp.get('Items', []))
+    except Exception as e:
+        print(f"Error in stats: {e}")
+        items = []
+
+    total = len(items)
+
+    # 統計狀態
+    approved = sum(1 for i in items if str(i.get('status', '')).startswith('approved')
+                   or i.get('status') in ('auto_approved', 'trust_approved', 'grant_approved'))
+    denied = sum(1 for i in items if i.get('status') in ('denied', 'blocked', 'compliance_violation'))
+    pending = sum(1 for i in items if str(i.get('status', '')).startswith('pending'))
+
+    # 審批率
+    decided = approved + denied
+    if decided > 0:
+        rate = round(approved / decided * 100)
+        rate_str = f"{rate}%"
+    else:
+        rate_str = "N/A"
+
+    # Hourly breakdown — 找尖峰時段
+    import datetime
+    hourly: dict = {}
+    for item in items:
+        created_at = item.get('created_at')
+        if not created_at:
+            continue
+        try:
+            ts = int(float(str(created_at)))
+            dt = datetime.datetime.utcfromtimestamp(ts)
+            hour_key = dt.strftime('%Y-%m-%dT%H')
+            hourly[hour_key] = hourly.get(hour_key, 0) + 1
+        except Exception:
+            continue
+
+    # 尖峰時段
+    peak_line = ""
+    if hourly:
+        peak_hour = max(hourly, key=lambda k: hourly[k])
+        peak_count = hourly[peak_hour]
+        peak_line = f"\n📈 尖峰時段: {peak_hour} ({peak_count} requests)"
+
+    text = (
+        f"📊 統計資訊（過去 {hours}h）\n"
+        f"\n"
+        f"📋 總請求: {total}\n"
+        f"✅ 批准: {approved}\n"
+        f"❌ 拒絕: {denied}\n"
+        f"⏳ 待審批: {pending}\n"
+        f"📈 審批率: {rate_str}"
+        f"{peak_line}"
+    )
+
+    send_telegram_message_to(chat_id, text, parse_mode=None)
+    return response(200, {'ok': True})
+
+
 def handle_help_command(chat_id: str) -> dict:
     """處理 /help 指令"""
     text = """🔐 Bouncer Commands
@@ -153,6 +246,7 @@ def handle_help_command(chat_id: str) -> dict:
 /accounts - 列出 AWS 帳號
 /trust - 列出信任時段
 /pending - 列出待審批請求
+/stats [hours] - 統計資訊（預設 24h）
 /help - 顯示此說明"""
 
     send_telegram_message_to(chat_id, text, parse_mode=None)

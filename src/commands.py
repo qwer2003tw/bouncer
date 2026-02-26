@@ -22,6 +22,8 @@ __all__ = [
     '_normalize_whitespace',
     '_has_dangerous_flag',
     '_DANGEROUS_FLAG_MAP',
+    'check_lambda_env_update',
+    'LAMBDA_ENV_WARN_MSG',
 ]
 
 
@@ -50,6 +52,10 @@ def get_block_reason(command: str) -> str | None:
     # 檢查 file:// 協議
     if _has_file_protocol(cmd_lower):
         return "禁止使用 file:// 或 fileb:// 協議（本地檔案讀取風險）"
+    # 特殊檢查：lambda update-function-configuration --environment Variables={}
+    level, reason = check_lambda_env_update(command)
+    if level == 'BLOCKED':
+        return reason
     # 檢查封鎖 pattern
     for pattern in BLOCKED_PATTERNS:
         if pattern in cmd_lower:
@@ -76,9 +82,56 @@ def _has_file_protocol(cmd_lower: str) -> bool:
     return 'file://' in cmd_lower or 'fileb://' in cmd_lower
 
 
+LAMBDA_ENV_WARN_MSG = "⚠️ 此命令會覆蓋所有環境變數！請確認已備份現有設定。"
+
+
+def check_lambda_env_update(command: str) -> tuple[str | None, str | None]:
+    """
+    檢查 lambda update-function-configuration --environment 命令。
+
+    Returns:
+        (level, message) where level is:
+          - 'BLOCKED': --environment Variables={} (清空 env vars)
+          - 'DANGEROUS': --environment Variables={...} (有值但會覆蓋)
+          - None: 命令不符合此 pattern
+    """
+    cmd_lower = _normalize_whitespace(command).lower()
+
+    # 必須是 lambda update-function-configuration
+    if 'lambda update-function-configuration' not in cmd_lower:
+        return None, None
+
+    # 必須包含 --environment
+    if '--environment' not in cmd_lower:
+        return None, None
+
+    # 找出 Variables={...} 的部分
+    # 使用 re 找 Variables= 後面的 JSON-like 值
+    # 可以是 Variables={} 或 Variables={"KEY":"VALUE",...}
+    import re
+    # 抓取 Variables=... 的部分（可能有空格）
+    match = re.search(r'variables\s*=\s*(\{[^}]*\})', cmd_lower)
+    if match:
+        variables_value = match.group(1).strip()
+        # {} 或空的 JSON object → BLOCKED
+        if variables_value == '{}' or re.match(r'^\{\s*\}$', variables_value):
+            return 'BLOCKED', '此命令會清空所有環境變數（Variables={}）！這是破壞性操作，已被封鎖。'
+        else:
+            # 有值的 --environment Variables={...} → DANGEROUS
+            return 'DANGEROUS', LAMBDA_ENV_WARN_MSG
+
+    return None, None
+
+
 def is_dangerous(command: str) -> bool:
     """Layer 2: 檢查命令是否是高危操作（需特殊審批）"""
     cmd_lower = _normalize_whitespace(command).lower()
+
+    # 特殊檢查：lambda update-function-configuration --environment
+    level, _ = check_lambda_env_update(command)
+    if level == 'DANGEROUS':
+        return True
+
     return any(pattern in cmd_lower for pattern in DANGEROUS_PATTERNS)
 
 
