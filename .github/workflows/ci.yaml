@@ -84,8 +84,8 @@ jobs:
           # 取得 commit message
           COMMIT_MSG=$(git log -1 --pretty=%B $HEAD)
           
-          # 如果是 fix/docs/refactor/ci/test 開頭，跳過文件檢查
-          if echo "$COMMIT_MSG" | grep -qiE '^(fix|docs|refactor|ci|test|chore):'; then
+          # 如果是 fix/docs/refactor/ci/test/chore 開頭（支援 fix: 和 fix(scope): 兩種格式），跳過文件檢查
+          if echo "$COMMIT_MSG" | grep -qiE '^(fix|docs|refactor|ci|test|chore)(\([^)]*\))?:'; then
             echo "Commit type is fix/docs/refactor/ci/test/chore, skipping docs check"
             exit 0
           fi
