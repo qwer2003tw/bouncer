@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.0] - 2026-02-26
+
+### Added
+- `bouncer_stats` MCP tool — 過去 24 小時統計：top_sources、top_commands、approval_rate、avg_execution_time、hourly_breakdown（時段分布）
+- `bouncer_help batch-deploy` — in-tool 批次部署流程說明
+- `docs/trust-batch-flow.md` — presigned_batch → confirm_upload → grant → deploy 完整參考文件
+- `SKILL.md` 批次部署完整流程 guide
+
+### Changed
+- Template scan HIGH/CRITICAL hits → 強制升級為 MANUAL 審批（不可被 trust/auto_approve 繞過）
+- Trust session 審批通知加入 pending request 摘要顯示
+
+### Fixed
+- bouncer-bug-014：`test_upload_cross_account_staging_uses_default_account_id` flaky test — 用 monkeypatch 獨立 DynamoDB table setup
+
+### Tests
+- Backend: 910 passed (+24 new tests) / coverage 81.33%
+
 ## [3.1.0] - 2026-02-26
 
 ### Added
