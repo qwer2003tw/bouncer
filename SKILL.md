@@ -300,6 +300,64 @@ for f in data['files']:
 
 ---
 
+### bouncer_confirm_upload
+**驗證 presigned batch 上傳結果**：在 PUT 後確認所有檔案已成功上傳到 staging bucket，避免後續 `s3 cp` 時遇到 404。
+
+```bash
+result=$(mcporter call bouncer bouncer_confirm_upload \
+  --args '{
+    "batch_id": "batch-db31d35b7c1e",
+    "files": [
+      {"s3_key": "2026-02-25/batch-db31d35b7c1e/index.html"},
+      {"s3_key": "2026-02-25/batch-db31d35b7c1e/assets/main.js"}
+    ]
+  }')
+
+# 回傳 verified=true 才繼續後續 s3 cp
+```
+
+**Parameters:**
+| 參數 | 必填 | 說明 |
+|------|------|------|
+| `batch_id` | ✅ | batch ID（格式：`batch-{12 hex chars}`）|
+| `files` | ✅ | `[{s3_key}]`，最多 50 個 |
+
+**Response（成功）：**
+```json
+{
+  "batch_id": "batch-db31d35b7c1e",
+  "verified": true,
+  "results": [
+    {"s3_key": "2026-02-25/batch-db31d35b7c1e/index.html", "exists": true},
+    {"s3_key": "2026-02-25/batch-db31d35b7c1e/assets/main.js", "exists": true}
+  ],
+  "missing": []
+}
+```
+
+**Response（有缺失）：**
+```json
+{
+  "batch_id": "batch-db31d35b7c1e",
+  "verified": false,
+  "results": [...],
+  "missing": ["2026-02-25/batch-db31d35b7c1e/assets/main.js"]
+}
+```
+
+**特性：**
+- **不需審批**（純 S3 read，無 Telegram 通知）
+- 使用 `list_objects_v2` 批量驗證（比 N 次 HeadObject 省 API call）
+- DynamoDB audit record（TTL 7 天），可事後查驗
+- `verified=false` 時列出所有缺失檔案
+
+**建議的前端部署流程：**
+```
+presigned_batch → PUT 上傳 → confirm_upload 驗證 → (verified=true) → grant s3 cp
+```
+
+---
+
 ## Trust Session
 
 審批時選「🔓 信任10分鐘」，期間同 trust_scope 的操作自動執行。
