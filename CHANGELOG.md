@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.1] - 2026-02-26
+
+### Fixed
+- 自動執行通知（⚡ 自動執行）加入 `💬 原因` 欄位，方便審計 why a command ran
+
+### Tests
+- Backend: 911 passed / coverage 81.33%
+
 ## [3.2.0] - 2026-02-26
 
 ### Added
