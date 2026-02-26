@@ -589,9 +589,11 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
     # Silent Telegram notification for safelist auto-approve
     try:
         result_preview = (result[:300] if result else '(無輸出)').strip()
+        reason_line = f"💬 *原因：* {escape_markdown(ctx.reason or '(未填寫)')}\n" if ctx.reason else ""
         _notif_text = (
             f"⚡ *自動執行*\n\n"
             f"🤖 *來源：* {escape_markdown(ctx.source or '(unknown)')}\n"
+            f"{reason_line}"
             f"📋 *命令：*\n```\n{ctx.command[:300]}\n```\n\n"
             f"✅ *結果：*\n```\n{result_preview}\n```"
         )
