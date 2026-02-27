@@ -2,19 +2,11 @@
 Bouncer - 命令分類與執行模組
 處理 AWS CLI 命令的分類（blocked/dangerous/auto-approve）和執行
 """
+import os
 import re
-import sys
-from io import StringIO
+import subprocess
 
 import boto3
-import botocore.session
-
-try:
-    from awscli.clidriver import CLIDriver as _AWSCLIDriver
-    _AWSCLI_AVAILABLE = True
-except ImportError:
-    _AWSCLIDriver = None
-    _AWSCLI_AVAILABLE = False
 
 
 from constants import BLOCKED_PATTERNS, DANGEROUS_PATTERNS, AUTO_APPROVE_PREFIXES
@@ -369,9 +361,9 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
         命令輸出（成功或錯誤訊息）
 
     Security note (bouncer-sec-006):
-        Credentials are injected via an isolated botocore.session.Session and
-        CLIDriver instance — os.environ is never mutated, eliminating
-        cross-request credential contamination under Lambda warm starts.
+        Credentials are passed via an isolated env dict to a subprocess —
+        os.environ is never mutated, eliminating cross-request credential
+        contamination under Lambda warm starts.
     """
 
     try:
@@ -381,17 +373,11 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
         if not args or args[0] != 'aws':
             return '❌ 只能執行 aws CLI 命令'
 
-        # 移除 'aws' 前綴，awscli.clidriver 不需要它
-        cli_args = args[1:]
+        # 建立隔離的環境變數 dict（不修改 os.environ）
+        env = os.environ.copy()
+        env['AWS_PAGER'] = ''  # 禁用 pager
 
-        # 建立一個 per-request 的 botocore session（credentials 隔離）
-        # 不修改 os.environ，避免 Lambda warm start 下的 cross-contamination
-        session = botocore.session.Session()
-
-        # 禁用 pager：透過 session 環境變數覆蓋，不影響 os.environ
-        session.set_config_variable('cli_pager', '')
-
-        # 如果需要 assume role，先取得臨時 credentials 並注入 session
+        # 如果需要 assume role，先取得臨時 credentials 並注入 env
         if assume_role_arn:
             try:
                 sts = boto3.client('sts')
@@ -402,41 +388,31 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
                 )
                 creds = assumed['Credentials']
 
-                # 將 credentials 注入到 isolated session — 不碰 os.environ
-                session.set_credentials(
-                    access_key=creds['AccessKeyId'],
-                    secret_key=creds['SecretAccessKey'],
-                    token=creds['SessionToken'],
-                )
+                # 注入到 isolated env dict，不影響 os.environ
+                env['AWS_ACCESS_KEY_ID'] = creds['AccessKeyId']
+                env['AWS_SECRET_ACCESS_KEY'] = creds['SecretAccessKey']
+                env['AWS_SESSION_TOKEN'] = creds['SessionToken']
 
             except Exception as e:
                 return f'❌ Assume role 失敗: {str(e)}'
 
-        # 捕獲 stdout/stderr
-        old_stdout = sys.stdout
-        old_stderr = sys.stderr
-        sys.stdout = StringIO()
-        sys.stderr = StringIO()
-
+        # 用 subprocess 執行，完全隔離 env，正確捕獲 stdout/stderr
         try:
-            if not _AWSCLI_AVAILABLE:
-                raise ImportError("awscli not installed")
-            # CLIDriver 接受自訂 session，credentials 與 os.environ 完全隔離
-            driver = _AWSCLIDriver(session=session)
+            result = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=55,  # Lambda timeout 60s，留 5s buffer
+            )
+            exit_code = result.returncode
+            stdout_output = result.stdout
+            stderr_output = result.stderr
 
-            exit_code = driver.main(cli_args)
-
-            stdout_output = sys.stdout.getvalue()
-            stderr_output = sys.stderr.getvalue()
-
-        except SystemExit as e:
-            stdout_output = sys.stdout.getvalue()
-            stderr_output = sys.stderr.getvalue()
-            exit_code = e.code if isinstance(e.code, int) else 1
-
-        finally:
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
+        except subprocess.TimeoutExpired:
+            return '❌ 命令執行超時（55 秒）'
+        except FileNotFoundError:
+            return '❌ aws CLI 未找到'
 
         output = stdout_output or stderr_output or ''
 
@@ -444,7 +420,6 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
             if not output.strip():
                 output = '✅ 命令執行成功（無輸出）'
         else:
-            # 顯示完整原始輸出（和直接跑 CLI 一樣），加上 exit code 提示
             if output.strip():
                 output = f'{output}\n\n(exit code: {exit_code})'
             else:
@@ -452,8 +427,6 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
 
         return output  # 不截斷，讓呼叫端用 store_paged_output 處理
 
-    except ImportError:
-        return '❌ awscli 模組未安裝'
     except ValueError as e:
         return f'❌ 命令格式錯誤: {str(e)}'
     except Exception as e:
