@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.0] - 2026-02-27
+
+### Added
+- `bouncer_confirm_upload` MCP tool — verify presigned batch upload results (S3 HeadObject check, no approval required)
+- `bouncer_stats` now includes `top_sources`, `top_commands`, `approval_rate`, `avg_execution_time_seconds`
+- `/stats [hours]` Telegram command for on-demand statistics
+- Template scan notification integration (`template_hit_count` in approval messages)
+- Trust session batch flow documentation in SKILL.md
+- `STAGING_BUCKET` constant in `constants.py`
+
+### Changed
+- `bouncer_deploy` response now includes `commit_sha`, `commit_short`, `commit_message`
+- Deploy approval and started notifications show commit info (`🔖 abc1234 — message`)
+- Deploy conflict error is now structured: `status: conflict`, `running_deploy_id`, `started_at` (ISO 8601), `estimated_remaining`, `hint`
+- Lambda env overwrite protection: `--environment Variables={}` → BLOCKED; `--environment Variables={...}` → DANGEROUS with warning
+- `risk-rules.json` adds `lambda_env_overwrite` pattern (score: 80)
+
+### Fixed
+- Flaky test isolation: `test_upload_cross_account_staging_uses_default_account_id` (patch rate_limit.table in fixture)
+- Decimal serialization in deploy conflict response (`started_at` now ISO 8601 string)
+- GitHub Issue #13: presigned PUT silent failures now detectable via `bouncer_confirm_upload`
+- GitHub Issue #17: lambda env var overwrite now blocked by compliance checker (B-LAMBDA-01)
+
+### Tests
+- 964 passed / coverage 81%+
+- +41 new regression and unit tests
+
 ## [3.2.1] - 2026-02-26
 
 ### Fixed
