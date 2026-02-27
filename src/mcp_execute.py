@@ -696,7 +696,8 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
     # 發送靜默通知
     send_trust_auto_approve_notification(
         ctx.command, trust_session['request_id'], remaining_str, new_count, result,
-        source=ctx.source
+        source=ctx.source,
+        reason=ctx.reason,
     )
 
     log_decision(

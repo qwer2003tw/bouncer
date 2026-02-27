@@ -927,6 +927,7 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
         send_trust_auto_approve_notification(
             cmd, trust_id, remaining, new_count, result,
             source=item_source,
+            reason=reason,
         )
 
         # Audit log

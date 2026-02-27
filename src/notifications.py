@@ -189,7 +189,7 @@ def send_account_approval_request(request_id: str, action: str, account_id: str,
 
 
 def send_trust_auto_approve_notification(command: str, trust_id: str, remaining: str, count: int,
-                                         result: str = None, source: str = None):
+                                         result: str = None, source: str = None, reason: str = None):
     """發送 Trust Session 自動批准的靜默通知"""
     cmd_preview = command if len(command) <= 100 else command[:100] + '...'
     # code block 內不需要 escape
@@ -208,12 +208,14 @@ def send_trust_auto_approve_notification(command: str, trust_id: str, remaining:
     remaining_line = f"⏱ {remaining}" if remaining else ""
     session_info = f"{source_line}{remaining_line}".strip()
     session_line = f"\n{session_info}" if session_info else ""
+    reason_line = f"\n💬 {_escape_markdown(reason)}" if reason else ""
 
     text = (
         f"🔓 *自動批准* (信任中)\n"
         f"📋 `{cmd_preview}`\n"
         f"📊 {count}/{TRUST_SESSION_MAX_COMMANDS}"
         f"{session_line}"
+        f"{reason_line}"
         f"{result_preview}"
     )
 

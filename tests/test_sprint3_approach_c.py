@@ -391,7 +391,7 @@ class TestHandleStatsCommand:
             import telegram_commands as tc_mod
 
         from constants import APPROVED_CHAT_IDS
-        approved_user = next(iter(APPROVED_CHAT_IDS)) if APPROVED_CHAT_IDS else '12345'
+        approved_user = next((x for x in APPROVED_CHAT_IDS if x), '12345') or '12345'
         message = {
             'from': {'id': int(approved_user)},
             'chat': {'id': 99999},
