@@ -1,0 +1,6 @@
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-randomly>=3.0.0
+pytest-xdist>=3.0.0
+pytest-memray>=1.0.0
+moto[dynamodb,s3]>=5.0.0

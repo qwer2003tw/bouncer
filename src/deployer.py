@@ -11,6 +11,7 @@ import boto3
 from botocore.exceptions import ClientError
 from metrics import emit_metric
 from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native, generate_display_summary
+import db as _db
 
 # 環境變數
 PROJECTS_TABLE = os.environ.get('PROJECTS_TABLE', 'bouncer-projects')
@@ -18,14 +19,53 @@ HISTORY_TABLE = os.environ.get('HISTORY_TABLE', 'bouncer-deploy-history')
 LOCKS_TABLE = os.environ.get('LOCKS_TABLE', 'bouncer-deploy-locks')
 STATE_MACHINE_ARN = os.environ.get('DEPLOY_STATE_MACHINE_ARN', '')
 
-# DynamoDB
-dynamodb = boto3.resource('dynamodb')
-projects_table = dynamodb.Table(PROJECTS_TABLE)
-history_table = dynamodb.Table(HISTORY_TABLE)
-locks_table = dynamodb.Table(LOCKS_TABLE)
+# DynamoDB — lazy init (no boto3 call at import time)
+# Tests may set these directly: deployer.history_table = moto_table
+_dynamodb = None
+projects_table = None
+history_table = None
+locks_table = None
 
-# Step Functions
-sfn_client = boto3.client('stepfunctions')
+# Step Functions — lazy init
+# Tests may patch this: patch.object(deployer, 'sfn_client')
+sfn_client = None
+
+
+def _get_dynamodb():
+    global _dynamodb
+    if _dynamodb is None:
+        region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+        _dynamodb = boto3.resource('dynamodb', region_name=region)
+    return _dynamodb
+
+
+def _get_projects_table():
+    global projects_table
+    if projects_table is None:
+        projects_table = _get_dynamodb().Table(os.environ.get('PROJECTS_TABLE', PROJECTS_TABLE))
+    return projects_table
+
+
+def _get_history_table():
+    global history_table
+    if history_table is None:
+        history_table = _get_dynamodb().Table(os.environ.get('HISTORY_TABLE', HISTORY_TABLE))
+    return history_table
+
+
+def _get_locks_table():
+    global locks_table
+    if locks_table is None:
+        locks_table = _get_dynamodb().Table(os.environ.get('LOCKS_TABLE', LOCKS_TABLE))
+    return locks_table
+
+
+def _get_sfn_client():
+    global sfn_client
+    if sfn_client is None:
+        region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+        sfn_client = boto3.client('stepfunctions', region_name=region)
+    return sfn_client
 
 
 # ============================================================================
@@ -78,7 +118,7 @@ def get_git_commit_info(cwd: str = None) -> dict:
 def list_projects() -> list:
     """列出所有專案"""
     try:
-        result = projects_table.scan()
+        result = _get_projects_table().scan()
         return result.get('Items', [])
     except Exception:
         return []
@@ -87,7 +127,7 @@ def list_projects() -> list:
 def get_project(project_id: str) -> dict:
     """取得專案配置"""
     try:
-        result = projects_table.get_item(Key={'project_id': project_id})
+        result = _get_projects_table().get_item(Key={'project_id': project_id})
         return result.get('Item')
     except Exception:
         return None
@@ -110,14 +150,14 @@ def add_project(project_id: str, config: dict) -> dict:
         'enabled': True,
         'created_at': int(time.time())
     }
-    projects_table.put_item(Item=item)
+    _get_projects_table().put_item(Item=item)
     return item
 
 
 def remove_project(project_id: str) -> bool:
     """移除專案配置"""
     try:
-        projects_table.delete_item(Key={'project_id': project_id})
+        _get_projects_table().delete_item(Key={'project_id': project_id})
         return True
     except Exception:
         return False
@@ -130,7 +170,7 @@ def remove_project(project_id: str) -> bool:
 def acquire_lock(project_id: str, deploy_id: str, locked_by: str) -> bool:
     """嘗試取得部署鎖"""
     try:
-        locks_table.put_item(
+        _get_locks_table().put_item(
             Item={
                 'project_id': project_id,
                 'lock_id': deploy_id,
@@ -150,7 +190,7 @@ def acquire_lock(project_id: str, deploy_id: str, locked_by: str) -> bool:
 def release_lock(project_id: str) -> bool:
     """釋放部署鎖"""
     try:
-        locks_table.delete_item(Key={'project_id': project_id})
+        _get_locks_table().delete_item(Key={'project_id': project_id})
         return True
     except Exception:
         return False
@@ -159,7 +199,7 @@ def release_lock(project_id: str) -> bool:
 def get_lock(project_id: str) -> dict:
     """取得鎖資訊（檢查是否過期）"""
     try:
-        result = locks_table.get_item(Key={'project_id': project_id})
+        result = _get_locks_table().get_item(Key={'project_id': project_id})
         item = result.get('Item')
 
         if not item:
@@ -201,7 +241,7 @@ def create_deploy_record(deploy_id: str, project_id: str, config: dict) -> dict:
     }
     # DynamoDB 不允許存 None，過濾掉 null 欄位
     item = {k: v for k, v in item.items() if v is not None}
-    history_table.put_item(Item=item)
+    _get_history_table().put_item(Item=item)
     return item
 
 
@@ -212,7 +252,7 @@ def update_deploy_record(deploy_id: str, updates: dict):
         expr_names = {f'#{k}': k for k in updates.keys()}
         expr_values = {f':{k}': v for k, v in updates.items()}
 
-        history_table.update_item(
+        _get_history_table().update_item(
             Key={'deploy_id': deploy_id},
             UpdateExpression=update_expr,
             ExpressionAttributeNames=expr_names,
@@ -225,7 +265,7 @@ def update_deploy_record(deploy_id: str, updates: dict):
 def get_deploy_record(deploy_id: str) -> dict:
     """取得部署記錄"""
     try:
-        result = history_table.get_item(Key={'deploy_id': deploy_id})
+        result = _get_history_table().get_item(Key={'deploy_id': deploy_id})
         return result.get('Item')
     except Exception:
         return None
@@ -234,7 +274,7 @@ def get_deploy_record(deploy_id: str) -> dict:
 def get_deploy_history(project_id: str, limit: int = 10) -> list:
     """取得專案部署歷史"""
     try:
-        result = history_table.query(
+        result = _get_history_table().query(
             IndexName='project-time-index',
             KeyConditionExpression='project_id = :pid',
             ExpressionAttributeValues={':pid': project_id},
@@ -312,7 +352,7 @@ def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str) -
 
     # 啟動 Step Functions
     try:
-        response = sfn_client.start_execution(
+        response = _get_sfn_client().start_execution(
             stateMachineArn=STATE_MACHINE_ARN,
             name=deploy_id,
             input=json.dumps(sfn_input)
@@ -359,7 +399,7 @@ def cancel_deploy(deploy_id: str) -> dict:
     execution_arn = record.get('execution_arn')
     if execution_arn:
         try:
-            sfn_client.stop_execution(
+            _get_sfn_client().stop_execution(
                 executionArn=execution_arn,
                 cause='User cancelled'
             )
@@ -388,7 +428,7 @@ def get_deploy_status(deploy_id: str) -> dict:
     execution_arn = record.get('execution_arn')
     if execution_arn and record.get('status') == 'RUNNING':
         try:
-            response = sfn_client.describe_execution(executionArn=execution_arn)
+            response = _get_sfn_client().describe_execution(executionArn=execution_arn)
             sfn_status = response.get('status')
 
             # 同步狀態
@@ -497,7 +537,7 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
         'mode': 'mcp',
         'display_summary': generate_display_summary('deploy', project_id=project_id),
     }
-    table.put_item(Item=item)
+    _db.table.put_item(Item=item)
 
     # 發送 Telegram 審批請求
     send_deploy_approval_request(request_id, project, branch, reason, source, context=context)
