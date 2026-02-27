@@ -2942,8 +2942,10 @@ class TestDeployerModule:
         })
         
         result = deployer.start_deploy('locked-project', 'main', 'user', 'reason')
-        assert 'error' in result
-        assert '進行中' in result['error']
+        # Final: conflict response uses status='conflict' + message field
+        assert result.get('status') == 'conflict' or 'error' in result
+        error_or_msg = result.get('error') or result.get('message', '')
+        assert '進行中' in error_or_msg
         
         sys.path.pop(0)
     

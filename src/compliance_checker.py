@@ -232,6 +232,18 @@ COMPLIANCE_RULES = [
     ),
 
     # -------------------------------------------------------------------------
+    # Lambda - 危險環境變數操作 (B-LAMBDA-01)
+    # -------------------------------------------------------------------------
+    # 攔截 lambda update-function-configuration --environment（覆蓋式更新，會清空所有 env vars）
+    (
+        r"lambda\s+update-function-configuration\s+.*--environment\s+",
+        "B-LAMBDA-01",
+        "Lambda 危險 --environment 覆蓋",
+        "lambda update-function-configuration --environment 會完整覆蓋所有環境變數，清空未列出的 vars",
+        "使用 update-function-configuration 前先 get-function-configuration 取得完整 env vars，或用 AWS Console / Terraform 管理",
+    ),
+
+    # -------------------------------------------------------------------------
     # EC2 Instance Attribute - 細粒度控制 (B-EC2)
     # -------------------------------------------------------------------------
     # 禁止危險的 attribute 修改

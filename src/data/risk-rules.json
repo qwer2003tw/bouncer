@@ -95,6 +95,11 @@
   },
   "parameter_patterns": [
     {
+      "pattern": "lambda\\s+update-function-configuration.*--environment",
+      "score": 80,
+      "description": "lambda_env_overwrite: Lambda --environment 覆蓋式更新（category: dangerous）"
+    },
+    {
       "pattern": "--policy-document",
       "score": 70,
       "description": "IAM Policy 修改"

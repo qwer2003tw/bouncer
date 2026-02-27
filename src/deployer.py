@@ -4,6 +4,7 @@ MCP tools for SAM deployment
 """
 import json
 import os
+import subprocess
 import time
 import uuid
 import boto3
@@ -25,6 +26,49 @@ locks_table = dynamodb.Table(LOCKS_TABLE)
 
 # Step Functions
 sfn_client = boto3.client('stepfunctions')
+
+
+# ============================================================================
+# Git Utilities
+# ============================================================================
+
+def get_git_commit_info(cwd: str = None) -> dict:
+    """
+    取得當前 git commit 資訊
+
+    Returns:
+        dict with commit_sha (full), commit_short (7 chars), commit_message
+        若 git 不可用或非 git repo，回傳全 null 的 graceful fallback
+    """
+    try:
+        kwargs = {'capture_output': True, 'text': True, 'timeout': 5}
+        if cwd:
+            kwargs['cwd'] = cwd
+
+        sha_result = subprocess.run(['git', 'rev-parse', 'HEAD'], **kwargs)
+        if sha_result.returncode != 0:
+            return {'commit_sha': None, 'commit_short': None, 'commit_message': None}
+
+        full_sha = sha_result.stdout.strip()
+        short_sha = full_sha[:7] if full_sha else None
+
+        log_result = subprocess.run(
+            ['git', 'log', '-1', '--format=%h %s'],
+            **kwargs
+        )
+        commit_message = None
+        if log_result.returncode == 0 and log_result.stdout.strip():
+            parts = log_result.stdout.strip().split(' ', 1)
+            commit_message = parts[1] if len(parts) > 1 else None
+
+        return {
+            'commit_sha': full_sha,
+            'commit_short': short_sha,
+            'commit_message': commit_message,
+        }
+    except Exception as e:
+        print(f"[deployer] get_git_commit_info failed (graceful fallback): {e}")
+        return {'commit_sha': None, 'commit_short': None, 'commit_message': None}
 
 
 # ============================================================================
@@ -139,6 +183,9 @@ def get_lock(project_id: str) -> dict:
 
 def create_deploy_record(deploy_id: str, project_id: str, config: dict) -> dict:
     """建立部署記錄"""
+    # 取得 git commit 資訊
+    git_info = get_git_commit_info()
+
     item = {
         'deploy_id': deploy_id,
         'project_id': project_id,
@@ -147,13 +194,13 @@ def create_deploy_record(deploy_id: str, project_id: str, config: dict) -> dict:
         'started_at': int(time.time()),
         'triggered_by': config.get('triggered_by', ''),
         'reason': config.get('reason', ''),
+        'commit_sha': git_info['commit_sha'],
+        'commit_short': git_info['commit_short'],
+        'commit_message': git_info['commit_message'],
         'ttl': int(time.time()) + 30 * 24 * 3600  # 30 天
     }
-    # 加入 commit SHA（若有）
-    if config.get('commit_sha'):
-        item['commit_sha'] = config.get('commit_sha')
-    if config.get('commit_message'):
-        item['commit_message'] = config.get('commit_message')
+    # DynamoDB 不允許存 None，過濾掉 null 欄位
+    item = {k: v for k, v in item.items() if v is not None}
     history_table.put_item(Item=item)
     return item
 
@@ -204,8 +251,7 @@ def get_deploy_history(project_id: str, limit: int = 10) -> list:
 # Deploy Trigger
 # ============================================================================
 
-def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str,
-                 commit_sha: str = None, commit_message: str = None) -> dict:
+def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str) -> dict:
     """啟動部署"""
     # 取得專案配置
     project = get_project(project_id)
@@ -218,11 +264,22 @@ def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str,
     # 檢查並行鎖
     existing_lock = get_lock(project_id)
     if existing_lock:
+        locked_at_ts = existing_lock.get('locked_at')
+        started_at_iso = None
+        estimated_remaining = None
+        if locked_at_ts:
+            import datetime
+            started_at_iso = datetime.datetime.utcfromtimestamp(int(locked_at_ts)).strftime('%Y-%m-%dT%H:%M:%SZ')
+            elapsed = int(time.time()) - int(locked_at_ts)
+            avg_deploy_secs = 300  # 5 分鐘
+            estimated_remaining = max(0, avg_deploy_secs - elapsed)
         return {
-            'error': '此專案有部署正在進行中',
-            'current_deploy': existing_lock.get('lock_id'),
-            'locked_by': existing_lock.get('locked_by'),
-            'locked_at': existing_lock.get('locked_at')
+            'status': 'conflict',
+            'message': '此專案有部署正在進行中',
+            'running_deploy_id': existing_lock.get('lock_id'),
+            'started_at': started_at_iso,
+            'estimated_remaining': estimated_remaining,
+            'hint': '用 bouncer_deploy_status 查詢進度，或 bouncer_deploy_cancel 取消',
         }
 
     # 建立部署 ID
@@ -232,13 +289,11 @@ def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str,
     if not acquire_lock(project_id, deploy_id, triggered_by):
         return {'error': '無法取得部署鎖，可能有其他部署正在進行'}
 
-    # 建立部署記錄
-    create_deploy_record(deploy_id, project_id, {
+    # 建立部署記錄（內部自動取得 git commit 資訊）
+    deploy_record = create_deploy_record(deploy_id, project_id, {
         'branch': branch,
         'triggered_by': triggered_by,
         'reason': reason,
-        'commit_sha': commit_sha,
-        'commit_message': commit_message,
     })
 
     # 準備 Step Functions 輸入
@@ -271,18 +326,16 @@ def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str,
 
         emit_metric('Bouncer', 'Deploy', 1, dimensions={'Status': 'started', 'Project': project_id})
 
-        result = {
+        return {
             'status': 'started',
             'deploy_id': deploy_id,
             'execution_arn': response['executionArn'],
             'project_id': project_id,
-            'branch': sfn_input['branch']
+            'branch': sfn_input['branch'],
+            'commit_sha': deploy_record.get('commit_sha'),
+            'commit_short': deploy_record.get('commit_short'),
+            'commit_message': deploy_record.get('commit_message'),
         }
-        if commit_sha:
-            result['commit_sha'] = commit_sha
-        if commit_message:
-            result['commit_message'] = commit_message
-        return result
 
     except Exception as e:
         # 失敗時釋放鎖
@@ -380,8 +433,6 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
     source = arguments.get('source', None)
     context = arguments.get('context', None)
     async_mode = arguments.get('async', True)
-    commit_sha = str(arguments.get('commit_sha', '')).strip() or None
-    commit_message = str(arguments.get('commit_message', '')).strip() or None
 
     if not project_id:
         return mcp_error(req_id, -32602, 'Missing required parameter: project')
@@ -405,31 +456,24 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
     # 檢查並行鎖
     existing_lock = get_lock(project_id)
     if existing_lock:
-        # Task 3: 加入 running deploy 詳細資訊
-        lock_id = existing_lock.get('lock_id')
-        locked_at = existing_lock.get('locked_at')
-        conflict_info = {
-            'status': 'error',
-            'error': '此專案有部署正在進行中',
-            'current_deploy': lock_id,
-        }
-        # 嘗試從 history 查詢 running deploy 詳細資訊
-        if lock_id:
-            running_record = get_deploy_record(lock_id)
-            if running_record:
-                conflict_info['running_deploy_id'] = lock_id
-                started = running_record.get('started_at', locked_at)
-                # Decimal → int for JSON serialisation
-                started_int = int(started) if started is not None else None
-                conflict_info['started_at'] = started_int
-                # 估計剩餘時間（假設平均部署時間 5 分鐘）
-                if started_int:
-                    elapsed = int(time.time()) - started_int
-                    avg_deploy_secs = 300  # 5 分鐘
-                    estimated_remaining = max(0, avg_deploy_secs - elapsed)
-                    conflict_info['estimated_remaining'] = estimated_remaining
+        locked_at_ts = existing_lock.get('locked_at')
+        started_at_iso = None
+        estimated_remaining = None
+        if locked_at_ts:
+            import datetime
+            started_at_iso = datetime.datetime.utcfromtimestamp(int(locked_at_ts)).strftime('%Y-%m-%dT%H:%M:%SZ')
+            elapsed = int(time.time()) - int(locked_at_ts)
+            avg_deploy_secs = 300  # 5 分鐘
+            estimated_remaining = max(0, avg_deploy_secs - elapsed)
         return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps(conflict_info)}],
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'conflict',
+                'message': '此專案有部署正在進行中',
+                'running_deploy_id': existing_lock.get('lock_id'),
+                'started_at': started_at_iso,
+                'estimated_remaining': estimated_remaining,
+                'hint': '用 bouncer_deploy_status 查詢進度，或 bouncer_deploy_cancel 取消',
+            }, ensure_ascii=False)}],
             'isError': True
         })
 
@@ -453,18 +497,10 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
         'mode': 'mcp',
         'display_summary': generate_display_summary('deploy', project_id=project_id),
     }
-    # 加入 commit 資訊（若有）
-    if commit_sha:
-        item['commit_sha'] = commit_sha
-    if commit_message:
-        item['commit_message'] = commit_message
     table.put_item(Item=item)
 
     # 發送 Telegram 審批請求
-    send_deploy_approval_request(
-        request_id, project, branch, reason, source,
-        context=context, commit_sha=commit_sha, commit_message=commit_message
-    )
+    send_deploy_approval_request(request_id, project, branch, reason, source, context=context)
 
     if async_mode:
         return mcp_result(req_id, {
@@ -554,8 +590,7 @@ def mcp_tool_project_list(req_id, arguments: dict) -> dict:
 # Telegram Notifications
 # ============================================================================
 
-def send_deploy_approval_request(request_id: str, project: dict, branch: str, reason: str, source: str,
-                                  context: str = None, commit_sha: str = None, commit_message: str = None):
+def send_deploy_approval_request(request_id: str, project: dict, branch: str, reason: str, source: str, context: str = None):
     """發送部署審批請求到 Telegram"""
     from telegram import send_telegram_message, escape_markdown
     from utils import build_info_lines
@@ -578,20 +613,11 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
     info_lines = build_info_lines(source=source, context=context, reason=reason)
     account_line = f"🏦 *帳號：* `{target_account}`\n" if target_account else ""
 
-    # Commit SHA 行（若有）
-    commit_line = ""
-    if commit_sha:
-        sha_short = commit_sha[:7]
-        if commit_message:
-            commit_line = f"🔖 *Commit：* `{sha_short}` — {escape_markdown(commit_message)}\n"
-        else:
-            commit_line = f"🔖 *Commit：* `{sha_short}`\n"
     text = (
         f"🚀 *SAM 部署請求*\n\n"
         f"{info_lines}"
         f"📦 *專案：* {escape_markdown(project_name)}\n"
         f"🌿 *分支：* {branch}\n"
-        f"{commit_line}"
         f"{account_line}"
         f"📋 *Stack：* {stack_name}\n\n"
         f"🆔 *ID：* `{request_id}`\n"

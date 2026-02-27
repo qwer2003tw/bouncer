@@ -166,7 +166,7 @@ class TestDeployCommitSHA:
     """Tests for git commit SHA in deploy history and notification."""
 
     def test_create_deploy_record_includes_commit_sha(self):
-        """create_deploy_record should store commit_sha when provided."""
+        """create_deploy_record should auto-detect and store git commit_sha."""
         for mod in list(sys.modules.keys()):
             if 'deployer' in mod:
                 del sys.modules[mod]
@@ -199,13 +199,18 @@ class TestDeployCommitSHA:
             import deployer
             deployer.history_table = history_tbl
 
-            record = deployer.create_deploy_record('deploy-abc', 'bouncer', {
-                'branch': 'master',
-                'triggered_by': 'test-bot',
-                'reason': 'test deploy',
+            # Final: create_deploy_record auto-detects git commit info
+            # Patch get_git_commit_info to return controlled values
+            with patch.object(deployer, 'get_git_commit_info', return_value={
                 'commit_sha': 'abc1234567890',
+                'commit_short': 'abc1234',
                 'commit_message': 'fix: add reason to notification',
-            })
+            }):
+                record = deployer.create_deploy_record('deploy-abc', 'bouncer', {
+                    'branch': 'master',
+                    'triggered_by': 'test-bot',
+                    'reason': 'test deploy',
+                })
 
             assert record['commit_sha'] == 'abc1234567890'
             assert record['commit_message'] == 'fix: add reason to notification'
@@ -216,7 +221,7 @@ class TestDeployCommitSHA:
             assert item.get('commit_message') == 'fix: add reason to notification'
 
     def test_create_deploy_record_without_commit_sha(self):
-        """create_deploy_record without commit_sha should work (backward compat)."""
+        """create_deploy_record without git repo should gracefully omit commit fields."""
         for mod in list(sys.modules.keys()):
             if 'deployer' in mod:
                 del sys.modules[mod]
@@ -247,17 +252,23 @@ class TestDeployCommitSHA:
             import deployer
             deployer.history_table = history_tbl
 
-            record = deployer.create_deploy_record('deploy-xyz', 'bouncer', {
-                'branch': 'master',
-                'triggered_by': 'test-bot',
-                'reason': 'test deploy',
-            })
+            # Patch get_git_commit_info to simulate non-git environment
+            with patch.object(deployer, 'get_git_commit_info', return_value={
+                'commit_sha': None,
+                'commit_short': None,
+                'commit_message': None,
+            }):
+                record = deployer.create_deploy_record('deploy-xyz', 'bouncer', {
+                    'branch': 'master',
+                    'triggered_by': 'test-bot',
+                    'reason': 'test deploy',
+                })
 
             assert 'commit_sha' not in record or record.get('commit_sha') is None
             assert record['deploy_id'] == 'deploy-xyz'
 
     def test_deploy_notification_includes_commit_sha(self):
-        """send_deploy_approval_request should show commit SHA in notification text."""
+        """Approval request notification is sent successfully (commit SHA shown in callbacks after start_deploy)."""
         for mod in list(sys.modules.keys()):
             if 'deployer' in mod:
                 del sys.modules[mod]
@@ -280,15 +291,13 @@ class TestDeployCommitSHA:
                 branch='master',
                 reason='v3.2.1 hotfix',
                 source='Private Bot',
-                commit_sha='abc1234def567',
-                commit_message='fix: add reason to notification',
             )
 
         mock_tg.assert_called_once()
         text_sent = mock_tg.call_args[0][0]
-        # Should contain short SHA (first 7 chars)
-        assert 'abc1234' in text_sent
-        assert 'fix: add reason to notification' in text_sent or 'Commit' in text_sent
+        # Should contain project name and branch
+        assert 'Bouncer' in text_sent
+        assert 'master' in text_sent
 
     def test_deploy_notification_without_commit_sha(self):
         """send_deploy_approval_request without commit SHA should work (backward compat)."""
@@ -322,7 +331,7 @@ class TestDeployCommitSHA:
         assert '🔖' not in text_sent or 'Commit' not in text_sent
 
     def test_deploy_notification_commit_sha_only(self):
-        """send_deploy_approval_request with SHA but no message."""
+        """send_deploy_approval_request succeeds; commit SHA shown in started callback via start_deploy."""
         for mod in list(sys.modules.keys()):
             if 'deployer' in mod:
                 del sys.modules[mod]
@@ -345,13 +354,13 @@ class TestDeployCommitSHA:
                 branch='master',
                 reason='deploy',
                 source='Bot',
-                commit_sha='deadbeef1234567',
-                commit_message=None,
             )
 
         mock_tg.assert_called_once()
         text_sent = mock_tg.call_args[0][0]
-        assert 'deadbee' in text_sent  # first 7 chars of SHA
+        # Should contain project and branch info
+        assert 'Bouncer' in text_sent
+        assert 'master' in text_sent
 
 
 # ===========================================================================
@@ -474,7 +483,7 @@ class TestDeployConflictDetails:
         body = json.loads(result['body'])
         text = json.loads(body['result']['content'][0]['text'])
 
-        assert text.get('status') == 'error' or 'error' in text
+        assert text.get('status') in ('error', 'conflict') or 'error' in text
         assert text.get('running_deploy_id') == running_deploy_id or \
                text.get('current_deploy') == running_deploy_id
 

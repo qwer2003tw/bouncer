@@ -494,8 +494,9 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
         # 啟動部署
         result = start_deploy(project_id, branch, user_id, reason)
 
-        if 'error' in result:
+        if 'error' in result or result.get('status') == 'conflict':
             emit_metric('Bouncer', 'Deploy', 1, dimensions={'Status': 'failed', 'Project': project_id})
+            error_msg = result.get('error') or result.get('message', '啟動失敗')
             update_message(
                 message_id,
                 f"❌ *部署啟動失敗*\n\n"
@@ -503,13 +504,22 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
                 f"{source_line}"
                 f"📦 *專案：* {project_name}\n"
                 f"🌿 *分支：* {branch}\n\n"
-                f"❗ *錯誤：* {result['error']}"
+                f"❗ *錯誤：* {escape_markdown(error_msg)}"
             )
             answer_callback(callback_id, '❌ 部署啟動失敗')
         else:
             emit_metric('Bouncer', 'Deploy', 1, dimensions={'Status': 'started', 'Project': project_id})
             deploy_id = result.get('deploy_id', '')
             reason_line = f"📝 *原因：* {escape_markdown(reason)}\n" if reason else ""
+            # 加入 git commit SHA（若有）
+            commit_short = result.get('commit_short')
+            commit_message = result.get('commit_message', '')
+            commit_line = ""
+            if commit_short:
+                commit_display = f"`{commit_short}`"
+                if commit_message:
+                    commit_display += f" {escape_markdown(commit_message)}"
+                commit_line = f"🔖 {commit_display}\n"
             update_message(
                 message_id,
                 f"🚀 *部署已啟動*\n\n"
@@ -518,8 +528,9 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
                 f"📦 *專案：* {project_name}\n"
                 f"🌿 *分支：* {branch}\n"
                 f"{reason_line}"
-                f"📋 *Stack：* {stack_name}\n\n"
-                f"🆔 *部署 ID：* `{deploy_id}`\n\n"
+                f"📋 *Stack：* {stack_name}\n"
+                f"{commit_line}"
+                f"\n🆔 *部署 ID：* `{deploy_id}`\n\n"
                 f"⏳ 部署進行中..."
             )
             answer_callback(callback_id, '🚀 部署已啟動')
