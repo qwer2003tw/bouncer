@@ -1115,3 +1115,846 @@ class TestCrossAccountExecuteErrors:
 # ============================================================================
 # Display Summary Tests
 # ============================================================================
+
+
+# ============================================================================
+# T7: Grant Tools Coverage — mcp_tool_request_grant / grant_status / revoke_grant
+# ============================================================================
+
+
+def _make_grant_event(tool_name: str, arguments: dict) -> dict:
+    """Helper: build a lambda_handler event for a grant MCP tool call."""
+    return {
+        'rawPath': '/mcp',
+        'headers': {'x-approval-secret': 'test-secret'},
+        'body': json.dumps({
+            'jsonrpc': '2.0',
+            'id': 'grant-test',
+            'method': 'tools/call',
+            'params': {
+                'name': tool_name,
+                'arguments': arguments,
+            },
+        }),
+        'requestContext': {'http': {'method': 'POST'}},
+    }
+
+
+class TestMCPGrantTools:
+    """Coverage for mcp_tool_request_grant / grant_status / revoke_grant (L882-1020)."""
+
+    # ------------------------------------------------------------------ #
+    # bouncer_request_grant — happy path                                  #
+    # ------------------------------------------------------------------ #
+
+    @patch('notifications.send_grant_request_notification')
+    def test_request_grant_happy_path(self, mock_notif, app_module):
+        """request_grant returns pending_approval on valid input."""
+        event = _make_grant_event('bouncer_request_grant', {
+            'commands': ['aws s3 ls s3://my-bucket'],
+            'reason': 'list bucket contents',
+            'source': 'test-bot',
+        })
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        assert 'result' in body, f"Expected result, got: {body}"
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'pending_approval'
+        assert 'grant_request_id' in content
+
+    @patch('notifications.send_grant_request_notification')
+    def test_request_grant_with_account(self, mock_notif, app_module):
+        """request_grant with explicit account_id uses that account."""
+        event = _make_grant_event('bouncer_request_grant', {
+            'commands': ['aws s3 ls'],
+            'reason': 'test reason',
+            'source': 'test-bot',
+            'account': '111111111111',
+        })
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        assert 'result' in body
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'pending_approval'
+
+    @patch('notifications.send_grant_request_notification')
+    def test_request_grant_notification_failure_non_fatal(self, mock_notif, app_module):
+        """Notification failure should not prevent grant creation."""
+        mock_notif.side_effect = Exception("Telegram down")
+        event = _make_grant_event('bouncer_request_grant', {
+            'commands': ['aws ec2 describe-instances'],
+            'reason': 'check instances',
+            'source': 'test-bot',
+        })
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        # Should still return pending_approval despite notification failure
+        assert 'result' in body
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'pending_approval'
+
+    # ------------------------------------------------------------------ #
+    # bouncer_request_grant — missing required params                     #
+    # ------------------------------------------------------------------ #
+
+    def test_request_grant_missing_commands(self, app_module):
+        """request_grant without commands returns error -32602."""
+        event = _make_grant_event('bouncer_request_grant', {
+            'reason': 'test',
+            'source': 'test-bot',
+            # 'commands' intentionally missing
+        })
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        # Should be an MCP error
+        assert 'error' in body or (
+            'result' in body and
+            json.loads(body['result']['content'][0]['text']).get('isError')
+        )
+
+    def test_request_grant_missing_reason(self, app_module):
+        """request_grant without reason returns error -32602."""
+        event = _make_grant_event('bouncer_request_grant', {
+            'commands': ['aws s3 ls'],
+            'source': 'test-bot',
+            # 'reason' missing
+        })
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        assert 'error' in body or body.get('result', {}).get('isError')
+
+    def test_request_grant_missing_source(self, app_module):
+        """request_grant without source returns error -32602."""
+        event = _make_grant_event('bouncer_request_grant', {
+            'commands': ['aws s3 ls'],
+            'reason': 'test reason',
+            # 'source' missing
+        })
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        assert 'error' in body or body.get('result', {}).get('isError')
+
+    def test_request_grant_invalid_account(self, app_module):
+        """request_grant with invalid account_id returns error."""
+        event = _make_grant_event('bouncer_request_grant', {
+            'commands': ['aws s3 ls'],
+            'reason': 'test',
+            'source': 'test-bot',
+            'account': 'not-numeric',
+        })
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        # Should report error (either MCP error or isError result)
+        assert result['statusCode'] == 200  # HTTP level OK
+        is_error = (
+            'error' in body or
+            body.get('result', {}).get('isError') or
+            json.loads(body.get('result', {}).get('content', [{'text': '{}'}])[0]['text']).get('status') == 'error'
+        )
+        assert is_error
+
+    def test_request_grant_nonexistent_account(self, app_module):
+        """request_grant with unconfigured account returns error."""
+        event = _make_grant_event('bouncer_request_grant', {
+            'commands': ['aws s3 ls'],
+            'reason': 'test',
+            'source': 'test-bot',
+            'account': '999999999999',
+        })
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content_text = body.get('result', {}).get('content', [{'text': '{}'}])[0]['text']
+        content = json.loads(content_text)
+        assert content.get('status') == 'error' or body.get('result', {}).get('isError')
+
+    # ------------------------------------------------------------------ #
+    # bouncer_grant_status — various paths                                #
+    # ------------------------------------------------------------------ #
+
+    def test_grant_status_missing_grant_id(self, app_module):
+        """grant_status without grant_id returns error -32602."""
+        event = _make_grant_event('bouncer_grant_status', {
+            'source': 'test-bot',
+            # grant_id missing
+        })
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        assert 'error' in body
+
+    def test_grant_status_missing_source(self, app_module):
+        """grant_status without source returns error -32602."""
+        event = _make_grant_event('bouncer_grant_status', {
+            'grant_id': 'grant_nonexistent',
+            # source missing
+        })
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        assert 'error' in body
+
+    def test_grant_status_not_found(self, app_module):
+        """grant_status for unknown grant_id returns isError result."""
+        event = _make_grant_event('bouncer_grant_status', {
+            'grant_id': 'grant_doesnotexist_abc123',
+            'source': 'test-bot',
+        })
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        # Should return isError since grant not found
+        assert 'result' in body
+        assert body['result'].get('isError') is True
+
+    @patch('notifications.send_grant_request_notification')
+    def test_grant_status_found_pending(self, mock_notif, app_module):
+        """grant_status returns status for existing pending grant."""
+        # First create a grant
+        create_event = _make_grant_event('bouncer_request_grant', {
+            'commands': ['aws s3 ls'],
+            'reason': 'check for status test',
+            'source': 'status-test-bot',
+        })
+        create_result = app_module.lambda_handler(create_event, None)
+        create_body = json.loads(create_result['body'])
+        grant_id = json.loads(create_body['result']['content'][0]['text'])['grant_request_id']
+
+        # Now check status
+        status_event = _make_grant_event('bouncer_grant_status', {
+            'grant_id': grant_id,
+            'source': 'status-test-bot',
+        })
+        result = app_module.lambda_handler(status_event, None)
+        body = json.loads(result['body'])
+        assert 'result' in body
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['grant_id'] == grant_id
+        assert content['status'] in ('pending_approval', 'active', 'expired', 'revoked')
+
+    @patch('notifications.send_grant_request_notification')
+    def test_grant_status_source_mismatch(self, mock_notif, app_module):
+        """grant_status with wrong source returns isError (source mismatch)."""
+        # Create grant with source-A
+        create_event = _make_grant_event('bouncer_request_grant', {
+            'commands': ['aws s3 ls'],
+            'reason': 'source mismatch test',
+            'source': 'source-A',
+        })
+        create_result = app_module.lambda_handler(create_event, None)
+        create_body = json.loads(create_result['body'])
+        grant_id = json.loads(create_body['result']['content'][0]['text'])['grant_request_id']
+
+        # Query with source-B
+        status_event = _make_grant_event('bouncer_grant_status', {
+            'grant_id': grant_id,
+            'source': 'source-B-different',
+        })
+        result = app_module.lambda_handler(status_event, None)
+        body = json.loads(result['body'])
+        assert 'result' in body
+        assert body['result'].get('isError') is True
+
+    # ------------------------------------------------------------------ #
+    # bouncer_revoke_grant — paths                                        #
+    # ------------------------------------------------------------------ #
+
+    def test_revoke_grant_missing_grant_id(self, app_module):
+        """revoke_grant without grant_id returns error -32602."""
+        event = _make_grant_event('bouncer_revoke_grant', {
+            # grant_id missing
+        })
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        assert 'error' in body
+
+    @patch('notifications.send_grant_request_notification')
+    def test_revoke_grant_success(self, mock_notif, app_module):
+        """revoke_grant on existing grant returns success=True."""
+        # Create a grant first
+        create_event = _make_grant_event('bouncer_request_grant', {
+            'commands': ['aws s3 ls'],
+            'reason': 'revoke test',
+            'source': 'revoke-test-bot',
+        })
+        create_result = app_module.lambda_handler(create_event, None)
+        create_body = json.loads(create_result['body'])
+        grant_id = json.loads(create_body['result']['content'][0]['text'])['grant_request_id']
+
+        # Revoke it
+        revoke_event = _make_grant_event('bouncer_revoke_grant', {
+            'grant_id': grant_id,
+        })
+        result = app_module.lambda_handler(revoke_event, None)
+        body = json.loads(result['body'])
+        assert 'result' in body
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['success'] is True
+        assert content['grant_id'] == grant_id
+
+    def test_revoke_grant_nonexistent(self, app_module):
+        """revoke_grant on nonexistent grant_id returns a result (DynamoDB update succeeds vacuously)."""
+        revoke_event = _make_grant_event('bouncer_revoke_grant', {
+            'grant_id': 'grant_nonexistent_xyz999',
+        })
+        result = app_module.lambda_handler(revoke_event, None)
+        assert result['statusCode'] == 200
+        body = json.loads(result['body'])
+        # DynamoDB update on non-existent item doesn't error — success may be True
+        assert 'result' in body
+
+
+# ============================================================================
+# T7 Extra: Unicode normalization + _safe_risk helpers coverage (L86-153)
+# ============================================================================
+
+
+class TestMCPExecuteHelpers:
+    """Direct unit tests for helper functions in mcp_execute.py."""
+
+    def test_safe_risk_category_none_input(self, app_module):
+        """_safe_risk_category returns None for None input."""
+        import mcp_execute
+        result = mcp_execute._safe_risk_category(None)
+        assert result is None
+
+    def test_safe_risk_category_with_value_attr(self, app_module):
+        """_safe_risk_category returns .value for enum-like category."""
+        import mcp_execute
+        cat_mock = MagicMock()
+        cat_mock.value = 'high'
+        risk_mock = MagicMock()
+        risk_mock.risk_result.category = cat_mock
+        result = mcp_execute._safe_risk_category(risk_mock)
+        assert result == 'high'
+
+    def test_safe_risk_category_exception(self, app_module):
+        """_safe_risk_category returns None on exception."""
+        import mcp_execute
+        bad_mock = MagicMock()
+        bad_mock.risk_result = None  # will raise AttributeError
+        result = mcp_execute._safe_risk_category(bad_mock)
+        assert result is None
+
+    def test_safe_risk_factors_none_input(self, app_module):
+        """_safe_risk_factors returns None for None input."""
+        import mcp_execute
+        result = mcp_execute._safe_risk_factors(None)
+        assert result is None
+
+    def test_safe_risk_factors_with_floats(self, app_module):
+        """_safe_risk_factors converts float values to Decimal."""
+        import mcp_execute
+        from decimal import Decimal
+        factor_mock = MagicMock()
+        factor_mock.__dict__ = {'name': 'test', 'score': 0.75, 'raw_score': 75}
+        risk_mock = MagicMock()
+        risk_mock.risk_result.factors = [factor_mock]
+        result = mcp_execute._safe_risk_factors(risk_mock)
+        assert result is not None
+        assert isinstance(result[0]['score'], Decimal)
+
+    def test_safe_risk_factors_exception(self, app_module):
+        """_safe_risk_factors returns None on exception."""
+        import mcp_execute
+        bad_mock = MagicMock()
+        bad_mock.risk_result = None
+        result = mcp_execute._safe_risk_factors(bad_mock)
+        assert result is None
+
+    def test_normalize_command_strips_invisible_chars(self, app_module):
+        """_normalize_command removes Unicode zero-width characters."""
+        import mcp_execute
+        # Zero-width space (U+200B) in command
+        cmd = 'aws\u200b s3 ls'
+        result = mcp_execute._normalize_command(cmd)
+        assert '\u200b' not in result
+        assert 'aws' in result
+
+    def test_normalize_command_collapses_spaces(self, app_module):
+        """_normalize_command collapses multiple spaces."""
+        import mcp_execute
+        result = mcp_execute._normalize_command('aws   s3   ls')
+        assert result == 'aws s3 ls'
+
+    def test_normalize_command_unicode_spaces(self, app_module):
+        """_normalize_command replaces Unicode spaces with ASCII space."""
+        import mcp_execute
+        # Non-breaking space (U+00A0)
+        cmd = 'aws\u00a0s3\u00a0ls'
+        result = mcp_execute._normalize_command(cmd)
+        assert '\u00a0' not in result
+        assert 'aws s3 ls' == result
+
+    def test_normalize_command_empty_string(self, app_module):
+        """_normalize_command handles empty string."""
+        import mcp_execute
+        assert mcp_execute._normalize_command('') == ''
+
+
+# ============================================================================
+# T7 Extra: _extract_actual_decision + _map_status coverage (L363-375)
+# ============================================================================
+
+
+class TestMCPExecuteDecisionHelpers:
+    """Tests for _extract_actual_decision and _map_status_to_decision."""
+
+    def test_map_status_auto_approved(self, app_module):
+        import mcp_execute
+        assert mcp_execute._map_status_to_decision('auto_approved') == 'auto_approve'
+
+    def test_map_status_blocked(self, app_module):
+        import mcp_execute
+        assert mcp_execute._map_status_to_decision('blocked') == 'blocked'
+
+    def test_map_status_compliance_violation(self, app_module):
+        import mcp_execute
+        assert mcp_execute._map_status_to_decision('compliance_violation') == 'blocked'
+
+    def test_map_status_pending_approval(self, app_module):
+        import mcp_execute
+        assert mcp_execute._map_status_to_decision('pending_approval') == 'needs_approval'
+
+    def test_map_status_trust_auto_approved(self, app_module):
+        import mcp_execute
+        assert mcp_execute._map_status_to_decision('trust_auto_approved') == 'auto_approve'
+
+    def test_map_status_grant_auto_approved(self, app_module):
+        import mcp_execute
+        assert mcp_execute._map_status_to_decision('grant_auto_approved') == 'auto_approve'
+
+    def test_map_status_unknown(self, app_module):
+        import mcp_execute
+        assert mcp_execute._map_status_to_decision('something_else') == 'something_else'
+
+    def test_extract_actual_decision_auto_approved(self, app_module):
+        import mcp_execute
+        fake_result = {
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'result': {
+                    'content': [{'type': 'text', 'text': json.dumps({'status': 'auto_approved'})}]
+                }
+            })
+        }
+        assert mcp_execute._extract_actual_decision(fake_result) == 'auto_approve'
+
+    def test_extract_actual_decision_error_path(self, app_module):
+        import mcp_execute
+        fake_result = {
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'error': {'code': -32603, 'message': 'Internal error'}
+            })
+        }
+        assert mcp_execute._extract_actual_decision(fake_result) == 'error'
+
+    def test_extract_actual_decision_bad_json(self, app_module):
+        import mcp_execute
+        fake_result = {'body': 'not-json'}
+        # Should not raise, returns 'unknown'
+        result = mcp_execute._extract_actual_decision(fake_result)
+        assert isinstance(result, str)
+
+    def test_extract_actual_decision_empty_content(self, app_module):
+        import mcp_execute
+        fake_result = {
+            'body': json.dumps({
+                'jsonrpc': '2.0',
+                'result': {'content': []}
+            })
+        }
+        result = mcp_execute._extract_actual_decision(fake_result)
+        assert result == 'unknown'
+
+
+# ============================================================================
+# T7 Extra: Rate-limit / pending-limit paths (L646-660)
+# ============================================================================
+
+
+class TestMCPRateLimitPaths:
+    """Cover _check_rate_limit PendingLimitExceeded branch (L656-660)."""
+
+    @patch('mcp_execute.check_rate_limit')
+    @patch('telegram.send_telegram_message')
+    def test_pending_limit_exceeded(self, mock_tg, mock_rate, app_module):
+        """When PendingLimitExceeded is raised, return pending_limit_exceeded status."""
+        from rate_limit import PendingLimitExceeded
+        mock_rate.side_effect = PendingLimitExceeded("Too many pending requests")
+
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0', 'id': 'rate-test', 'method': 'tools/call',
+                'params': {'name': 'bouncer_execute', 'arguments': {
+                    'command': 'aws ec2 stop-instances --instance-ids i-abc',
+                    'trust_scope': 'test-session',
+                    'reason': 'test pending limit',
+                    'source': 'test-bot',
+                }}
+            }),
+            'requestContext': {'http': {'method': 'POST'}},
+        }
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'pending_limit_exceeded'
+
+    @patch('mcp_execute.check_rate_limit')
+    @patch('telegram.send_telegram_message')
+    def test_rate_limit_exceeded(self, mock_tg, mock_rate, app_module):
+        """When RateLimitExceeded is raised, return rate_limited status."""
+        from rate_limit import RateLimitExceeded
+        mock_rate.side_effect = RateLimitExceeded("Rate limit hit")
+
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0', 'id': 'rate-test2', 'method': 'tools/call',
+                'params': {'name': 'bouncer_execute', 'arguments': {
+                    'command': 'aws ec2 stop-instances --instance-ids i-xyz',
+                    'trust_scope': 'test-session',
+                    'reason': 'test rate limit',
+                    'source': 'test-bot',
+                }}
+            }),
+            'requestContext': {'http': {'method': 'POST'}},
+        }
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'rate_limited'
+
+
+# ============================================================================
+# T7 Extra: Compliance violation path (L397-428)
+# ============================================================================
+
+
+class TestMCPCompliancePaths:
+    """Cover _check_compliance violation path."""
+
+    @patch('mcp_execute._check_compliance')
+    @patch('telegram.send_telegram_message')
+    def test_compliance_violation_returned(self, mock_tg, mock_compliance, app_module):
+        """When compliance check returns violation, pipeline returns compliance_violation."""
+        import mcp_execute
+        from utils import mcp_result
+
+        # Make _check_compliance return a compliance_violation result
+        mock_compliance.return_value = mcp_result('test-id', {
+            'content': [{
+                'type': 'text',
+                'text': json.dumps({
+                    'status': 'compliance_violation',
+                    'rule_id': 'RULE-001',
+                    'rule_name': 'Test Rule',
+                    'description': 'Test',
+                    'remediation': 'Fix it',
+                    'command': 'aws iam delete-user',
+                })
+            }],
+            'isError': True
+        })
+
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0', 'id': 'compliance-test', 'method': 'tools/call',
+                'params': {'name': 'bouncer_execute', 'arguments': {
+                    'command': 'aws iam delete-user --user-name bad-user',
+                    'trust_scope': 'test-session',
+                    'reason': 'compliance test',
+                    'source': 'test-bot',
+                }}
+            }),
+            'requestContext': {'http': {'method': 'POST'}},
+        }
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'compliance_violation'
+
+    def test_execute_missing_command(self, app_module):
+        """bouncer_execute without command returns error -32602."""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0', 'id': 'no-cmd', 'method': 'tools/call',
+                'params': {'name': 'bouncer_execute', 'arguments': {
+                    'trust_scope': 'test-session',
+                    'reason': 'test',
+                    # command missing
+                }}
+            }),
+            'requestContext': {'http': {'method': 'POST'}},
+        }
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        assert 'error' in body
+        assert body['error']['code'] == -32602
+
+    def test_execute_missing_trust_scope(self, app_module):
+        """bouncer_execute without trust_scope returns error -32602."""
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0', 'id': 'no-trust', 'method': 'tools/call',
+                'params': {'name': 'bouncer_execute', 'arguments': {
+                    'command': 'aws s3 ls',
+                    'reason': 'test',
+                    # trust_scope missing
+                }}
+            }),
+            'requestContext': {'http': {'method': 'POST'}},
+        }
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        assert 'error' in body
+        assert body['error']['code'] == -32602
+
+
+# ============================================================================
+# T7 Extra: _check_blocked path (L436-450)
+# ============================================================================
+
+
+class TestMCPBlockedPath:
+    """Cover _check_blocked path."""
+
+    @patch('mcp_execute._check_blocked')
+    @patch('telegram.send_telegram_message')
+    def test_blocked_command_returns_blocked_status(self, mock_tg, mock_blocked, app_module):
+        """When _check_blocked returns a result, pipeline short-circuits."""
+        import mcp_execute
+        from utils import mcp_result
+
+        mock_blocked.return_value = mcp_result('test-id', {
+            'content': [{
+                'type': 'text',
+                'text': json.dumps({
+                    'status': 'blocked',
+                    'error': '命令被安全規則封鎖',
+                    'block_reason': 'test block',
+                    'command': 'aws iam delete-role',
+                    'suggestion': '...',
+                })
+            }],
+            'isError': True
+        })
+
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0', 'id': 'blocked-test', 'method': 'tools/call',
+                'params': {'name': 'bouncer_execute', 'arguments': {
+                    'command': 'aws iam delete-role --role-name bad-role',
+                    'trust_scope': 'test-session',
+                    'reason': 'blocked test',
+                    'source': 'test-bot',
+                }}
+            }),
+            'requestContext': {'http': {'method': 'POST'}},
+        }
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'blocked'
+
+
+# ============================================================================
+# T7 Extra: template scan escalate path (L339-347 / L843)
+# ============================================================================
+
+
+class TestMCPTemplateScanEscalate:
+    """Cover template escalate pipeline branch."""
+
+    @patch('mcp_execute._scan_template')
+    @patch('mcp_execute._score_risk')
+    @patch('telegram.send_telegram_message')
+    def test_escalate_skips_auto_approve(self, mock_tg, mock_score, mock_scan, app_module):
+        """When template scan escalates, auto_approve / trust are skipped."""
+        # Make template scan set escalate=True
+        def fake_scan(ctx):
+            ctx.template_scan_result = {
+                'max_score': 90,
+                'hit_count': 1,
+                'severity': 'critical',
+                'factors': [],
+                'escalate': True,
+            }
+        mock_scan.side_effect = fake_scan
+
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0', 'id': 'escalate-test', 'method': 'tools/call',
+                'params': {'name': 'bouncer_execute', 'arguments': {
+                    'command': 'aws s3 cp s3://bucket/dangerous.json .',
+                    'trust_scope': 'test-session',
+                    'reason': 'template escalate test',
+                    'source': 'test-bot',
+                }}
+            }),
+            'requestContext': {'http': {'method': 'POST'}},
+        }
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        # Should go to pending_approval (not auto_approved)
+        assert content['status'] == 'pending_approval'
+
+
+# ============================================================================
+# T7 Extra: Disabled account path (L232)
+# ============================================================================
+
+
+class TestMCPDisabledAccount:
+    """Cover disabled account error path (L232)."""
+
+    @patch('mcp_execute.get_account')
+    @patch('mcp_execute.validate_account_id')
+    def test_execute_disabled_account(self, mock_validate, mock_get, app_module):
+        """Execute with disabled account returns error."""
+        mock_validate.return_value = (True, None)
+        mock_get.return_value = {
+            'account_id': '111111111111',
+            'name': 'Disabled Account',
+            'enabled': False,
+            'role_arn': None,
+        }
+
+        event = {
+            'rawPath': '/mcp',
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({
+                'jsonrpc': '2.0', 'id': 'disabled-acct', 'method': 'tools/call',
+                'params': {'name': 'bouncer_execute', 'arguments': {
+                    'command': 'aws s3 ls',
+                    'trust_scope': 'test-session',
+                    'reason': 'test',
+                    'source': 'test-bot',
+                    'account': '111111111111',
+                }}
+            }),
+            'requestContext': {'http': {'method': 'POST'}},
+        }
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'error'
+        assert '已停用' in content.get('error', '')
+
+
+# ============================================================================
+# T7 Extra: request_grant with ttl_minutes and allow_repeat (L919-962)
+# ============================================================================
+
+
+class TestMCPRequestGrantOptions:
+    """Test request_grant with optional ttl_minutes and allow_repeat."""
+
+    @patch('notifications.send_grant_request_notification')
+    def test_request_grant_with_ttl_and_repeat(self, mock_notif, app_module):
+        """request_grant with ttl_minutes and allow_repeat=True creates grant."""
+        event = _make_grant_event('bouncer_request_grant', {
+            'commands': ['aws s3 ls', 'aws ec2 describe-instances'],
+            'reason': 'batch ops',
+            'source': 'test-bot',
+            'ttl_minutes': 15,
+            'allow_repeat': True,
+        })
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        assert 'result' in body
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'pending_approval'
+        assert 'expires_in' in content
+
+    @patch('notifications.send_grant_request_notification')
+    def test_request_grant_ValueError_propagated(self, mock_notif, app_module):
+        """request_grant with empty commands list hits ValueError path."""
+        event = _make_grant_event('bouncer_request_grant', {
+            'commands': [],  # empty list triggers ValueError
+            'reason': 'test',
+            'source': 'test-bot',
+        })
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        # Empty commands is caught and returned as error
+        assert 'error' in body or body.get('result', {}).get('isError')
+
+
+# ============================================================================
+# T7 Extra: grant_status found / exception (L992-993, L1019-1020)
+# ============================================================================
+
+
+class TestMCPGrantStatusException:
+    """Test exception paths in grant_status and revoke_grant."""
+
+    @patch('grant.get_grant_status')
+    def test_grant_status_internal_exception(self, mock_status, app_module):
+        """grant_status exception returns mcp_error -32603."""
+        mock_status.side_effect = Exception("DDB timeout")
+
+        event = _make_grant_event('bouncer_grant_status', {
+            'grant_id': 'grant_test123',
+            'source': 'test-bot',
+        })
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        assert 'error' in body
+        assert body['error']['code'] == -32603
+
+    @patch('grant.revoke_grant')
+    def test_revoke_grant_internal_exception(self, mock_revoke, app_module):
+        """revoke_grant exception returns mcp_error -32603."""
+        mock_revoke.side_effect = Exception("DDB timeout")
+
+        event = _make_grant_event('bouncer_revoke_grant', {
+            'grant_id': 'grant_test456',
+        })
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        assert 'error' in body
+        assert body['error']['code'] == -32603
+
+
+# ============================================================================
+# T7 Extra: _log_smart_approval_shadow success path (L152-153)
+# ============================================================================
+
+
+class TestMCPShadowLogging:
+    """Test _log_smart_approval_shadow."""
+
+    def test_shadow_log_handles_exception_gracefully(self, app_module):
+        """_log_smart_approval_shadow failure is non-fatal."""
+        import mcp_execute
+
+        # Create a fake smart_decision that will cause DDB error
+        smart_mock = MagicMock()
+        smart_mock.decision = 'auto_approve'
+        smart_mock.final_score = 25
+        smart_mock.risk_result.category.value = 'low'
+        smart_mock.risk_result.factors = []
+
+        # Should not raise even when DDB table doesn't exist
+        mcp_execute._log_smart_approval_shadow(
+            req_id='test-123',
+            command='aws s3 ls',
+            reason='test',
+            source='test-bot',
+            account_id='111111111111',
+            smart_decision=smart_mock,
+            actual_decision='auto_approve',
+        )
+        # No assertion needed — just verify it doesn't raise
