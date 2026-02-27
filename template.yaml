@@ -16,6 +16,10 @@ Parameters:
     Type: String
     Default: ""
     Description: 允許審批的 Telegram Chat ID（支援多個，用逗號分隔，例如：999999999,-5177412711）
+  AlarmEmail:
+    Type: String
+    Default: "bouncer@ztp.one"
+    Description: 接收 CloudWatch Alarm 通知的 Email 地址（留空則不建立 SNS subscription）
   RequestSecret:
     Type: String
     NoEcho: true
@@ -37,6 +41,9 @@ Parameters:
     Type: String
     Default: ""
     Description: 預設 AWS 帳號 ID（用於上傳桶等資源，部署時必須指定）
+
+Conditions:
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, ""]]
 
 Globals:
   Function:
@@ -415,6 +422,14 @@ Resources:
     Properties:
       TopicName: !Sub "${Environment}-bouncer-alarms"
 
+  AlarmEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      TopicArn: !Ref AlarmNotificationTopic
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+
   # ============================================================
   # CloudWatch Alarm - API Gateway 5xx
   # ============================================================
@@ -450,7 +465,7 @@ Resources:
       ExtendedStatistic: p99
       Period: 300
       EvaluationPeriods: 1
-      Threshold: 600000
+      Threshold: 50000
       ComparisonOperator: GreaterThanThreshold
       AlarmActions:
         - !Ref AlarmNotificationTopic
