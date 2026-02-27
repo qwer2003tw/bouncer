@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.5.0] - 2026-02-27
+
+### Added
+- (TODO: fill in)
+
+### Changed
+- (TODO: fill in)
+
+### Fixed
+- (TODO: fill in)
+
+### Tests
+- Backend: (TODO: test counts)
+
 ## [3.4.0] - 2026-02-27
 
 ### Security
