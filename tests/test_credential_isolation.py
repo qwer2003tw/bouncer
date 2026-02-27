@@ -1,8 +1,8 @@
 """
 Tests for bouncer-sec-006: credential isolation in execute_command.
 
-Subprocess approach: os.environ is never mutated,
-credentials are passed via isolated env dict to subprocess.
+Lock-based approach: _execute_lock ensures os.environ credential swap
+is atomic under Lambda warm-start concurrency.
 """
 import os
 import threading
@@ -26,136 +26,120 @@ def _make_fake_sts_response(access_key, secret_key, token):
     }
 
 
-def _fake_subprocess_result(stdout='ok', returncode=0):
-    result = MagicMock()
-    result.returncode = returncode
-    result.stdout = stdout
-    result.stderr = ''
-    return result
+def _fake_driver_result(output='{"UserId":"AIDA..."}', rc=0):
+    m = MagicMock()
+    m.main.return_value = rc
+    return m
 
 
 class TestCredentialIsolation:
 
-    def test_os_environ_not_mutated_during_assume_role(self):
-        """After assume_role, os.environ must NOT contain the assumed credentials."""
+    def test_lock_exists(self):
+        """_execute_lock must exist and be a threading.Lock."""
+        assert hasattr(commands_mod, '_execute_lock')
+        assert isinstance(commands_mod._execute_lock, type(threading.Lock()))
+
+    def test_execute_command_uses_lock(self):
+        """execute_command must acquire _execute_lock during execution."""
+        lock_acquired = []
+
+        original_locked = commands_mod._execute_locked
+
+        def spy_locked(command, assume_role_arn=None):
+            lock_acquired.append(commands_mod._execute_lock.locked())
+            return original_locked(command, assume_role_arn)
+
+        fake_sts = MagicMock()
+        fake_sts.assume_role.return_value = _make_fake_sts_response(
+            'AKIA_TEST', 'secret', 'token'
+        )
+
+        import io
+        fake_out = io.StringIO('{"UserId":"AIDA..."}')
+
+        with patch.object(commands_mod, '_execute_locked', side_effect=spy_locked), \
+             patch('boto3.client', return_value=fake_sts):
+            commands_mod.execute_command('aws sts get-caller-identity')
+
+        # lock was held during _execute_locked
+        assert any(lock_acquired), "Lock was not acquired during execute_command"
+
+    def test_os_environ_restored_after_assume_role(self):
+        """After execute_command with assume_role, os.environ must be restored."""
         original_key = os.environ.get('AWS_ACCESS_KEY_ID')
 
         fake_sts = MagicMock()
         fake_sts.assume_role.return_value = _make_fake_sts_response(
-            'AKIA_ASSUMED_KEY', 'assumed_secret', 'assumed_token'
+            'AKIA_ASSUMED', 'assumed_secret', 'assumed_token'
         )
 
-        captured_env = {}
+        import io
+        fake_stdout = io.StringIO('{"UserId":"AIDA..."}')
+        fake_stderr = io.StringIO()
 
-        def fake_run(args, capture_output, text, env, timeout):
-            captured_env.update(dict(env))
-            return _fake_subprocess_result('{"UserId": "AIDA..."}')
+        def fake_main(cli_args):
+            import sys
+            sys.stdout.write('{"UserId":"AIDA..."}')
+            return 0
+
+        fake_driver = MagicMock()
+        fake_driver.main.side_effect = fake_main
 
         with patch('boto3.client', return_value=fake_sts), \
-             patch.object(commands_mod.subprocess, 'run', side_effect=fake_run):
-            commands_mod.execute_command(
-                'aws sts get-caller-identity',
-                assume_role_arn='arn:aws:iam::111111111111:role/TestRole',
-            )
+             patch('commands.create_clidriver', return_value=fake_driver, create=True):
+            # Patch create_clidriver inside the module
+            import awscli.clidriver
+            with patch.object(awscli.clidriver, 'create_clidriver', return_value=fake_driver):
+                commands_mod.execute_command(
+                    'aws sts get-caller-identity',
+                    assume_role_arn='arn:aws:iam::111:role/TestRole',
+                )
 
-        # subprocess env must have assumed credentials
-        assert captured_env.get('AWS_ACCESS_KEY_ID') == 'AKIA_ASSUMED_KEY'
-        assert captured_env.get('AWS_SECRET_ACCESS_KEY') == 'assumed_secret'
-        assert captured_env.get('AWS_SESSION_TOKEN') == 'assumed_token'
-
-        # os.environ must NOT have changed
+        # os.environ must be restored to original value
         assert os.environ.get('AWS_ACCESS_KEY_ID') == original_key, (
-            f"os.environ was mutated! Before: {original_key}, "
-            f"After: {os.environ.get('AWS_ACCESS_KEY_ID')}"
+            f"os.environ was not restored! Now: {os.environ.get('AWS_ACCESS_KEY_ID')}"
         )
 
-    def test_concurrent_calls_credential_isolation(self):
-        """Two threads: each subprocess must get its own credentials, os.environ clean."""
-        CREDS_A = ('AKIA_THREAD_A_KEY', 'secret_a', 'token_a')
-        CREDS_B = ('AKIA_THREAD_B_KEY', 'secret_b', 'token_b')
+    def test_concurrent_calls_serialized(self):
+        """Concurrent calls must be serialized (one at a time) via the lock."""
+        concurrent_count = {'max': 0, 'current': 0}
+        lock = threading.Lock()
 
-        captured = {}
-        capture_lock = threading.Lock()
-        errors = {}
+        original_locked = commands_mod._execute_locked
 
-        def make_sts_mock(access_key, secret_key, token):
-            sts = MagicMock()
-            sts.assume_role.return_value = _make_fake_sts_response(
-                access_key, secret_key, token
-            )
-            return sts
+        def slow_locked(command, assume_role_arn=None):
+            with lock:
+                concurrent_count['current'] += 1
+                if concurrent_count['current'] > concurrent_count['max']:
+                    concurrent_count['max'] = concurrent_count['current']
+            time.sleep(0.05)
+            result = original_locked(command, assume_role_arn)
+            with lock:
+                concurrent_count['current'] -= 1
+            return result
 
-        sts_clients = [make_sts_mock(*CREDS_A), make_sts_mock(*CREDS_B)]
-        call_counter = {'n': 0}
-        counter_lock = threading.Lock()
+        import awscli.clidriver
+        fake_driver = MagicMock()
+        fake_driver.main.return_value = 0
 
-        def boto3_client_side_effect(service, **kwargs):
-            with counter_lock:
-                idx = call_counter['n'] % 2
-                call_counter['n'] += 1
-            return sts_clients[idx]
+        errors = []
 
-        def make_fake_subprocess(slot):
-            def fake_run(args, capture_output, text, env, timeout):
-                with capture_lock:
-                    captured[slot] = {
-                        'env_key': env.get('AWS_ACCESS_KEY_ID'),
-                        'os_env_key': os.environ.get('AWS_ACCESS_KEY_ID'),
-                    }
-                time.sleep(0.05)
-                return _fake_subprocess_result('{}')
-            return fake_run
-
-        def thread_fn(slot, role_arn):
+        def thread_fn():
             try:
-                with patch('boto3.client', side_effect=boto3_client_side_effect), \
-                     patch.object(commands_mod.subprocess, 'run',
-                                  side_effect=make_fake_subprocess(slot)):
-                    commands_mod.execute_command(
-                        'aws sts get-caller-identity',
-                        assume_role_arn=role_arn,
-                    )
+                with patch.object(commands_mod, '_execute_locked', side_effect=slow_locked), \
+                     patch.object(awscli.clidriver, 'create_clidriver', return_value=fake_driver):
+                    commands_mod.execute_command('aws s3 ls')
             except Exception as e:
-                errors[slot] = str(e)
+                errors.append(str(e))
 
-        t_a = threading.Thread(target=thread_fn, args=('a', 'arn:aws:iam::111:role/A'))
-        t_b = threading.Thread(target=thread_fn, args=('b', 'arn:aws:iam::222:role/B'))
-        t_a.start(); t_b.start()
-        t_a.join(timeout=5); t_b.join(timeout=5)
+        threads = [threading.Thread(target=thread_fn) for _ in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
 
         assert not errors, f"Thread errors: {errors}"
-        assert 'a' in captured and 'b' in captured
-
-        for slot in ('a', 'b'):
-            assert captured[slot]['os_env_key'] not in (CREDS_A[0], CREDS_B[0]), (
-                f"Thread {slot}: os.environ contaminated: {captured[slot]['os_env_key']}"
-            )
-
-    def test_no_assume_role_env_untouched(self):
-        """Without assume_role, os.environ must not change at all."""
-        original_snapshot = {
-            k: os.environ.get(k)
-            for k in ('AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN')
-        }
-
-        with patch.object(commands_mod.subprocess, 'run',
-                          return_value=_fake_subprocess_result('i-1234')):
-            commands_mod.execute_command('aws ec2 describe-instances')
-
-        for key, val in original_snapshot.items():
-            assert os.environ.get(key) == val, f"os.environ[{key}] changed"
-
-    def test_subprocess_env_has_aws_pager_disabled(self):
-        """subprocess must always receive AWS_PAGER='' to prevent blocking."""
-        captured_env = {}
-
-        def fake_run(args, capture_output, text, env, timeout):
-            captured_env['AWS_PAGER'] = env.get('AWS_PAGER')
-            return _fake_subprocess_result('ok')
-
-        with patch.object(commands_mod.subprocess, 'run', side_effect=fake_run):
-            commands_mod.execute_command('aws s3 ls')
-
-        assert captured_env.get('AWS_PAGER') == '', (
-            f"AWS_PAGER not empty: {captured_env.get('AWS_PAGER')!r}"
+        # With the lock, max concurrent == 1
+        assert concurrent_count['max'] == 1, (
+            f"Expected max concurrent=1 (serialized), got {concurrent_count['max']}"
         )

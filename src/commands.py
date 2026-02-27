@@ -4,12 +4,16 @@ Bouncer - 命令分類與執行模組
 """
 import os
 import re
-import subprocess
+import sys
+import threading
+from io import StringIO
 
 import boto3
 
-
 from constants import BLOCKED_PATTERNS, DANGEROUS_PATTERNS, AUTO_APPROVE_PREFIXES
+
+# Lock: Lambda warm start 下 os.environ credential swap 必須 atomic
+_execute_lock = threading.Lock()
 
 __all__ = [
     'is_blocked',
@@ -351,7 +355,7 @@ def aws_cli_split(command: str) -> list:
 
 
 def execute_command(command: str, assume_role_arn: str = None) -> str:
-    """執行 AWS CLI 命令
+    """執行 AWS CLI 命令（thread-safe via _execute_lock）
 
     Args:
         command: AWS CLI 命令
@@ -359,13 +363,14 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
 
     Returns:
         命令輸出（成功或錯誤訊息）
-
-    Security note (bouncer-sec-006):
-        Credentials are passed via an isolated env dict to a subprocess —
-        os.environ is never mutated, eliminating cross-request credential
-        contamination under Lambda warm starts.
     """
 
+    with _execute_lock:
+        return _execute_locked(command, assume_role_arn)
+
+
+def _execute_locked(command: str, assume_role_arn: str = None) -> str:
+    """execute_command 的實作，必須在 _execute_lock 持有時呼叫。"""
     try:
         # 解析命令字串為 argv list
         args = aws_cli_split(command)
@@ -373,11 +378,13 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
         if not args or args[0] != 'aws':
             return '❌ 只能執行 aws CLI 命令'
 
-        # 建立隔離的環境變數 dict（不修改 os.environ）
-        env = os.environ.copy()
-        env['AWS_PAGER'] = ''  # 禁用 pager
+        # 移除 'aws' 前綴，awscli.clidriver 不需要它
+        cli_args = args[1:]
 
-        # 如果需要 assume role，先取得臨時 credentials 並注入 env
+        # 保存原始環境變數
+        original_env = {}
+
+        # 如果需要 assume role，先取得臨時 credentials
         if assume_role_arn:
             try:
                 sts = boto3.client('sts')
@@ -388,31 +395,48 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
                 )
                 creds = assumed['Credentials']
 
-                # 注入到 isolated env dict，不影響 os.environ
-                env['AWS_ACCESS_KEY_ID'] = creds['AccessKeyId']
-                env['AWS_SECRET_ACCESS_KEY'] = creds['SecretAccessKey']
-                env['AWS_SESSION_TOKEN'] = creds['SessionToken']
+                # 設定環境變數讓 awscli 使用這些 credentials
+                original_env = {
+                    'AWS_ACCESS_KEY_ID': os.environ.get('AWS_ACCESS_KEY_ID'),
+                    'AWS_SECRET_ACCESS_KEY': os.environ.get('AWS_SECRET_ACCESS_KEY'),
+                    'AWS_SESSION_TOKEN': os.environ.get('AWS_SESSION_TOKEN'),
+                }
+                os.environ['AWS_ACCESS_KEY_ID'] = creds['AccessKeyId']
+                os.environ['AWS_SECRET_ACCESS_KEY'] = creds['SecretAccessKey']
+                os.environ['AWS_SESSION_TOKEN'] = creds['SessionToken']
 
             except Exception as e:
                 return f'❌ Assume role 失敗: {str(e)}'
 
-        # 用 subprocess 執行，完全隔離 env，正確捕獲 stdout/stderr
-        try:
-            result = subprocess.run(
-                args,
-                capture_output=True,
-                text=True,
-                env=env,
-                timeout=55,  # Lambda timeout 60s，留 5s buffer
-            )
-            exit_code = result.returncode
-            stdout_output = result.stdout
-            stderr_output = result.stderr
+        # 捕獲 stdout/stderr
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+        sys.stdout = StringIO()
+        sys.stderr = StringIO()
 
-        except subprocess.TimeoutExpired:
-            return '❌ 命令執行超時（55 秒）'
-        except FileNotFoundError:
-            return '❌ aws CLI 未找到'
+        try:
+            from awscli.clidriver import create_clidriver
+            driver = create_clidriver()
+
+            # 禁用 pager
+            os.environ['AWS_PAGER'] = ''
+
+            exit_code = driver.main(cli_args)
+
+            stdout_output = sys.stdout.getvalue()
+            stderr_output = sys.stderr.getvalue()
+
+        finally:
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
+
+            # 還原環境變數
+            if assume_role_arn and original_env:
+                for key, value in original_env.items():
+                    if value is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = value
 
         output = stdout_output or stderr_output or ''
 
@@ -420,6 +444,7 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
             if not output.strip():
                 output = '✅ 命令執行成功（無輸出）'
         else:
+            # 顯示完整原始輸出（和直接跑 CLI 一樣），加上 exit code 提示
             if output.strip():
                 output = f'{output}\n\n(exit code: {exit_code})'
             else:
@@ -427,6 +452,8 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
 
         return output  # 不截斷，讓呼叫端用 store_paged_output 處理
 
+    except ImportError:
+        return '❌ awscli 模組未安裝'
     except ValueError as e:
         return f'❌ 命令格式錯誤: {str(e)}'
     except Exception as e:
