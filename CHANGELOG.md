@@ -4,17 +4,30 @@ All notable changes to this project will be documented in this file.
 
 ## [3.4.0] - 2026-02-27
 
-### Added
-- (TODO: fill in)
-
-### Changed
-- (TODO: fill in)
+### Security
+- `execute_command()` 加 `threading.Lock`，確保 Lambda warm start 下 os.environ credential swap 是 atomic 的，防止 cross-request credential contamination (bouncer-sec-006)
+- Presigned URL 生成時加入 Telegram silent 通知，提升可見性 (bouncer-sec-007)
+- Grant pattern 加入 ReDoS 防護：長度 >256 chars、wildcard >10 個、`***` 連續 wildcard 全部攔截 (bouncer-sec-008)
+- REST endpoint `handle_clawdbot_request` 補上 Unicode 正規化 (bouncer-sec-009)
 
 ### Fixed
-- (TODO: fill in)
+- CloudWatch `LambdaDurationAlarm` 閾值從 600,000ms 修正為 50,000ms（原值永遠不會觸發）(bouncer-ops-001)
+- `db.py` 改為 lazy init，import 時不再建立 DynamoDB client，降低冷啟動記憶體用量
+
+### Added
+- SNS Topic 加入 Email Subscription (`alerts@ztp.one`)，CloudWatch Alarm 觸發時會發通知 (bouncer-ops-003)
+- `scripts/run-tests.sh`：分批測試腳本，搭配 cgroup `MemoryMax=2G` 防止 OOM
+- `pytest.py` OOM Guard：攔截 `python3 -m pytest tests/` 全套呼叫，強制使用分批方式
+- `~/.local/bin/pytest` wrapper：攔截直接呼叫 `pytest tests/`
+- `requirements-dev.txt` 建立（pytest-xdist、pytest-memray 等）
+
+### Changed
+- pre-commit hook 移除全套 pytest，改為只跑 ruff lint（全套測試改由 `run-tests.sh` 手動執行）
+- `execute_command()` 使用 `_execute_lock` 確保 thread safety
 
 ### Tests
-- Backend: (TODO: test counts)
+- Backend: 566 passed (關鍵批次驗證)
+- 全批次分段驗收：995 passed / 0 failed
 
 ## [3.3.0] - 2026-02-27
 
