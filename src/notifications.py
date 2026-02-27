@@ -504,3 +504,66 @@ def send_batch_upload_notification(
 
     except Exception as e:
         print(f"[BATCH UPLOAD] send_batch_upload_notification error: {e}")
+
+
+# ============================================================================
+# Presigned URL Notifications (bouncer-sec-007)
+# ============================================================================
+
+def send_presigned_notification(
+    filename: str,
+    source: str,
+    account_id: str,
+    expires_at: str,
+) -> None:
+    """發送 Presigned URL 生成的靜默通知（單檔）。
+
+    ❌ 絕對不含 presigned URL 本身。
+    """
+    try:
+        safe_filename = _escape_markdown(filename or '')
+        safe_source = _escape_markdown(source or 'Unknown')
+        safe_account_id = _escape_markdown(account_id or '')
+        safe_expires_at = _escape_markdown(expires_at or '')
+
+        text = (
+            f"📎 *Presigned URL 已生成*\n"
+            f"來源：{safe_source}\n"
+            f"檔案：`{safe_filename}`\n"
+            f"帳號：`{safe_account_id}`\n"
+            f"過期：`{safe_expires_at}`"
+        )
+
+        _send_message_silent(text)
+
+    except Exception as e:
+        print(f"[PRESIGNED] send_presigned_notification error: {e}")
+
+
+def send_presigned_batch_notification(
+    source: str,
+    count: int,
+    account_id: str,
+    expires_at: str,
+) -> None:
+    """發送 Presigned URL Batch 生成的靜默通知。
+
+    ❌ 絕對不含任何 presigned URL。
+    """
+    try:
+        safe_source = _escape_markdown(source or 'Unknown')
+        safe_account_id = _escape_markdown(account_id or '')
+        safe_expires_at = _escape_markdown(expires_at or '')
+
+        text = (
+            f"📎 *Presigned URL Batch 已生成*\n"
+            f"來源：{safe_source}\n"
+            f"檔案數：{count} 個\n"
+            f"帳號：`{safe_account_id}`\n"
+            f"過期：`{safe_expires_at}`"
+        )
+
+        _send_message_silent(text)
+
+    except Exception as e:
+        print(f"[PRESIGNED] send_presigned_batch_notification error: {e}")
