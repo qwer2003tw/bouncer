@@ -17,6 +17,7 @@ from botocore.exceptions import ClientError
 
 from constants import DEFAULT_ACCOUNT_ID
 from db import table
+from notifications import send_presigned_notification, send_presigned_batch_notification
 from rate_limit import PendingLimitExceeded, RateLimitExceeded, check_rate_limit
 from utils import generate_request_id, mcp_result
 
@@ -284,6 +285,17 @@ def _generate_presigned_url(ctx: PresignedContext) -> dict:
     }
     table.put_item(Item=audit_item)
 
+    # Notify (silent) — must not include the presigned URL itself
+    try:
+        send_presigned_notification(
+            filename=ctx.filename,
+            source=ctx.source,
+            account_id=ctx.account_id,
+            expires_at=expires_at_iso,
+        )
+    except Exception as _notify_exc:
+        print(f"[PRESIGNED] notification error (non-fatal): {_notify_exc}")
+
     payload = {
         "status": "ready",
         "presigned_url": presigned_url,
@@ -544,6 +556,17 @@ def _generate_presigned_batch_urls(ctx: PresignedBatchContext) -> dict:
         "ttl": expires_at_ts + 60,
     }
     table.put_item(Item=audit_item)
+
+    # Notify (silent) — must not include any presigned URLs
+    try:
+        send_presigned_batch_notification(
+            source=ctx.source,
+            count=len(file_results),
+            account_id=ctx.account_id,
+            expires_at=expires_at_iso,
+        )
+    except Exception as _notify_exc:
+        print(f"[PRESIGNED BATCH] notification error (non-fatal): {_notify_exc}")
 
     payload = {
         "status": "ready",
