@@ -96,8 +96,27 @@ def compile_pattern(pattern: str) -> re.Pattern:
         編譯後的 re.Pattern，使用全字串匹配（re.IGNORECASE）
 
     Raises:
-        re.error: 如果最終 regex 編譯失敗（不應發生於合法 pattern）
+        ValueError: 如果 pattern 長度超過上限、wildcard 過多、含不合法連續 wildcard，或 regex 編譯失敗
     """
+    # ── 前置驗證（bouncer-sec-008：ReDoS prevention）────────────────────────
+    if len(pattern) > 256:
+        raise ValueError(
+            f"Pattern 長度超過上限（256 字元），目前 {len(pattern)} 字元"
+        )
+
+    # 連續 3+ 個 star（必須在 wildcard 計數之前檢查）
+    if '***' in pattern:
+        raise ValueError("Pattern 含有不合法的連續 wildcard（***）")
+
+    # 計算 wildcard 數量（排除 {placeholder} 內的 *）
+    pattern_no_placeholders = re.sub(r'\{[^}]*\}', '', pattern)
+    wildcard_count = pattern_no_placeholders.count('*')
+    if wildcard_count > 10:
+        raise ValueError(
+            f"Pattern 含有過多 wildcard（{wildcard_count} 個，上限 10）"
+        )
+    # ── 前置驗證結束 ─────────────────────────────────────────────────────────
+
     # Step 1: 先把 named placeholder 替換為 sentinel，避免後續轉義干擾
     # 格式：{name}  → 只允許合法識別符（字母 + 底線）
     placeholder_re = re.compile(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}')
@@ -119,7 +138,10 @@ def compile_pattern(pattern: str) -> re.Pattern:
     parts.append(_glob_to_regex(pattern[last_end:]))
 
     full_regex = ''.join(parts)
-    return re.compile(f'^{full_regex}$', re.IGNORECASE)
+    try:
+        return re.compile(f'^{full_regex}$', re.IGNORECASE)
+    except re.error as e:
+        raise ValueError(f"Pattern 編譯失敗：{e}") from e
 
 
 def _glob_to_regex(text: str) -> str:
