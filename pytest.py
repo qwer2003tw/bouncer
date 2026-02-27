@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """
-python3 -m pytest 우회 방지 wrapper.
-/home/ec2-user/projects/bouncer/pytest.py 에 배치하면
-python3 -m pytest 실행 시 이 파일이 먼저 실행됨.
+OOM Guard: python3 -m pytest tests/ 전체 실행 차단.
+tests/ 특정 파일 지정은 허용.
 """
 import sys
 import os
-import subprocess
 
 BOUNCER_REPO = "/home/ec2-user/projects/bouncer"
 cwd = os.getcwd()
@@ -20,7 +18,8 @@ if cwd.startswith(BOUNCER_REPO):
             print(f"    특정 모듈: bash {BOUNCER_REPO}/scripts/run-tests.sh tests/test_foo.py", file=sys.stderr)
             sys.exit(1)
 
-# 정상 실행 — 실제 pytest 호출
-import runpy
-# pytest가 설치된 실제 경로에서 실행
-sys.exit(runpy.run_module("pytest", run_name="__main__", alter_sys=True))
+# 재귀 방지: pytest.py를 sys.path에서 제거 후 실제 pytest 실행
+sys.path = [p for p in sys.path if not p == BOUNCER_REPO]
+
+from pytest import main
+sys.exit(main())
