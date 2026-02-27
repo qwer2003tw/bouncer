@@ -2,12 +2,19 @@
 Bouncer - 命令分類與執行模組
 處理 AWS CLI 命令的分類（blocked/dangerous/auto-approve）和執行
 """
-import os
 import re
 import sys
 from io import StringIO
 
 import boto3
+import botocore.session
+
+try:
+    from awscli.clidriver import CLIDriver as _AWSCLIDriver
+    _AWSCLI_AVAILABLE = True
+except ImportError:
+    _AWSCLIDriver = None
+    _AWSCLI_AVAILABLE = False
 
 
 from constants import BLOCKED_PATTERNS, DANGEROUS_PATTERNS, AUTO_APPROVE_PREFIXES
@@ -360,6 +367,11 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
 
     Returns:
         命令輸出（成功或錯誤訊息）
+
+    Security note (bouncer-sec-006):
+        Credentials are injected via an isolated botocore.session.Session and
+        CLIDriver instance — os.environ is never mutated, eliminating
+        cross-request credential contamination under Lambda warm starts.
     """
 
     try:
@@ -372,10 +384,14 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
         # 移除 'aws' 前綴，awscli.clidriver 不需要它
         cli_args = args[1:]
 
-        # 保存原始環境變數
-        original_env = {}
+        # 建立一個 per-request 的 botocore session（credentials 隔離）
+        # 不修改 os.environ，避免 Lambda warm start 下的 cross-contamination
+        session = botocore.session.Session()
 
-        # 如果需要 assume role，先取得臨時 credentials
+        # 禁用 pager：透過 session 環境變數覆蓋，不影響 os.environ
+        session.set_config_variable('cli_pager', '')
+
+        # 如果需要 assume role，先取得臨時 credentials 並注入 session
         if assume_role_arn:
             try:
                 sts = boto3.client('sts')
@@ -386,15 +402,12 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
                 )
                 creds = assumed['Credentials']
 
-                # 設定環境變數讓 awscli 使用這些 credentials
-                original_env = {
-                    'AWS_ACCESS_KEY_ID': os.environ.get('AWS_ACCESS_KEY_ID'),
-                    'AWS_SECRET_ACCESS_KEY': os.environ.get('AWS_SECRET_ACCESS_KEY'),
-                    'AWS_SESSION_TOKEN': os.environ.get('AWS_SESSION_TOKEN'),
-                }
-                os.environ['AWS_ACCESS_KEY_ID'] = creds['AccessKeyId']
-                os.environ['AWS_SECRET_ACCESS_KEY'] = creds['SecretAccessKey']
-                os.environ['AWS_SESSION_TOKEN'] = creds['SessionToken']
+                # 將 credentials 注入到 isolated session — 不碰 os.environ
+                session.set_credentials(
+                    access_key=creds['AccessKeyId'],
+                    secret_key=creds['SecretAccessKey'],
+                    token=creds['SessionToken'],
+                )
 
             except Exception as e:
                 return f'❌ Assume role 失敗: {str(e)}'
@@ -406,28 +419,24 @@ def execute_command(command: str, assume_role_arn: str = None) -> str:
         sys.stderr = StringIO()
 
         try:
-            from awscli.clidriver import create_clidriver
-            driver = create_clidriver()
-
-            # 禁用 pager
-            os.environ['AWS_PAGER'] = ''
+            if not _AWSCLI_AVAILABLE:
+                raise ImportError("awscli not installed")
+            # CLIDriver 接受自訂 session，credentials 與 os.environ 完全隔離
+            driver = _AWSCLIDriver(session=session)
 
             exit_code = driver.main(cli_args)
 
             stdout_output = sys.stdout.getvalue()
             stderr_output = sys.stderr.getvalue()
 
+        except SystemExit as e:
+            stdout_output = sys.stdout.getvalue()
+            stderr_output = sys.stderr.getvalue()
+            exit_code = e.code if isinstance(e.code, int) else 1
+
         finally:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
-
-            # 還原環境變數
-            if assume_role_arn and original_env:
-                for key, value in original_env.items():
-                    if value is None:
-                        os.environ.pop(key, None)
-                    else:
-                        os.environ[key] = value
 
         output = stdout_output or stderr_output or ''
 
