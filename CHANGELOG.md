@@ -5,16 +5,24 @@ All notable changes to this project will be documented in this file.
 ## [3.5.0] - 2026-02-27
 
 ### Added
-- (TODO: fill in)
+- `tests/conftest.py` — 共用 fixtures（mock_dynamodb, app_module, _cleanup_tables），解決跨檔案 fixture isolation 問題
+- 13 個模組對應測試檔，取代原本 7334 行的 test_bouncer.py
 
 ### Changed
-- (TODO: fill in)
+- `test_bouncer.py`（7334行）拆分為 13 個模組測試檔：test_commands, test_mcp_execute, test_deployer_main, test_app, test_trust, test_telegram_main, test_callbacks_main, test_notifications_main, test_mcp_upload_main, test_accounts_main, test_paging, test_rate_limit, test_utils
+- `conftest._cleanup_tables` 改為 optional mock_dynamodb，修復 test_ddb_400kb_fix flaky isolation
 
 ### Fixed
-- (TODO: fill in)
+- OOM 根本原因：test_bouncer.py 單檔 import 整個 src/ → 現在每個測試檔只 import 對應模組
+- `test_ddb_400kb_fix.py` flaky（ResourceInUseException）— conftest autouse fixture 不再強制注入無 mock_dynamodb 的測試
 
 ### Tests
-- Backend: (TODO: test counts)
+- notifications.py: 59% → 100%（+53 tests）
+- mcp_execute.py: 72% → 83%（+15 tests）
+- callbacks.py: 79% → 85%（+10 tests）
+- mcp_upload.py: 77% → 82%（+5 tests）
+- deployer.py: 77% → 81%（+5 tests）
+- Backend: 1098 tests, coverage 85%+
 
 ## [3.4.0] - 2026-02-27
 
