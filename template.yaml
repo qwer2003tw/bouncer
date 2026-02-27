@@ -18,7 +18,7 @@ Parameters:
     Description: 允許審批的 Telegram Chat ID（支援多個，用逗號分隔，例如：999999999,-5177412711）
   AlarmEmail:
     Type: String
-    Default: "bouncer@ztp.one"
+    Default: "alerts@ztp.one"
     Description: 接收 CloudWatch Alarm 通知的 Email 地址（留空則不建立 SNS subscription）
   RequestSecret:
     Type: String
