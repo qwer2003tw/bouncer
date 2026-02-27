@@ -90,6 +90,10 @@ mcporter call bouncer bouncer_execute \
 - `blocked` — 被封鎖（含 `block_reason` 和 `suggestion`）
 - `trust_auto_approved` — 信任期間自動執行
 
+**⚠️ Lambda 環境變數保護（B-LAMBDA-01）：**
+- `lambda update-function-configuration --environment Variables={}` → **BLOCKED**（空值覆寫保護）
+- `lambda update-function-configuration --environment Variables={...}` → **DANGEROUS**（帶值需審批，附警告）
+
 ### bouncer_status
 查詢審批請求狀態。
 
@@ -445,6 +449,22 @@ mcporter call bouncer bouncer_deploy \
   source="Private Bot (Bouncer deploy)"
 ```
 
+**Response 包含：**
+- `commit_sha` — 完整 commit hash
+- `commit_short` — 7 字元短 hash（`🔖 abc1234 — commit message`）
+- `commit_message` — commit 標題
+
+**衝突（已有部署在跑）時回傳：**
+```json
+{
+  "status": "conflict",
+  "running_deploy_id": "deploy-xxx",
+  "started_at": "2026-02-27T03:00:00Z",
+  "estimated_remaining": "2 minutes",
+  "hint": "Use bouncer_deploy_cancel to cancel the running deploy"
+}
+```
+
 ### bouncer_deploy_status / bouncer_deploy_cancel / bouncer_deploy_history / bouncer_project_list
 ```bash
 mcporter call bouncer bouncer_deploy_status deploy_id="deploy-xxx"
@@ -484,6 +504,66 @@ mcporter call bouncer bouncer_get_page page_id="abc123:page:2"
 
 ### bouncer_list_safelist
 列出命令分類規則。
+
+---
+
+## MCP Tools Quick Reference
+
+| Tool | 說明 | 審批 |
+|------|------|------|
+| `bouncer_execute` | 執行 AWS CLI 命令 | 視命令而定 |
+| `bouncer_status` | 查詢審批請求狀態 | 自動 |
+| `bouncer_list_pending` | 列出待審批請求 | 自動 |
+| `bouncer_list_accounts` | 列出 AWS 帳號 | 自動 |
+| `bouncer_add_account` | 新增 AWS 帳號 | 需審批 |
+| `bouncer_remove_account` | 移除 AWS 帳號 | 需審批 |
+| `bouncer_upload` | 上傳單一檔案到 S3 | 需審批（信任可自動）|
+| `bouncer_upload_batch` | 批量上傳多個檔案 | 需審批（信任可自動）|
+| `bouncer_request_presigned` | 取得單檔 presigned PUT URL | 自動 |
+| `bouncer_request_presigned_batch` | 取得批量 presigned PUT URL | 自動 |
+| `bouncer_confirm_upload` | 驗證 presigned batch 上傳結果，確認 S3 files 存在 | 自動 |
+| `bouncer_deploy` | 部署 SAM 專案 | 需審批 |
+| `bouncer_deploy_status` | 查詢部署狀態 | 自動 |
+| `bouncer_deploy_cancel` | 取消部署 | 自動 |
+| `bouncer_deploy_history` | 查看部署歷史 | 自動 |
+| `bouncer_project_list` | 列出可部署專案 | 自動 |
+| `bouncer_request_grant` | 申請批次命令授權 | 需審批 |
+| `bouncer_grant_execute` | 在授權內執行命令 | 自動 |
+| `bouncer_grant_status` | 查詢授權狀態 | 自動 |
+| `bouncer_trust_status` | 查詢信任時段 | 自動 |
+| `bouncer_trust_revoke` | 撤銷信任時段 | 自動 |
+| `bouncer_get_page` | 取分頁輸出 | 自動 |
+| `bouncer_help` | 查詢命令說明 | 自動 |
+| `bouncer_list_safelist` | 列出命令分類規則 | 自動 |
+
+---
+
+## Telegram Commands
+
+在 Telegram 中可直接對 Bouncer bot 發送的指令：
+
+| 指令 | 說明 |
+|------|------|
+| `/start` | 顯示歡迎訊息與基本說明 |
+| `/help` | 顯示完整指令列表 |
+| `/stats [hours]` | 查看 N 小時統計（預設 24h）。顯示：總請求數、各狀態分布、top sources/commands、approval rate、avg execution time |
+| `/pending` | 列出待審批請求 |
+
+### `/stats` 範例
+
+```
+/stats       → 顯示過去 24 小時統計
+/stats 1     → 顯示過去 1 小時統計
+/stats 168   → 顯示過去 7 天統計
+```
+
+**回傳欄位：**
+- `total` — 總請求數
+- `by_status` — 各狀態分布（approved / denied / pending / auto_approved）
+- `approval_rate` — 人工審批通過率（%）
+- `avg_execution_time_seconds` — 平均執行時間（已審批命令）
+- `top_sources` — Top 5 來源
+- `top_commands` — Top 5 命令類型
 
 ---
 

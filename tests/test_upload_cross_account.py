@@ -135,6 +135,7 @@ def mcp_upload_module(mock_infra, monkeypatch):
         'accounts', 'src.accounts',
         'db', 'src.db',
         'constants', 'src.constants',
+        'rate_limit', 'src.rate_limit',
     ]
     for mod in list(sys.modules.keys()):
         if mod in _modules_to_purge:
@@ -142,10 +143,16 @@ def mcp_upload_module(mock_infra, monkeypatch):
 
     import mcp_upload
     import accounts
+    import rate_limit
 
     # Patch mcp_upload module-level constants using monkeypatch (auto-undone)
     monkeypatch.setattr(mcp_upload, 'DEFAULT_ACCOUNT_ID', DEFAULT_ACCOUNT)
     monkeypatch.setattr(mcp_upload, 'table', mock_infra['table'])
+
+    # Patch rate_limit._table so check_rate_limit() uses the moto-backed table.
+    # Without this, _get_table() may initialise _table outside the moto context
+    # (from a prior test) and leak a real/stale boto3 resource into this test.
+    monkeypatch.setattr(rate_limit, '_table', mock_infra['table'])
 
     # Use monkeypatch to set accounts._accounts_table so it is *guaranteed*
     # to be restored to its pre-test value after the test completes (even on
