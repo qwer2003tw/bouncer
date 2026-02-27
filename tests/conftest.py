@@ -157,12 +157,19 @@ _ALL_TABLE_KEYS = {
 
 
 @pytest.fixture(autouse=True)
-def _cleanup_tables(mock_dynamodb):
+def _cleanup_tables(request):
     """每個測試後清除所有表中的資料，避免測試間資料洩漏
 
     在每個測試執行前也重新注入 db module 的 table references，
     防止跨 test file 的 sys.modules 清除造成 db 重新 import 時指向真實 AWS。
+    只在有 mock_dynamodb fixture 的測試中才執行（其他測試自己管理 fixture）。
     """
+    # 只在有 mock_dynamodb fixture 的測試中才執行
+    if 'mock_dynamodb' not in request.fixturenames:
+        yield
+        return
+
+    mock_dynamodb = request.getfixturevalue('mock_dynamodb')
     # Re-inject db/accounts references before each test (guard against cross-file sys.modules pollution)
     # Other test files (test_ddb_400kb_fix.py, test_grant.py) delete sys.modules['db'],
     # which causes db/accounts to be re-imported with real boto3 when interleaved via pytest-randomly.
