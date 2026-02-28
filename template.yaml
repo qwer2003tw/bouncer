@@ -519,11 +519,9 @@ Resources:
   #     aws logs put-retention-policy \
   #       --log-group-name /aws/lambda/bouncer-prod-function \
   #       --retention-in-days 30
-    # NOTE: LambdaLogGroup intentionally NOT defined in CFN.
-  # The log group /aws/lambda/bouncer-prod-function is auto-created by Lambda
-  # and already exists. CFN cannot create an existing log group (EarlyValidation fails).
-  # Retention is set via CLI: aws logs put-retention-policy --retention-in-days 30
-  # (done 2026-02-28, Sprint 6)
+    # NOTE: LambdaLogGroup NOT in CFN (Sprint 6 workaround).
+  # Lambda auto-creates log group before CFN deploy; CFN CREATE fails with EarlyValidation.
+  # Retention set via CLI (2026-02-28). Proper fix tracked in Issue #28 (Sprint 7).
 
   # ============================================================
   # API Gateway - Usage Plan + Throttling
