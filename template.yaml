@@ -519,15 +519,11 @@ Resources:
   #     aws logs put-retention-policy \
   #       --log-group-name /aws/lambda/bouncer-prod-function \
   #       --retention-in-days 30
-  #
-  # DeletionPolicy: Retain ensures the log group is NOT deleted on stack delete.
-  LambdaLogGroup:
-    Type: AWS::Logs::LogGroup
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      LogGroupName: !Sub "/aws/lambda/bouncer-${Environment}-function"
-      RetentionInDays: 30
+    # NOTE: LambdaLogGroup intentionally NOT defined in CFN.
+  # The log group /aws/lambda/bouncer-prod-function is auto-created by Lambda
+  # and already exists. CFN cannot create an existing log group (EarlyValidation fails).
+  # Retention is set via CLI: aws logs put-retention-policy --retention-in-days 30
+  # (done 2026-02-28, Sprint 6)
 
   # ============================================================
   # API Gateway - Usage Plan + Throttling
