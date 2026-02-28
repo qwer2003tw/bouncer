@@ -23,6 +23,7 @@ Version: 1.0.0
 """
 
 import json
+import logging
 import re
 import time
 from dataclasses import dataclass, field
@@ -31,6 +32,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
 from utils import RiskFactor  # canonical definition in utils.py
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     # Core types
@@ -239,10 +242,10 @@ def create_default_rules() -> RiskRules:
                 rules.version = data.get('version', '1.0.0-json')
                 return rules
         except Exception as e:
-            print(f"[RiskScorer] Failed to load {p}: {e}")
+            logger.error(f"[RiskScorer] Failed to load {p}: {e}")
 
     # Hardcoded fallback — 最小化，fail-closed（未知命令 = 高風險）
-    print("[RiskScorer] WARNING: No risk-rules.json found, using minimal fallback")
+    logger.warning("[RiskScorer] WARNING: No risk-rules.json found, using minimal fallback")
     return RiskRules(
         version="1.0.0-fallback",
         verb_scores={'describe': 0, 'list': 0, 'get': 5},
@@ -300,7 +303,7 @@ def load_risk_rules(
         # 驗證規則
         is_valid, errors = rules.validate()
         if not is_valid:
-            print(f"[RiskScorer] Rule validation errors: {errors}")
+            logger.warning(f"[RiskScorer] Rule validation errors: {errors}")
             # 仍然使用載入的規則，但記錄警告
 
         # 更新快取
@@ -310,7 +313,7 @@ def load_risk_rules(
         return rules
 
     except Exception as e:
-        print(f"[RiskScorer] Failed to load rules, using defaults: {e}")
+        logger.error(f"[RiskScorer] Failed to load rules, using defaults: {e}")
         return create_default_rules()
 
 
@@ -643,7 +646,7 @@ def score_parameters(
             max_pattern_score = max(max_pattern_score, template_score)
             combined_score = min(100, max(combined_score, max_pattern_score + flag_score_total))
     except Exception as e:
-        print(f"[TEMPLATE_SCAN] Error: {e}")
+        logger.error(f"[TEMPLATE_SCAN] Error: {e}")
         # Fail-open: don't change score on scanner error
 
     # 如果沒有匹配任何模式或旗標，給予基礎分數

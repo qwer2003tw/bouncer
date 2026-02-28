@@ -4,12 +4,15 @@ Long polling 版本（非 webhook）
 """
 
 import json
+import logging
 import time
 import threading
 import urllib.request
 import urllib.parse
 from typing import Optional, Dict, Any, Callable
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -98,7 +101,7 @@ class TelegramClient:
         if result.get('ok'):
             return result.get('result', {}).get('message_id')
         else:
-            print(f"[Telegram] Failed to send message: {result.get('error')}")
+            logger.error(f"[Telegram] Failed to send message: {result.get('error')}")
             return None
 
     def update_message(
@@ -185,14 +188,14 @@ class TelegramPoller:
         self._running = True
         self._thread = threading.Thread(target=self._poll_loop, daemon=True)
         self._thread.start()
-        print("[TelegramPoller] Started")
+        logger.info("[TelegramPoller] Started")
 
     def stop(self):
         """停止 polling 執行緒"""
         self._running = False
         if self._thread:
             self._thread.join(timeout=5)
-        print("[TelegramPoller] Stopped")
+        logger.info("[TelegramPoller] Stopped")
 
     def _poll_loop(self):
         """Polling 主迴圈"""
@@ -209,7 +212,7 @@ class TelegramPoller:
                     self._last_update_id = update.get('update_id', 0) + 1
 
             except Exception as e:
-                print(f"[TelegramPoller] Error: {e}")
+                logger.error(f"[TelegramPoller] Error: {e}")
                 time.sleep(5)  # 錯誤後等待再重試
 
     def _handle_update(self, update: Dict):

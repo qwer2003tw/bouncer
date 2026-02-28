@@ -6,7 +6,10 @@ CloudWatch automatically picks these up from Lambda logs.
 """
 
 import json
+import logging
 import time
+
+logger = logging.getLogger(__name__)
 
 
 def emit_metric(namespace: str, metric_name: str, value: float, unit: str = 'Count', dimensions: dict = None):
@@ -24,4 +27,5 @@ def emit_metric(namespace: str, metric_name: str, value: float, unit: str = 'Cou
     }
     if dimensions:
         emf.update(dimensions)
+    # EMF requires raw JSON on stdout for CloudWatch to parse; intentional print()
     print(json.dumps(emf))

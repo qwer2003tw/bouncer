@@ -6,11 +6,13 @@ Also includes _sanitize_filename() and _format_size_human().
 """
 
 import json
+import logging
 import re
 import time
 import boto3
 from dataclasses import dataclass
 from typing import Optional
+
 
 
 from utils import mcp_result, generate_request_id, generate_display_summary
@@ -30,11 +32,14 @@ from notifications import (
     send_batch_upload_notification,
 )
 from constants import (
+
     DEFAULT_ACCOUNT_ID,
     TRUST_SESSION_MAX_UPLOADS,
     TRUST_UPLOAD_MAX_BYTES_PER_FILE, TRUST_UPLOAD_MAX_BYTES_TOTAL,
     APPROVAL_TTL_BUFFER, UPLOAD_TIMEOUT,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -305,7 +310,7 @@ def _check_upload_trust(ctx: UploadContext) -> Optional[dict]:
         })
 
     except Exception as e:
-        print(f"[TRUST UPLOAD] Execution error: {e}")
+        logger.error(f"[TRUST UPLOAD] Execution error: {e}")
         return None  # Fall through to human approval
 
 
@@ -425,8 +430,8 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
         try:
             table.delete_item(Key={'request_id': ctx.request_id})
         except Exception as del_err:
-            print(f"[ORPHAN CLEANUP] Failed to delete DDB record {ctx.request_id}: {del_err}")
-        print(f"[ORPHAN CLEANUP] Telegram notification failed for upload {ctx.request_id}: {tg_err}")
+            logger.error(f"[ORPHAN CLEANUP] Failed to delete DDB record {ctx.request_id}: {del_err}")
+        logger.error(f"[ORPHAN CLEANUP] Telegram notification failed for upload {ctx.request_id}: {tg_err}")
         return mcp_result(ctx.req_id, {
             'content': [{'type': 'text', 'text': json.dumps({
                 'status': 'error',
@@ -754,7 +759,7 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
                             })
 
                     except Exception as e:
-                        print(f"[BATCH TRUST] Error: {e}")
+                        logger.error(f"[BATCH TRUST] Error: {e}")
                         # Fall through to human approval
 
     # ---- Submit batch for human approval ----

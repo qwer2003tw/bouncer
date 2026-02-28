@@ -15,6 +15,7 @@ Author: Bouncer Team
 Version: 1.0.0
 """
 
+import logging
 import os
 import re
 import time
@@ -25,6 +26,8 @@ from typing import Dict, List, Optional, Tuple, Any
 
 import boto3
 from boto3.dynamodb.conditions import Key
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     # Data classes
@@ -579,7 +582,7 @@ def record_command(
         )
 
     except Exception as e:
-        print(f"[SequenceAnalyzer] Failed to record command: {e}")
+        logger.error(f"[SequenceAnalyzer] Failed to record command: {e}")
         return None
 
 
@@ -630,7 +633,7 @@ def get_recent_commands(
         return records
 
     except Exception as e:
-        print(f"[SequenceAnalyzer] Failed to get recent commands: {e}")
+        logger.error(f"[SequenceAnalyzer] Failed to get recent commands: {e}")
         return []
 
 

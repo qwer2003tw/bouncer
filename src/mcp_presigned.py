@@ -6,6 +6,7 @@ Follows the same dataclass pipeline style as mcp_upload.py (UploadContext).
 """
 
 import json
+import logging
 import re
 import time
 import uuid
@@ -20,6 +21,8 @@ from db import table
 from notifications import send_presigned_notification, send_presigned_batch_notification
 from rate_limit import PendingLimitExceeded, RateLimitExceeded, check_rate_limit
 from utils import generate_request_id, mcp_result
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -294,7 +297,7 @@ def _generate_presigned_url(ctx: PresignedContext) -> dict:
             expires_at=expires_at_iso,
         )
     except Exception as _notify_exc:
-        print(f"[PRESIGNED] notification error (non-fatal): {_notify_exc}")
+        logger.error(f"[PRESIGNED] notification error (non-fatal): {_notify_exc}")
 
     payload = {
         "status": "ready",
@@ -566,7 +569,7 @@ def _generate_presigned_batch_urls(ctx: PresignedBatchContext) -> dict:
             expires_at=expires_at_iso,
         )
     except Exception as _notify_exc:
-        print(f"[PRESIGNED BATCH] notification error (non-fatal): {_notify_exc}")
+        logger.error(f"[PRESIGNED BATCH] notification error (non-fatal): {_notify_exc}")
 
     payload = {
         "status": "ready",

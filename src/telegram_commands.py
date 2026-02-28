@@ -4,7 +4,9 @@ Bouncer - Telegram 命令處理模組
 所有 handle_*_command 函數
 """
 
+import logging
 import time
+
 
 
 # 從其他模組導入
@@ -13,6 +15,8 @@ from accounts import init_default_account, list_accounts
 from telegram import _telegram_request
 from constants import APPROVED_CHAT_IDS
 import db as _db
+
+logger = logging.getLogger(__name__)
 
 
 def _get_table():
@@ -107,7 +111,7 @@ def handle_trust_command(chat_id: str) -> dict:
         )
         items = resp.get('Items', [])
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         items = []
 
     if not items:
@@ -138,7 +142,7 @@ def handle_pending_command(chat_id: str) -> dict:
         )
         items = resp.get('Items', [])
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         items = []
 
     if not items:
@@ -183,7 +187,7 @@ def handle_stats_command(chat_id: str, hours: int = 24) -> dict:
             )
             items.extend(resp.get('Items', []))
     except Exception as e:
-        print(f"Error in stats: {e}")
+        logger.error(f"Error in stats: {e}")
         items = []
 
     total = len(items)

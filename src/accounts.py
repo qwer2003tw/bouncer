@@ -4,6 +4,7 @@ Bouncer - 帳號管理模組
 """
 import time
 import json
+import logging
 import urllib.request
 from typing import Optional, Dict
 
@@ -13,6 +14,8 @@ import boto3
 from constants import (
     ACCOUNTS_TABLE_NAME, DEFAULT_ACCOUNT_ID, TELEGRAM_TOKEN
 )
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     'init_bot_commands',
@@ -61,9 +64,9 @@ def init_bot_commands():
         )
         urllib.request.urlopen(req, timeout=5)  # nosec B310
         _bot_commands_initialized = True
-        print("Bot commands initialized")
+        logger.info("Bot commands initialized")
     except Exception as e:
-        print(f"Failed to set bot commands: {e}")
+        logger.error(f"Failed to set bot commands: {e}")
 
 
 def init_default_account():
@@ -80,7 +83,7 @@ def init_default_account():
                 'created_at': int(time.time())
             })
     except Exception as e:
-        print(f"Error initializing default account: {e}")
+        logger.error(f"Error initializing default account: {e}")
 
 
 def get_account(account_id: str) -> Optional[Dict]:
@@ -89,7 +92,7 @@ def get_account(account_id: str) -> Optional[Dict]:
         result = _get_accounts_table().get_item(Key={'account_id': account_id})
         return result.get('Item')
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         return None
 
 
@@ -99,7 +102,7 @@ def list_accounts() -> list:
         result = _get_accounts_table().scan()
         return result.get('Items', [])
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         return []
 
 

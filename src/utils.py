@@ -4,12 +4,15 @@ Bouncer - 工具函數模組
 
 import hashlib
 import json
+import logging
 import time
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
 
 from constants import AUDIT_TTL_SHORT, AUDIT_TTL_LONG
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -272,5 +275,5 @@ def log_decision(table, request_id, command, reason, source, account_id,
     try:
         table.put_item(Item=item)
     except Exception as e:
-        print(f"[AUDIT] Failed to log decision: {e}")
+        logger.error(f"[AUDIT] Failed to log decision: {e}")
     return item

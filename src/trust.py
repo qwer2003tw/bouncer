@@ -6,6 +6,7 @@ Bouncer - Trust Session 模組
 - trust_scope 是呼叫端提供的穩定識別符（如 session key）
 - source 僅用於顯示，不參與信任匹配
 """
+import logging
 import time
 import hashlib
 from typing import Optional, Dict
@@ -13,13 +14,17 @@ from typing import Optional, Dict
 import boto3
 
 
+
 from constants import (
+
     TABLE_NAME,
     TRUST_SESSION_ENABLED, TRUST_SESSION_DURATION, TRUST_SESSION_MAX_COMMANDS,
     TRUST_EXCLUDED_SERVICES, TRUST_EXCLUDED_ACTIONS, TRUST_EXCLUDED_FLAGS,
     TRUST_UPLOAD_MAX_BYTES_PER_FILE,
     TRUST_UPLOAD_MAX_BYTES_TOTAL, TRUST_UPLOAD_BLOCKED_EXTENSIONS,
 )
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     'get_trust_session',
@@ -82,7 +87,7 @@ def get_trust_session(trust_scope: str, account_id: str) -> Optional[Dict]:
         return item
 
     except Exception as e:
-        print(f"Trust session check error: {e}")
+        logger.error(f"Trust session check error: {e}")
         return None
 
 
@@ -141,7 +146,7 @@ def revoke_trust_session(trust_id: str) -> bool:
         _get_table().delete_item(Key={'request_id': trust_id})
         return True
     except Exception as e:
-        print(f"Revoke trust session error: {e}")
+        logger.error(f"Revoke trust session error: {e}")
         return False
 
 
@@ -176,10 +181,10 @@ def increment_trust_command_count(trust_id: str) -> int:
         )
         return int(response.get('Attributes', {}).get('command_count', 0))
     except _get_table().meta.client.exceptions.ConditionalCheckFailedException:
-        print(f"Trust command count conditional update failed for {trust_id} (limit or expired)")
+        logger.warning(f"Trust command count conditional update failed for {trust_id} (limit or expired)")
         return 0
     except Exception as e:
-        print(f"Increment trust command count error: {e}")
+        logger.error(f"Increment trust command count error: {e}")
         return 0
 
 
@@ -380,8 +385,8 @@ def increment_trust_upload_count(trust_id: str, content_size: int) -> bool:
         )
         return True
     except _get_table().meta.client.exceptions.ConditionalCheckFailedException:
-        print(f"Trust upload conditional update failed for {trust_id}")
+        logger.warning(f"Trust upload conditional update failed for {trust_id}")
         return False
     except Exception as e:
-        print(f"Increment trust upload count error: {e}")
+        logger.error(f"Increment trust upload count error: {e}")
         return False

@@ -5,12 +5,15 @@ Extracted from app.py to break circular dependency:
 Now: mcp_tools.py → notifications.py (no cycle)
 """
 
+import logging
 import os
 
 import telegram as _telegram
 from commands import is_dangerous, check_lambda_env_update
 from constants import COMMAND_APPROVAL_TIMEOUT, TRUST_SESSION_MAX_COMMANDS, UPLOAD_TIMEOUT, GRANT_APPROVAL_TIMEOUT
 from utils import format_size_human, build_info_lines
+
+logger = logging.getLogger(__name__)
 
 
 def _escape_markdown(text):
@@ -69,7 +72,7 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
             role_name = assume_role.split('/')[-1]
             account_line = f"🏦 *帳號：* `{parsed_account_id}` ({role_name})\n"
         except Exception as e:
-            print(f"Error: {e}")
+            logger.error(f"Error: {e}")
             account_line = f"🏦 *Role：* `{assume_role}`\n"
     else:
         default_account = os.environ.get('AWS_ACCOUNT_ID', '')
@@ -322,7 +325,7 @@ def send_grant_request_notification(
         _send_message(text, keyboard)
 
     except Exception as e:
-        print(f"[GRANT] send_grant_request_notification error: {e}")
+        logger.error(f"[GRANT] send_grant_request_notification error: {e}")
 
 
 def send_grant_execute_notification(
@@ -368,7 +371,7 @@ def send_grant_execute_notification(
         _send_message_silent(text, keyboard)
 
     except Exception as e:
-        print(f"[GRANT] send_grant_execute_notification error: {e}")
+        logger.error(f"[GRANT] send_grant_execute_notification error: {e}")
 
 
 def send_grant_complete_notification(grant_id: str, reason: str) -> None:
@@ -385,7 +388,7 @@ def send_grant_complete_notification(grant_id: str, reason: str) -> None:
         _send_message_silent(text)
 
     except Exception as e:
-        print(f"[GRANT] send_grant_complete_notification error: {e}")
+        logger.error(f"[GRANT] send_grant_complete_notification error: {e}")
 
 
 def send_blocked_notification(
@@ -407,7 +410,7 @@ def send_blocked_notification(
         _send_message_silent(text)
 
     except Exception as e:
-        print(f"[BLOCKED] send_blocked_notification error: {e}")
+        logger.error(f"[BLOCKED] send_blocked_notification error: {e}")
 
 
 # ============================================================================
@@ -448,7 +451,7 @@ def send_trust_upload_notification(
         _send_message_silent(text, keyboard)
 
     except Exception as e:
-        print(f"[TRUST UPLOAD] send_trust_upload_notification error: {e}")
+        logger.error(f"[TRUST UPLOAD] send_trust_upload_notification error: {e}")
 
 
 def send_batch_upload_notification(
@@ -515,7 +518,7 @@ def send_batch_upload_notification(
         _send_message(text, keyboard)
 
     except Exception as e:
-        print(f"[BATCH UPLOAD] send_batch_upload_notification error: {e}")
+        logger.error(f"[BATCH UPLOAD] send_batch_upload_notification error: {e}")
 
 
 # ============================================================================
@@ -549,7 +552,7 @@ def send_presigned_notification(
         _send_message_silent(text)
 
     except Exception as e:
-        print(f"[PRESIGNED] send_presigned_notification error: {e}")
+        logger.error(f"[PRESIGNED] send_presigned_notification error: {e}")
 
 
 def send_presigned_batch_notification(
@@ -578,4 +581,4 @@ def send_presigned_batch_notification(
         _send_message_silent(text)
 
     except Exception as e:
-        print(f"[PRESIGNED] send_presigned_batch_notification error: {e}")
+        logger.error(f"[PRESIGNED] send_presigned_batch_notification error: {e}")

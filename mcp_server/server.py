@@ -13,6 +13,7 @@ AWS 命令審批執行系統 - stdio MCP Server 版本
     BOUNCER_DB_PATH - SQLite 資料庫路徑（可選）
 """
 
+import logging
 import os
 import sys
 import json
@@ -20,6 +21,8 @@ import time
 import hashlib
 from pathlib import Path
 from typing import Optional, Dict, Any
+
+logger = logging.getLogger(__name__)
 
 from .db import get_db
 from .classifier import classify_command, execute_command, get_safelist, get_blocked_patterns
@@ -127,7 +130,7 @@ class BouncerMCPServer:
         if self.telegram_token and self.chat_id:
             self._init_telegram()
         else:
-            print("[Bouncer] Warning: Telegram not configured, approval commands will timeout", file=sys.stderr)
+            logger.warning("[Bouncer] Warning: Telegram not configured, approval commands will timeout")
 
     def _init_telegram(self):
         """初始化 Telegram 整合"""
@@ -203,7 +206,7 @@ class BouncerMCPServer:
 
     def run(self):
         """主迴圈 - 讀取 stdin，處理 JSON-RPC，寫入 stdout"""
-        print(f"[Bouncer] MCP Server v{VERSION} started", file=sys.stderr)
+        logger.info(f"[Bouncer] MCP Server v{VERSION} started")
 
         try:
             for line in sys.stdin:
@@ -218,7 +221,7 @@ class BouncerMCPServer:
                 except json.JSONDecodeError as e:
                     self._write_response(self._error(None, -32700, f'Parse error: {e}'))
                 except Exception as e:
-                    print(f"[Bouncer] Error: {e}", file=sys.stderr)
+                    logger.error(f"[Bouncer] Error: {e}")
                     self._write_response(self._error(None, -32603, f'Internal error: {e}'))
 
         finally:

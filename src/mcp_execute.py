@@ -6,12 +6,14 @@ Also includes grant-session tools: request_grant, grant_status, revoke_grant.
 """
 
 import json
+import logging
 import os
 import re
 import secrets
 import time
 from dataclasses import dataclass
 from typing import Optional
+
 
 
 from utils import mcp_result, mcp_error, generate_request_id, log_decision, generate_display_summary
@@ -36,12 +38,15 @@ from notifications import (
 from telegram import send_telegram_message_silent, escape_markdown
 from metrics import emit_metric
 from constants import (
+
     DEFAULT_ACCOUNT_ID, MCP_MAX_WAIT, RATE_LIMIT_WINDOW,
     TRUST_SESSION_MAX_COMMANDS,
     APPROVAL_TTL_BUFFER,
     AUDIT_TTL_SHORT,
     GRANT_SESSION_ENABLED,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # Shadow mode 表名（用於收集智慧審批數據）
@@ -150,10 +155,10 @@ def _log_smart_approval_shadow(
         }
 
         table.put_item(Item=item)
-        print(f"[SHADOW] Logged: {shadow_id} -> {smart_decision.decision} (score={smart_decision.final_score}, actual={actual_decision})")
+        logger.info(f"[SHADOW] Logged: {shadow_id} -> {smart_decision.decision} (score={smart_decision.final_score}, actual={actual_decision})")
     except Exception as e:
         # Shadow 記錄失敗不影響主流程
-        print(f"[SHADOW] Failed to log: {e}")
+        logger.error(f"[SHADOW] Failed to log: {e}")
 
 
 # =============================================================================
@@ -276,7 +281,7 @@ def _score_risk(ctx: ExecuteContext) -> None:
             enable_sequence_analysis=False,
         )
     except Exception as e:
-        print(f"[SHADOW] Smart approval error: {e}")
+        logger.error(f"[SHADOW] Smart approval error: {e}")
 
 
 def _scan_template(ctx: ExecuteContext) -> None:
@@ -336,15 +341,15 @@ def _scan_template(ctx: ExecuteContext) -> None:
         }
 
         if escalate:
-            print(
+            logger.info(
                 f"[TEMPLATE] Escalating to MANUAL: {hit_count} hits, "
                 f"max_score={max_score}, severity={severity}"
             )
 
     except ImportError as e:
-        print(f"[TEMPLATE] template_scanner or load_risk_rules not available: {e}")
+        logger.warning(f"[TEMPLATE] template_scanner or load_risk_rules not available: {e}")
     except Exception as e:
-        print(f"[TEMPLATE] Scan error (non-fatal): {e}")
+        logger.error(f"[TEMPLATE] Scan error (non-fatal): {e}")
 
 
 def _extract_actual_decision(result: dict) -> str:
@@ -394,7 +399,7 @@ def _check_compliance(ctx: ExecuteContext) -> Optional[dict]:
         from compliance_checker import check_compliance
         is_compliant, violation = check_compliance(ctx.command)
         if not is_compliant:
-            print(f"[COMPLIANCE] Blocked: {violation.rule_id} - {violation.rule_name}")
+            logger.warning(f"[COMPLIANCE] Blocked: {violation.rule_id} - {violation.rule_name}")
             emit_metric('Bouncer', 'BlockedCommand', 1, dimensions={'Reason': 'compliance'})
             log_decision(
                 table=table,
@@ -572,7 +577,7 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
 
     except Exception as e:
         # Grant 失敗不影響主流程 → fallthrough
-        print(f"[GRANT] _check_grant_session error: {e}")
+        logger.error(f"[GRANT] _check_grant_session error: {e}")
         return None
 
 
@@ -788,8 +793,8 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
         try:
             table.delete_item(Key={'request_id': request_id})
         except Exception as del_err:
-            print(f"[ORPHAN CLEANUP] Failed to delete DDB record {request_id}: {del_err}")
-        print(f"[ORPHAN CLEANUP] Telegram notification failed for {request_id}: {tg_err}")
+            logger.error(f"[ORPHAN CLEANUP] Failed to delete DDB record {request_id}: {del_err}")
+        logger.error(f"[ORPHAN CLEANUP] Telegram notification failed for {request_id}: {tg_err}")
         return mcp_result(ctx.req_id, {
             'content': [{
                 'type': 'text',
@@ -939,7 +944,7 @@ def mcp_tool_request_grant(req_id: str, arguments: dict) -> dict:
                 allow_repeat=allow_repeat,
             )
         except Exception as e:
-            print(f"[GRANT] Failed to send notification: {e}")
+            logger.error(f"[GRANT] Failed to send notification: {e}")
 
         return mcp_result(req_id, {
             'content': [{

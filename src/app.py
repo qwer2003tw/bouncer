@@ -11,6 +11,7 @@ Bouncer - Clawdbot AWS 命令審批執行系統
 import json
 import hashlib
 import hmac
+import logging
 import time
 
 
@@ -75,6 +76,9 @@ from constants import (  # noqa: F401
 # DynamoDB — canonical references in db.py; re-exported for backward compat
 from db import table, accounts_table  # noqa: F401
 
+logging.basicConfig(level=logging.INFO, format='%(levelname)s %(name)s %(message)s')
+logger = logging.getLogger(__name__)
+
 
 # ============================================================================
 # Lambda Handler
@@ -135,7 +139,7 @@ def handle_mcp_request(event) -> dict:
     try:
         body = json.loads(event.get('body', '{}'))
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         return mcp_error(None, -32700, 'Parse error')
 
     jsonrpc = body.get('jsonrpc')
@@ -303,7 +307,7 @@ def handle_clawdbot_request(event: dict) -> dict:
     try:
         body = json.loads(event.get('body', '{}'))
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         return response(400, {'error': 'Invalid JSON'})
 
     command = body.get('command', '').strip()
@@ -468,7 +472,7 @@ def handle_telegram_webhook(event: dict) -> dict:
     try:
         body = json.loads(event.get('body', '{}'))
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         return response(400, {'error': 'Invalid JSON'})
 
     # 處理文字訊息（指令）
@@ -535,9 +539,9 @@ def handle_telegram_webhook(event: dict) -> dict:
     try:
         db_start = time.time()
         item = table.get_item(Key={'request_id': request_id}).get('Item')
-        print(f"[TIMING] DynamoDB get_item: {(time.time() - db_start) * 1000:.0f}ms")
+        logger.debug(f"[TIMING] DynamoDB get_item: {(time.time() - db_start) * 1000:.0f}ms")
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         item = None
 
     if not item:
@@ -620,7 +624,7 @@ def verify_hmac(headers: dict, body: str) -> bool:
         if abs(time.time() - ts) > TELEGRAM_TIMESTAMP_MAX_AGE:
             return False
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         return False
 
     payload = f"{timestamp}.{nonce}.{body}"

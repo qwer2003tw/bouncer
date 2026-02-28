@@ -5,6 +5,7 @@ Bouncer - Telegram Callback 處理模組
 """
 
 import time
+import logging
 
 
 # 從其他模組導入
@@ -21,6 +22,8 @@ from mcp_upload import execute_upload
 
 # DynamoDB tables from db.py (no circular dependency)
 import db as _db
+
+logger = logging.getLogger(__name__)
 
 
 def _get_table():
@@ -76,7 +79,7 @@ def handle_grant_approve(query: dict, grant_id: str, mode: str = 'all') -> dict:
         return response(200, {'ok': True})
 
     except Exception as e:
-        print(f"[GRANT] handle_grant_approve error (mode={mode}): {e}")
+        logger.error(f"[GRANT] handle_grant_approve error (mode={mode}): {e}")
         answer_callback(callback_id, f'❌ 批准失敗: {str(e)[:50]}')
         return response(500, {'error': str(e)})
 
@@ -117,7 +120,7 @@ def handle_grant_deny(query: dict, grant_id: str) -> dict:
         return response(200, {'ok': True})
 
     except Exception as e:
-        print(f"[GRANT] handle_grant_deny error: {e}")
+        logger.error(f"[GRANT] handle_grant_deny error: {e}")
         answer_callback(callback_id, f'❌ 處理失敗: {str(e)[:50]}')
         return response(500, {'error': str(e)})
 
@@ -303,7 +306,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             try:
                 _auto_execute_pending_requests(trust_scope, account_id, assume_role, trust_id, source)
             except Exception as e:
-                print(f"[TRUST] Auto-execute pending error: {e}")
+                logger.error(f"[TRUST] Auto-execute pending error: {e}")
 
         max_preview = 800 if action == 'approve_trust' else 1000
         result_preview = result[:max_preview] if len(result) > max_preview else result
@@ -872,7 +875,7 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
             from compliance_checker import check_compliance
             is_compliant, violation = check_compliance(cmd)
             if not is_compliant:
-                print(f"[TRUST][SEC-013] Pending request {req_id} failed compliance: {violation.rule_id if violation else 'unknown'}")
+                logger.warning(f"[TRUST][SEC-013] Pending request {req_id} failed compliance: {violation.rule_id if violation else 'unknown'}")
                 # 更新狀態為 compliance_rejected
                 now_rej = int(time.time())
                 table.update_item(
@@ -939,4 +942,4 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
         executed += 1
 
     if executed > 0:
-        print(f"[TRUST] Auto-executed {executed} pending requests for trust_scope={trust_scope}")
+        logger.info(f"[TRUST] Auto-executed {executed} pending requests for trust_scope={trust_scope}")

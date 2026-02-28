@@ -506,9 +506,28 @@ Resources:
   # ============================================================
   # CloudWatch Logs - Log Group with Retention
   # ============================================================
-  # Note: Log group /aws/lambda/${ApprovalFunction} already exists
-  # (auto-created by Lambda). Set retention manually or via CLI:
-  # aws logs put-retention-policy --log-group-name /aws/lambda/bouncer-prod-function --retention-in-days 30
+  # IMPORTANT: If the log group /aws/lambda/bouncer-prod-function already exists
+  # (auto-created by a prior Lambda invocation), CloudFormation will fail with
+  # "Resource already exists" on first deploy of this resource.
+  #
+  # Resolution options:
+  #   Option A (recommended): Import existing resource before deploying:
+  #     aws cloudformation import-resources-to-stack ...
+  #   Option B: Delete the existing log group first (loses historical logs):
+  #     aws logs delete-log-group --log-group-name /aws/lambda/bouncer-prod-function
+  #   Option C: Set retention manually (bypass CFN):
+  #     aws logs put-retention-policy \
+  #       --log-group-name /aws/lambda/bouncer-prod-function \
+  #       --retention-in-days 30
+  #
+  # DeletionPolicy: Retain ensures the log group is NOT deleted on stack delete.
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/bouncer-${Environment}-function"
+      RetentionInDays: 30
 
   # ============================================================
   # API Gateway - Usage Plan + Throttling

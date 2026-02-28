@@ -13,6 +13,7 @@ Design notes (Approach C):
 """
 
 import json
+import logging
 import re
 import time
 
@@ -22,6 +23,8 @@ from botocore.exceptions import ClientError
 from constants import STAGING_BUCKET
 from db import table
 from utils import mcp_result
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +126,7 @@ def _write_confirm_record(
         table.put_item(Item=item)
     except Exception as exc:
         # Non-fatal: log and continue; verification result is still returned.
-        print(f"[confirm_upload] DynamoDB write failed: {exc}")
+        logger.error(f"[confirm_upload] DynamoDB write failed: {exc}")
 
 
 # ---------------------------------------------------------------------------

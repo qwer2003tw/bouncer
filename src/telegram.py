@@ -3,13 +3,17 @@ Bouncer - Telegram API 模組
 處理所有 Telegram 訊息發送、更新、callback 回應
 """
 import json
+import logging
 import time
 import urllib.request
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
+
 from constants import TELEGRAM_TOKEN, TELEGRAM_API_BASE, APPROVED_CHAT_ID
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     'escape_markdown',
@@ -88,15 +92,15 @@ def _telegram_request(method: str, data: dict, timeout: int = 5, json_body: bool
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
             result = json.loads(resp.read().decode())
             elapsed = (time.time() - start_time) * 1000
-            print(f"[TIMING] Telegram {method}: {elapsed:.0f}ms")
+            logger.debug(f"[TIMING] Telegram {method}: {elapsed:.0f}ms")
             return result
     except Exception as e:
         elapsed = (time.time() - start_time) * 1000
-        print(f"[TIMING] Telegram {method} error ({elapsed:.0f}ms): {e}")
+        logger.debug(f"[TIMING] Telegram {method} error ({elapsed:.0f}ms): {e}")
 
         # Fallback: if sendMessage fails with Markdown, retry without parse_mode
         if method == 'sendMessage' and 'parse_mode' in data and '400' in str(e):
-            print(f"[FALLBACK] Retrying {method} without parse_mode")
+            logger.info(f"[FALLBACK] Retrying {method} without parse_mode")
             fallback_data = {k: v for k, v in data.items() if k != 'parse_mode'}
             try:
                 if json_body:
@@ -115,10 +119,10 @@ def _telegram_request(method: str, data: dict, timeout: int = 5, json_body: bool
                 with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
                     result = json.loads(resp.read().decode())
                     elapsed2 = (time.time() - start_time) * 1000
-                    print(f"[TIMING] Telegram {method} fallback OK ({elapsed2:.0f}ms)")
+                    logger.debug(f"[TIMING] Telegram {method} fallback OK ({elapsed2:.0f}ms)")
                     return result
             except Exception as e2:
-                print(f"[TIMING] Telegram {method} fallback also failed: {e2}")
+                logger.debug(f"[TIMING] Telegram {method} fallback also failed: {e2}")
 
         return {}
 
@@ -223,4 +227,4 @@ def update_and_answer(message_id: int, text: str, callback_id: str, callback_tex
     ]
     start_time = time.time()
     _telegram_requests_parallel(requests)
-    print(f"[TIMING] update_and_answer parallel: {(time.time() - start_time) * 1000:.0f}ms")
+    logger.debug(f"[TIMING] update_and_answer parallel: {(time.time() - start_time) * 1000:.0f}ms")

@@ -3,6 +3,7 @@ Bouncer Deployer Tools
 MCP tools for SAM deployment
 """
 import json
+import logging
 import os
 import subprocess
 import time
@@ -12,6 +13,8 @@ from botocore.exceptions import ClientError
 from metrics import emit_metric
 from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native, generate_display_summary
 import db as _db
+
+logger = logging.getLogger(__name__)
 
 # 環境變數
 PROJECTS_TABLE = os.environ.get('PROJECTS_TABLE', 'bouncer-projects')
@@ -107,7 +110,7 @@ def get_git_commit_info(cwd: str = None) -> dict:
             'commit_message': commit_message,
         }
     except Exception as e:
-        print(f"[deployer] get_git_commit_info failed (graceful fallback): {e}")
+        logger.warning(f"[deployer] get_git_commit_info failed (graceful fallback): {e}")
         return {'commit_sha': None, 'commit_short': None, 'commit_message': None}
 
 
@@ -259,7 +262,7 @@ def update_deploy_record(deploy_id: str, updates: dict):
             ExpressionAttributeValues=expr_values
         )
     except Exception as e:
-        print(f"Error updating deploy record: {e}")
+        logger.error(f"Error updating deploy record: {e}")
 
 
 def get_deploy_record(deploy_id: str) -> dict:
@@ -283,7 +286,7 @@ def get_deploy_history(project_id: str, limit: int = 10) -> list:
         )
         return result.get('Items', [])
     except Exception as e:
-        print(f"Error getting deploy history: {e}")
+        logger.error(f"Error getting deploy history: {e}")
         return []
 
 
@@ -404,7 +407,7 @@ def cancel_deploy(deploy_id: str) -> dict:
                 cause='User cancelled'
             )
         except Exception as e:
-            print(f"Error stopping execution: {e}")
+            logger.error(f"Error stopping execution: {e}")
 
     # 釋放鎖
     release_lock(record.get('project_id'))
@@ -455,7 +458,7 @@ def get_deploy_status(deploy_id: str) -> dict:
                 release_lock(record.get('project_id'))
 
         except Exception as e:
-            print(f"Error getting execution status: {e}")
+            logger.error(f"Error getting execution status: {e}")
 
     return record
 

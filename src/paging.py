@@ -2,12 +2,16 @@
 Bouncer - 輸出分頁模組
 處理長輸出的分頁存儲和取得
 """
+import logging
 import time
 import boto3
 
 
+
 from constants import TABLE_NAME, OUTPUT_MAX_INLINE, OUTPUT_PAGE_SIZE, OUTPUT_PAGE_TTL
 from telegram import send_telegram_message_silent
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     'store_paged_output',
@@ -43,7 +47,7 @@ def send_remaining_pages(request_id: str, total_pages: int):
                     f"```\n{content}\n```"
                 )
         except Exception as e:
-            print(f"Error sending page {page_num}: {e}")
+            logger.error(f"Error sending page {page_num}: {e}")
 
 
 def store_paged_output(request_id: str, output: str) -> dict:

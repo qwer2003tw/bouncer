@@ -7,6 +7,7 @@ bouncer_stats:   最近 24h 的統計資訊
 
 import base64
 import json
+import logging
 import time
 from decimal import Decimal
 
@@ -16,6 +17,8 @@ from boto3.dynamodb.conditions import Attr
 from constants import TABLE_NAME
 from db import table
 from utils import decimal_to_native, mcp_error, mcp_result
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # Constants
@@ -153,7 +156,7 @@ def _query_requests_table(
         all_items.extend(resp.get("Items", []))
         last_key = resp.get("LastEvaluatedKey")
     except Exception as e:
-        print(f"[history] scan requests error: {e}")
+        logger.error(f"[history] scan requests error: {e}")
         return [], 0, None
 
     # Trim to desired limit
@@ -197,7 +200,7 @@ def _query_command_history_table(
         scanned = resp.get("ScannedCount", 0)
         return items, scanned
     except Exception as e:
-        print(f"[history] scan command-history error: {e}")
+        logger.error(f"[history] scan command-history error: {e}")
         return [], 0
 
 
