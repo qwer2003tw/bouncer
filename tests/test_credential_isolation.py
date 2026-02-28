@@ -32,6 +32,9 @@ def _fake_driver_result(output='{"UserId":"AIDA..."}', rc=0):
     return m
 
 
+awscli = pytest.importorskip("awscli", reason="awscli not installed in this environment")
+
+
 class TestCredentialIsolation:
 
     def test_lock_exists(self):

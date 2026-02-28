@@ -22,8 +22,6 @@ import hashlib
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-logger = logging.getLogger(__name__)
-
 from .db import get_db
 from .classifier import classify_command, execute_command, get_safelist, get_blocked_patterns
 from .telegram import (
@@ -32,6 +30,8 @@ from .telegram import (
     TelegramPoller,
     ApprovalWaiter
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
