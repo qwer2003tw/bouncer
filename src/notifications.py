@@ -9,7 +9,7 @@ import os
 
 import telegram as _telegram
 from commands import is_dangerous, check_lambda_env_update
-from constants import COMMAND_APPROVAL_TIMEOUT, TRUST_SESSION_MAX_COMMANDS
+from constants import COMMAND_APPROVAL_TIMEOUT, TRUST_SESSION_MAX_COMMANDS, UPLOAD_TIMEOUT, GRANT_APPROVAL_TIMEOUT
 from utils import format_size_human, build_info_lines
 
 
@@ -300,7 +300,8 @@ def send_grant_request_notification(
             f"🏦 *帳號：* `{account_id}`\n"
             f"⏱ *TTL：* {ttl_minutes} 分鐘 | 模式：{mode_str}\n"
             f"{commands_text}\n\n"
-            f"🆔 *ID：* `{grant_id}`"
+            f"🆔 *ID：* `{grant_id}`\n"
+            f"⏰ *審批期限：{GRANT_APPROVAL_TIMEOUT // 60} 分鐘*"
         )
 
         # 根據是否有 requires_individual 決定按鈕
@@ -459,6 +460,7 @@ def send_batch_upload_notification(
     source: str = '',
     account_name: str = '',
     trust_scope: str = '',
+    timeout: int = None,
 ) -> None:
     """發送批量上傳審批請求通知"""
     try:
@@ -479,13 +481,23 @@ def send_batch_upload_notification(
 
         account_line = f"🏦 *帳號：* {safe_account}\n" if safe_account else ""
 
+        # Timeout display
+        timeout_val = timeout if timeout is not None else UPLOAD_TIMEOUT
+        if timeout_val < 60:
+            timeout_str = f"{timeout_val} 秒"
+        elif timeout_val < 3600:
+            timeout_str = f"{timeout_val // 60} 分鐘"
+        else:
+            timeout_str = f"{timeout_val // 3600} 小時"
+
         text = (
             f"📁 *批量上傳請求*\n\n"
             f"{info_lines}"
             f"{account_line}\n"
             f"📄 *{file_count} 個檔案* ({size_str})\n"
             f"📊 {ext_line}\n\n"
-            f"🆔 `{batch_id}`"
+            f"🆔 `{batch_id}`\n"
+            f"⏰ *{timeout_str}後過期*"
         )
 
         keyboard = {

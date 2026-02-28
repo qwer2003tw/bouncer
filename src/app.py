@@ -421,6 +421,41 @@ def handle_clawdbot_request(event: dict) -> dict:
 # Telegram Webhook Handler
 # ============================================================================
 
+def _is_grant_expired(request_id: str, callback: dict) -> bool:
+    """Check if a grant request has expired; if so, send expiry callback and update message.
+
+    Returns True if the grant has expired (caller should return early),
+    False if not expired or item not found (let callback handler decide).
+    """
+    try:
+        grant_item = table.get_item(Key={'request_id': request_id}).get('Item')
+        if not grant_item:
+            return False
+        grant_ttl = int(grant_item.get('ttl', 0))
+        if grant_ttl and int(time.time()) > grant_ttl:
+            answer_callback(callback['id'], '⏰ 此請求已過期')
+            message_id = callback.get('message', {}).get('message_id')
+            if message_id:
+                update_message(
+                    message_id,
+                    f"⏰ *Grant 審批已過期*\n\n🆔 `{request_id}`",
+                    remove_buttons=True,
+                )
+            try:
+                table.update_item(
+                    Key={'request_id': request_id},
+                    UpdateExpression='SET #s = :s',
+                    ExpressionAttributeNames={'#s': 'status'},
+                    ExpressionAttributeValues={':s': 'timeout'},
+                )
+            except Exception:
+                pass
+            return True
+    except Exception as e:
+        print(f"[GRANT EXPIRY] Error checking grant TTL: {e}")
+    return False
+
+
 def handle_telegram_webhook(event: dict) -> dict:
     """處理 Telegram callback"""
     headers = event.get('headers', {})
@@ -472,12 +507,18 @@ def handle_telegram_webhook(event: dict) -> dict:
     # 特殊處理：Grant Session callbacks
     if action == 'grant_approve_all':
         emit_metric('Bouncer', 'ApprovalAction', 1, dimensions={'Action': action})
+        if _is_grant_expired(request_id, callback):
+            return response(200, {'ok': True})
         return handle_grant_approve_all(callback, request_id)
     elif action == 'grant_approve_safe':
         emit_metric('Bouncer', 'ApprovalAction', 1, dimensions={'Action': action})
+        if _is_grant_expired(request_id, callback):
+            return response(200, {'ok': True})
         return handle_grant_approve_safe(callback, request_id)
     elif action == 'grant_deny':
         emit_metric('Bouncer', 'ApprovalAction', 1, dimensions={'Action': action})
+        if _is_grant_expired(request_id, callback):
+            return response(200, {'ok': True})
         return handle_grant_deny(callback, request_id)
     elif action == 'grant_revoke':
         emit_metric('Bouncer', 'ApprovalAction', 1, dimensions={'Action': action})

@@ -405,7 +405,8 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
         f"📊 *大小：* {size_str}\n"
         f"📝 *類型：* {safe_content_type}\n"
         f"💬 *原因：* {safe_reason}\n\n"
-        f"🆔 *ID：* `{ctx.request_id}`"
+        f"🆔 *ID：* `{ctx.request_id}`\n"
+        f"⏰ *{UPLOAD_TIMEOUT // 60} 分鐘後過期*"
     )
 
     keyboard = {
