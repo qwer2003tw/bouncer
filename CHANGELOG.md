@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.6.0] - 2026-02-28
+
+### Fixed
+- `callbacks.py` — `answer_callback` 前移至所有 handler 的處理流程最前端，按鈕按下後立即響應，消除 5~10 秒 spinner 延遲 (bouncer-sprint6-001, closes #25)
+- `app.py` — grant callback 過期檢查新增於 `grant_approve_all` / `grant_approve_safe` / `grant_deny` 路徑，修補繞過通用 TTL check 的問題 (bouncer-sprint6-002)
+
+### Added
+- `notifications.py` — 批量上傳審批通知顯示「⏰ X 分鐘後過期」(bouncer-sprint6-002, closes #24)
+- `notifications.py` — Grant 審批通知顯示「⏰ 審批期限：5 分鐘」(bouncer-sprint6-002, closes #26)
+- `mcp_upload.py` — 單檔上傳通知加入過期時間顯示 (bouncer-sprint6-002)
+- `template.yaml` — 新增 `LambdaLogGroup` resource，CloudWatch log retention 設為 30 天 (bouncer-sprint6-005)
+
+### Changed
+- 全 codebase `print()` 遷移至 `logging` 模組（21 個模組，95 處）；`app.py` 加 `logging.basicConfig`；保留 `metrics.py` EMF stdout 及 `mcp_server/server.py` stdio (bouncer-sprint6-004)
+
+### Tests
+- 新增 `tests/test_expires_at_display.py`（12 tests）：expires_at 顯示、grant callback 過期處理
+- Backend: 1110 tests, coverage 85%
+
 ## [3.5.0] - 2026-02-27
 
 ### Added
