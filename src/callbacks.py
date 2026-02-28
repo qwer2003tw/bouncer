@@ -12,7 +12,7 @@ from utils import response, format_size_human, build_info_lines
 from commands import execute_command
 from paging import store_paged_output, send_remaining_pages
 from trust import create_trust_session
-from telegram import escape_markdown, update_message, answer_callback, update_and_answer
+from telegram import escape_markdown, update_message, answer_callback
 from notifications import send_trust_auto_approve_notification
 from constants import DEFAULT_ACCOUNT_ID, RESULT_TTL, TRUST_SESSION_MAX_UPLOADS, TRUST_SESSION_MAX_COMMANDS
 from metrics import emit_metric
@@ -45,7 +45,6 @@ def handle_grant_approve(query: dict, grant_id: str, mode: str = 'all') -> dict:
         mode: 'all' 全部批准 | 'safe_only' 只批准安全命令
     """
     from grant import approve_grant
-    from telegram import update_and_answer
 
     callback_id = query.get('id', '')
     user_id = str(query.get('from', {}).get('id', ''))
@@ -64,15 +63,14 @@ def handle_grant_approve(query: dict, grant_id: str, mode: str = 'all') -> dict:
 
         cb_suffix = '命令' if mode == 'all' else '安全命令'
 
-        update_and_answer(
+        answer_callback(callback_id, f'✅ 已批准 {len(granted)} 個{cb_suffix}')
+        update_message(
             message_id,
             f"✅ *Grant 已批准（{mode_label}）*\n\n"
             f"🔑 *Grant ID：* `{grant_id}`\n"
             f"📋 *已授權命令：* {len(granted)} 個\n"
             f"⏱ *有效時間：* {ttl_minutes} 分鐘\n"
             f"👤 *批准者：* {user_id}",
-            callback_id,
-            f'✅ 已批准 {len(granted)} 個{cb_suffix}'
         )
 
         return response(200, {'ok': True})
@@ -97,7 +95,6 @@ def handle_grant_approve_safe(query: dict, grant_id: str) -> dict:
 def handle_grant_deny(query: dict, grant_id: str) -> dict:
     """處理 Grant 拒絕 callback"""
     from grant import deny_grant
-    from telegram import update_and_answer
 
     callback_id = query.get('id', '')
     user_id = str(query.get('from', {}).get('id', ''))
@@ -109,13 +106,12 @@ def handle_grant_deny(query: dict, grant_id: str) -> dict:
             answer_callback(callback_id, '❌ 拒絕失敗')
             return response(200, {'ok': True})
 
-        update_and_answer(
+        answer_callback(callback_id, '❌ 已拒絕')
+        update_message(
             message_id,
             f"❌ *Grant 已拒絕*\n\n"
             f"🔑 *Grant ID：* `{grant_id}`\n"
             f"👤 *拒絕者：* {user_id}",
-            callback_id,
-            '❌ 已拒絕'
         )
 
         return response(200, {'ok': True})
@@ -216,6 +212,8 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
     cmd_preview = command[:500] + '...' if len(command) > 500 else command
 
     if action in ('approve', 'approve_trust'):
+        cb_text = '✅ 執行中 + 🔓 信任啟動' if action == 'approve_trust' else '✅ 執行中...'
+        answer_callback(callback_id, cb_text)
         result = execute_command(command, assume_role)
         cmd_status = 'failed' if result.startswith('❌') else 'success'
         emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'manual_approve'})
@@ -317,7 +315,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         title = "✅ *已批准並執行* + 🔓 *信任 10 分鐘*" if action == 'approve_trust' else "✅ *已批准並執行*"
         cb_text = '✅ 已執行 + 🔓 信任啟動' if action == 'approve_trust' else '✅ 已執行'
 
-        update_and_answer(
+        update_message(
             message_id,
             f"{title}\n\n"
             f"🆔 *ID：* `{request_id}`\n"
@@ -326,8 +324,6 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             f"📋 *命令：*\n`{cmd_preview}`\n\n"
             f"💬 *原因：* {safe_reason}\n\n"
             f"📤 *結果：*\n```\n{result_preview}\n```{truncate_notice}{trust_line}",
-            callback_id,
-            cb_text
         )
         # 自動發送剩餘頁面
         if paged.get('paged'):
@@ -340,13 +336,14 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         if decision_latency_ms:
             emit_metric('Bouncer', 'DecisionLatency', decision_latency_ms, unit='Milliseconds', dimensions={'Action': 'deny'})
 
+        answer_callback(callback_id, '❌ 已拒絕')
         _update_request_status(table, request_id, 'denied', user_id, extra_attrs={
             'decision_type': 'manual_denied',
             'decided_at': now,
             'decision_latency_ms': decision_latency_ms,
         })
 
-        update_and_answer(
+        update_message(
             message_id,
             f"❌ *已拒絕*\n\n"
             f"🆔 *ID：* `{request_id}`\n"
@@ -354,8 +351,6 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             f"{account_line}"
             f"📋 *命令：*\n`{cmd_preview}`\n\n"
             f"💬 *原因：* {safe_reason}",
-            callback_id,
-            '❌ 已拒絕'
         )
 
     return response(200, {'ok': True})
@@ -383,6 +378,7 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
 
     if action == 'approve':
         # 寫入帳號配置
+        answer_callback(callback_id, '✅ 處理中...')
         try:
             accounts_table.put_item(Item={
                 'account_id': account_id,
@@ -401,13 +397,13 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
                 {'request_id': request_id, 'source': source, 'context': context},
                 extra_lines=f"{detail_lines}\n🔗 *Role：* `{role_arn}`"
             )
-            answer_callback(callback_id, '✅ 帳號已新增')
 
         except Exception as e:
             answer_callback(callback_id, f'❌ 新增失敗: {str(e)[:50]}')
             return response(500, {'error': str(e)})
 
     elif action == 'deny':
+        answer_callback(callback_id, '❌ 已拒絕')
         _update_request_status(table, request_id, 'denied', user_id)
 
         _send_status_update(
@@ -415,7 +411,6 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
             {'request_id': request_id, 'source': source, 'context': context},
             extra_lines=detail_lines
         )
-        answer_callback(callback_id, '❌ 已拒絕')
 
     return response(200, {'ok': True})
 
@@ -440,6 +435,7 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
     )
 
     if action == 'approve':
+        answer_callback(callback_id, '✅ 處理中...')
         try:
             accounts_table.delete_item(Key={'account_id': account_id})
 
@@ -450,13 +446,13 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
                 {'request_id': request_id, 'source': source, 'context': context},
                 extra_lines=detail_lines
             )
-            answer_callback(callback_id, '✅ 帳號已移除')
 
         except Exception as e:
             answer_callback(callback_id, f'❌ 移除失敗: {str(e)[:50]}')
             return response(500, {'error': str(e)})
 
     elif action == 'deny':
+        answer_callback(callback_id, '❌ 已拒絕')
         _update_request_status(table, request_id, 'denied', user_id)
 
         _send_status_update(
@@ -464,7 +460,6 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
             {'request_id': request_id, 'source': source, 'context': context},
             extra_lines=detail_lines
         )
-        answer_callback(callback_id, '❌ 已拒絕')
 
     return response(200, {'ok': True})
 
@@ -489,6 +484,7 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
     source_line = build_info_lines(source=source, context=context)
 
     if action == 'approve':
+        answer_callback(callback_id, '🚀 啟動部署中...')
         _update_request_status(table, request_id, 'approved', user_id)
 
         # 啟動部署
@@ -506,7 +502,6 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
                 f"🌿 *分支：* {branch}\n\n"
                 f"❗ *錯誤：* {escape_markdown(error_msg)}"
             )
-            answer_callback(callback_id, '❌ 部署啟動失敗')
         else:
             emit_metric('Bouncer', 'Deploy', 1, dimensions={'Status': 'started', 'Project': project_id})
             deploy_id = result.get('deploy_id', '')
@@ -533,9 +528,9 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
                 f"\n🆔 *部署 ID：* `{deploy_id}`\n\n"
                 f"⏳ 部署進行中..."
             )
-            answer_callback(callback_id, '🚀 部署已啟動')
 
     elif action == 'deny':
+        answer_callback(callback_id, '❌ 已拒絕')
         _update_request_status(table, request_id, 'denied', user_id)
 
         update_message(
@@ -548,7 +543,6 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
             f"📋 *Stack：* {stack_name}\n\n"
             f"💬 *原因：* {escape_markdown(reason)}"
         )
-        answer_callback(callback_id, '❌ 已拒絕')
 
     return response(200, {'ok': True})
 
@@ -581,6 +575,7 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
 
     if action == 'approve':
         # 執行上傳
+        answer_callback(callback_id, '📤 上傳中...')
         result = execute_upload(request_id, user_id)
 
         if result.get('success'):
@@ -595,7 +590,6 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
                 f"🔗 *URL：* {result.get('s3_url', '')}\n"
                 f"💬 *原因：* {safe_reason}"
             )
-            answer_callback(callback_id, '✅ 已上傳')
         else:
             # 上傳失敗
             error = result.get('error', 'Unknown error')
@@ -609,10 +603,10 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
                 f"❗ *錯誤：* {error}\n"
                 f"💬 *原因：* {safe_reason}"
             )
-            answer_callback(callback_id, '❌ 上傳失敗')
 
     elif action == 'deny':
         emit_metric('Bouncer', 'Upload', 1, dimensions={'Status': 'denied', 'Type': 'single'})
+        answer_callback(callback_id, '❌ 已拒絕')
         _update_request_status(table, request_id, 'denied', user_id)
 
         update_message(
@@ -624,7 +618,6 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
             f"📊 *大小：* {size_str}\n"
             f"💬 *原因：* {safe_reason}"
         )
-        answer_callback(callback_id, '❌ 已拒絕')
 
     return response(200, {'ok': True})
 
@@ -819,6 +812,7 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
 
     elif action == 'deny':
         emit_metric('Bouncer', 'Upload', 1, dimensions={'Status': 'denied', 'Type': 'batch'})
+        answer_callback(callback_id, '❌ 已拒絕')
         _update_request_status(table, request_id, 'denied', user_id)
 
         update_message(
@@ -829,7 +823,6 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
             f"📄 {file_count} 個檔案 ({size_str})\n"
             f"💬 *原因：* {safe_reason}",
         )
-        answer_callback(callback_id, '❌ 已拒絕')
 
     return response(200, {'ok': True})
 
