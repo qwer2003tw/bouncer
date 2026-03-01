@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import logging
 import time
+import unicodedata
 
 
 # 從模組導入
@@ -426,7 +427,7 @@ def handle_clawdbot_request(event: dict) -> dict:
         logger.error(f"Error: {e}")
         return response(400, {'error': 'Invalid JSON'})
 
-    command = body.get('command', '').strip()
+    command = unicodedata.normalize('NFKC', body.get('command', '')).strip()
     reason = body.get('reason', 'No reason provided')
     source = body.get('source', None)  # 來源（哪個 agent/系統）
     assume_role = body.get('assume_role', None)  # 目標帳號 role ARN

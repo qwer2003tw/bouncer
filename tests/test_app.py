@@ -1075,3 +1075,139 @@ class TestCleanupExpired:
         assert body.get('ok') is True
         item = app_module.table.get_item(Key={'request_id': 'clean-008'}).get('Item')
         assert item.get('status') == 'timeout'
+
+
+# ============================================================================
+# Sprint8-003 — Unicode Normalization Tests (Approach C: Test-focused)
+# ============================================================================
+
+
+class TestUnicodeNormalization:
+    """Unicode NFKC 正規化測試 — 確保每個 edge case 都有覆蓋。"""
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _make_event(self, command: str) -> dict:
+        """建立帶有合法 secret 的 REST 請求事件。"""
+        return {
+            'headers': {'x-approval-secret': 'test-secret'},
+            'body': json.dumps({'command': command, 'reason': 'unicode-test'}),
+        }
+
+    # ------------------------------------------------------------------
+    # Core tests
+    # ------------------------------------------------------------------
+
+    @patch('commands.execute_command')
+    def test_clawdbot_unicode_lookalike_blocked(self, mock_execute, app_module):
+        """fullwidth chars (ａｗｓ) 應被 NFKC 正規化為 'aws'。
+
+        'aws iam delete-user' 是封鎖命令，正規化後應被 block (403)，
+        而不是被當成無害字串溜過去。
+        """
+        mock_execute.return_value = 'ok'
+        # ａｗｓ ｉａｍ ｄｅｌｅｔｅ－ｕｓｅｒ (全是 fullwidth)
+        fullwidth_cmd = '\uff41\uff57\uff53 \uff49\uff41\uff4d \uff44\uff45\uff4c\uff45\uff54\uff45\uff0d\uff55\uff53\uff45\uff52 --user-name x'
+        event = self._make_event(fullwidth_cmd)
+        result = app_module.handle_clawdbot_request(event)
+        # After normalization the command reads "aws iam delete-user …" which is blocked
+        assert result['statusCode'] == 403
+
+    @patch('commands.execute_command')
+    def test_clawdbot_nfkc_normalize_applied(self, mock_execute, app_module):
+        """NFKC 正規化把 fullwidth 'ｓ３' 轉成 's3'，使 safelist 命中。"""
+        mock_execute.return_value = '[]'
+        # ａｗｓ ｓ３ ｌｓ — 正規化後 → 'aws s3 ls' (safelist)
+        fullwidth_cmd = '\uff41\uff57\uff53 \uff53\uff13 \uff4c\uff53'
+        event = self._make_event(fullwidth_cmd)
+        result = app_module.handle_clawdbot_request(event)
+        # 'aws s3 ls' is auto-approved → 200
+        assert result['statusCode'] == 200
+        body = json.loads(result['body'])
+        assert body.get('status') == 'auto_approved'
+
+    def test_clawdbot_strip_after_normalize(self, app_module):
+        """正規化後的 strip() 應移除前後空白（包含全形空白 U+3000）。"""
+        # 全形空白 (U+3000) 在 NFKC 轉成一般空格後會被 strip() 移除
+        cmd_with_fullwidth_spaces = '\u3000aws s3 ls\u3000'
+        event = self._make_event(cmd_with_fullwidth_spaces)
+        # 正規化後 = 'aws s3 ls' (auto-approved), 不應被當空命令
+        with patch('commands.execute_command', return_value='[]'):
+            result = app_module.handle_clawdbot_request(event)
+        assert result['statusCode'] == 200
+
+    @patch('commands.execute_command')
+    def test_clawdbot_normal_command_unchanged(self, mock_execute, app_module):
+        """純 ASCII 命令在正規化後應維持不變、正常執行。"""
+        mock_execute.return_value = 'caller-id'
+        event = self._make_event('aws sts get-caller-identity')
+        result = app_module.handle_clawdbot_request(event)
+        assert result['statusCode'] == 200
+        body = json.loads(result['body'])
+        assert body.get('status') == 'auto_approved'
+
+    def test_clawdbot_empty_command_after_normalize(self, app_module):
+        """全形空白組成的命令，正規化 + strip 後為空字串，應回 400。"""
+        # U+3000 × 5  →  NFKC → '     '  → strip → ''
+        whitespace_only = '\u3000\u3000\u3000\u3000\u3000'
+        event = self._make_event(whitespace_only)
+        result = app_module.handle_clawdbot_request(event)
+        assert result['statusCode'] == 400
+        body = json.loads(result['body'])
+        assert 'command' in body.get('error', '').lower() or 'missing' in body.get('error', '').lower()
+
+    @patch('commands.execute_command')
+    def test_clawdbot_normalization_before_risk_check(self, mock_execute, app_module):
+        """正規化必須在風險/封鎖檢查之前執行。
+
+        用混合 fullwidth + ASCII 的封鎖命令，確認 block 是因為正規化生效，
+        而非命令本身含非 ASCII 被其他邏輯誤判。
+        """
+        mock_execute.return_value = 'should-not-reach'
+        # 'aws iam' (ascii) + ' delete-access-key' 的部分用 fullwidth
+        # ｄｅｌｅｔｅ－ａｃｃｅｓｓ－ｋｅｙ = fullwidth "delete-access-key"
+        mixed = 'aws iam \uff44\uff45\uff4c\uff45\uff54\uff45\uff0d\uff41\uff43\uff43\uff45\uff53\uff53\uff0d\uff4b\uff45\uff59 --user-name x'
+        event = self._make_event(mixed)
+        result = app_module.handle_clawdbot_request(event)
+        # 正規化後 = 'aws iam delete-access-key …' → blocked
+        assert result['statusCode'] == 403
+        # execute_command 不應被呼叫（因為被 block 了）
+        mock_execute.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # Merged from approach-a: ideographic space (U+3000) tests
+    # ------------------------------------------------------------------
+
+    def test_clawdbot_ideographic_space_blocked(self, app_module):
+        """U+3000 ideographic spaces 被 NFKC 正規化為普通空格後，封鎖命令仍被攔截。
+
+        (Merged from approach-a test_clawdbot_request_normalizes_unicode)
+        """
+        # 使用 U+3000（全形空格）連接各參數，NFKC 會把它轉成普通空格
+        confusable_cmd = 'aws\u3000iam\u3000delete-user\u3000--user-name\u3000test'
+        event = self._make_event(confusable_cmd)
+        result = app_module.handle_clawdbot_request(event)
+        # 正規化後等同 'aws iam delete-user --user-name test'，應被 block (403)
+        assert result['statusCode'] == 403
+
+    @patch('app.get_block_reason')
+    @patch('app.is_auto_approve', return_value=False)
+    def test_clawdbot_normalization_before_block_check_via_mock(self, mock_auto, mock_block, app_module):
+        """用 mock 驗證 get_block_reason 收到的是正規化後的命令（無 U+3000）。
+
+        (Merged from approach-a test_clawdbot_request_normalization_before_risk_check)
+        """
+        mock_block.return_value = 'blocked for test'
+
+        # 含全形空格 \u3000 的命令：正規化後變普通空格
+        raw_cmd = 'aws\u3000s3\u3000ls'
+        event = self._make_event(raw_cmd)
+        app_module.handle_clawdbot_request(event)
+
+        # get_block_reason 應該收到正規化後的命令（普通空格），而非原始全形空格
+        assert mock_block.called
+        called_cmd = mock_block.call_args[0][0]
+        assert '\u3000' not in called_cmd, "正規化應在 block check 前套用"
+        assert ' ' in called_cmd or called_cmd == called_cmd.strip()
