@@ -240,8 +240,9 @@ class TestSendApprovalRequest:
                 command='aws iam create-access-key',
                 reason='test'
             )
-            # 封鎖的命令不會成功：send_approval_request 回傳 bool，Telegram 失敗時為 False
-            assert result is None or isinstance(result, bool) or result.get('status') == 'blocked'
+            # 封鎖的命令不會成功：send_approval_request 回傳 NotificationResult，Telegram 失敗時 ok=False
+            from notifications import NotificationResult
+            assert isinstance(result, NotificationResult) and not result.ok
 
 
 # ============================================================================
@@ -846,3 +847,231 @@ class TestValidation:
         """非數字的帳號 ID"""
         valid, error = app_module.validate_account_id('12345678901a')
         assert valid is False
+
+
+# ============================================================================
+# sprint7-002: handle_cleanup_expired tests
+# ============================================================================
+
+class TestCleanupExpired:
+    """Tests for handle_cleanup_expired() introduced in sprint7-002.
+
+    Covers all 6 required scenarios:
+    - removes buttons when request is pending
+    - updates message text to ⏰ 已過期
+    - no-op when already approved
+    - no-op when already rejected
+    - handles missing telegram_message_id gracefully
+    - handles unknown (not found) request gracefully
+    """
+
+    def _cleanup_event(self, request_id: str) -> dict:
+        return {
+            'source': 'bouncer-scheduler',
+            'action': 'cleanup_expired',
+            'request_id': request_id,
+        }
+
+    def _put_request(self, app_module, request_id: str, status: str = 'pending',
+                     telegram_message_id: int = None):
+        """Helper: insert a minimal DDB item for testing."""
+        item = {
+            'request_id': request_id,
+            'status': status,
+            'created_at': int(__import__('time').time()),
+        }
+        if telegram_message_id is not None:
+            item['telegram_message_id'] = telegram_message_id
+        app_module.table.put_item(Item=item)
+
+    # ------------------------------------------------------------------
+    # test_cleanup_expired_removes_buttons
+    # ------------------------------------------------------------------
+
+    @patch('app.update_message')
+    def test_cleanup_expired_removes_buttons(self, mock_update, app_module):
+        """Cleanup event on pending request calls update_message with remove_buttons=True."""
+        self._put_request(app_module, 'clean-001', status='pending', telegram_message_id=12345)
+
+        event = self._cleanup_event('clean-001')
+        result = app_module.lambda_handler(event, None)
+
+        body = json.loads(result['body'])
+        assert body.get('ok') is True
+        assert body.get('cleaned') is True
+
+        mock_update.assert_called_once()
+        call_kwargs = mock_update.call_args
+        args, kwargs = call_kwargs
+        assert args[0] == 12345 or kwargs.get('message_id') == 12345
+        remove_buttons_val = kwargs.get('remove_buttons', args[2] if len(args) > 2 else False)
+        assert remove_buttons_val is True
+
+    # ------------------------------------------------------------------
+    # test_cleanup_expired_updates_message_text_to_expired
+    # ------------------------------------------------------------------
+
+    @patch('app.update_message')
+    def test_cleanup_expired_updates_message_text_to_expired(self, mock_update, app_module):
+        """Cleanup event updates message text to include ⏰ 已過期."""
+        self._put_request(app_module, 'clean-002', status='pending', telegram_message_id=99999)
+
+        event = self._cleanup_event('clean-002')
+        app_module.lambda_handler(event, None)
+
+        mock_update.assert_called_once()
+        args, kwargs = mock_update.call_args
+        message_text = args[1] if len(args) > 1 else kwargs.get('text', '')
+        assert '已過期' in message_text or '⏰' in message_text
+        assert 'clean-002' in message_text
+
+    # ------------------------------------------------------------------
+    # test_cleanup_expired_noop_if_already_approved
+    # ------------------------------------------------------------------
+
+    @patch('app.update_message')
+    def test_cleanup_expired_noop_if_already_approved(self, mock_update, app_module):
+        """Cleanup event on approved request is a no-op (no Telegram call)."""
+        self._put_request(app_module, 'clean-003', status='approved', telegram_message_id=11111)
+
+        event = self._cleanup_event('clean-003')
+        result = app_module.lambda_handler(event, None)
+
+        body = json.loads(result['body'])
+        assert body.get('ok') is True
+        assert body.get('skipped') is True
+        assert 'approved' in body.get('reason', '')
+        mock_update.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # test_cleanup_expired_noop_if_already_rejected
+    # ------------------------------------------------------------------
+
+    @patch('app.update_message')
+    def test_cleanup_expired_noop_if_already_rejected(self, mock_update, app_module):
+        """Cleanup event on rejected/denied request is a no-op."""
+        self._put_request(app_module, 'clean-004', status='rejected', telegram_message_id=22222)
+
+        event = self._cleanup_event('clean-004')
+        result = app_module.lambda_handler(event, None)
+
+        body = json.loads(result['body'])
+        assert body.get('ok') is True
+        assert body.get('skipped') is True
+        mock_update.assert_not_called()
+
+    @patch('app.update_message')
+    def test_cleanup_expired_noop_if_already_denied(self, mock_update, app_module):
+        """Cleanup event on 'denied' status is also a no-op."""
+        self._put_request(app_module, 'clean-004b', status='denied', telegram_message_id=22223)
+
+        event = self._cleanup_event('clean-004b')
+        result = app_module.lambda_handler(event, None)
+
+        body = json.loads(result['body'])
+        assert body.get('ok') is True
+        assert body.get('skipped') is True
+        mock_update.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # test_cleanup_expired_missing_message_id_handled
+    # ------------------------------------------------------------------
+
+    @patch('app.update_message')
+    def test_cleanup_expired_missing_message_id_handled(self, mock_update, app_module):
+        """Cleanup event on pending request with no telegram_message_id: no Telegram call, status updated."""
+        self._put_request(app_module, 'clean-005', status='pending', telegram_message_id=None)
+
+        event = self._cleanup_event('clean-005')
+        result = app_module.lambda_handler(event, None)
+
+        body = json.loads(result['body'])
+        assert body.get('ok') is True
+        assert body.get('skipped') is True
+        assert 'no_message_id' in body.get('reason', '')
+        mock_update.assert_not_called()
+
+        # Status should be updated to 'timeout' in DDB
+        item = app_module.table.get_item(Key={'request_id': 'clean-005'}).get('Item')
+        assert item is not None
+        assert item.get('status') == 'timeout'
+
+    # ------------------------------------------------------------------
+    # test_cleanup_expired_unknown_request_handled
+    # ------------------------------------------------------------------
+
+    @patch('app.update_message')
+    def test_cleanup_expired_unknown_request_handled(self, mock_update, app_module):
+        """Cleanup event for a non-existent request_id returns gracefully (skipped)."""
+        event = self._cleanup_event('does-not-exist-xyz')
+        result = app_module.lambda_handler(event, None)
+
+        body = json.loads(result['body'])
+        assert body.get('ok') is True
+        assert body.get('skipped') is True
+        assert 'not_found' in body.get('reason', '')
+        mock_update.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # Additional edge cases
+    # ------------------------------------------------------------------
+
+    @patch('app.update_message')
+    def test_cleanup_expired_updates_ddb_status_to_timeout(self, mock_update, app_module):
+        """After cleanup, DDB status is set to 'timeout'."""
+        self._put_request(app_module, 'clean-006', status='pending', telegram_message_id=55555)
+
+        event = self._cleanup_event('clean-006')
+        app_module.lambda_handler(event, None)
+
+        item = app_module.table.get_item(Key={'request_id': 'clean-006'}).get('Item')
+        assert item is not None
+        assert item.get('status') == 'timeout'
+
+    def test_cleanup_event_routed_by_lambda_handler(self, app_module):
+        """lambda_handler routes cleanup events before checking path/method."""
+        event = {
+            'source': 'bouncer-scheduler',
+            'action': 'cleanup_expired',
+            'request_id': 'route-test-001',
+        }
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        assert body.get('ok') is True
+
+    def test_cleanup_event_missing_request_id(self, app_module):
+        """Cleanup event without request_id returns skipped gracefully."""
+        event = {
+            'source': 'bouncer-scheduler',
+            'action': 'cleanup_expired',
+        }
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        assert body.get('ok') is True
+        assert body.get('skipped') is True
+        assert 'missing_request_id' in body.get('reason', '')
+
+    @patch('app.update_message')
+    def test_cleanup_expired_noop_if_auto_approved(self, mock_update, app_module):
+        """Cleanup event on auto_approved request is a no-op."""
+        self._put_request(app_module, 'clean-007', status='auto_approved', telegram_message_id=33333)
+
+        event = self._cleanup_event('clean-007')
+        result = app_module.lambda_handler(event, None)
+
+        body = json.loads(result['body'])
+        assert body.get('skipped') is True
+        mock_update.assert_not_called()
+
+    @patch('telegram.update_message', side_effect=Exception("Telegram API error"))
+    def test_cleanup_expired_telegram_error_is_non_fatal(self, mock_update, app_module):
+        """If update_message raises, handle_cleanup_expired still marks DDB and returns ok."""
+        self._put_request(app_module, 'clean-008', status='pending', telegram_message_id=44444)
+
+        event = self._cleanup_event('clean-008')
+        result = app_module.lambda_handler(event, None)
+
+        body = json.loads(result['body'])
+        assert body.get('ok') is True
+        item = app_module.table.get_item(Key={'request_id': 'clean-008'}).get('Item')
+        assert item.get('status') == 'timeout'

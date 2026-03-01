@@ -298,7 +298,7 @@ def _make_notifications_module():
 
     # Clear cached modules so imports are fresh
     for mod in ['notifications', 'telegram', 'commands', 'constants', 'utils',
-                'risk_scorer', 'template_scanner']:
+                'risk_scorer', 'template_scanner', 'scheduler_service']:
         sys.modules.pop(mod, None)
         sys.modules.pop(f'src.{mod}', None)
 
@@ -357,7 +357,7 @@ class TestNotificationsCoverage:
     # ------------------------------------------------------------------
 
     def test_send_approval_request_happy_path(self):
-        """Normal (non-dangerous) command → sends message, returns True."""
+        """Normal (non-dangerous) command → sends message, returns NotificationResult(ok=True)."""
         ctx, send_mock, _ = self._patch_send(ok=True)
         with ctx:
             result = self.notif.send_approval_request(
@@ -368,14 +368,14 @@ class TestNotificationsCoverage:
                 account_id='123456789012',
                 account_name='DevAccount',
             )
-        assert result is True
+        assert result.ok is True
         send_mock.assert_called_once()
         text, keyboard = send_mock.call_args[0]
         assert 'req-001' in text
         assert 'list buckets' in text
 
     def test_send_approval_request_returns_false_on_api_failure(self):
-        """Returns False when telegram API returns ok=False."""
+        """Returns NotificationResult(ok=False) when telegram API returns ok=False."""
         ctx, send_mock, _ = self._patch_send(ok=False)
         with ctx:
             result = self.notif.send_approval_request(
@@ -383,7 +383,7 @@ class TestNotificationsCoverage:
                 command='aws s3 ls',
                 reason='test',
             )
-        assert result is False
+        assert result.ok is False
 
     def test_send_approval_request_dangerous_command(self):
         """Dangerous command (e.g. delete) → different keyboard (⚠️ 確認執行)."""
@@ -395,7 +395,7 @@ class TestNotificationsCoverage:
                     command='aws s3 rb s3://important-bucket --force',
                     reason='cleanup',
                 )
-        assert result is True
+        assert result.ok is True
         text, keyboard = send_mock.call_args[0]
         # Dangerous path shows "高危操作"
         assert '高危' in text or '⚠️' in text
@@ -1156,3 +1156,271 @@ class TestNotificationsCoverage:
                 grant_id='grant-complete-err',
                 reason='expired',
             )
+
+
+# ============================================================================
+# sprint7-002: NotificationResult, post_notification_setup, SchedulerService
+# ============================================================================
+
+class TestSchedulerIntegration:
+    """Tests for the message_id storage + EventBridge schedule creation
+    introduced in sprint7-002.
+
+    B's architecture: send_approval_request returns NotificationResult;
+    callers invoke post_notification_setup to store message_id + schedule.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        """Fresh notifications module + mocked DynamoDB table per test."""
+        # Save all modules that _make_notifications_module will pop
+        saved_modules = {}
+        for mod_name in ['notifications', 'telegram', 'commands', 'constants', 'utils',
+                         'risk_scorer', 'template_scanner', 'scheduler_service']:
+            for key in [mod_name, f'src.{mod_name}']:
+                if key in sys.modules:
+                    saved_modules[key] = sys.modules[key]
+
+        self.notif = _make_notifications_module()
+
+        # Provide a mock db.table for post_notification_setup
+        import db as _db
+        self._original_table = _db.table
+        self.mock_table = MagicMock()
+        _db.table = self.mock_table
+
+        yield
+
+        # Restore original table to avoid state bleed
+        _db.table = self._original_table
+
+        # Restore original modules to avoid poisoning module-scoped fixtures
+        for key, mod in saved_modules.items():
+            sys.modules[key] = mod
+
+    # ------------------------------------------------------------------
+    # Helper
+    # ------------------------------------------------------------------
+
+    def _patch_send_with_message_id(self, message_id: int = 42):
+        """Patch _send_message to return ok=True with given message_id."""
+        return patch.object(
+            self.notif, '_send_message',
+            return_value={'ok': True, 'result': {'message_id': message_id}},
+        )
+
+    # ------------------------------------------------------------------
+    # test_message_id_returned_from_send_command_request
+    # ------------------------------------------------------------------
+
+    def test_message_id_returned_from_send_command_request(self):
+        """send_approval_request returns NotificationResult with message_id."""
+        with self._patch_send_with_message_id(999):
+            result = self.notif.send_approval_request(
+                request_id='cmd-req-001',
+                command='aws s3 ls',
+                reason='test',
+                timeout=30,
+            )
+
+        assert result.ok is True
+        assert result.message_id == 999
+
+    # ------------------------------------------------------------------
+    # test_message_id_returned_from_send_upload_request
+    # ------------------------------------------------------------------
+
+    def test_message_id_returned_from_send_upload_request(self):
+        """send_batch_upload_notification returns NotificationResult with message_id."""
+        with self._patch_send_with_message_id(777):
+            result = self.notif.send_batch_upload_notification(
+                batch_id='upload-req-001',
+                file_count=3,
+                total_size=1024,
+                ext_counts={'.js': 3},
+                reason='deploy',
+                source='Bot',
+                timeout=300,
+            )
+
+        assert result.ok is True
+        assert result.message_id == 777
+
+    # ------------------------------------------------------------------
+    # test_post_notification_setup_stores_message_id
+    # ------------------------------------------------------------------
+
+    def test_post_notification_setup_stores_message_id(self):
+        """post_notification_setup stores telegram_message_id in DDB."""
+        with patch('scheduler_service.get_scheduler_service') as mock_svc:
+            mock_svc.return_value = MagicMock()
+            self.notif.post_notification_setup(
+                request_id='my-req-123',
+                telegram_message_id=4567,
+                expires_at=int(time.time()) + 300,
+            )
+
+        self.mock_table.update_item.assert_called_once()
+        call_kwargs = self.mock_table.update_item.call_args[1]
+        assert call_kwargs['Key'] == {'request_id': 'my-req-123'}
+        assert ':mid' in call_kwargs['ExpressionAttributeValues']
+        assert call_kwargs['ExpressionAttributeValues'][':mid'] == 4567
+
+    # ------------------------------------------------------------------
+    # test_post_notification_setup_ddb_error_is_non_fatal
+    # ------------------------------------------------------------------
+
+    def test_post_notification_setup_ddb_error_is_non_fatal(self):
+        """post_notification_setup swallows DynamoDB exceptions."""
+        self.mock_table.update_item.side_effect = Exception("ProvisionedThroughputExceeded")
+        with patch('scheduler_service.get_scheduler_service') as mock_svc:
+            mock_svc.return_value = MagicMock()
+            # Should not raise
+            self.notif.post_notification_setup(
+                request_id='req-ddb-fail',
+                telegram_message_id=999,
+                expires_at=int(time.time()) + 300,
+            )
+
+    # ------------------------------------------------------------------
+    # test_scheduler_created_with_correct_expiry
+    # ------------------------------------------------------------------
+
+    def test_scheduler_created_with_correct_expiry(self):
+        """post_notification_setup calls SchedulerService.create_expiry_schedule."""
+        expires_at = int(time.time()) + 120
+
+        mock_service = MagicMock()
+        with patch('scheduler_service.get_scheduler_service', return_value=mock_service):
+            self.notif.post_notification_setup(
+                request_id='sched-req-001',
+                telegram_message_id=101,
+                expires_at=expires_at,
+            )
+
+        mock_service.create_expiry_schedule.assert_called_once_with(
+            request_id='sched-req-001',
+            expires_at=expires_at,
+        )
+
+    # ------------------------------------------------------------------
+    # test_scheduler_not_created_if_send_fails
+    # ------------------------------------------------------------------
+
+    def test_scheduler_not_called_if_send_fails(self):
+        """If Telegram send fails, result.ok is False, so post_notification_setup
+        should not be invoked by the caller (tested via NotificationResult)."""
+        with patch.object(self.notif, '_send_message', return_value={'ok': False}):
+            result = self.notif.send_approval_request(
+                request_id='fail-req-001',
+                command='aws s3 ls',
+                reason='test',
+            )
+
+        assert result.ok is False
+        assert result.message_id is None
+
+    # ------------------------------------------------------------------
+    # test_scheduler_failure_is_non_fatal
+    # ------------------------------------------------------------------
+
+    def test_scheduler_failure_is_non_fatal(self):
+        """post_notification_setup does not raise even if SchedulerService fails."""
+        mock_service = MagicMock()
+        mock_service.create_expiry_schedule.side_effect = RuntimeError("Scheduler API unavailable")
+
+        with patch('scheduler_service.get_scheduler_service', return_value=mock_service):
+            # Should NOT raise
+            self.notif.post_notification_setup(
+                request_id='req-nonfatal',
+                telegram_message_id=55,
+                expires_at=int(time.time()) + 60,
+            )
+
+    # ------------------------------------------------------------------
+    # test_scheduler_service_disabled_is_noop
+    # ------------------------------------------------------------------
+
+    def test_scheduler_service_disabled_is_noop(self):
+        """SchedulerService with enabled=False returns False for create_expiry_schedule."""
+        from scheduler_service import SchedulerService
+        svc = SchedulerService(enabled=False)
+        result = svc.create_expiry_schedule(request_id='req-disabled', expires_at=9999999999)
+        assert result is False
+
+    # ------------------------------------------------------------------
+    # test_schedule_name_format
+    # ------------------------------------------------------------------
+
+    def test_schedule_name_format(self):
+        """schedule_name() returns 'bouncer-expire-{request_id}' (truncated to 64)."""
+        from scheduler_service import schedule_name
+        name = schedule_name('special-req-abc')
+        assert name == 'bouncer-expire-special-req-abc'
+        assert len(name) <= 64
+
+    # ------------------------------------------------------------------
+    # test_scheduler_service_create_calls_boto
+    # ------------------------------------------------------------------
+
+    def test_scheduler_service_create_calls_boto(self):
+        """SchedulerService.create_expiry_schedule calls boto3 scheduler.create_schedule."""
+        mock_client = MagicMock()
+        svc_mod = __import__('scheduler_service')
+        svc = svc_mod.SchedulerService(
+            scheduler_client=mock_client,
+            lambda_arn='arn:aws:lambda:us-east-1:123:function:test',
+            role_arn='arn:aws:iam::123:role/sched-role',
+            group_name='test-group',
+            enabled=True,
+        )
+        result = svc.create_expiry_schedule(
+            request_id='boto-test-001',
+            expires_at=int(time.time()) + 300,
+        )
+        assert result is True
+        mock_client.create_schedule.assert_called_once()
+        call_kwargs = mock_client.create_schedule.call_args[1]
+        assert call_kwargs['Name'] == 'bouncer-expire-boto-test-001'
+        assert call_kwargs['ActionAfterCompletion'] == 'DELETE'
+        assert 'bouncer-scheduler' in call_kwargs['Target']['Input']
+
+    # ------------------------------------------------------------------
+    # test_scheduler_service_delete_handles_not_found
+    # ------------------------------------------------------------------
+
+    def test_scheduler_service_delete_handles_not_found(self):
+        """SchedulerService.delete_schedule returns True when schedule doesn't exist."""
+        mock_client = MagicMock()
+        # Simulate ResourceNotFoundException
+        exc_class = type('ResourceNotFoundException', (Exception,), {})
+        mock_client.exceptions = MagicMock()
+        mock_client.exceptions.ResourceNotFoundException = exc_class
+        mock_client.delete_schedule.side_effect = exc_class("Not found")
+
+        svc_mod = __import__('scheduler_service')
+        svc = svc_mod.SchedulerService(
+            scheduler_client=mock_client,
+            enabled=True,
+        )
+        result = svc.delete_schedule(request_id='already-gone')
+        assert result is True
+
+    # ------------------------------------------------------------------
+    # test_scheduler_service_create_failure_returns_false
+    # ------------------------------------------------------------------
+
+    def test_scheduler_service_create_failure_returns_false(self):
+        """SchedulerService.create_expiry_schedule returns False on boto3 error."""
+        mock_client = MagicMock()
+        mock_client.create_schedule.side_effect = Exception("AccessDenied")
+
+        svc_mod = __import__('scheduler_service')
+        svc = svc_mod.SchedulerService(
+            scheduler_client=mock_client,
+            lambda_arn='arn:aws:lambda:us-east-1:123:function:test',
+            role_arn='arn:aws:iam::123:role/test',
+            enabled=True,
+        )
+        result = svc.create_expiry_schedule(request_id='fail-test', expires_at=9999999999)
+        assert result is False

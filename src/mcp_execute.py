@@ -786,7 +786,7 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
             ctx.account_id, ctx.account_name, context=ctx.context,
             template_scan_result=ctx.template_scan_result,
         )
-        if not notified:
+        if not notified.ok:
             raise RuntimeError("Telegram notification returned failure (ok=False or empty response)")
     except Exception as tg_err:
         # Cleanup DDB to prevent orphan pending record
@@ -806,6 +806,15 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
             }],
             'isError': True,
         })
+
+    # Post-notification: store telegram_message_id + schedule expiry cleanup
+    if notified.message_id:
+        from notifications import post_notification_setup
+        post_notification_setup(
+            request_id=request_id,
+            telegram_message_id=notified.message_id,
+            expires_at=ttl,
+        )
 
     # 一律異步返回：讓 client 用 bouncer_status 輪詢結果。
     # sync long-polling 已移除（Lambda 60s timeout + API Gateway 29s timeout 使其無意義）。

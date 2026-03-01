@@ -81,6 +81,118 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================================
+# Cleanup Expired Handler (sprint7-002)
+# ============================================================================
+
+def handle_cleanup_expired(event: dict) -> dict:
+    """Handle EventBridge Scheduler trigger to clean up expired request buttons.
+
+    Triggered by EventBridge Scheduler when a request's TTL is reached.
+
+    Scenarios:
+    - Request has status 'pending' → update message text to "⏰ 已過期" and remove buttons
+    - Request already approved/rejected/denied/timeout/auto_approved → no-op
+    - Request not found or missing message_id → log and return gracefully
+    """
+    request_id = event.get('request_id')
+    if not request_id:
+        logger.warning("[CLEANUP] Missing request_id in event")
+        return response(200, {'ok': True, 'skipped': True, 'reason': 'missing_request_id'})
+
+    logger.info("[CLEANUP] Processing expiry for request_id=%s", request_id)
+
+    try:
+        item = table.get_item(Key={'request_id': request_id}).get('Item')
+    except Exception as e:
+        logger.error(f"[CLEANUP] DynamoDB error for {request_id}: {e}")
+        return response(200, {'ok': True, 'skipped': True, 'reason': 'db_error'})
+
+    if not item:
+        logger.info(f"[CLEANUP] Request {request_id} not found — skipping")
+        return response(200, {'ok': True, 'skipped': True, 'reason': 'not_found'})
+
+    current_status = item.get('status', 'pending')
+
+    # Already actioned — no-op
+    if current_status in ('approved', 'rejected', 'denied', 'timeout', 'auto_approved'):
+        logger.info(f"[CLEANUP] Request {request_id} already {current_status} — no-op")
+        return response(200, {'ok': True, 'skipped': True, 'reason': f'already_{current_status}'})
+
+    # Retrieve stored telegram_message_id
+    telegram_message_id = item.get('telegram_message_id')
+    if not telegram_message_id:
+        logger.info(f"[CLEANUP] Request {request_id} has no telegram_message_id — cannot update message")
+        # Still mark as timed out
+        _mark_request_timeout(request_id)
+        return response(200, {'ok': True, 'skipped': True, 'reason': 'no_message_id'})
+
+    # Build expiry message preserving original context
+    source = item.get('source', '')
+    command = item.get('command', '')
+    reason = item.get('reason', '')
+    context_val = item.get('context', '')
+
+    source_line = f"🤖 *來源：* {escape_markdown(source)}\n" if source else ""
+    context_line = f"📝 *任務：* {escape_markdown(context_val)}\n" if context_val else ""
+
+    # Action-specific summary line
+    action_type = item.get('action', 'execute')
+    if action_type in ('upload', 'upload_batch'):
+        summary = item.get('display_summary', '上傳請求')
+        detail_line = f"📁 *請求：* {escape_markdown(summary)}\n"
+    elif action_type == 'deploy':
+        project_id = item.get('project_id', '')
+        detail_line = f"🚀 *部署：* `{project_id}`\n"
+    else:
+        cmd_preview = command[:200] + '...' if len(command) > 200 else command
+        detail_line = f"📋 *命令：*\n`{cmd_preview}`\n"
+
+    reason_line = f"\n💬 *原因：* {escape_markdown(reason)}" if reason else ""
+
+    expiry_text = (
+        f"⏰ *已過期*\n\n"
+        f"{source_line}"
+        f"{context_line}"
+        f"{detail_line}"
+        f"{reason_line}\n"
+        f"\n🆔 `{request_id}`"
+    )
+
+    # Update Telegram message (remove buttons)
+    try:
+        update_message(int(telegram_message_id), expiry_text, remove_buttons=True)
+        logger.info(
+            "[CLEANUP] Updated Telegram message %s for request %s",
+            telegram_message_id, request_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "[CLEANUP] Failed to update Telegram message %s: %s",
+            telegram_message_id, exc,
+        )
+        # Continue to update DynamoDB even if Telegram update fails
+
+    # Mark as timeout in DynamoDB
+    _mark_request_timeout(request_id)
+
+    emit_metric('Bouncer', 'RequestExpired', 1, dimensions={'Action': action_type})
+    return response(200, {'ok': True, 'cleaned': True, 'request_id': request_id})
+
+
+def _mark_request_timeout(request_id: str) -> None:
+    """Set request status to 'timeout' in DynamoDB."""
+    try:
+        table.update_item(
+            Key={'request_id': request_id},
+            UpdateExpression='SET #s = :s',
+            ExpressionAttributeNames={'#s': 'status'},
+            ExpressionAttributeValues={':s': 'timeout'},
+        )
+    except Exception as exc:
+        logger.error("[CLEANUP] Failed to update DynamoDB status for %s: %s", request_id, exc)
+
+
+# ============================================================================
 # Lambda Handler
 # ============================================================================
 
@@ -88,6 +200,10 @@ def lambda_handler(event: dict, context) -> dict:
     """主入口 - 路由請求"""
     # 初始化 Bot commands（cold start 時執行一次）
     init_bot_commands()
+
+    # EventBridge Scheduler cleanup trigger (sprint7-002)
+    if event.get('source') == 'bouncer-scheduler' and event.get('action') == 'cleanup_expired':
+        return handle_cleanup_expired(event)
 
     # 支援 Function URL (rawPath) 和 API Gateway (path)
     path = event.get('rawPath') or event.get('path') or '/'

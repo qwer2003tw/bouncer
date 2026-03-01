@@ -440,6 +440,16 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
             'isError': True,
         })
 
+    # Post-notification: store telegram_message_id + schedule expiry cleanup
+    tg_message_id = tg_result.get('result', {}).get('message_id')
+    if tg_message_id:
+        from notifications import post_notification_setup
+        post_notification_setup(
+            request_id=ctx.request_id,
+            telegram_message_id=tg_message_id,
+            expires_at=ttl,
+        )
+
     # 一律異步返回：讓 client 用 bouncer_status 輪詢結果。
     # sync long-polling 已移除。
     return mcp_result(ctx.req_id, {
@@ -818,7 +828,7 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
     table.put_item(Item=item)
 
     # Send Telegram notification
-    send_batch_upload_notification(
+    batch_notified = send_batch_upload_notification(
         batch_id=batch_id,
         file_count=len(processed_files),
         total_size=total_size,
@@ -828,6 +838,15 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
         account_name=account_name,
         trust_scope=trust_scope,
     )
+
+    # Post-notification: store telegram_message_id + schedule expiry cleanup
+    if batch_notified.message_id:
+        from notifications import post_notification_setup
+        post_notification_setup(
+            request_id=batch_id,
+            telegram_message_id=batch_notified.message_id,
+            expires_at=ttl,
+        )
 
     return mcp_result(req_id, {
         'content': [{

@@ -334,6 +334,11 @@ Resources:
           HISTORY_TABLE: bouncer-deploy-history
           LOCKS_TABLE: bouncer-deploy-locks
           DEPLOY_STATE_MACHINE_ARN: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:sam-deployer-workflow'
+          # Scheduler (sprint7-002): EventBridge expiry schedule
+          SCHEDULER_GROUP_NAME: !Ref ExpiryScheduleGroup
+          SCHEDULER_ROLE_ARN: !GetAtt SchedulerInvokeRole.Arn
+          AWS_LAMBDA_FUNCTION_ARN: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:bouncer-${Environment}-function'
+          SCHEDULER_ENABLED: "true"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref RequestsTable
@@ -376,6 +381,19 @@ Resources:
                 - s3:GetObject
                 - s3:DeleteObject
               Resource: !Sub "arn:aws:s3:::bouncer-uploads-${DefaultAccountId}/*"
+            # sprint7-002: Allow Lambda to manage expiry schedules in EventBridge Scheduler
+            - Sid: SchedulerManageExpiry
+              Effect: Allow
+              Action:
+                - scheduler:CreateSchedule
+                - scheduler:DeleteSchedule
+                - scheduler:GetSchedule
+              Resource: !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${ExpiryScheduleGroup}/*"
+            # Required to pass the Scheduler invoke role to EventBridge
+            - Sid: PassSchedulerRole
+              Effect: Allow
+              Action: iam:PassRole
+              Resource: !GetAtt SchedulerInvokeRole.Arn
 
   # ============================================================
   # API Gateway
@@ -536,6 +554,56 @@ Resources:
         - ApiId: !Ref BouncerApi
           Stage: prod
 
+  # ============================================================
+  # EventBridge Scheduler (sprint7-002)
+  # One-time schedules that fire at request TTL to auto-remove
+  # expired Telegram inline keyboards.
+  # ============================================================
+  ExpiryScheduleGroup:
+    Type: AWS::Scheduler::ScheduleGroup
+    Properties:
+      Name: !Sub "bouncer-${Environment}-expiry-schedules"
+      Tags:
+        - Key: Project
+          Value: Bouncer
+        - Key: Purpose
+          Value: request-expiry-cleanup
+        - Key: auto-delete
+          Value: "no"
+
+  # IAM role that EventBridge Scheduler assumes to invoke the Lambda
+  SchedulerInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "bouncer-${Environment}-scheduler-invoke"
+      Description: Role assumed by EventBridge Scheduler to invoke Bouncer Lambda for expiry cleanup
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: InvokeBouncer
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: InvokeBouncerFunction
+                Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - !GetAtt ApprovalFunction.Arn
+                  - !Sub "${ApprovalFunction.Arn}:*"
+      Tags:
+        - Key: Project
+          Value: Bouncer
+        - Key: auto-delete
+          Value: "no"
+
 Outputs:
   ApiUrl:
     Description: API Gateway URL（Clawdbot 用這個發請求）
@@ -555,3 +623,9 @@ Outputs:
   DefaultBouncerRoleArn:
     Description: Default 帳號 BouncerRole ARN（用於 accounts 表設定）
     Value: !GetAtt DefaultBouncerRole.Arn
+  ExpiryScheduleGroupName:
+    Description: EventBridge Scheduler group for request expiry schedules (sprint7-002)
+    Value: !Ref ExpiryScheduleGroup
+  SchedulerInvokeRoleArn:
+    Description: IAM role ARN for EventBridge Scheduler to invoke Lambda (sprint7-002)
+    Value: !GetAtt SchedulerInvokeRole.Arn

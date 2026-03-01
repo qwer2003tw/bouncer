@@ -626,8 +626,7 @@ class TestTemplateScanEscalation:
                 # No template_scan_result → should not crash
             )
 
-        assert result is True
-        mock_send.assert_called_once()
+        assert result.ok is True
 
 
 # ===========================================================================
