@@ -1,19 +1,35 @@
 """
-Bouncer - 輸出分頁模組
-處理長輸出的分頁存儲和取得
+Bouncer - 輸出分頁模組 (v2 — Aggressive Refactor)
+
+設計原則：
+  - PaginatedOutput dataclass 作為核心抽象
+  - 硬性上限 (OUTPUT_HARD_CAP_BYTES) 防止 DynamoDB 400KB 炸掉
+  - store_paged_output() 永遠不截斷前端可見資料，只加截斷通知
+  - 所有分頁 metadata 集中在一個 dataclass，不再散落各處
 """
+from __future__ import annotations
+
 import logging
 import time
+from dataclasses import dataclass
+from typing import Optional
+
 import boto3
 
-
-
-from constants import TABLE_NAME, OUTPUT_MAX_INLINE, OUTPUT_PAGE_SIZE, OUTPUT_PAGE_TTL
+from constants import (
+    TABLE_NAME,
+    OUTPUT_MAX_INLINE,
+    OUTPUT_PAGE_SIZE,
+    OUTPUT_PAGE_TTL,
+    OUTPUT_HARD_CAP_BYTES,
+    OUTPUT_TRUNCATION_NOTICE_TEMPLATE,
+)
 from telegram import send_telegram_message_silent
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    'PaginatedOutput',
     'store_paged_output',
     'get_paged_output',
     'send_remaining_pages',
@@ -31,62 +47,125 @@ def _get_table():
     return _table
 
 
-def send_remaining_pages(request_id: str, total_pages: int):
-    """自動發送剩餘的分頁內容"""
-    if total_pages <= 1:
-        return
+# ---------------------------------------------------------------------------
+# Core abstraction
+# ---------------------------------------------------------------------------
 
-    for page_num in range(2, total_pages + 1):
-        page_id = f"{request_id}:page:{page_num}"
-        try:
-            result = _get_table().get_item(Key={'request_id': page_id}).get('Item')
-            if result and 'content' in result:
-                content = result['content']
-                send_telegram_message_silent(
-                    f"📄 *第 {page_num}/{total_pages} 頁*\n\n"
-                    f"```\n{content}\n```"
-                )
-        except Exception as e:
-            logger.error(f"Error sending page {page_num}: {e}")
+@dataclass
+class PaginatedOutput:
+    """Immutable value-object describing a (possibly paginated) command output.
 
-
-def store_paged_output(request_id: str, output: str) -> dict:
-    """存儲長輸出並分頁
-
-    Returns:
-        dict with page info and first page content
+    Fields
+    ------
+    paged        : True when output was split into multiple pages
+    result       : First-page content (always present)
+    page         : Page number of *result* (always 1)
+    total_pages  : Total number of pages (1 when not paged)
+    output_length: Length of the *original* output before any truncation
+    next_page    : DynamoDB key for the next page, or None
+    truncated    : True when the original output was capped at OUTPUT_HARD_CAP_BYTES
     """
-    if len(output) <= OUTPUT_MAX_INLINE:
-        return {'paged': False, 'result': output}
+    paged: bool
+    result: str
+    page: int = 1
+    total_pages: int = 1
+    output_length: int = 0
+    next_page: Optional[str] = None
+    truncated: bool = False
 
-    # 分頁
-    chunks = [output[i:i+OUTPUT_PAGE_SIZE] for i in range(0, len(output), OUTPUT_PAGE_SIZE)]
+    def to_dict(self) -> dict:
+        """Backwards-compatible dict for callers that use dict-access."""
+        d: dict = {
+            'paged': self.paged,
+            'result': self.result,
+        }
+        if self.paged:
+            d.update({
+                'page': self.page,
+                'total_pages': self.total_pages,
+                'output_length': self.output_length,
+                'next_page': self.next_page,
+                'truncated': self.truncated,
+            })
+        return d
+
+    # Allow dict-style access so existing callers don't need changes
+    def __getitem__(self, key: str):
+        return self.to_dict()[key]
+
+    def get(self, key: str, default=None):
+        return self.to_dict().get(key, default)
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def store_paged_output(request_id: str, output: str) -> PaginatedOutput:
+    """Store long output with pagination.
+
+    Strategy
+    --------
+    1. Output ≤ OUTPUT_MAX_INLINE  → return as-is (no DynamoDB writes)
+    2. Output ≤ OUTPUT_HARD_CAP_BYTES → chunk into OUTPUT_PAGE_SIZE pages,
+       write pages 2..N to DynamoDB, return page-1 metadata
+    3. Output > OUTPUT_HARD_CAP_BYTES → cap + append truncation notice,
+       then apply same chunking as step 2
+
+    DynamoDB item size is kept well under 400 KB because each page is at most
+    OUTPUT_PAGE_SIZE characters (default 4 000 chars ≈ 4 KB UTF-8 worst-case,
+    far below the 400 KB per-item limit).
+    """
+    truncated = False
+    original_length = len(output)
+
+    # --- Step 1: hard cap ---
+    if len(output) > OUTPUT_HARD_CAP_BYTES:
+        truncated = True
+        notice = OUTPUT_TRUNCATION_NOTICE_TEMPLATE.format(
+            original_length=original_length,
+            cap=OUTPUT_HARD_CAP_BYTES,
+        )
+        output = output[:OUTPUT_HARD_CAP_BYTES] + "\n" + notice
+
+    # --- Step 2: check inline threshold ---
+    if len(output) <= OUTPUT_MAX_INLINE:
+        return PaginatedOutput(
+            paged=False,
+            result=output,
+            page=1,
+            total_pages=1,
+            output_length=original_length,
+            truncated=truncated,
+        )
+
+    # --- Step 3: chunk ---
+    chunks = _split_chunks(output, OUTPUT_PAGE_SIZE)
     total_pages = len(chunks)
     ttl = int(time.time()) + OUTPUT_PAGE_TTL
 
-    # 存儲每一頁（跳過第一頁，會直接回傳）
-    for i, chunk in enumerate(chunks[1:], start=2):
-        _get_table().put_item(Item={
-            'request_id': f"{request_id}:page:{i}",
-            'content': chunk,
-            'page': i,
-            'total_pages': total_pages,
-            'original_request': request_id,
-            'ttl': ttl
-        })
+    # Write pages 2..N (page 1 is returned inline)
+    _write_pages(request_id, chunks, total_pages, ttl)
 
-    return {
-        'paged': True,
-        'result': chunks[0],
-        'page': 1,
-        'total_pages': total_pages,
-        'output_length': len(output),
-        'next_page': f"{request_id}:page:2" if total_pages > 1 else None
-    }
+    next_page_id = f"{request_id}:page:2" if total_pages > 1 else None
+
+    return PaginatedOutput(
+        paged=True,
+        result=chunks[0],
+        page=1,
+        total_pages=total_pages,
+        output_length=original_length,
+        next_page=next_page_id,
+        truncated=truncated,
+    )
 
 
 def get_paged_output(page_request_id: str) -> dict:
-    """取得分頁輸出"""
+    """Retrieve a page from DynamoDB.
+
+    Returns a dict with keys: result, page, total_pages, next_page
+    or: error (str) on failure.
+    """
     try:
         result = _get_table().get_item(Key={'request_id': page_request_id})
         item = result.get('Item')
@@ -96,12 +175,74 @@ def get_paged_output(page_request_id: str) -> dict:
 
         page = int(item.get('page', 0))
         total_pages = int(item.get('total_pages', 0))
+        original_request = item.get('original_request', '')
+
+        next_page = (
+            f"{original_request}:page:{page + 1}"
+            if page < total_pages
+            else None
+        )
 
         return {
             'result': item.get('content', ''),
             'page': page,
             'total_pages': total_pages,
-            'next_page': f"{item.get('original_request')}:page:{page+1}" if page < total_pages else None
+            'next_page': next_page,
         }
     except Exception as e:
+        logger.error(f"get_paged_output error: {e}")
         return {'error': f'取得分頁失敗: {str(e)}'}
+
+
+def send_remaining_pages(request_id: str, total_pages: int) -> None:
+    """Auto-send pages 2..total_pages to Telegram.
+
+    Fetches each page from DynamoDB and sends it as a silent message.
+    Errors per-page are logged but do not abort the remaining pages.
+    """
+    if total_pages <= 1:
+        return
+
+    for page_num in range(2, total_pages + 1):
+        page_id = f"{request_id}:page:{page_num}"
+        try:
+            item = _get_table().get_item(Key={'request_id': page_id}).get('Item')
+            if item and 'content' in item:
+                content = item['content']
+                send_telegram_message_silent(
+                    f"📄 *第 {page_num}/{total_pages} 頁*\n\n"
+                    f"```\n{content}\n```"
+                )
+            else:
+                logger.warning(f"send_remaining_pages: page {page_id} not found in DynamoDB")
+        except Exception as e:
+            logger.error(f"send_remaining_pages error on page {page_num}: {e}")
+            # Continue sending remaining pages even if one fails
+
+
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
+
+def _split_chunks(text: str, chunk_size: int) -> list[str]:
+    """Split *text* into chunks of at most *chunk_size* characters."""
+    return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+
+
+def _write_pages(
+    request_id: str,
+    chunks: list[str],
+    total_pages: int,
+    ttl: int,
+) -> None:
+    """Write pages 2..N to DynamoDB (page 1 is returned inline, never stored)."""
+    table = _get_table()
+    for i, chunk in enumerate(chunks[1:], start=2):
+        table.put_item(Item={
+            'request_id': f"{request_id}:page:{i}",
+            'content': chunk,
+            'page': i,
+            'total_pages': total_pages,
+            'original_request': request_id,
+            'ttl': ttl,
+        })

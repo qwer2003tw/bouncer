@@ -174,9 +174,19 @@ TRUST_EXCLUDED_FLAGS = [
 # Output Paging - 長輸出分頁
 # ============================================================================
 
-OUTPUT_PAGE_SIZE = 3000  # 每頁字元數
-OUTPUT_MAX_INLINE = 3500  # 直接回傳的最大長度
-OUTPUT_PAGE_TTL = 3600  # 分頁資料保留 1 小時
+OUTPUT_PAGE_SIZE = 4000         # 每頁字元數（提高至 4K）
+OUTPUT_MAX_INLINE = 4000        # 直接回傳的最大長度（與 PAGE_SIZE 對齊）
+OUTPUT_PAGE_TTL = 3600          # 分頁資料保留 1 小時
+
+# Hard cap: outputs larger than this will be truncated with a notice.
+# DynamoDB item limit = 400 KB; keeping total stored data well below that.
+# 100 KB of *characters* is generous for CloudWatch log output and safe for DDB.
+OUTPUT_HARD_CAP_BYTES = 100_000  # 100K chars
+
+OUTPUT_TRUNCATION_NOTICE_TEMPLATE = (
+    "\n\n⚠️ [輸出已截斷] 原始輸出 {original_length:,} 字元，"
+    "超過上限 {cap:,} 字元。請縮小查詢範圍（加 --limit 或縮短時間範圍）。"
+)
 
 # ============================================================================
 # 命令分類 - 黑名單（絕對禁止）
