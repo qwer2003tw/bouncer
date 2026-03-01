@@ -139,3 +139,22 @@ All notable changes to this project will be documented in this file.
 ### Tests
 - Backend: 886 passed (+18 regression tests) / coverage 81.52%
 
+
+## [3.7.0] - 2026-03-01
+
+### Fixed
+- `bouncer_execute`: `&&` chained commands now execute sequentially with proper risk-checking per sub-command (#30)
+- Over-truncation of large command output (CloudWatch Logs etc.) — full pagination via `PaginatedOutput` dataclass (#27)
+- Trust session source binding — prevents cross-source trust reuse (bouncer-sec-010)
+- DynamoDB history/stats queries now use GSI instead of full table Scan — prevents timeout at scale
+- EventBridge Scheduler auto-removes expired approval request buttons (#21)
+
+### Added
+- `sam_deploy.py`: auto-imports pre-existing CloudFormation resources on deploy conflict + `--dry-run-import` flag (#28)
+- `SchedulerService`: centralized EventBridge Scheduler management for cleanup tasks
+- `TrustSession` dataclass: typed wrapper for trust session records
+
+### Refactored
+- DynamoDB table initialization centralized in `db.py` via `_LazyTable` pattern
+- Deduplicated `send_telegram_message_to()` and `sanitize_filename()` functions
+- Lambda memory increased 256MB → 512MB for improved cold start performance
