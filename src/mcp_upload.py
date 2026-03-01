@@ -2,14 +2,14 @@
 Bouncer - Upload Pipeline
 
 UploadContext + upload step functions + mcp_tool_upload() + mcp_tool_upload_batch()
-Also includes _format_size_human().
+Also includes _format_size_human() and UploadVerifier.
 """
 
 import json
 import logging
 import time
 import boto3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -498,6 +498,82 @@ def _format_size_human(size_bytes: int) -> str:
         return f"{size_bytes} bytes"
 
 
+# =============================================================================
+# S3 Upload Verifier
+# =============================================================================
+
+@dataclass
+class VerificationResult:
+    """Structured result from UploadVerifier.verify_all()"""
+    verified: bool                           # True iff every file passed head_object
+    verification_failed: list = field(default_factory=list)  # [{'filename': ..., 'reason': ...}]
+    verified_files: list = field(default_factory=list)        # [{'filename': ..., 's3_uri': ..., 's3_size': int}]
+
+    @property
+    def s3_size(self) -> Optional[int]:
+        """Total bytes confirmed in S3 (None if nothing verified)."""
+        if not self.verified_files:
+            return None
+        return sum(f['s3_size'] for f in self.verified_files)
+
+
+class UploadVerifier:
+    """Verify S3 objects exist after upload using head_object.
+
+    Design goals (Approach B — Aggressive):
+    - Single-responsibility: only does verification, not upload
+    - Returns a rich VerificationResult instead of raw dicts
+    - Fails gracefully per-file; never raises
+    """
+
+    def __init__(self, s3_client) -> None:
+        self._s3 = s3_client
+
+    def verify(self, bucket: str, key: str, filename: str) -> dict:
+        """Verify a single object.  Returns a file-level result dict."""
+        try:
+            resp = self._s3.head_object(Bucket=bucket, Key=key)
+            return {
+                'filename': filename,
+                's3_uri': f"s3://{bucket}/{key}",
+                's3_size': resp.get('ContentLength', 0),
+                'ok': True,
+            }
+        except Exception as exc:
+            return {
+                'filename': filename,
+                's3_uri': f"s3://{bucket}/{key}",
+                'ok': False,
+                'reason': str(exc)[:200],
+            }
+
+    def verify_all(self, items: list) -> VerificationResult:
+        """Verify a list of {'bucket', 'key', 'filename'} dicts.
+
+        Returns a VerificationResult with verified/failed partitioned.
+        """
+        failed = []
+        verified = []
+        for item in items:
+            result = self.verify(item['bucket'], item['key'], item['filename'])
+            if result['ok']:
+                verified.append({
+                    'filename': result['filename'],
+                    's3_uri': result['s3_uri'],
+                    's3_size': result['s3_size'],
+                })
+            else:
+                failed.append({
+                    'filename': result['filename'],
+                    'reason': result['reason'],
+                })
+        return VerificationResult(
+            verified=len(failed) == 0,
+            verification_failed=failed,
+            verified_files=verified,
+        )
+
+
 def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_upload_batch — 批量上傳多個檔案到 S3"""
     import base64
@@ -724,9 +800,25 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
                                 's3_uri': f"s3://{bucket}/{fkey}",
                                 'size': pf['size'],
                                 'sha256': pf['sha256'],
+                                '_bucket': bucket,
+                                '_key': fkey,
                             })
 
                         if uploaded:
+                            # ---- S3 Verification (Approach B) ----
+                            verifier = UploadVerifier(s3)
+                            verify_items = [
+                                {'bucket': u['_bucket'], 'key': u['_key'], 'filename': u['filename']}
+                                for u in uploaded
+                            ]
+                            vr = verifier.verify_all(verify_items)
+
+                            # Strip internal _bucket/_key from public response
+                            public_uploaded = [
+                                {k: v for k, v in u.items() if not k.startswith('_')}
+                                for u in uploaded
+                            ]
+
                             new_count = upload_count + len(uploaded)
                             send_trust_upload_notification(
                                 filename=f"[batch: {len(uploaded)} files]",
@@ -738,17 +830,23 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
                                 source=source,
                             )
 
+                            payload: dict = {
+                                'status': 'trust_auto_approved',
+                                'uploaded': public_uploaded,
+                                'total_files': len(uploaded),
+                                'total_size': sum(u['size'] for u in uploaded),
+                                'trust_session': session['request_id'],
+                                'upload_quota': f"{new_count}/{max_uploads}",
+                                'verified': vr.verified,
+                                'verification_failed': vr.verification_failed,
+                            }
+                            if vr.s3_size is not None:
+                                payload['s3_size'] = vr.s3_size
+
                             return mcp_result(req_id, {
                                 'content': [{
                                     'type': 'text',
-                                    'text': json.dumps({
-                                        'status': 'trust_auto_approved',
-                                        'uploaded': uploaded,
-                                        'total_files': len(uploaded),
-                                        'total_size': sum(u['size'] for u in uploaded),
-                                        'trust_session': session['request_id'],
-                                        'upload_quota': f"{new_count}/{max_uploads}",
-                                    }),
+                                    'text': json.dumps(payload),
                                 }],
                             })
 
