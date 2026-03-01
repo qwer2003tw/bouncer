@@ -45,21 +45,21 @@ def _get_dynamodb():
 def _get_projects_table():
     global projects_table
     if projects_table is None:
-        projects_table = _get_dynamodb().Table(os.environ.get('PROJECTS_TABLE', PROJECTS_TABLE))
+        projects_table = _db.deployer_projects_table._get()
     return projects_table
 
 
 def _get_history_table():
     global history_table
     if history_table is None:
-        history_table = _get_dynamodb().Table(os.environ.get('HISTORY_TABLE', HISTORY_TABLE))
+        history_table = _db.deployer_history_table._get()
     return history_table
 
 
 def _get_locks_table():
     global locks_table
     if locks_table is None:
-        locks_table = _get_dynamodb().Table(os.environ.get('LOCKS_TABLE', LOCKS_TABLE))
+        locks_table = _db.deployer_locks_table._get()
     return locks_table
 
 

@@ -14,10 +14,9 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-import boto3
+import db as _db
 
 from constants import (
-    TABLE_NAME,
     OUTPUT_MAX_INLINE,
     OUTPUT_PAGE_SIZE,
     OUTPUT_PAGE_TTL,
@@ -35,16 +34,15 @@ __all__ = [
     'send_remaining_pages',
 ]
 
-# DynamoDB - lazy init
+# DynamoDB - via db.py (lazy init)
+# Tests may inject directly: paging._table = moto_table
 _table = None
 
 
 def _get_table():
-    global _table
-    if _table is None:
-        dynamodb = boto3.resource('dynamodb')
-        _table = dynamodb.Table(TABLE_NAME)
-    return _table
+    if _table is not None:
+        return _table
+    return _db.table
 
 
 # ---------------------------------------------------------------------------

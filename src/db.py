@@ -46,6 +46,14 @@ class _LazyTable:
 table = _LazyTable('TABLE_NAME', TABLE_NAME)
 accounts_table = _LazyTable('ACCOUNTS_TABLE_NAME', ACCOUNTS_TABLE_NAME)
 
+# Deployer tables
+deployer_projects_table = _LazyTable('PROJECTS_TABLE', 'bouncer-projects')
+deployer_history_table = _LazyTable('HISTORY_TABLE', 'bouncer-deploy-history')
+deployer_locks_table = _LazyTable('LOCKS_TABLE', 'bouncer-deploy-locks')
+
+# Sequence analyzer history table
+sequence_history_table = _LazyTable('COMMAND_HISTORY_TABLE', 'bouncer-command-history')
+
 
 def get_table():
     """Return the main DynamoDB table (initialises on first call)."""
@@ -61,3 +69,7 @@ def reset_tables():
     """Reset all cached table references. Use in test teardown."""
     table._reset()
     accounts_table._reset()
+    deployer_projects_table._reset()
+    deployer_history_table._reset()
+    deployer_locks_table._reset()
+    sequence_history_table._reset()

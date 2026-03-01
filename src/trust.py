@@ -13,13 +13,12 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
 
-import boto3
+import db as _db
 
 
 
 from constants import (
 
-    TABLE_NAME,
     TRUST_SESSION_ENABLED, TRUST_SESSION_DURATION, TRUST_SESSION_MAX_COMMANDS,
     TRUST_EXCLUDED_SERVICES, TRUST_EXCLUDED_ACTIONS, TRUST_EXCLUDED_FLAGS,
     TRUST_UPLOAD_MAX_BYTES_PER_FILE,
@@ -40,13 +39,20 @@ __all__ = [
     'should_trust_approve_upload',
 ]
 
-# DynamoDB - lazy init
+# DynamoDB - via db.py (lazy init)
+# Tests may inject directly: trust._table = moto_table
+# Tests may reset: trust._table = None
 _table = None
+
+
+def _get_table():
+    if _table is not None:
+        return _table
+    return _db.table
 
 
 # ============================================================================
 # TrustSession dataclass — typed wrapper over raw DynamoDB item
-# ============================================================================
 
 @dataclass
 class TrustSession:
@@ -133,14 +139,6 @@ class TrustSession:
 # ============================================================================
 # Internal helpers
 # ============================================================================
-
-def _get_table():
-    global _table
-    if _table is None:
-        dynamodb = boto3.resource('dynamodb')
-        _table = dynamodb.Table(TABLE_NAME)
-    return _table
-
 
 def _compute_trust_id(trust_scope: str, account_id: str) -> str:
     scope_hash = hashlib.sha256(trust_scope.encode()).hexdigest()[:16]

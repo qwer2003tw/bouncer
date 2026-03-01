@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 
-import boto3
+import db as _db
 from boto3.dynamodb.conditions import Key
 
 logger = logging.getLogger(__name__)
@@ -54,18 +54,10 @@ HISTORY_TABLE_NAME = os.environ.get('COMMAND_HISTORY_TABLE', 'bouncer-command-hi
 DEFAULT_HISTORY_MINUTES = 30  # 預設查詢最近 30 分鐘
 HISTORY_TTL_DAYS = 30  # 歷史記錄保留 30 天
 
-# DynamoDB 客戶端（延遲初始化）
-_dynamodb = None
-_history_table = None
-
-
+# DynamoDB 客戶端（延遲初始化，via db.py）
 def _get_history_table():
-    """取得 DynamoDB 歷史表（延遲初始化）"""
-    global _dynamodb, _history_table
-    if _history_table is None:
-        _dynamodb = boto3.resource('dynamodb')
-        _history_table = _dynamodb.Table(HISTORY_TABLE_NAME)
-    return _history_table
+    """取得 DynamoDB 歷史表（via db.py lazy init）"""
+    return _db.sequence_history_table
 
 
 # ============================================================================

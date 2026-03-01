@@ -8,11 +8,10 @@ import logging
 import urllib.request
 from typing import Optional, Dict
 
-import boto3
-
+import db as _db
 
 from constants import (
-    ACCOUNTS_TABLE_NAME, DEFAULT_ACCOUNT_ID, TELEGRAM_TOKEN
+    DEFAULT_ACCOUNT_ID, TELEGRAM_TOKEN
 )
 
 logger = logging.getLogger(__name__)
@@ -26,16 +25,15 @@ __all__ = [
     'validate_role_arn',
 ]
 
-# DynamoDB - lazy init
+# DynamoDB - via db.py (lazy init)
+# _accounts_table: test injection shim (monkeypatch sets this directly)
 _accounts_table = None
 
 
 def _get_accounts_table():
-    global _accounts_table
-    if _accounts_table is None:
-        dynamodb = boto3.resource('dynamodb')
-        _accounts_table = dynamodb.Table(ACCOUNTS_TABLE_NAME)
-    return _accounts_table
+    if _accounts_table is not None:
+        return _accounts_table
+    return _db.accounts_table
 
 
 # Bot commands 初始化標記（避免每次 invoke 都呼叫 API）

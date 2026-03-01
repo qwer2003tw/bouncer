@@ -4,11 +4,9 @@ Bouncer - Rate Limiting 模組
 """
 import time
 
-import boto3
-
+import db as _db
 
 from constants import (
-    TABLE_NAME,
     RATE_LIMIT_ENABLED, RATE_LIMIT_WINDOW, RATE_LIMIT_MAX_REQUESTS,
     MAX_PENDING_PER_SOURCE,
 )
@@ -19,16 +17,15 @@ __all__ = [
     'check_rate_limit',
 ]
 
-# DynamoDB - lazy init
+# DynamoDB - via db.py (lazy init)
+# Tests may inject directly: rate_limit._table = mock_table
 _table = None
 
 
 def _get_table():
-    global _table
-    if _table is None:
-        dynamodb = boto3.resource('dynamodb')
-        _table = dynamodb.Table(TABLE_NAME)
-    return _table
+    if _table is not None:
+        return _table
+    return _db.table
 
 
 class RateLimitExceeded(Exception):
