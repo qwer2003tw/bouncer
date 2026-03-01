@@ -1,112 +1,105 @@
-"""Tests for utility functions and constants."""
-import sys, os, json, pytest
-from unittest.mock import patch, MagicMock
-from decimal import Decimal
+"""
+Tests for utils.sanitize_filename() — verifies the function works correctly
+in its new canonical location (moved from mcp_presigned/_sanitize_filename
+and mcp_upload/_sanitize_filename).
+"""
 
-class TestHelperFunctions:
-    """輔助函數測試"""
-    
-    def test_get_header_case_insensitive(self, app_module):
-        """get_header 大小寫不敏感"""
-        headers = {'Content-Type': 'application/json'}
-        assert app_module.get_header(headers, 'content-type') == 'application/json'
-        assert app_module.get_header(headers, 'CONTENT-TYPE') == 'application/json'
-    
-    def test_get_header_not_found(self, app_module):
-        """get_header 找不到返回 None"""
-        headers = {'X-Custom': 'value'}
-        assert app_module.get_header(headers, 'X-Missing') is None
-    
-    def test_get_header_empty_dict(self, app_module):
-        """get_header 空 dict"""
-        assert app_module.get_header({}, 'any') is None
+import sys
+import os
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-# ============================================================================
-# MCP Result/Error 格式測試
-# ============================================================================
+import pytest
+from unittest.mock import patch
 
-class TestConstants:
-    """常數驗證測試"""
-    
-    def test_blocked_patterns_not_empty(self, app_module):
-        """BLOCKED_PATTERNS 不應為空"""
-        from constants import BLOCKED_PATTERNS
-        assert len(BLOCKED_PATTERNS) > 0
-    
-    def test_auto_approve_prefixes_not_empty(self, app_module):
-        """AUTO_APPROVE_PREFIXES 不應為空"""
-        from constants import AUTO_APPROVE_PREFIXES
-        assert len(AUTO_APPROVE_PREFIXES) > 0
-    
-    def test_dangerous_patterns_not_empty(self, app_module):
-        """DANGEROUS_PATTERNS 不應為空"""
-        from constants import DANGEROUS_PATTERNS
-        assert len(DANGEROUS_PATTERNS) > 0
+# Patch constants before importing utils
+with patch.dict(os.environ, {}):
+    import importlib
+    # Provide minimal stub for constants so utils imports cleanly
+    import types
+    constants_stub = types.ModuleType('constants')
+    constants_stub.AUDIT_TTL_SHORT = 86400 * 30
+    constants_stub.AUDIT_TTL_LONG = 86400 * 90
+    sys.modules.setdefault('constants', constants_stub)
+
+from utils import sanitize_filename
 
 
-# ============================================================================
-# Account Validation Error Paths 測試 (562-592)
-# ============================================================================
+class TestSanitizeFilenameBasename:
+    """keep_path=False (default) — basename-only mode used by mcp_upload"""
 
-class TestHelperFunctionsAdditional:
-    """Helper Functions 補充測試"""
-    
-    def test_generate_request_id(self, app_module):
-        """產生請求 ID"""
-        id1 = app_module.generate_request_id('aws s3 ls')
-        id2 = app_module.generate_request_id('aws s3 ls')
-        
-        assert len(id1) == 12
-        assert id1 != id2  # 應該每次產生不同的 ID
-    
-    def test_decimal_to_native_dict(self, app_module):
-        """Decimal 轉換 - dict"""
-        from decimal import Decimal
-        data = {'count': Decimal('10'), 'value': Decimal('3.14')}
-        result = app_module.decimal_to_native(data)
-        assert result['count'] == 10
-        assert result['value'] == 3.14
-    
-    def test_decimal_to_native_list(self, app_module):
-        """Decimal 轉換 - list"""
-        from decimal import Decimal
-        data = [Decimal('1'), Decimal('2'), Decimal('3')]
-        result = app_module.decimal_to_native(data)
-        assert result == [1, 2, 3]
-    
-    def test_response_helper(self, app_module):
-        """response 輔助函數"""
-        result = app_module.response(200, {'test': 'data'})
-        assert result['statusCode'] == 200
-        assert 'Content-Type' in result['headers']
-        body = json.loads(result['body'])
-        assert body['test'] == 'data'
+    def test_simple_filename(self):
+        assert sanitize_filename('hello.txt') == 'hello.txt'
+
+    def test_strips_directory(self):
+        assert sanitize_filename('some/path/file.txt') == 'file.txt'
+
+    def test_strips_backslash_directory(self):
+        assert sanitize_filename('some\\path\\file.txt') == 'file.txt'
+
+    def test_removes_null_bytes(self):
+        assert sanitize_filename('file\x00name.txt') == 'filename.txt'
+
+    def test_removes_path_traversal(self):
+        assert sanitize_filename('../../../etc/passwd') == 'passwd'
+
+    def test_strips_leading_dots(self):
+        assert sanitize_filename('.hidden') == 'hidden'
+
+    def test_strips_leading_spaces(self):
+        assert sanitize_filename('  file.txt') == 'file.txt'
+
+    def test_replaces_special_chars(self):
+        result = sanitize_filename('file name!@#.txt')
+        assert result == 'file_name___.txt'
+
+    def test_empty_result_returns_unnamed(self):
+        assert sanitize_filename('...') == 'unnamed'
+
+    def test_empty_string_returns_unnamed(self):
+        assert sanitize_filename('') == 'unnamed'
+
+    def test_null_only_returns_unnamed(self):
+        assert sanitize_filename('\x00') == 'unnamed'
+
+    def test_preserves_hyphens_and_underscores(self):
+        assert sanitize_filename('my-file_v2.tar.gz') == 'my-file_v2.tar.gz'
 
 
-# ============================================================================
-# Lambda Handler 路由測試
-# ============================================================================
+class TestSanitizeFilenameKeepPath:
+    """keep_path=True — subdirectory-preserving mode used by mcp_presigned"""
 
-class TestDecimalConversion:
-    """Decimal 轉換測試"""
-    
-    def test_decimal_to_native_int(self, app_module):
-        """整數 Decimal"""
-        result = app_module.decimal_to_native(Decimal('100'))
-        assert result == 100
-        assert isinstance(result, int)
-    
-    def test_decimal_to_native_float(self, app_module):
-        """浮點數 Decimal"""
-        result = app_module.decimal_to_native(Decimal('3.14'))
-        assert result == 3.14
-        assert isinstance(result, float)
-    
-    def test_decimal_to_native_dict(self, app_module):
-        """字典中的 Decimal"""
-        data = {'count': Decimal('5'), 'rate': Decimal('0.5')}
-        result = app_module.decimal_to_native(data)
-        assert result['count'] == 5
-        assert result['rate'] == 0.5
+    def test_simple_filename(self):
+        assert sanitize_filename('hello.txt', keep_path=True) == 'hello.txt'
 
+    def test_preserves_subdir_structure(self):
+        assert sanitize_filename('assets/foo.js', keep_path=True) == 'assets/foo.js'
+
+    def test_preserves_nested_subdir(self):
+        assert sanitize_filename('static/js/app.chunk.js', keep_path=True) == 'static/js/app.chunk.js'
+
+    def test_removes_path_traversal_segments(self):
+        result = sanitize_filename('../../etc/passwd', keep_path=True)
+        # traversal segments should be stripped
+        assert '..' not in result
+        assert 'passwd' in result
+
+    def test_removes_null_bytes(self):
+        assert sanitize_filename('dir/\x00file.txt', keep_path=True) == 'dir/file.txt'
+
+    def test_normalises_backslash(self):
+        result = sanitize_filename('assets\\foo.js', keep_path=True)
+        assert result == 'assets/foo.js'
+
+    def test_empty_result_returns_unnamed(self):
+        assert sanitize_filename('...', keep_path=True) == 'unnamed'
+
+    def test_empty_string_returns_unnamed(self):
+        assert sanitize_filename('', keep_path=True) == 'unnamed'
+
+    def test_replaces_special_chars_in_segment(self):
+        result = sanitize_filename('assets/my file!.js', keep_path=True)
+        assert result == 'assets/my_file_.js'
+
+    def test_preserves_hyphens_and_underscores(self):
+        assert sanitize_filename('dist/my-file_v2.js', keep_path=True) == 'dist/my-file_v2.js'

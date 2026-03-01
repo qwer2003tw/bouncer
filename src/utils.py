@@ -5,6 +5,7 @@ Bouncer - 工具函數模組
 import hashlib
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass
 from decimal import Decimal
@@ -43,6 +44,41 @@ class RiskFactor:
         """確保分數在有效範圍內"""
         self.raw_score = max(0, min(100, self.raw_score))
         self.weighted_score = max(0.0, min(100.0, self.weighted_score))
+
+
+def sanitize_filename(filename: str, keep_path: bool = False) -> str:
+    """消毒檔名，移除危險字元（防 path traversal）。
+
+    Args:
+        filename:  原始檔名（可包含路徑）
+        keep_path: True 時保留 sub-directory 結構（用於 presigned URL）；
+                   False 時只保留 basename（用於一般上傳）
+
+    Returns:
+        安全的檔名字串，不含危險字元。若結果為空則回傳 'unnamed'。
+    """
+    # Remove null bytes
+    filename = filename.replace('\x00', '')
+    # Normalise separators
+    filename = filename.replace('\\', '/')
+
+    if keep_path:
+        # Resolve path-traversal components segment by segment
+        clean_parts = []
+        for part in filename.split('/'):
+            part = part.replace('..', '')
+            part = part.lstrip('. ')
+            part = re.sub(r'[^\w\-.]', '_', part)
+            if part:
+                clean_parts.append(part)
+        return '/'.join(clean_parts) or 'unnamed'
+    else:
+        # Only keep basename (strip directory separators)
+        filename = filename.rsplit('/', 1)[-1]
+        filename = filename.replace('..', '')
+        filename = filename.lstrip('. ')
+        filename = re.sub(r'[^\w\-.]', '_', filename)
+        return filename or 'unnamed'
 
 
 def format_size_human(size_bytes: int) -> str:

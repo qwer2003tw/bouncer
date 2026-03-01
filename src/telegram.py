@@ -180,7 +180,7 @@ def send_telegram_message_to(chat_id: str, text: str, parse_mode: str = None):
     }
     if parse_mode:
         data['parse_mode'] = parse_mode
-    _telegram_request('sendMessage', data)
+    _telegram_request('sendMessage', data, timeout=10, json_body=True)
 
 
 def update_message(message_id: int, text: str, remove_buttons: bool = False):

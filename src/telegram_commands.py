@@ -12,7 +12,7 @@ import time
 # 從其他模組導入
 from utils import response
 from accounts import init_default_account, list_accounts
-from telegram import _telegram_request
+from telegram import send_telegram_message_to
 from constants import APPROVED_CHAT_IDS
 import db as _db
 
@@ -22,17 +22,6 @@ logger = logging.getLogger(__name__)
 def _get_table():
     """取得 DynamoDB table"""
     return _db.table
-
-
-def send_telegram_message_to(chat_id: str, text: str, parse_mode: str = None):
-    """發送訊息到指定 chat"""
-    data = {
-        'chat_id': chat_id,
-        'text': text
-    }
-    if parse_mode:
-        data['parse_mode'] = parse_mode
-    _telegram_request('sendMessage', data, timeout=10, json_body=True)
 
 
 def handle_telegram_command(message: dict) -> dict:

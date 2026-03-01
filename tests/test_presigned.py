@@ -440,35 +440,41 @@ def test_s3_generate_failure_returns_error(mocked_aws):
 
 
 # ---------------------------------------------------------------------------
-# Tests — _sanitize_filename unit tests (pure function, no AWS needed)
+# Tests — sanitize_filename unit tests (pure function, no AWS needed)
+# Function moved to utils.sanitize_filename(keep_path=True)
 # ---------------------------------------------------------------------------
 
 
 def test_sanitize_preserves_safe_filename(mocked_aws):
     tbl, mcp_presigned = mocked_aws
-    assert mcp_presigned._sanitize_filename("hello.txt") == "hello.txt"
+    from utils import sanitize_filename
+    assert sanitize_filename("hello.txt", keep_path=True) == "hello.txt"
 
 
 def test_sanitize_removes_dotdot(mocked_aws):
     tbl, mcp_presigned = mocked_aws
-    result = mcp_presigned._sanitize_filename("../../etc/passwd")
+    from utils import sanitize_filename
+    result = sanitize_filename("../../etc/passwd", keep_path=True)
     assert ".." not in result
 
 
 def test_sanitize_empty_returns_unnamed(mocked_aws):
     tbl, mcp_presigned = mocked_aws
-    assert mcp_presigned._sanitize_filename("") == "unnamed"
+    from utils import sanitize_filename
+    assert sanitize_filename("", keep_path=True) == "unnamed"
 
 
 def test_sanitize_preserves_subdir(mocked_aws):
     tbl, mcp_presigned = mocked_aws
-    result = mcp_presigned._sanitize_filename("assets/foo.js")
+    from utils import sanitize_filename
+    result = sanitize_filename("assets/foo.js", keep_path=True)
     assert result == "assets/foo.js"
 
 
 def test_sanitize_normalizes_backslash(mocked_aws):
     tbl, mcp_presigned = mocked_aws
-    result = mcp_presigned._sanitize_filename(r"assets\bar.css")
+    from utils import sanitize_filename
+    result = sanitize_filename(r"assets\bar.css", keep_path=True)
     assert "\\" not in result
     assert "bar.css" in result
 

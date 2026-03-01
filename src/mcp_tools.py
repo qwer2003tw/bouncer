@@ -48,7 +48,6 @@ from mcp_upload import (  # noqa: F401
     UploadContext,
     mcp_tool_upload,
     mcp_tool_upload_batch,
-    _sanitize_filename,
     _format_size_human,
     _check_upload_trust,
     _check_upload_rate_limit,
@@ -63,7 +62,6 @@ from mcp_presigned import (  # noqa: F401
     mcp_tool_request_presigned,
     mcp_tool_request_presigned_batch,
     PresignedBatchContext,
-    _sanitize_filename as _sanitize_presigned_filename,
     _parse_presigned_request,
     _resolve_presigned_target,
     _generate_presigned_url,
@@ -131,7 +129,7 @@ from notifications import (  # noqa: F401
     send_trust_upload_notification,
     send_batch_upload_notification,
 )
-from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native, log_decision  # noqa: F401
+from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native, log_decision, sanitize_filename  # noqa: F401
 from paging import store_paged_output, get_paged_output  # noqa: F401
 from constants import (  # noqa: F401
     DEFAULT_ACCOUNT_ID, MCP_MAX_WAIT, RATE_LIMIT_WINDOW,

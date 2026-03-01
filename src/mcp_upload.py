@@ -2,12 +2,11 @@
 Bouncer - Upload Pipeline
 
 UploadContext + upload step functions + mcp_tool_upload() + mcp_tool_upload_batch()
-Also includes _sanitize_filename() and _format_size_human().
+Also includes _format_size_human().
 """
 
 import json
 import logging
-import re
 import time
 import boto3
 from dataclasses import dataclass
@@ -15,7 +14,7 @@ from typing import Optional
 
 
 
-from utils import mcp_result, generate_request_id, generate_display_summary
+from utils import mcp_result, generate_request_id, generate_display_summary, sanitize_filename
 from accounts import (
     init_default_account, get_account, list_accounts,
     validate_account_id,
@@ -479,21 +478,6 @@ def mcp_tool_upload(req_id: str, arguments: dict) -> dict:
 # Batch Upload
 # =============================================================================
 
-def _sanitize_filename(filename: str) -> str:
-    """消毒檔名，移除危險字元"""
-    # Remove null bytes
-    filename = filename.replace('\x00', '')
-    # Only keep basename (strip directory separators)
-    filename = filename.replace('\\', '/').rsplit('/', 1)[-1]
-    # Remove path traversal
-    filename = filename.replace('..', '')
-    # Remove leading dots and spaces
-    filename = filename.lstrip('. ')
-    # Remove special characters except .-_
-    filename = re.sub(r'[^\w\-.]', '_', filename)
-    return filename or 'unnamed'
-
-
 def _format_size_human(size_bytes: int) -> str:
     """格式化檔案大小為人類可讀格式"""
     if size_bytes >= 1024 * 1024:
@@ -600,7 +584,7 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
             })
 
         # Sanitize filename
-        safe_name = _sanitize_filename(fname)
+        safe_name = sanitize_filename(fname)
         if not _is_upload_filename_safe(safe_name):
             return mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({

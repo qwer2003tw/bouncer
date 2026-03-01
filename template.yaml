@@ -49,7 +49,7 @@ Globals:
   Function:
     Timeout: 60
     Runtime: python3.12
-    MemorySize: 256
+    MemorySize: 512
     Architectures:
       - arm64
     Tracing: Active

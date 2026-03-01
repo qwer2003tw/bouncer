@@ -7,7 +7,6 @@ Follows the same dataclass pipeline style as mcp_upload.py (UploadContext).
 
 import json
 import logging
-import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -20,7 +19,7 @@ from constants import DEFAULT_ACCOUNT_ID
 from db import table
 from notifications import send_presigned_notification, send_presigned_batch_notification
 from rate_limit import PendingLimitExceeded, RateLimitExceeded, check_rate_limit
-from utils import generate_request_id, mcp_result
+from utils import generate_request_id, mcp_result, sanitize_filename
 
 logger = logging.getLogger(__name__)
 
@@ -49,30 +48,6 @@ class PresignedContext:
     bucket: str = field(default="")
     s3_key: str = field(default="")
     request_id: str = field(default="")
-
-
-def _sanitize_filename(filename: str) -> str:
-    """消毒檔名，移除危險字元（防 path traversal）。
-
-    Mirrors the logic in mcp_upload._sanitize_filename but preserves
-    sub-directory structure (e.g. ``assets/foo.js``) so the presigned
-    key keeps its intended path.
-    """
-    # Remove null bytes
-    filename = filename.replace("\x00", "")
-    # Normalise separators
-    filename = filename.replace("\\", "/")
-    # Resolve path-traversal components segment by segment
-    clean_parts = []
-    for part in filename.split("/"):
-        # Strip .. and leading dots/spaces from every segment
-        part = part.replace("..", "")
-        part = part.lstrip(". ")
-        # Keep only safe characters per segment
-        part = re.sub(r"[^\w\-.]", "_", part)
-        if part:
-            clean_parts.append(part)
-    return "/".join(clean_parts) or "unnamed"
 
 
 def _generate_presigned_url_for_file(
@@ -238,7 +213,7 @@ def _parse_presigned_request(
 
 def _resolve_presigned_target(ctx: PresignedContext) -> None:
     """Determine bucket, key, and request_id.  Mutates *ctx* in-place."""
-    safe_filename = _sanitize_filename(ctx.filename)
+    safe_filename = sanitize_filename(ctx.filename, keep_path=True)
     ctx.request_id = generate_request_id(f"presigned:{safe_filename}")
     date_str = time.strftime("%Y-%m-%d")
     ctx.bucket = f"bouncer-uploads-{ctx.account_id}"
@@ -501,7 +476,7 @@ def _generate_presigned_batch_urls(ctx: PresignedBatchContext) -> dict:
         content_type = entry["content_type"]
 
         # Deduplicate: append index suffix if filename already seen
-        safe_fn = _sanitize_filename(raw_filename)
+        safe_fn = sanitize_filename(raw_filename, keep_path=True)
         original_safe = safe_fn
         suffix_idx = 1
         while safe_fn in seen_filenames:

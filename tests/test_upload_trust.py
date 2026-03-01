@@ -375,10 +375,10 @@ class TestBatchUploadValidation:
 
     def test_sanitizes_path_traversal(self, app_module):
         """Path traversal filenames are sanitized — '../passwd' becomes 'passwd' (safe)."""
-        from mcp_tools import _sanitize_filename
-        assert _sanitize_filename('../etc/passwd') == 'passwd'
-        assert _sanitize_filename('file\x00evil.txt') == 'fileevil.txt'
-        assert _sanitize_filename('sub/dir/file.txt') == 'file.txt'
+        from utils import sanitize_filename
+        assert sanitize_filename('../etc/passwd') == 'passwd'
+        assert sanitize_filename('file\x00evil.txt') == 'fileevil.txt'
+        assert sanitize_filename('sub/dir/file.txt') == 'file.txt'
 
     def test_invalid_base64(self, app_module):
         files = [{'filename': 'f.txt', 'content': '!!!bad!!!'}]
