@@ -2,14 +2,16 @@
 Bouncer - Trust Session 模組
 處理信任時段的建立、查詢、撤銷和自動批准判斷
 
-信任匹配基於 trust_scope + account_id：
+信任匹配基於 trust_scope + account_id + bound_source：
 - trust_scope 是呼叫端提供的穩定識別符（如 session key）
-- source 僅用於顯示，不參與信任匹配
+- bound_source 在建立時綁定，防止不同來源重用同一 trust session
+- Legacy sessions（無 bound_source）向下相容，但會記錄警告
 """
 import logging
 import time
 import hashlib
-from typing import Optional, Dict
+from dataclasses import dataclass, field
+from typing import Optional, Dict, Any
 
 import boto3
 
@@ -27,6 +29,7 @@ from constants import (
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    'TrustSession',
     'get_trust_session',
     'create_trust_session',
     'revoke_trust_session',
@@ -41,6 +44,96 @@ __all__ = [
 _table = None
 
 
+# ============================================================================
+# TrustSession dataclass — typed wrapper over raw DynamoDB item
+# ============================================================================
+
+@dataclass
+class TrustSession:
+    """Typed representation of a trust session record.
+
+    Wraps raw DynamoDB dict access with attribute-level type safety.
+    Use ``TrustSession.from_item()`` to construct from a raw DynamoDB item.
+    """
+    request_id: str
+    trust_scope: str
+    account_id: str
+    approved_by: str
+    created_at: int
+    expires_at: int
+    command_count: int = 0
+    max_uploads: int = 0
+    upload_count: int = 0
+    upload_bytes_total: int = 0
+    source: str = ''
+    bound_source: str = ''          # security-critical: bound at creation time
+    ttl: int = 0
+    _raw: Dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+
+    # ------------------------------------------------------------------
+    # Factory
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_item(cls, item: Dict[str, Any]) -> 'TrustSession':
+        """Construct a TrustSession from a raw DynamoDB item dict."""
+        return cls(
+            request_id=str(item.get('request_id', '')),
+            trust_scope=str(item.get('trust_scope', '')),
+            account_id=str(item.get('account_id', '')),
+            approved_by=str(item.get('approved_by', '')),
+            created_at=int(item.get('created_at', 0)),
+            expires_at=int(item.get('expires_at', 0)),
+            command_count=int(item.get('command_count', 0)),
+            max_uploads=int(item.get('max_uploads', 0)),
+            upload_count=int(item.get('upload_count', 0)),
+            upload_bytes_total=int(item.get('upload_bytes_total', 0)),
+            source=str(item.get('source', '')),
+            bound_source=str(item.get('bound_source', '')),
+            ttl=int(item.get('ttl', 0)),
+            _raw=item,
+        )
+
+    # ------------------------------------------------------------------
+    # Convenience helpers
+    # ------------------------------------------------------------------
+
+    @property
+    def remaining_seconds(self) -> int:
+        return max(0, self.expires_at - int(time.time()))
+
+    @property
+    def is_expired(self) -> bool:
+        return self.remaining_seconds <= 0
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Return the underlying raw item dict (for backward-compatible callers)."""
+        return self._raw
+
+    # ──── source binding ────────────────────────────────────────────────
+
+    def matches_source(self, source: str) -> bool:
+        """Return True if *source* is allowed to use this trust session.
+
+        Logic:
+          - Legacy session (empty bound_source) → always allow, emit warning.
+          - Non-legacy → exact match required.
+        """
+        if not self.bound_source:
+            # Legacy / migrated session — backward-compatible pass-through
+            logger.warning(
+                "Trust session %s has no bound_source (legacy). "
+                "Allowing source=%r — consider re-creating the session.",
+                self.request_id, source,
+            )
+            return True
+        return self.bound_source == source
+
+
+# ============================================================================
+# Internal helpers
+# ============================================================================
+
 def _get_table():
     global _table
     if _table is None:
@@ -49,24 +142,38 @@ def _get_table():
     return _table
 
 
-def get_trust_session(trust_scope: str, account_id: str) -> Optional[Dict]:
-    """
-    查詢有效的信任時段
+def _compute_trust_id(trust_scope: str, account_id: str) -> str:
+    scope_hash = hashlib.sha256(trust_scope.encode()).hexdigest()[:16]
+    return f"trust-{scope_hash}-{account_id}"
+
+
+# ============================================================================
+# Public API
+# ============================================================================
+
+def get_trust_session(
+    trust_scope: str,
+    account_id: str,
+    source: str = '',
+) -> Optional[Dict]:
+    """Query for an active trust session, validating source binding.
 
     Args:
-        trust_scope: 信任範圍識別符（session key 等）
-        account_id: AWS 帳號 ID
+        trust_scope: Stable caller-provided identifier (session key etc.)
+        account_id:  AWS account ID
+        source:      Caller source string — must match ``bound_source`` stored at
+                     creation time.  Empty/None source is allowed for legacy callers
+                     (treated as unknown — session must itself be legacy).
 
     Returns:
-        信任時段記錄，或 None
+        Raw trust session dict (for backward compatibility), or ``None`` when:
+        - no session exists / expired / wrong type
+        - source mismatch with bound_source
     """
     if not TRUST_SESSION_ENABLED or not trust_scope:
         return None
 
-    # 用 trust_scope 算出 trust_id 直接 get（不用 scan）
-    scope_hash = hashlib.sha256(trust_scope.encode()).hexdigest()[:16]
-    trust_id = f"trust-{scope_hash}-{account_id}"
-
+    trust_id = _compute_trust_id(trust_scope, account_id)
     now = int(time.time())
 
     try:
@@ -76,12 +183,22 @@ def get_trust_session(trust_scope: str, account_id: str) -> Optional[Dict]:
         if not item:
             return None
 
-        # 驗證未過期
+        # Validate type
+        if item.get('type') != 'trust_session':
+            return None
+
+        # Validate expiry
         if int(item.get('expires_at', 0)) <= now:
             return None
 
-        # 驗證類型
-        if item.get('type') != 'trust_session':
+        # Validate source binding (core security fix)
+        session = TrustSession.from_item(item)
+        if not session.matches_source(source):
+            logger.warning(
+                "Trust session source mismatch: trust_id=%s "
+                "bound_source=%r incoming_source=%r — blocked.",
+                trust_id, session.bound_source, source,
+            )
             return None
 
         return item
@@ -91,32 +208,40 @@ def get_trust_session(trust_scope: str, account_id: str) -> Optional[Dict]:
         return None
 
 
-def create_trust_session(trust_scope: str, account_id: str, approved_by: str,
-                         source: str = '', max_uploads: int = 0) -> str:
-    """
-    建立信任時段
+def create_trust_session(
+    trust_scope: str,
+    account_id: str,
+    approved_by: str,
+    source: str = '',
+    max_uploads: int = 0,
+) -> str:
+    """Create a trust session and store ``bound_source`` for future validation.
 
     Args:
-        trust_scope: 信任範圍識別符（session key 等）
-        account_id: AWS 帳號 ID
-        approved_by: 批准者 ID
-        source: 顯示用來源描述（不參與匹配）
-        max_uploads: 信任期間最大上傳次數（0=不允許信任上傳）
+        trust_scope:  Stable caller-provided identifier
+        account_id:   AWS account ID
+        approved_by:  Approver ID (Telegram user ID etc.)
+        source:       Caller source — bound to this session; future calls with a
+                      different source will be rejected.
+        max_uploads:  Maximum trusted uploads (0 = upload trust disabled)
 
     Returns:
-        trust_id
+        trust_id string
     """
-    scope_hash = hashlib.sha256(trust_scope.encode()).hexdigest()[:16]
-    trust_id = f"trust-{scope_hash}-{account_id}"
+    trust_id = _compute_trust_id(trust_scope, account_id)
 
     now = int(time.time())
     expires_at = now + TRUST_SESSION_DURATION
+
+    # bound_source is the security-critical binding; source is display-only
+    display_source = source or trust_scope  # GSI does not accept empty strings
 
     item = {
         'request_id': trust_id,
         'type': 'trust_session',
         'trust_scope': trust_scope,
-        'source': source or trust_scope,  # GSI 不接受空字串
+        'source': display_source,
+        'bound_source': source,          # ← NEW: security binding
         'account_id': account_id,
         'approved_by': approved_by,
         'created_at': now,
@@ -125,7 +250,7 @@ def create_trust_session(trust_scope: str, account_id: str, approved_by: str,
         'max_uploads': max_uploads,
         'upload_count': 0,
         'upload_bytes_total': 0,
-        'ttl': expires_at
+        'ttl': expires_at,
     }
 
     _get_table().put_item(Item=item)
@@ -133,14 +258,13 @@ def create_trust_session(trust_scope: str, account_id: str, approved_by: str,
 
 
 def revoke_trust_session(trust_id: str) -> bool:
-    """
-    撤銷信任時段
+    """Revoke (delete) a trust session.
 
     Args:
-        trust_id: 信任時段 ID
+        trust_id: Trust session ID
 
     Returns:
-        是否成功
+        True on success
     """
     try:
         _get_table().delete_item(Key={'request_id': trust_id})
@@ -151,15 +275,14 @@ def revoke_trust_session(trust_id: str) -> bool:
 
 
 def increment_trust_command_count(trust_id: str) -> int:
-    """
-    原子性增加信任時段的命令計數（SEC-007）
+    """Atomically increment trust session command counter (SEC-007).
 
-    使用 DynamoDB conditional update 確保並發安全：
-    - 只有在 command_count 未超限且 session 仍有效時才增加
-    - ConditionalCheckFailedException → return 0 (拒絕)
+    Uses DynamoDB conditional update for concurrency safety:
+    - Only increments when under limit and session is still active
+    - ConditionalCheckFailedException → returns 0 (reject)
 
     Returns:
-        新的計數值，或 0（條件不滿足）
+        New counter value, or 0 when condition is not met
     """
     now = int(time.time())
     try:
@@ -189,28 +312,24 @@ def increment_trust_command_count(trust_id: str) -> int:
 
 
 def is_trust_excluded(command: str) -> bool:
-    """
-    檢查命令是否被 Trust Session 排除（高危命令）
+    """Check whether a command is excluded from trust (high-risk).
 
     Args:
-        command: AWS CLI 命令
+        command: AWS CLI command string
 
     Returns:
-        True 如果命令被排除，False 如果可以信任
+        True if the command is excluded (should not be auto-approved)
     """
     cmd_lower = command.lower()
 
-    # 檢查是否是高危服務
     for service in TRUST_EXCLUDED_SERVICES:
         if f'aws {service} ' in cmd_lower or f'aws {service}\t' in cmd_lower:
             return True
 
-    # 檢查是否是高危操作
     for action in TRUST_EXCLUDED_ACTIONS:
         if action in cmd_lower:
             return True
 
-    # 檢查是否有危險旗標
     for flag in TRUST_EXCLUDED_FLAGS:
         if flag in cmd_lower:
             return True
@@ -218,14 +337,19 @@ def is_trust_excluded(command: str) -> bool:
     return False
 
 
-def should_trust_approve(command: str, trust_scope: str, account_id: str) -> tuple:
-    """
-    檢查是否應該透過信任時段自動批准
+def should_trust_approve(
+    command: str,
+    trust_scope: str,
+    account_id: str,
+    source: str = '',
+) -> tuple:
+    """Check whether a command should be auto-approved via trust session.
 
     Args:
-        command: AWS CLI 命令
-        trust_scope: 信任範圍識別符
-        account_id: AWS 帳號 ID
+        command:     AWS CLI command
+        trust_scope: Trust scope identifier
+        account_id:  AWS account ID
+        source:      Caller source — validated against ``bound_source``
 
     Returns:
         (should_approve: bool, trust_session: dict or None, reason: str)
@@ -233,20 +357,16 @@ def should_trust_approve(command: str, trust_scope: str, account_id: str) -> tup
     if not TRUST_SESSION_ENABLED or not trust_scope:
         return False, None, "Trust session disabled or no trust_scope"
 
-    # 檢查是否有有效的信任時段
-    session = get_trust_session(trust_scope, account_id)
+    session = get_trust_session(trust_scope, account_id, source=source)
     if not session:
         return False, None, "No active trust session"
 
-    # 檢查命令計數
     if session.get('command_count', 0) >= TRUST_SESSION_MAX_COMMANDS:
         return False, session, f"Trust session command limit reached ({TRUST_SESSION_MAX_COMMANDS})"
 
-    # 使用統一的排除檢查
     if is_trust_excluded(command):
         return False, session, "Command excluded from trust"
 
-    # 計算剩餘時間
     remaining = int(session.get('expires_at', 0)) - int(time.time())
     if remaining <= 0:
         return False, None, "Trust session expired"
@@ -254,40 +374,25 @@ def should_trust_approve(command: str, trust_scope: str, account_id: str) -> tup
     return True, session, f"Trust session active ({remaining}s remaining)"
 
 
+# ============================================================================
+# Upload helpers
+# ============================================================================
+
 def _is_upload_filename_safe(filename: str) -> bool:
-    """
-    檢查檔名是否安全（無 path traversal、null bytes 等）
-
-    Args:
-        filename: 檔案名稱
-
-    Returns:
-        True 如果安全
-    """
+    """Return True if filename is free of path-traversal / unsafe characters."""
     if not filename:
         return False
-    # null bytes
     if '\x00' in filename:
         return False
-    # path traversal
     if '..' in filename:
         return False
-    # absolute paths or directory separators
     if '/' in filename or '\\' in filename:
         return False
     return True
 
 
 def _is_upload_extension_blocked(filename: str) -> bool:
-    """
-    檢查檔案副檔名是否在黑名單
-
-    Args:
-        filename: 檔案名稱
-
-    Returns:
-        True 如果副檔名被封鎖
-    """
+    """Return True if the file extension is on the block-list."""
     lower = filename.lower()
     for ext in TRUST_UPLOAD_BLOCKED_EXTENSIONS:
         if lower.endswith(ext):
@@ -295,16 +400,21 @@ def _is_upload_extension_blocked(filename: str) -> bool:
     return False
 
 
-def should_trust_approve_upload(trust_scope: str, account_id: str,
-                                filename: str, content_size: int) -> tuple:
-    """
-    檢查是否應該透過信任時段自動批准上傳
+def should_trust_approve_upload(
+    trust_scope: str,
+    account_id: str,
+    filename: str,
+    content_size: int,
+    source: str = '',
+) -> tuple:
+    """Check whether an upload should be auto-approved via trust session.
 
     Args:
-        trust_scope: 信任範圍識別符
-        account_id: AWS 帳號 ID
-        filename: 上傳檔案名稱
-        content_size: 檔案大小（bytes）
+        trust_scope:   Trust scope identifier
+        account_id:    AWS account ID
+        filename:      Upload filename
+        content_size:  File size in bytes
+        source:        Caller source — validated against ``bound_source``
 
     Returns:
         (should_approve: bool, trust_session: dict or None, reason: str)
@@ -312,20 +422,16 @@ def should_trust_approve_upload(trust_scope: str, account_id: str,
     if not TRUST_SESSION_ENABLED or not trust_scope:
         return False, None, "Trust session disabled or no trust_scope"
 
-    # 檔名安全檢查
     if not _is_upload_filename_safe(filename):
         return False, None, "Filename contains unsafe characters"
 
-    # 副檔名黑名單
     if _is_upload_extension_blocked(filename):
         return False, None, f"File extension blocked: {filename}"
 
-    # 查詢信任時段
-    session = get_trust_session(trust_scope, account_id)
+    session = get_trust_session(trust_scope, account_id, source=source)
     if not session:
         return False, None, "No active trust session"
 
-    # 過期檢查
     remaining = int(session.get('expires_at', 0)) - int(time.time())
     if remaining <= 0:
         return False, None, "Trust session expired"
@@ -334,16 +440,13 @@ def should_trust_approve_upload(trust_scope: str, account_id: str,
     if max_uploads <= 0:
         return False, session, "Trust session upload not enabled"
 
-    # 上傳次數檢查
     upload_count = int(session.get('upload_count', 0))
     if upload_count >= max_uploads:
         return False, session, f"Upload quota exhausted ({upload_count}/{max_uploads})"
 
-    # 單檔大小檢查
     if content_size > TRUST_UPLOAD_MAX_BYTES_PER_FILE:
         return False, session, f"File too large: {content_size} > {TRUST_UPLOAD_MAX_BYTES_PER_FILE}"
 
-    # 累計 bytes 檢查
     upload_bytes_total = int(session.get('upload_bytes_total', 0))
     if upload_bytes_total + content_size > TRUST_UPLOAD_MAX_BYTES_TOTAL:
         return False, session, "Total upload bytes would exceed limit"
@@ -352,17 +455,16 @@ def should_trust_approve_upload(trust_scope: str, account_id: str,
 
 
 def increment_trust_upload_count(trust_id: str, content_size: int) -> bool:
-    """
-    原子性增加信任時段的上傳計數和字節計數
+    """Atomically increment trust session upload count and byte total.
 
-    使用 DynamoDB conditional update 確保並發安全。
+    Uses DynamoDB conditional update for concurrency safety.
 
     Args:
-        trust_id: 信任時段 ID
-        content_size: 本次上傳的字節數
+        trust_id:     Trust session ID
+        content_size: Bytes uploaded in this request
 
     Returns:
-        是否成功（False = 條件不滿足，如 quota 已滿或過期）
+        True on success; False when condition is not met (quota full or expired)
     """
     now = int(time.time())
     try:
