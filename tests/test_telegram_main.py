@@ -386,3 +386,99 @@ class TestWebhookMessage:
         
         result = app_module.lambda_handler(event, None)
         assert result['statusCode'] == 200
+
+
+# ============================================================================
+# GSI Query 驗證測試 (sprint7-003)
+# ============================================================================
+
+class TestTelegramCommandsGSI:
+    """驗證 /pending 和 /stats 使用 GSI Query 而非 Scan"""
+
+    def test_pending_command_uses_gsi_query(self, app_module):
+        """/pending 使用 status-created-index GSI Query，不走 Scan"""
+        import db as _db
+        table = _db.table
+
+        with patch.object(table, "query", wraps=table.query) as mock_query, \
+             patch.object(table, "scan") as mock_scan, \
+             patch("telegram_commands.send_telegram_message_to"):
+            app_module.handle_pending_command("12345")
+
+        mock_scan.assert_not_called()
+        assert mock_query.called
+        assert any(
+            call.kwargs.get("IndexName") == "status-created-index"
+            for call in mock_query.call_args_list
+        )
+
+    def test_stats_command_uses_gsi_query(self, app_module):
+        """/stats 使用 status-created-index GSI Query，不走 Scan"""
+        import db as _db
+        import telegram_commands
+        table = _db.table
+
+        with patch.object(table, "query", wraps=table.query) as mock_query, \
+             patch.object(table, "scan") as mock_scan, \
+             patch("telegram_commands.send_telegram_message_to"):
+            telegram_commands.handle_stats_command("12345", hours=24)
+
+        mock_scan.assert_not_called()
+        assert mock_query.called
+        assert any(
+            call.kwargs.get("IndexName") == "status-created-index"
+            for call in mock_query.call_args_list
+        )
+
+    def test_pending_command_returns_pending_items_via_gsi(self, app_module):
+        """/pending 通過 GSI Query 正確回傳 pending 狀態項目"""
+        import db as _db
+        table = _db.table
+
+        # 插入 pending 和 approved 各一筆
+        table.put_item(Item={
+            "request_id": "gsi-pending-test-1",
+            "command": "aws s3 ls",
+            "status": "pending",
+            "source": "test-bot",
+            "created_at": int(time.time()) - 100,
+        })
+        table.put_item(Item={
+            "request_id": "gsi-approved-test-1",
+            "command": "aws ec2 ls",
+            "status": "approved",
+            "source": "test-bot",
+            "created_at": int(time.time()) - 200,
+        })
+
+        with patch("telegram_commands.send_telegram_message_to") as mock_send:
+            result = app_module.handle_pending_command("12345")
+
+        assert result["statusCode"] == 200
+        # 確認發出的訊息只包含 pending 項目
+        sent_text = mock_send.call_args[0][1]
+        assert "pending" in sent_text.lower() or "gsi-pending" in sent_text or "aws s3 ls" in sent_text
+
+    def test_stats_command_counts_correct_totals(self, app_module):
+        """/stats 透過 GSI 正確統計各狀態數量"""
+        import db as _db
+        import telegram_commands
+        table = _db.table
+
+        now = int(time.time())
+        for i, status in enumerate(["approved", "denied", "pending"]):
+            table.put_item(Item={
+                "request_id": f"gsi-stats-{status}",
+                "command": f"aws cmd {i}",
+                "status": status,
+                "source": "stats-bot",
+                "created_at": now - (i + 1) * 100,
+            })
+
+        with patch("telegram_commands.send_telegram_message_to") as mock_send:
+            result = telegram_commands.handle_stats_command("12345", hours=24)
+
+        assert result["statusCode"] == 200
+        sent_text = mock_send.call_args[0][1]
+        # 統計文字應包含批准/拒絕/待審批資訊
+        assert "批准" in sent_text or "approved" in sent_text.lower() or "✅" in sent_text

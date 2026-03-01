@@ -90,6 +90,7 @@ def handle_trust_command(chat_id: str) -> dict:
     now = int(time.time())
 
     try:
+        # trust_session items use 'type' field (not 'status'); no suitable GSI — Scan is correct.
         resp = table.scan(
             FilterExpression='#type = :type AND expires_at > :now',
             ExpressionAttributeNames={'#type': 'type'},
@@ -124,10 +125,12 @@ def handle_pending_command(chat_id: str) -> dict:
     table = _get_table()
 
     try:
-        resp = table.scan(
-            FilterExpression='#status = :status',
-            ExpressionAttributeNames={'#status': 'status'},
-            ExpressionAttributeValues={':status': 'pending'}
+        from boto3.dynamodb.conditions import Key
+        # Use status-created-index GSI: PK=status, SK=created_at — ALL projection
+        resp = table.query(
+            IndexName='status-created-index',
+            KeyConditionExpression=Key('status').eq('pending'),
+            ScanIndexForward=False,
         )
         items = resp.get('Items', [])
     except Exception as e:
@@ -162,19 +165,38 @@ def handle_stats_command(chat_id: str, hours: int = 24) -> dict:
     now = int(time.time())
     since_ts = now - hours * 3600
 
+    # Collect items via GSI Query for each known status value, then merge.
+    # This avoids a full table Scan by leveraging status-created-index (ALL projection).
+    KNOWN_STATUSES = [
+        'approved', 'auto_approved', 'trust_approved', 'grant_approved',
+        'denied', 'blocked', 'compliance_violation',
+        'pending', 'pending_approval',
+        'error',
+    ]
+
     try:
-        from boto3.dynamodb.conditions import Attr
-        resp = table.scan(
-            FilterExpression=Attr('created_at').gte(since_ts)
-        )
-        items = resp.get('Items', [])
-        # 處理分頁
-        while 'LastEvaluatedKey' in resp:
-            resp = table.scan(
-                FilterExpression=Attr('created_at').gte(since_ts),
-                ExclusiveStartKey=resp['LastEvaluatedKey']
+        from boto3.dynamodb.conditions import Key
+        items = []
+        for status_val in KNOWN_STATUSES:
+            resp = table.query(
+                IndexName='status-created-index',
+                KeyConditionExpression=(
+                    Key('status').eq(status_val) & Key('created_at').gte(since_ts)
+                ),
+                ScanIndexForward=False,
             )
             items.extend(resp.get('Items', []))
+            # Handle pagination within each status
+            while 'LastEvaluatedKey' in resp:
+                resp = table.query(
+                    IndexName='status-created-index',
+                    KeyConditionExpression=(
+                        Key('status').eq(status_val) & Key('created_at').gte(since_ts)
+                    ),
+                    ScanIndexForward=False,
+                    ExclusiveStartKey=resp['LastEvaluatedKey'],
+                )
+                items.extend(resp.get('Items', []))
     except Exception as e:
         logger.error(f"Error in stats: {e}")
         items = []

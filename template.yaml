@@ -87,9 +87,7 @@ Resources:
             - AttributeName: created_at
               KeyType: RANGE
           Projection:
-            ProjectionType: INCLUDE
-            NonKeyAttributes:
-              - status
+            ProjectionType: ALL
         - IndexName: status-created-index
           KeySchema:
             - AttributeName: status

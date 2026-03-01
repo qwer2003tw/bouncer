@@ -136,34 +136,98 @@ def _query_requests_table(
     since_ts: int,
     exclusive_start_key: dict | None,
 ) -> tuple[list[dict], int, dict | None]:
-    """Scan requests table with filters. Returns (items, scanned_count, last_key)."""
-    filter_expr = _build_filter_expression(source, action, status, account_id, since_ts)
+    """Query (or scan) requests table with filters. Returns (items, scanned_count, last_key).
 
-    kwargs: dict = {
-        "FilterExpression": filter_expr,
-        "Limit": limit * 5,  # over-scan to get enough filtered results
-    }
-    if exclusive_start_key:
-        kwargs["ExclusiveStartKey"] = exclusive_start_key
+    GSI usage (conservative approach):
+    - status provided → status-created-index (PK: status, SK: created_at) — ALL projection
+    - source provided → source-created-index (PK: source, SK: created_at) — ALL projection
+    - neither         → fallback Scan with warning
+    """
+    from boto3.dynamodb.conditions import Key
 
     all_items: list[dict] = []
     total_scanned = 0
     last_key = None
 
     try:
-        resp = table.scan(**kwargs)
+        if status:
+            # Use status-created-index GSI
+            key_cond = Key("status").eq(status) & Key("created_at").gte(since_ts)
+            extra_filter_parts = []
+            if source:
+                extra_filter_parts.append(Attr("source").eq(source))
+            if action:
+                extra_filter_parts.append(Attr("action").eq(action))
+            if account_id:
+                extra_filter_parts.append(Attr("account_id").eq(account_id))
+
+            kwargs: dict = {
+                "IndexName": "status-created-index",
+                "KeyConditionExpression": key_cond,
+                "Limit": limit * 5,
+                "ScanIndexForward": False,  # newest first
+            }
+            if extra_filter_parts:
+                expr = extra_filter_parts[0]
+                for part in extra_filter_parts[1:]:
+                    expr = expr & part
+                kwargs["FilterExpression"] = expr
+            if exclusive_start_key:
+                kwargs["ExclusiveStartKey"] = exclusive_start_key
+
+            resp = table.query(**kwargs)
+
+        elif source:
+            # Use source-created-index GSI
+            key_cond = Key("source").eq(source) & Key("created_at").gte(since_ts)
+            extra_filter_parts = []
+            if action:
+                extra_filter_parts.append(Attr("action").eq(action))
+            if account_id:
+                extra_filter_parts.append(Attr("account_id").eq(account_id))
+
+            kwargs = {
+                "IndexName": "source-created-index",
+                "KeyConditionExpression": key_cond,
+                "Limit": limit * 5,
+                "ScanIndexForward": False,
+            }
+            if extra_filter_parts:
+                expr = extra_filter_parts[0]
+                for part in extra_filter_parts[1:]:
+                    expr = expr & part
+                kwargs["FilterExpression"] = expr
+            if exclusive_start_key:
+                kwargs["ExclusiveStartKey"] = exclusive_start_key
+
+            resp = table.query(**kwargs)
+
+        else:
+            # No GSI-suitable filter — fallback to Scan with warning
+            logger.warning("[history] no GSI filter provided, falling back to full Scan")
+            filter_expr = _build_filter_expression(source, action, status, account_id, since_ts)
+            kwargs = {
+                "FilterExpression": filter_expr,
+                "Limit": limit * 5,
+            }
+            if exclusive_start_key:
+                kwargs["ExclusiveStartKey"] = exclusive_start_key
+
+            resp = table.scan(**kwargs)
+
         total_scanned += resp.get("ScannedCount", 0)
         all_items.extend(resp.get("Items", []))
         last_key = resp.get("LastEvaluatedKey")
+
     except Exception as e:
-        logger.error(f"[history] scan requests error: {e}")
+        logger.error(f"[history] query/scan requests error: {e}")
         return [], 0, None
 
     # Trim to desired limit
     items = all_items[:limit]
-    # If we got exactly limit items and there's a last_key, pass it along
+    # If we got fewer than limit items, there are no more pages
     if len(all_items) < limit:
-        last_key = None  # No more pages
+        last_key = None
 
     return items, total_scanned, last_key
 

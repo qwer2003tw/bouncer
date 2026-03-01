@@ -749,3 +749,103 @@ class TestComputeDuration:
             "approved_at": Decimal("1025"),
         })
         assert duration == pytest.approx(25.0)
+
+
+# ===========================================================================
+# GSI Query verification tests (sprint7-003)
+# ===========================================================================
+
+
+class TestGSIQueryUsage:
+    """Verify that _query_requests_table uses GSI query instead of scan
+    when status or source filters are provided."""
+
+    def test_status_filter_uses_status_created_index(self, mock_ddb):
+        """mcp_tool_history(status=approved) → uses status-created-index Query, not Scan."""
+        dynamodb, requests_tbl, cmd_tbl = mock_ddb
+        mh = _import_mcp_history(requests_tbl)
+
+        with patch.object(requests_tbl, "query", wraps=requests_tbl.query) as mock_query, \
+             patch.object(requests_tbl, "scan") as mock_scan, \
+             patch.object(mh, "_get_command_history_table", return_value=None):
+            mh.table = requests_tbl
+            mh.mcp_tool_history("req-1", {"status": "approved"})
+
+        mock_scan.assert_not_called()
+        assert mock_query.called
+        call_kwargs = mock_query.call_args[1] if mock_query.call_args[1] else mock_query.call_args[0][0] if mock_query.call_args[0] else {}
+        # Check IndexName was passed correctly
+        assert any(
+            call.kwargs.get("IndexName") == "status-created-index"
+            for call in mock_query.call_args_list
+        )
+
+    def test_source_filter_uses_source_created_index(self, mock_ddb):
+        """mcp_tool_history(source='Private Bot') → uses source-created-index Query, not Scan."""
+        dynamodb, requests_tbl, cmd_tbl = mock_ddb
+        mh = _import_mcp_history(requests_tbl)
+
+        with patch.object(requests_tbl, "query", wraps=requests_tbl.query) as mock_query, \
+             patch.object(requests_tbl, "scan") as mock_scan, \
+             patch.object(mh, "_get_command_history_table", return_value=None):
+            mh.table = requests_tbl
+            mh.mcp_tool_history("req-1", {"source": "Private Bot"})
+
+        mock_scan.assert_not_called()
+        assert mock_query.called
+        assert any(
+            call.kwargs.get("IndexName") == "source-created-index"
+            for call in mock_query.call_args_list
+        )
+
+    def test_no_filter_falls_back_to_scan(self, mock_ddb):
+        """mcp_tool_history() with no status/source → falls back to Scan."""
+        dynamodb, requests_tbl, cmd_tbl = mock_ddb
+        mh = _import_mcp_history(requests_tbl)
+
+        with patch.object(requests_tbl, "scan", wraps=requests_tbl.scan) as mock_scan, \
+             patch.object(mh, "_get_command_history_table", return_value=None):
+            mh.table = requests_tbl
+            mh.mcp_tool_history("req-1", {})
+
+        assert mock_scan.called
+
+    def test_status_filter_returns_correct_items(self, mock_ddb):
+        """GSI query for status=approved returns only approved items."""
+        dynamodb, requests_tbl, cmd_tbl = mock_ddb
+
+        _seed_requests(requests_tbl, [
+            _make_request("r1", status="approved", created_offset=-100),
+            _make_request("r2", status="denied", created_offset=-200),
+            _make_request("r3", status="approved", created_offset=-300),
+        ])
+
+        mh = _import_mcp_history(requests_tbl)
+        with patch.object(mh, "_get_command_history_table", return_value=None):
+            mh.table = requests_tbl
+            result = mh.mcp_tool_history("req-1", {"status": "approved"})
+
+        body = json.loads(result["body"])
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert len(data["items"]) == 2
+        assert all(item["status"] == "approved" for item in data["items"])
+
+    def test_source_filter_returns_correct_items(self, mock_ddb):
+        """GSI query for source='bot-a' returns only bot-a items."""
+        dynamodb, requests_tbl, cmd_tbl = mock_ddb
+
+        _seed_requests(requests_tbl, [
+            _make_request("r1", source="bot-a", created_offset=-100),
+            _make_request("r2", source="bot-b", created_offset=-200),
+            _make_request("r3", source="bot-a", created_offset=-300),
+        ])
+
+        mh = _import_mcp_history(requests_tbl)
+        with patch.object(mh, "_get_command_history_table", return_value=None):
+            mh.table = requests_tbl
+            result = mh.mcp_tool_history("req-1", {"source": "bot-a"})
+
+        body = json.loads(result["body"])
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert len(data["items"]) == 2
+        assert all(item["source"] == "bot-a" for item in data["items"])
