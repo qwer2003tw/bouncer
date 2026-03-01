@@ -421,66 +421,6 @@ def cancel_deploy(deploy_id: str) -> dict:
     return {'status': 'cancelled', 'deploy_id': deploy_id}
 
 
-def extract_error_lines_from_sfn_history(execution_arn: str, sfn_client_obj=None, max_lines: int = 5) -> list:
-    """Extract error lines from Step Functions execution history (S8-002).
-
-    Queries the SFN execution history, finds TaskFailed / ExecutionFailed events,
-    and returns up to max_lines unique error lines.
-
-    Args:
-        execution_arn: ARN of the SFN execution.
-        sfn_client_obj: optional boto3 SFN client (for testing).
-        max_lines: maximum number of error lines to return (default 5).
-
-    Returns:
-        List of unique error line strings, capped at max_lines.
-    """
-    client = sfn_client_obj or _get_sfn_client()
-    error_lines = []
-    seen = set()
-
-    try:
-        paginator = client.get_paginator('get_execution_history')
-        pages = paginator.paginate(
-            executionArn=execution_arn,
-            includeExecutionData=True,
-        )
-        for page in pages:
-            for event in page.get('events', []):
-                etype = event.get('type', '')
-                detail = None
-
-                if etype == 'TaskFailed':
-                    detail = event.get('taskFailedEventDetails', {})
-                elif etype == 'ExecutionFailed':
-                    detail = event.get('executionFailedEventDetails', {})
-
-                if detail:
-                    cause = detail.get('cause', '') or ''
-                    error = detail.get('error', '') or ''
-                    # Build a concise error line
-                    if error and cause:
-                        line = f"{error}: {cause[:200]}"
-                    elif cause:
-                        line = cause[:200]
-                    elif error:
-                        line = error
-                    else:
-                        continue
-
-                    # Deduplicate
-                    key = line.strip()
-                    if key and key not in seen:
-                        seen.add(key)
-                        error_lines.append(key)
-
-    except Exception as exc:
-        logger.warning(f"[deployer] extract_error_lines_from_sfn_history failed: {exc}")
-
-    # Cap at max_lines
-    return error_lines[:max_lines]
-
-
 def get_deploy_status(deploy_id: str) -> dict:
     """取得部署狀態"""
     record = get_deploy_record(deploy_id)
@@ -498,22 +438,11 @@ def get_deploy_status(deploy_id: str) -> dict:
             if sfn_status in ['SUCCEEDED', 'FAILED', 'TIMED_OUT', 'ABORTED']:
                 new_status = 'SUCCESS' if sfn_status == 'SUCCEEDED' else 'FAILED'
                 finished_at = int(time.time())
-
-                status_updates = {
+                update_deploy_record(deploy_id, {
                     'status': new_status,
                     'finished_at': finished_at
-                }
-
-                # S8-002: Extract error lines from SFN history on failure
-                if new_status == 'FAILED':
-                    error_lines = extract_error_lines_from_sfn_history(execution_arn)
-                    if error_lines:
-                        status_updates['error_lines'] = error_lines
-
-                update_deploy_record(deploy_id, status_updates)
+                })
                 record['status'] = new_status
-                if 'error_lines' in status_updates:
-                    record['error_lines'] = status_updates['error_lines']
 
                 project_id = record.get('project_id', '')
                 deploy_status = 'success' if new_status == 'SUCCESS' else 'failed'

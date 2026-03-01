@@ -17,12 +17,9 @@ Environment Variables:
   CFN_ROLE_ARN    - CloudFormation execution role ARN (optional)
   TARGET_ROLE_ARN - Cross-account assume role ARN (optional; when set,
                     CFN_ROLE_ARN is skipped)
-  SAM_BUCKET      - S3 bucket for sam package output (optional; enables
-                    packaged-template mode for IMPORT changesets)
 
 CLI Flags (appended after ``--``):
-  --dry-run-import    Detect conflicts and print import plan without executing
-  --suggest-import    Output JSON import plan to stdout and exit (rc=2)
+  --dry-run-import   Detect conflicts and print import plan without executing
 """
 
 from __future__ import annotations
@@ -61,16 +58,6 @@ _ALREADY_EXISTS_RE = re.compile(
 
 # Simpler fallback: just capture the "already exists" part
 _ALREADY_EXISTS_SIMPLE_RE = re.compile(r"already exists", re.IGNORECASE)
-
-# EarlyValidation: CFN rejects the changeset before any resources are touched.
-# Example: "An error occurred (ValidationError) when calling the
-# CreateChangeSet operation: Resource import can only be done for
-# resources that are not currently managed by CloudFormation"
-_EARLY_VALIDATION_RE = re.compile(
-    r"An error occurred \((?P<code>[A-Za-z]+Error)\)"
-    r".*?CreateChangeSet.*?:\s*(?P<msg>[^\n]+)",
-    re.IGNORECASE | re.DOTALL,
-)
 
 
 def _validate_stack_name(name: str) -> None:
@@ -167,7 +154,6 @@ _RESOURCE_ID_KEYS: Dict[str, str] = {
     "AWS::EC2::SecurityGroup": "GroupId",
     "AWS::EC2::Subnet": "SubnetId",
     "AWS::EC2::VPC": "VpcId",
-    "AWS::Logs::LogGroup": "LogGroupName",
 }
 
 
@@ -175,111 +161,6 @@ def _physical_id_to_identifier(resource_type: str, physical_id: str) -> dict:
     """Convert a physical resource ID to the CFN import identifier dict."""
     key = _RESOURCE_ID_KEYS.get(resource_type, "Id")
     return {key: physical_id}
-
-
-# ---------------------------------------------------------------------------
-# SamPackager — produces a CFN-transformed template URL for IMPORT changesets
-# ---------------------------------------------------------------------------
-
-
-class SamPackager:
-    """Runs ``sam build && sam package`` to produce a transformed template.
-
-    SAM resources (``AWS::Serverless::*``) must be transformed before a CFN
-    IMPORT changeset can accept them.  This helper encapsulates that two-step
-    process so ``CloudFormationImporter`` can stay focused on import logic.
-
-    Usage::
-
-        packager = SamPackager(s3_bucket="my-sam-bucket", region="us-east-1")
-        template_url = packager.package()   # returns s3://… URL or None on error
-    """
-
-    def __init__(
-        self,
-        s3_bucket: str = "",
-        region: str = "",
-        *,
-        s3_client=None,
-    ) -> None:
-        self.s3_bucket = s3_bucket or os.environ.get("SAM_BUCKET", "")
-        self.region = region or os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
-        self._s3_override = s3_client  # injectable for tests
-
-    @property
-    def _s3(self):
-        if self._s3_override is None:
-            self._s3_override = boto3.client("s3", region_name=self.region)
-        return self._s3_override
-
-    def is_available(self) -> bool:
-        """Return True if packaging is possible (bucket is configured)."""
-        return bool(self.s3_bucket)
-
-    def package(self) -> Optional[str]:
-        """Run ``sam build && sam package`` and return the S3 template URL.
-
-        Returns None if the bucket is not configured or if the commands fail.
-        The caller should fall back to passing a raw template body.
-        """
-        if not self.is_available():
-            print("[packager] SAM_BUCKET not set; skipping sam package.", file=sys.stderr)
-            return None
-
-        print("[packager] Running sam build …")
-        build_result = subprocess.run(
-            ["sam", "build", "--use-container"],
-            capture_output=True,
-            text=True,
-        )
-        if build_result.returncode != 0:
-            print(
-                f"[packager] sam build failed:\n{build_result.stderr}",
-                file=sys.stderr,
-            )
-            return None
-
-        output_template = "/tmp/sam-packaged-template.yaml"
-        print(f"[packager] Running sam package → {output_template} …")
-        pkg_result = subprocess.run(
-            [
-                "sam", "package",
-                "--output-template-file", output_template,
-                "--s3-bucket", self.s3_bucket,
-                "--region", self.region,
-            ],
-            capture_output=True,
-            text=True,
-        )
-        if pkg_result.returncode != 0:
-            print(
-                f"[packager] sam package failed:\n{pkg_result.stderr}",
-                file=sys.stderr,
-            )
-            return None
-
-        # Extract the S3 URL from the packaged template
-        template_url = self._upload_template(output_template)
-        return template_url
-
-    def _upload_template(self, local_path: str) -> Optional[str]:
-        """Upload the packaged template to S3 and return its HTTPS URL."""
-        import time as _time
-
-        key = f"sam-templates/packaged-{int(_time.time())}.yaml"
-        try:
-            self._s3.upload_file(local_path, self.s3_bucket, key)
-        except Exception as exc:
-            print(f"[packager] S3 upload failed: {exc}", file=sys.stderr)
-            return None
-
-        url = (
-            f"https://s3.amazonaws.com/{self.s3_bucket}/{key}"
-            if self.region == "us-east-1"
-            else f"https://s3.{self.region}.amazonaws.com/{self.s3_bucket}/{key}"
-        )
-        print(f"[packager] Template uploaded → {url}")
-        return url
 
 
 # ---------------------------------------------------------------------------
@@ -292,25 +173,18 @@ class CloudFormationImporter:
 
     Encapsulates all boto3 CloudFormation import logic behind a clean
     interface so that the main deploy flow stays readable.
-
-    If a ``SamPackager`` is provided (or SAM_BUCKET is set) the importer will
-    run ``sam build && sam package`` to produce a CFN-transformed template URL
-    before creating the IMPORT changeset — required when the stack contains
-    ``AWS::Serverless::*`` resources.
     """
 
     def __init__(
         self,
         stack_name: str,
         cfn_client=None,
-        packager: Optional["SamPackager"] = None,
         *,
         dry_run: bool = False,
     ) -> None:
         self.stack_name = stack_name
         self.dry_run = dry_run
         self._cfn_override = cfn_client  # None → lazy-init on first use
-        self._packager = packager  # None → auto-create from env if SAM_BUCKET set
 
     @property
     def _cfn(self):
@@ -364,44 +238,18 @@ class CloudFormationImporter:
 
         resources_to_import = [c.to_import_record() for c in conflicts]
 
-        # Build the base kwargs for create_change_set.  If a packager is
-        # available we supply TemplateURL (required when the stack has SAM
-        # resources); otherwise we fall back to reading the current template
-        # from the stack itself (UsePreviousTemplate).
-        changeset_kwargs: dict = {
-            "StackName": self.stack_name,
-            "ChangeSetName": "auto-import-changeset",
-            "ChangeSetType": "IMPORT",
-            "ResourcesToImport": resources_to_import,
-            "Capabilities": [
-                "CAPABILITY_IAM",
-                "CAPABILITY_AUTO_EXPAND",
-                "CAPABILITY_NAMED_IAM",
-            ],
-        }
-
-        # Resolve packager (lazy-create from env if not injected)
-        packager = self._packager
-        if packager is None and os.environ.get("SAM_BUCKET"):
-            packager = SamPackager()
-
-        template_url: Optional[str] = None
-        if packager is not None:
-            template_url = packager.package()
-
-        if template_url:
-            changeset_kwargs["TemplateURL"] = template_url
-            print(f"[import] Using packaged template: {template_url}")
-        else:
-            changeset_kwargs["UsePreviousTemplate"] = True
-            print("[import] Using previous (current) stack template.")
-
         try:
             self._ensure_stack_exists()
-            changeset_name = changeset_kwargs["ChangeSetName"]
+            changeset_name = "auto-import-changeset"
 
             print(f"[import] Creating import changeset '{changeset_name}' …")
-            self._cfn.create_change_set(**changeset_kwargs)
+            self._cfn.create_change_set(
+                StackName=self.stack_name,
+                ChangeSetName=changeset_name,
+                ChangeSetType="IMPORT",
+                ResourcesToImport=resources_to_import,
+                Capabilities=["CAPABILITY_IAM", "CAPABILITY_AUTO_EXPAND", "CAPABILITY_NAMED_IAM"],
+            )
 
             self._wait_for_changeset(changeset_name)
 
@@ -543,60 +391,11 @@ def _run_deploy(cmd: Sequence[str]) -> DeployResult:
 # ---------------------------------------------------------------------------
 
 
-def _print_early_validation_hint(output: str, stack: str) -> None:
-    """Detect EarlyValidation errors and print actionable import instructions."""
-    m = _EARLY_VALIDATION_RE.search(output)
-    if not m:
-        return
-
-    print(
-        "\n"
-        "╔══════════════════════════════════════════════════════════════╗\n"
-        "║  ⚠️  EarlyValidation Error Detected                          ║\n"
-        "╚══════════════════════════════════════════════════════════════╝\n"
-        f"\n  CloudFormation rejected the changeset: {m.group('msg').strip()}\n\n"
-        "  This usually means one or more resources exist outside the stack\n"
-        "  but are not included in the IMPORT changeset.  To resolve:\n\n"
-        "    1. sam build && sam package --s3-bucket $SAM_BUCKET \\\n"
-        "            --output-template-file /tmp/packaged.yaml\n\n"
-        "    2. aws cloudformation create-change-set \\\n"
-        f"            --stack-name {stack} \\\n"
-        "            --change-set-type IMPORT \\\n"
-        "            --template-url <s3-url-from-step-1> \\\n"
-        "            --resources-to-import file://import-resources.json\n\n"
-        "    3. aws cloudformation execute-change-set ...\n\n"
-        "  Tip: run with --dry-run-import to generate import-resources.json,\n"
-        "       or --suggest-import to get a JSON import plan.\n",
-        file=sys.stderr,
-    )
-
-
-def _build_import_plan(stack: str, conflicts: List[ConflictResource]) -> dict:
-    """Return a JSON-serialisable import plan for --suggest-import output."""
-    return {
-        "stack_name": stack,
-        "resources_to_import": [c.to_import_record() for c in conflicts],
-        "steps": [
-            "sam build",
-            "sam package --s3-bucket $SAM_BUCKET --output-template-file /tmp/packaged.yaml",
-            (
-                f"aws cloudformation create-change-set "
-                f"--stack-name {stack} "
-                f"--change-set-type IMPORT "
-                f"--template-url <s3-url> "
-                f"--resources-to-import file://import-resources.json"
-            ),
-            f"aws cloudformation execute-change-set --stack-name {stack} --change-set-name auto-import-changeset",
-        ],
-    }
-
-
 def main(argv: Optional[List[str]] = None) -> None:
     if argv is None:
         argv = sys.argv[1:]
 
     dry_run_import = "--dry-run-import" in argv
-    suggest_import = "--suggest-import" in argv
 
     stack = os.environ.get("STACK_NAME", "").strip()
     _validate_stack_name(stack)
@@ -619,8 +418,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     importer = CloudFormationImporter(stack, dry_run=dry_run_import)
 
     if not importer.has_conflict_error(combined_output):
-        # Check if it's an EarlyValidation error before giving up
-        _print_early_validation_hint(combined_output, stack)
+        # Non-conflict failure — surface it and exit
         print(
             f"ERROR: sam deploy failed (rc={deploy_result.returncode}) "
             "with no importable conflicts.",
@@ -633,19 +431,12 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     if not conflicts:
         # We saw "already exists" but couldn't parse resource details.
-        _print_early_validation_hint(combined_output, stack)
         print(
             "ERROR: Deploy failed with 'already exists' error but could not "
             "parse resource details for import. Manual intervention required.",
             file=sys.stderr,
         )
         sys.exit(deploy_result.returncode)
-
-    # --suggest-import: emit JSON plan then exit (rc=2 = no deploy performed)
-    if suggest_import:
-        plan = _build_import_plan(stack, conflicts)
-        print(json.dumps(plan, indent=2))
-        sys.exit(2)
 
     if dry_run_import:
         # Print plan and exit cleanly (non-zero to signal "not deployed")
