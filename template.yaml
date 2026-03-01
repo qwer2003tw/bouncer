@@ -527,14 +527,15 @@ Resources:
   # NOTE: Lambda auto-creates this log group before CFN deploy.
   # sam_deploy.py has auto-import logic (Sprint 7 #005) that handles
   # the "already exists" error by importing the existing log group into CFN.
-  LambdaLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub "/aws/lambda/bouncer-${Environment}-function"
-      RetentionInDays: 30
-      Tags:
-        - Key: Project
-          Value: Bouncer
+  # LambdaLogGroup: NOT in CFN — manual import needed.
+  # The log group /aws/lambda/bouncer-prod-function exists outside CFN.
+  # CFN IMPORT requires a SAM-transformed template (not raw SAM YAML).
+  # Steps to resolve (tracked in bouncer-log-group-import):
+  #   1. sam build && sam package → get transformed template S3 URL
+  #   2. aws cloudformation create-change-set --change-set-type IMPORT
+  #      --template-url <transformed-template-s3-url>
+  #   3. aws cloudformation execute-change-set
+  # Until then, retention is set manually (30d via CLI, set 2026-02-28).
 
   # ============================================================
   # API Gateway - Usage Plan + Throttling
