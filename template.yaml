@@ -393,7 +393,7 @@ Resources:
             - Sid: PassSchedulerRole
               Effect: Allow
               Action: iam:PassRole
-              Resource: !GetAtt SchedulerInvokeRole.Arn
+              Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/bouncer-${Environment}-scheduler-invoke"
 
   # ============================================================
   # API Gateway
@@ -596,8 +596,8 @@ Resources:
                 Effect: Allow
                 Action: lambda:InvokeFunction
                 Resource:
-                  - !GetAtt ApprovalFunction.Arn
-                  - !Sub "${ApprovalFunction.Arn}:*"
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:bouncer-${Environment}-function"
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:bouncer-${Environment}-function:*"
       Tags:
         - Key: Project
           Value: Bouncer
