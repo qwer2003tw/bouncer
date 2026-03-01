@@ -782,5 +782,419 @@ class TestHelpCommand:
 
 
 # ============================================================================
+# sprint7-001: _split_chain 解析測試
+# ============================================================================
+
+
+class TestSplitChain:
+    """_split_chain — split && chained commands (sprint7-001)."""
+
+    def _sc(self, cmd):
+        """shorthand helper"""
+        from commands import _split_chain
+        return _split_chain(cmd)
+
+    # --- From Approach B ---
+
+    def test_no_chain_single_command(self, app_module):
+        """Single command returns single-element list."""
+        assert self._sc('aws s3 ls') == ['aws s3 ls']
+
+    def test_two_commands(self, app_module):
+        """Two commands separated by && are split correctly."""
+        assert self._sc('aws s3 ls && aws sts get-caller-identity') == [
+            'aws s3 ls', 'aws sts get-caller-identity'
+        ]
+
+    def test_three_commands(self, app_module):
+        """Three commands in a row."""
+        assert self._sc('aws cmd1 && aws cmd2 && aws cmd3') == [
+            'aws cmd1', 'aws cmd2', 'aws cmd3'
+        ]
+
+    def test_quoted_ampersand_not_split(self, app_module):
+        """&& inside double quotes is NOT treated as separator."""
+        result = self._sc('aws logs filter-log-events --filter-pattern "foo && bar"')
+        assert len(result) == 1
+        assert '&&' in result[0]
+
+    def test_single_quoted_ampersand_not_split(self, app_module):
+        """&& inside single quotes is NOT treated as separator."""
+        result = self._sc("aws logs filter-log-events --filter-pattern 'foo && bar'")
+        assert len(result) == 1
+
+    def test_jmespath_ampersand_not_split(self, app_module):
+        """&& inside JMESPath query brackets is NOT treated as separator."""
+        cmd = 'aws dynamodb scan --query "Items[?contains(name, `foo`) && contains(type, `bar`)]"'
+        result = self._sc(cmd)
+        assert len(result) == 1
+
+    def test_json_ampersand_not_split(self, app_module):
+        """&& inside JSON curly braces is NOT treated as separator."""
+        cmd = 'aws lambda invoke --payload {"key":"foo && bar"}'
+        result = self._sc(cmd)
+        assert len(result) == 1
+
+    def test_leading_trailing_spaces(self, app_module):
+        """Each sub-command is stripped of leading/trailing whitespace."""
+        result = self._sc('  aws s3 ls  &&  aws sts get-caller-identity  ')
+        assert result == ['aws s3 ls', 'aws sts get-caller-identity']
+
+    def test_single_ampersand_not_separator(self, app_module):
+        """Single & is NOT a chain separator."""
+        result = self._sc('aws s3 ls & aws sts get-caller-identity')
+        # single & is not a separator — entire string stays together
+        assert len(result) == 1
+
+    def test_no_aws_prefix_chain(self, app_module):
+        """Non-aws commands in a chain are kept (validation happens elsewhere)."""
+        result = self._sc('cmd1 && cmd2 && cmd3')
+        assert result == ['cmd1', 'cmd2', 'cmd3']
+
+    def test_backtick_ampersand_not_split(self, app_module):
+        """&& inside backtick literal is NOT a separator."""
+        result = self._sc('aws ec2 describe-instances --query `foo && bar`')
+        assert len(result) == 1
+
+    def test_nested_brackets_ampersand_not_split(self, app_module):
+        """&& inside nested brackets is NOT a separator."""
+        cmd = 'aws ec2 describe-instances --filters [{"Name":"foo && bar"}]'
+        result = self._sc(cmd)
+        assert len(result) == 1
+
+    # --- From Approach C (edge cases) ---
+
+    def test_empty_segment(self, app_module):
+        """cmd1 && && cmd2 → empty segment dropped."""
+        result = self._sc('aws s3 ls && && aws sts get-caller-identity')
+        assert result == ['aws s3 ls', 'aws sts get-caller-identity']
+
+    def test_leading_trailing_ampersand(self, app_module):
+        """&& cmd1 && → leading/trailing empty segments dropped."""
+        result = self._sc('&& aws s3 ls &&')
+        assert result == ['aws s3 ls']
+
+    def test_empty_string(self, app_module):
+        """Empty string returns empty list."""
+        from commands import _split_chain
+        assert _split_chain('') == []
+
+    def test_whitespace_only(self, app_module):
+        """Whitespace-only string returns empty list."""
+        from commands import _split_chain
+        assert _split_chain('   ') == []
+
+    def test_curly_brace_with_and(self, app_module):
+        """&& inside {} not split."""
+        cmd = 'aws dynamodb query --expression-attribute-values {":v":"a && b"}'
+        result = self._sc(cmd)
+        assert result == [cmd]
+
+    def test_paren_with_and(self, app_module):
+        """&& inside () not split."""
+        cmd = 'aws ec2 describe-instances --query "sort_by(Instances, &(a && b))"'
+        result = self._sc(cmd)
+        assert result == [cmd]
+
+    def test_mixed_quoted_and_unquoted(self, app_module):
+        """Mix: quoted && inside arg + real && separator."""
+        result = self._sc('aws logs filter-log-events --filter-pattern "foo && bar" && aws s3 ls')
+        assert result == [
+            'aws logs filter-log-events --filter-pattern "foo && bar"',
+            'aws s3 ls',
+        ]
+
+
+# ============================================================================
+# sprint7-001: CommandChainResult dataclass tests (from Approach B)
+# ============================================================================
+
+
+class TestCommandChainResult:
+    """CommandChainResult dataclass tests."""
+
+    def test_all_succeeded_true(self, app_module):
+        from commands import CommandChainResult, SubCommandResult
+        chain = CommandChainResult(
+            results=[
+                SubCommandResult('aws s3 ls', 'bucket-a\nbucket-b', 0),
+                SubCommandResult('aws sts get-caller-identity', '{"Account":"123"}', 0),
+            ],
+            stopped_at=None,
+        )
+        assert chain.all_succeeded is True
+
+    def test_all_succeeded_false(self, app_module):
+        from commands import CommandChainResult, SubCommandResult
+        chain = CommandChainResult(
+            results=[
+                SubCommandResult('aws s3 ls', '❌ error', 1),
+            ],
+            stopped_at=0,
+        )
+        assert chain.all_succeeded is False
+
+    def test_combined_output(self, app_module):
+        from commands import CommandChainResult, SubCommandResult
+        chain = CommandChainResult(
+            results=[
+                SubCommandResult('aws s3 ls', 'bucket-a', 0),
+                SubCommandResult('aws sts get-caller-identity', '{"Account":"123"}', 0),
+            ],
+            stopped_at=None,
+        )
+        out = chain.combined_output
+        assert 'bucket-a' in out
+        assert '{"Account":"123"}' in out
+
+    def test_sub_command_success_property(self, app_module):
+        from commands import SubCommandResult
+        r = SubCommandResult('aws s3 ls', 'output', 0)
+        assert r.success is True
+        r2 = SubCommandResult('aws s3 ls', '❌ err', 1)
+        assert r2.success is False
+
+    def test_sub_commands_property(self, app_module):
+        from commands import CommandChainResult, SubCommandResult
+        chain = CommandChainResult(
+            results=[
+                SubCommandResult('aws s3 ls', 'out', 0),
+                SubCommandResult('aws sts get-caller-identity', 'out2', 0),
+            ]
+        )
+        assert chain.sub_commands == ['aws s3 ls', 'aws sts get-caller-identity']
+
+
+# ============================================================================
+# sprint7-001: execute_command 串接執行測試 (merged B + C)
+# ============================================================================
+
+
+class TestExecuteCommandChain:
+    """execute_command() && chain behaviour — using _executor for testability."""
+
+    # --- C-style tests using _executor ---
+
+    def test_execute_chain_no_regression_single(self, app_module):
+        """單一命令：非 aws 命令 → 回傳錯誤"""
+        from commands import execute_command
+        result = execute_command('ls -la')
+        assert '只能執行 aws CLI 命令' in result
+
+    def test_execute_chain_both_succeed(self, app_module):
+        """兩個子命令都成功 → 輸出串接"""
+        from commands import execute_command
+
+        outputs = ['output1', 'output2']
+        call_log = []
+
+        def fake_executor(cmd, role):
+            call_log.append(cmd)
+            return outputs.pop(0)
+
+        result = execute_command('aws s3 ls && aws sts get-caller-identity',
+                                 _executor=fake_executor)
+        assert call_log == ['aws s3 ls', 'aws sts get-caller-identity']
+        assert 'output1' in result
+        assert 'output2' in result
+
+    def test_execute_chain_first_fails_stops(self, app_module):
+        """第一個子命令失敗 → 第二個不執行"""
+        from commands import execute_command
+
+        call_log = []
+
+        def fake_executor(cmd, role):
+            call_log.append(cmd)
+            if 'fail' in cmd:
+                return 'error output\n\n(exit code: 1)'
+            return 'success output'
+
+        result = execute_command('aws s3 fail && aws sts get-caller-identity',
+                                 _executor=fake_executor)
+        assert call_log == ['aws s3 fail']
+        assert 'exit code: 1' in result
+        assert 'success output' not in result
+
+    def test_execute_chain_error_prefix_stops(self, app_module):
+        """❌ 開頭的輸出代表失敗 → 後續命令不執行"""
+        from commands import execute_command
+
+        call_log = []
+
+        def fake_executor(cmd, role):
+            call_log.append(cmd)
+            if cmd == 'aws s3 ls':
+                return '❌ 只能執行 aws CLI 命令'
+            return 'should not run'
+
+        result = execute_command('aws s3 ls && aws sts get-caller-identity',
+                                 _executor=fake_executor)
+        assert len(call_log) == 1
+        assert 'should not run' not in result
+
+    def test_execute_chain_middle_fails(self, app_module):
+        """中間命令失敗 → 後續不執行"""
+        from commands import execute_command
+
+        call_log = []
+
+        def fake_executor(cmd, role):
+            call_log.append(cmd)
+            if 'middle' in cmd:
+                return 'middle failed\n\n(exit code: 2)'
+            return 'ok'
+
+        result = execute_command(
+            'aws s3 ls && aws middle fail && aws sts get-caller-identity',
+            _executor=fake_executor
+        )
+        assert call_log == ['aws s3 ls', 'aws middle fail']
+        assert 'exit code: 2' in result
+
+    def test_execute_chain_role_passed_to_executor(self, app_module):
+        """assume_role_arn 被正確傳遞給每個子命令執行器"""
+        from commands import execute_command
+
+        role_log = []
+
+        def fake_executor(cmd, role):
+            role_log.append(role)
+            return 'ok'
+
+        execute_command(
+            'aws s3 ls && aws sts get-caller-identity',
+            assume_role_arn='arn:aws:iam::123:role/Test',
+            _executor=fake_executor
+        )
+        assert all(r == 'arn:aws:iam::123:role/Test' for r in role_log)
+        assert len(role_log) == 2
+
+    def test_execute_empty_command(self, app_module):
+        """空命令 → 回傳錯誤"""
+        from commands import execute_command
+        result = execute_command('')
+        assert '只能執行 aws CLI 命令' in result
+
+    # --- B-style tests using mock patch ---
+
+    def test_single_command_non_aws_rejected(self, app_module):
+        """Non-aws single command still rejected."""
+        result = app_module.execute_command('ls -la')
+        assert '只能執行 aws CLI 命令' in result
+
+    def test_chain_first_cmd_non_aws_rejected(self, app_module):
+        """If first sub-command is not aws, it is rejected."""
+        result = app_module.execute_command('ls && aws s3 ls')
+        assert '只能執行 aws CLI 命令' in result
+
+    def test_chain_second_cmd_non_aws_skipped_on_first_failure(self, app_module):
+        """Chain stops at first failure; second command not run."""
+        import commands as cmd_mod
+
+        call_log = []
+
+        def mock_execute_locked(command, assume_role_arn=None):
+            call_log.append(command)
+            if command.strip().startswith('aws iam create-user'):
+                return '❌ 只能執行 aws CLI 命令'
+            return 'success output'
+
+        with patch.object(cmd_mod, '_execute_locked', side_effect=mock_execute_locked):
+            result = cmd_mod.execute_command('aws iam create-user --user-name test && aws s3 ls')
+
+        assert len(call_log) == 1
+        assert 'aws iam create-user' in call_log[0]
+        assert '❌' in result
+
+    def test_chain_all_succeed_outputs_concatenated(self, app_module):
+        """When all sub-commands succeed, outputs are concatenated."""
+        import commands as cmd_mod
+
+        outputs = {
+            'aws s3 ls': 'bucket-list-output',
+            'aws sts get-caller-identity': '{"Account":"123456789012"}',
+        }
+
+        def mock_execute_locked(command, assume_role_arn=None):
+            return outputs.get(command.strip(), '✅ 命令執行成功（無輸出）')
+
+        with patch.object(cmd_mod, '_execute_locked', side_effect=mock_execute_locked):
+            result = cmd_mod.execute_command('aws s3 ls && aws sts get-caller-identity')
+
+        assert 'bucket-list-output' in result
+        assert '{"Account":"123456789012"}' in result
+
+    def test_chain_stops_at_first_failure(self, app_module):
+        """Chain stops executing after first failure (shell && semantics)."""
+        import commands as cmd_mod
+
+        call_log = []
+
+        def mock_execute_locked(command, assume_role_arn=None):
+            call_log.append(command.strip())
+            if 'failing-cmd' in command:
+                return 'An error occurred (AccessDenied)\n\n(exit code: 255)'
+            return 'success'
+
+        with patch.object(cmd_mod, '_execute_locked', side_effect=mock_execute_locked):
+            result = cmd_mod.execute_command(
+                'aws s3 ls && aws failing-cmd && aws sts get-caller-identity'
+            )
+
+        assert len(call_log) == 2
+        assert 'aws s3 ls' in call_log[0]
+        assert 'aws failing-cmd' in call_log[1]
+
+    def test_single_command_unchanged_behaviour(self, app_module):
+        """Single command (no &&) follows exactly the same path as before."""
+        import commands as cmd_mod
+
+        def mock_execute_locked(command, assume_role_arn=None):
+            return 'single-cmd-output'
+
+        with patch.object(cmd_mod, '_execute_locked', side_effect=mock_execute_locked):
+            result = cmd_mod.execute_command('aws s3 ls')
+
+        assert result == 'single-cmd-output'
+
+
+# ============================================================================
+# sprint7-001: _is_failed_output 工具函式測試 (from Approach C)
+# ============================================================================
+
+
+class TestIsFailedOutput:
+    """_is_failed_output — 失敗偵測邏輯"""
+
+    def test_success_output_not_failed(self, app_module):
+        from commands import _is_failed_output
+        assert _is_failed_output('some normal output') is False
+        assert _is_failed_output('✅ 命令執行成功（無輸出）') is False
+
+    def test_exit_code_nonzero_is_failed(self, app_module):
+        from commands import _is_failed_output
+        assert _is_failed_output('error msg\n\n(exit code: 1)') is True
+        assert _is_failed_output('err\n\n(exit code: 255)') is True
+
+    def test_exit_code_zero_not_failed(self, app_module):
+        from commands import _is_failed_output
+        assert _is_failed_output('output\n\n(exit code: 0)') is False
+
+    def test_error_prefix_is_failed(self, app_module):
+        from commands import _is_failed_output
+        assert _is_failed_output('❌ 只能執行 aws CLI 命令') is True
+        assert _is_failed_output('❌ awscli 模組未安裝') is True
+
+    def test_empty_string_not_failed(self, app_module):
+        from commands import _is_failed_output
+        assert _is_failed_output('') is False
+
+    def test_usage_error_is_failed(self, app_module):
+        from commands import _is_failed_output
+        assert _is_failed_output('usage: aws [options] <command>') is True
+
+
+# ============================================================================
 # Cross-Account Upload Tests
 # ============================================================================

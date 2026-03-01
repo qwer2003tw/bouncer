@@ -17,7 +17,7 @@ from typing import Optional
 
 
 from utils import mcp_result, mcp_error, generate_request_id, log_decision, generate_display_summary
-from commands import get_block_reason, is_auto_approve, execute_command
+from commands import get_block_reason, is_auto_approve, execute_command, _split_chain
 from accounts import (
     init_default_account, get_account, list_accounts,
     validate_account_id,
@@ -826,6 +826,90 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
 
 
 # =============================================================================
+# Chain Risk Pre-Check
+# =============================================================================
+
+def _check_chain_risks(ctx: ExecuteContext) -> Optional[dict]:
+    """Pre-validate all sub-commands in a && chain before execution.
+
+    Each sub-command is risk-checked individually (blocked / compliance).
+    If any sub-command fails a risk check, the entire chain is rejected
+    and the problematic sub-command is identified in the response.
+
+    Returns None when all sub-commands pass (chain may proceed), or an
+    MCP result/error dict when the chain should be aborted.
+    """
+    sub_cmds = _split_chain(ctx.command)
+    if len(sub_cmds) <= 1:
+        return None  # single command — normal pipeline handles it
+
+    for sub_cmd in sub_cmds:
+        sub_cmd = sub_cmd.strip()
+        if not sub_cmd:
+            continue
+
+        # Layer 0: compliance check per sub-command
+        try:
+            from compliance_checker import check_compliance
+            is_compliant, violation = check_compliance(sub_cmd)
+            if not is_compliant:
+                logger.warning(f"[CHAIN] Compliance violation in sub-command: {sub_cmd[:100]}")
+                emit_metric('Bouncer', 'BlockedCommand', 1, dimensions={'Reason': 'chain_compliance'})
+                return mcp_result(ctx.req_id, {
+                    'content': [{
+                        'type': 'text',
+                        'text': json.dumps({
+                            'status': 'compliance_violation',
+                            'rule_id': violation.rule_id,
+                            'rule_name': violation.rule_name,
+                            'description': violation.description,
+                            'remediation': violation.remediation,
+                            'command': ctx.command[:200],
+                            'failed_sub_command': sub_cmd[:200],
+                        })
+                    }],
+                    'isError': True
+                })
+        except ImportError:
+            pass
+
+        # Layer 1: blocked check per sub-command
+        block_reason = get_block_reason(sub_cmd)
+        if block_reason:
+            logger.warning(f"[CHAIN] Blocked sub-command: {sub_cmd[:100]}")
+            send_blocked_notification(sub_cmd, block_reason, ctx.source)
+            emit_metric('Bouncer', 'BlockedCommand', 1, dimensions={'Reason': 'chain_blocked'})
+            log_decision(
+                table=table,
+                request_id=generate_request_id(ctx.command),
+                command=ctx.command,
+                reason=ctx.reason,
+                source=ctx.source,
+                account_id=ctx.account_id,
+                decision_type='blocked',
+                risk_score=ctx.smart_decision.final_score if ctx.smart_decision else None,
+                risk_category=_safe_risk_category(ctx.smart_decision),
+                risk_factors=_safe_risk_factors(ctx.smart_decision),
+            )
+            return mcp_result(ctx.req_id, {
+                'content': [{
+                    'type': 'text',
+                    'text': json.dumps({
+                        'status': 'blocked',
+                        'error': '串接命令中有子命令被安全規則封鎖',
+                        'block_reason': block_reason,
+                        'command': ctx.command[:200],
+                        'failed_sub_command': sub_cmd[:200],
+                        'suggestion': '如果需要執行此操作，請聯繫管理員或使用替代方案',
+                    })
+                }],
+                'isError': True
+            })
+
+    return None  # all sub-commands passed
+
+
+# =============================================================================
 # Public Entry Point
 # =============================================================================
 
@@ -841,6 +925,12 @@ def mcp_tool_execute(req_id: str, arguments: dict) -> dict:
 
     # Phase 2.5: Template scan — escalate to MANUAL on HIGH/CRITICAL hits
     _scan_template(ctx)
+
+    # Phase 2.6: Chain risk pre-check — validate each sub-command individually
+    # when command contains && (reject entire chain if any sub-command is blocked)
+    chain_check = _check_chain_risks(ctx)
+    if chain_check is not None:
+        return chain_check
 
     # Phase 3: Pipeline — first non-None result wins
     # NOTE: if template_scan says escalate, skip auto_approve and trust layers

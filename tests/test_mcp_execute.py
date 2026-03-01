@@ -1958,3 +1958,216 @@ class TestMCPShadowLogging:
             actual_decision='auto_approve',
         )
         # No assertion needed — just verify it doesn't raise
+
+
+# ============================================================================
+# sprint7-001: Chain Risk Check Tests (merged B + C)
+# ============================================================================
+
+
+def _make_execute_event(command: str, **kwargs) -> dict:
+    """Helper to create a bouncer_execute event."""
+    args = {
+        'command': command,
+        'trust_scope': 'test-session',
+        'reason': 'sprint7 test',
+        'source': 'test-bot',
+    }
+    args.update(kwargs)
+    return {
+        'rawPath': '/mcp',
+        'headers': {'x-approval-secret': 'test-secret'},
+        'body': json.dumps({
+            'jsonrpc': '2.0',
+            'id': 'chain-test',
+            'method': 'tools/call',
+            'params': {'name': 'bouncer_execute', 'arguments': args},
+        }),
+        'requestContext': {'http': {'method': 'POST'}},
+    }
+
+
+class TestChainRiskChecks:
+    """Per-subcommand risk checks for && chained commands in mcp_execute."""
+
+    def test_chain_blocked_sub_command_rejected(self, app_module):
+        """Chain containing a blocked sub-command is rejected entirely."""
+        # aws iam delete-user is in BLOCKED_PATTERNS
+        event = _make_execute_event('aws s3 ls && aws iam delete-user --user-name test')
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'blocked'
+        # The failed sub-command should be identified
+        assert 'iam delete-user' in content.get('failed_sub_command', '')
+
+    def test_chain_all_safe_proceeds(self, app_module):
+        """Chain of two safe commands proceeds to auto_approve or pending_approval."""
+        import mcp_execute
+        with patch.object(mcp_execute, 'execute_command', return_value='output1\noutput2'):
+            event = _make_execute_event('aws s3 ls && aws sts get-caller-identity')
+            result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        # Both are in auto-approve list → should auto_approve
+        assert content['status'] == 'auto_approved'
+
+    def test_chain_blocked_first_cmd_rejected(self, app_module):
+        """Chain where first sub-command is blocked is rejected."""
+        event = _make_execute_event('aws sts assume-role --role-arn arn:x && aws s3 ls')
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'blocked'
+
+    def test_single_command_chain_check_passthrough(self, app_module):
+        """Single command (no &&) bypasses chain check, processed normally."""
+        import mcp_execute
+        with patch.object(mcp_execute, 'execute_command', return_value='{}'):
+            event = _make_execute_event('aws sts get-caller-identity')
+            result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'auto_approved'
+
+    def test_quoted_ampersand_not_split_for_risk_check(self, app_module):
+        """Quoted && is treated as single command — no chain splitting."""
+        import mcp_execute
+        with patch.object(mcp_execute, 'execute_command', return_value='log events'):
+            event = _make_execute_event(
+                'aws logs filter-log-events --log-group-name /app '
+                '--filter-pattern "foo && bar"'
+            )
+            result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        # Should not be blocked (single command, quoted &&)
+        assert content['status'] != 'blocked'
+
+    def test_chain_risk_check_identifies_failed_sub_command(self, app_module):
+        """Blocked chain response includes 'failed_sub_command' field."""
+        event = _make_execute_event(
+            'aws ec2 describe-instances && aws iam create-access-key --user-name x'
+        )
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'blocked'
+        assert 'failed_sub_command' in content
+        assert 'create-access-key' in content['failed_sub_command']
+
+    def test_chain_risk_check_returns_full_command_in_response(self, app_module):
+        """Blocked chain response includes the full original command."""
+        full_cmd = 'aws s3 ls && aws iam delete-user --user-name test'
+        event = _make_execute_event(full_cmd)
+        result = app_module.lambda_handler(event, None)
+        body = json.loads(result['body'])
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['status'] == 'blocked'
+        assert 'command' in content
+
+    # --- C-style tests directly calling _check_chain_risks ---
+
+    def test_chain_risk_blocked_direct_ctx(self, app_module, mock_dynamodb):
+        """直接測試 _check_chain_risks: blocked sub-command → 回傳 blocked"""
+        import mcp_execute
+
+        chained = 'aws s3 ls && aws iam delete-user --user-name test'
+
+        with patch.object(mcp_execute, 'send_blocked_notification'), \
+             patch.object(mcp_execute, 'emit_metric'), \
+             patch.object(mcp_execute, 'log_decision'):
+
+            ctx = mcp_execute.ExecuteContext(
+                req_id='test-chain-001',
+                command=chained,
+                reason='test',
+                source='test-bot',
+                trust_scope='test-session',
+                context=None,
+                account_id='123456789012',
+                account_name='Test',
+                assume_role=None,
+                timeout=30,
+                sync_mode=False,
+            )
+
+            result = mcp_execute._check_chain_risks(ctx)
+            assert result is not None
+            body = json.loads(result['body'])
+            content = json.loads(body['result']['content'][0]['text'])
+            assert content['status'] == 'blocked'
+
+    def test_chain_risk_all_safe_returns_none(self, app_module, mock_dynamodb):
+        """直接測試 _check_chain_risks: 全部安全 → 回傳 None"""
+        import mcp_execute
+
+        chained = 'aws s3 ls && aws sts get-caller-identity'
+
+        ctx = mcp_execute.ExecuteContext(
+            req_id='test-chain-002',
+            command=chained,
+            reason='test',
+            source='test-bot',
+            trust_scope='test-session',
+            context=None,
+            account_id='123456789012',
+            account_name='Test',
+            assume_role=None,
+            timeout=30,
+            sync_mode=False,
+        )
+
+        result = mcp_execute._check_chain_risks(ctx)
+        assert result is None
+
+    def test_chain_risk_single_cmd_passthrough_direct(self, app_module):
+        """單一命令 → _check_chain_risks 回傳 None"""
+        import mcp_execute
+
+        ctx = mcp_execute.ExecuteContext(
+            req_id='test-chain-003',
+            command='aws s3 ls',
+            reason='test',
+            source='test-bot',
+            trust_scope='test-session',
+            context=None,
+            account_id='123456789012',
+            account_name='Test',
+            assume_role=None,
+            timeout=30,
+            sync_mode=False,
+        )
+
+        result = mcp_execute._check_chain_risks(ctx)
+        assert result is None
+
+    def test_chain_risk_first_cmd_blocked_direct(self, app_module, mock_dynamodb):
+        """串接命令中第一個命令就被封鎖"""
+        import mcp_execute
+
+        chained = 'aws iam create-user --user-name hacker && aws s3 ls'
+
+        with patch.object(mcp_execute, 'send_blocked_notification'), \
+             patch.object(mcp_execute, 'emit_metric'), \
+             patch.object(mcp_execute, 'log_decision'):
+
+            ctx = mcp_execute.ExecuteContext(
+                req_id='test-chain-004',
+                command=chained,
+                reason='test',
+                source='test-bot',
+                trust_scope='test-session',
+                context=None,
+                account_id='123456789012',
+                account_name='Test',
+                assume_role=None,
+                timeout=30,
+                sync_mode=False,
+            )
+
+            result = mcp_execute._check_chain_risks(ctx)
+            assert result is not None
+            body = json.loads(result['body'])
+            content = json.loads(body['result']['content'][0]['text'])
+            assert content['status'] == 'blocked'

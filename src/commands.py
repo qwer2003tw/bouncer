@@ -6,7 +6,9 @@ import os
 import re
 import sys
 import threading
+from dataclasses import dataclass, field
 from io import StringIO
+from typing import Callable, List, Optional
 
 import boto3
 
@@ -22,17 +24,173 @@ __all__ = [
     'is_auto_approve',
     'execute_command',
     'aws_cli_split',
+    '_split_chain',
+    '_is_failed_output',
     '_normalize_whitespace',
     '_has_dangerous_flag',
     '_DANGEROUS_FLAG_MAP',
     'check_lambda_env_update',
     'LAMBDA_ENV_WARN_MSG',
+    'CommandChainResult',
+    'SubCommandResult',
 ]
+
+
+# ---------------------------------------------------------------------------
+# Command Chain Types
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SubCommandResult:
+    """Execution result for a single sub-command in a && chain."""
+    command: str
+    output: str
+    exit_code: int  # 0 = success, non-zero = failure (inferred from output)
+
+    @property
+    def success(self) -> bool:
+        return self.exit_code == 0
+
+
+@dataclass
+class CommandChainResult:
+    """Aggregated result for a && chain execution.
+
+    Attributes:
+        results:   per-sub-command results in execution order
+        stopped_at: index of the first failed sub-command (None = all succeeded)
+    """
+    results: List[SubCommandResult] = field(default_factory=list)
+    stopped_at: Optional[int] = None
+
+    @property
+    def all_succeeded(self) -> bool:
+        return self.stopped_at is None
+
+    @property
+    def combined_output(self) -> str:
+        """Concatenate outputs of executed sub-commands."""
+        parts = []
+        for r in self.results:
+            parts.append(r.output)
+        return '\n'.join(p for p in parts if p)
+
+    @property
+    def sub_commands(self) -> List[str]:
+        return [r.command for r in self.results]
 
 
 def _normalize_whitespace(command: str) -> str:
     """正規化命令中的空白（多空格 → 單空格、strip 前後空白）"""
     return re.sub(r'\s+', ' ', command).strip()
+
+
+def _split_chain(command: str) -> List[str]:
+    """Split a command string on unquoted ``&&`` operators.
+
+    Understands shell-style quoting (single/double quotes, backticks) and
+    bracket nesting (``{}``, ``[]``, ``()``) so that ``&&`` inside quoted
+    strings or JSON/JMESPath structures is NOT treated as a separator.
+
+    Empty segments (e.g. ``cmd1 && && cmd2``) are silently dropped.
+
+    Examples
+    --------
+    >>> _split_chain('aws s3 ls && aws sts get-caller-identity')
+    ['aws s3 ls', 'aws sts get-caller-identity']
+
+    >>> _split_chain('aws logs filter-log-events --filter-pattern "foo && bar"')
+    ['aws logs filter-log-events --filter-pattern "foo && bar"']
+
+    >>> _split_chain('aws s3 ls')
+    ['aws s3 ls']
+
+    >>> _split_chain('')
+    []
+
+    Returns
+    -------
+    list[str]
+        Non-empty sub-command strings, each stripped of leading/trailing
+        whitespace.  An empty/whitespace-only input returns ``[]``.
+    """
+    command = command.strip()
+    if not command:
+        return []
+
+    parts: List[str] = []
+    current: List[str] = []
+    i = 0
+    n = len(command)
+
+    OPEN_BRACKETS = {'(', '[', '{'}
+    CLOSE_MAP = {'(': ')', '[': ']', '{': '}'}
+    bracket_stack: List[str] = []
+
+    while i < n:
+        c = command[i]
+
+        # --- Quoted string: consume everything up to the matching quote ---
+        if c in ('"', "'") and not bracket_stack:
+            quote = c
+            current.append(c)
+            i += 1
+            while i < n:
+                sc = command[i]
+                current.append(sc)
+                if sc == '\\' and i + 1 < n:
+                    current.append(command[i + 1])
+                    i += 2
+                    continue
+                if sc == quote:
+                    i += 1
+                    break
+                i += 1
+            continue
+
+        # --- Backtick: consume until matching backtick (JMESPath literals) ---
+        if c == '`' and not bracket_stack:
+            current.append(c)
+            i += 1
+            while i < n and command[i] != '`':
+                current.append(command[i])
+                i += 1
+            if i < n:
+                current.append(command[i])
+                i += 1
+            continue
+
+        # --- Bracket open: push onto stack, no && splitting inside ---
+        if c in OPEN_BRACKETS:
+            bracket_stack.append(c)
+            current.append(c)
+            i += 1
+            continue
+
+        # --- Bracket close ---
+        if bracket_stack and c == CLOSE_MAP.get(bracket_stack[-1], ''):
+            bracket_stack.pop()
+            current.append(c)
+            i += 1
+            continue
+
+        # --- && operator (only when not nested) ---
+        if c == '&' and not bracket_stack and i + 1 < n and command[i + 1] == '&':
+            seg = ''.join(current).strip()
+            if seg:
+                parts.append(seg)
+            current = []
+            i += 2
+            continue
+
+        # --- Regular character ---
+        current.append(c)
+        i += 1
+
+    seg = ''.join(current).strip()
+    if seg:
+        parts.append(seg)
+    return parts
 
 
 def is_blocked(command: str) -> bool:
@@ -354,19 +512,108 @@ def aws_cli_split(command: str) -> list:
     return tokens
 
 
-def execute_command(command: str, assume_role_arn: str = None) -> str:
-    """執行 AWS CLI 命令（thread-safe via _execute_lock）
+def execute_command(command: str, assume_role_arn: str = None,
+                    _executor: Optional[Callable] = None) -> str:
+    """執行 AWS CLI 命令，支援 && 串接（thread-safe via _execute_lock）
 
     Args:
-        command: AWS CLI 命令
+        command: AWS CLI 命令（可包含 && 串接多個子命令）
         assume_role_arn: 可選，要 assume 的 role ARN
+        _executor: 可選，用於測試的子命令執行器
+                   callable(sub_cmd, assume_role_arn) -> str
+                   預設為 None（使用 _execute_locked）
 
     Returns:
-        命令輸出（成功或錯誤訊息）
+        命令輸出（成功或錯誤訊息）。
+        對於 && 串接命令，遵守 shell && 語意：停在第一個失敗的子命令。
     """
+    sub_cmds = _split_chain(command)
 
-    with _execute_lock:
-        return _execute_locked(command, assume_role_arn)
+    # 沒有任何有效子命令
+    if not sub_cmds:
+        return '❌ 只能執行 aws CLI 命令'
+
+    # Fast path: single command, behaviour unchanged
+    if len(sub_cmds) == 1:
+        with _execute_lock:
+            if _executor is not None:
+                return _executor(sub_cmds[0], assume_role_arn)
+            return _execute_locked(sub_cmds[0], assume_role_arn)
+
+    # Multi-command chain: execute sequentially, stop at first failure
+    chain_result = _execute_chain(sub_cmds, assume_role_arn, _executor)
+    return chain_result.combined_output if chain_result.all_succeeded else _chain_failure_output(chain_result)
+
+
+def _is_failed_output(output: str) -> bool:
+    """判斷子命令輸出是否代表執行失敗。
+
+    失敗判斷：
+    - 以 ❌ 開頭（命令驗證失敗、awscli 未安裝等）
+    - 包含 "(exit code:" 且 exit code 不是 0
+      （_execute_locked 在失敗時加上 "(exit code: N)" 尾綴）
+    - 輸出以 'usage:' 開頭（CLI usage error）
+    """
+    if output.startswith('❌'):
+        return True
+    if output.strip().startswith('usage:'):
+        return True
+    m = re.search(r'\(exit code:\s*(\d+)\)', output)
+    if m and m.group(1) != '0':
+        return True
+    return False
+
+
+def _chain_failure_output(chain_result: CommandChainResult) -> str:
+    """Format output for a failed chain execution."""
+    lines = []
+    for idx, sub in enumerate(chain_result.results):
+        if idx < chain_result.stopped_at:
+            lines.append(sub.output)
+        else:
+            # The failing command
+            lines.append(sub.output)
+            if idx + 1 < len(chain_result.sub_commands):
+                remaining = chain_result.sub_commands[idx + 1:]
+                skipped = ' && '.join(remaining)
+                lines.append(f'\n⚠️ 子命令失敗，跳過後續命令：{skipped}')
+            break
+    return '\n'.join(p for p in lines if p)
+
+
+def _execute_chain(sub_cmds: List[str], assume_role_arn: Optional[str],
+                   _executor: Optional[Callable] = None) -> CommandChainResult:
+    """Execute a list of sub-commands sequentially with && semantics."""
+    chain = CommandChainResult()
+
+    for idx, cmd in enumerate(sub_cmds):
+        with _execute_lock:
+            if _executor is not None:
+                output = _executor(cmd, assume_role_arn)
+            else:
+                output = _execute_locked(cmd, assume_role_arn)
+
+        failed = _is_failed_output(output)
+        exit_code = 1 if failed else 0
+
+        chain.results.append(SubCommandResult(
+            command=cmd,
+            output=output,
+            exit_code=exit_code,
+        ))
+
+        if failed:
+            chain.stopped_at = idx
+            # Append placeholder results for skipped commands so callers know
+            for remaining_cmd in sub_cmds[idx + 1:]:
+                chain.results.append(SubCommandResult(
+                    command=remaining_cmd,
+                    output='',   # not executed
+                    exit_code=-1,  # skipped sentinel
+                ))
+            break
+
+    return chain
 
 
 def _execute_locked(command: str, assume_role_arn: str = None) -> str:
