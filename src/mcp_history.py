@@ -201,6 +201,20 @@ def _query_requests_table(
                 kwargs["ExclusiveStartKey"] = exclusive_start_key
 
             resp = table.query(**kwargs)
+            # source-created-index has INCLUDE projection (only status).
+            # Fetch full items via batch_get_item for any that match.
+            raw_items = resp.get("Items", [])
+            if raw_items:
+                keys = [{"request_id": item["request_id"]} for item in raw_items]
+                batch_resp = table.meta.client.batch_get_item(
+                    RequestItems={
+                        table.name: {"Keys": keys}
+                    }
+                )
+                full_items = batch_resp.get("Responses", {}).get(table.name, [])
+                # Re-sort by created_at DESC (batch_get_item doesn't preserve order)
+                full_items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+                resp = {**resp, "Items": full_items, "Count": len(full_items)}
 
         else:
             # No GSI-suitable filter — fallback to Scan with warning
