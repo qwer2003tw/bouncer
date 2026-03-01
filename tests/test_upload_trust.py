@@ -616,7 +616,7 @@ class TestBatchUploadCallback:
         )
         # Verify trust session was created
         from trust import get_trust_session
-        session = get_trust_session('test-scope', '111111111111')
+        session = get_trust_session('test-scope', '111111111111', source='test-bot')
         assert session is not None
         assert int(session.get('max_uploads', 0)) > 0
 

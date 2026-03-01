@@ -283,9 +283,12 @@ class TestHandleStatsCommand:
     """telegram_commands.handle_stats_command"""
 
     def _make_mock_table(self, items):
-        """Create a minimal mock DynamoDB table for stats scan"""
+        """Create a minimal mock DynamoDB table for stats scan/query"""
         mock_table = MagicMock()
         mock_table.scan.return_value = {'Items': items, 'ScannedCount': len(items)}
+        # Sprint 7 migrated stats to GSI query; mock both for backward compat
+        mock_table.query.return_value = {'Items': items, 'Count': len(items), 'ScannedCount': len(items)}
+        mock_table.meta.client.batch_get_item.return_value = {'Responses': {mock_table.name: items}}
         return mock_table
 
     def test_stats_empty_shows_no_records(self):

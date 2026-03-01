@@ -398,11 +398,13 @@ class TestTelegramCommandsGSI:
     def test_pending_command_uses_gsi_query(self, app_module):
         """/pending 使用 status-created-index GSI Query，不走 Scan"""
         import db as _db
+        # Re-fetch table reference after conftest may have reset _db.table
         table = _db.table
 
         with patch.object(table, "query", wraps=table.query) as mock_query, \
              patch.object(table, "scan") as mock_scan, \
-             patch("telegram_commands.send_telegram_message_to"):
+             patch("telegram_commands.send_telegram_message_to"), \
+             patch("telegram_commands._get_table", return_value=table):
             app_module.handle_pending_command("12345")
 
         mock_scan.assert_not_called()
@@ -416,11 +418,13 @@ class TestTelegramCommandsGSI:
         """/stats 使用 status-created-index GSI Query，不走 Scan"""
         import db as _db
         import telegram_commands
+        # Re-fetch table reference after conftest may have reset _db.table
         table = _db.table
 
         with patch.object(table, "query", wraps=table.query) as mock_query, \
              patch.object(table, "scan") as mock_scan, \
-             patch("telegram_commands.send_telegram_message_to"):
+             patch("telegram_commands.send_telegram_message_to"), \
+             patch("telegram_commands._get_table", return_value=table):
             telegram_commands.handle_stats_command("12345", hours=24)
 
         mock_scan.assert_not_called()

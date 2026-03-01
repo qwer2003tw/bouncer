@@ -630,6 +630,7 @@ class TestStatsTelegramCommand:
 
         mock_table = MagicMock()
         mock_table.scan.return_value = {'Items': [], 'ScannedCount': 0}
+        mock_table.query.return_value = {'Items': [], 'Count': 0, 'ScannedCount': 0}
 
         import db
         db.table = mock_table
@@ -649,6 +650,7 @@ class TestStatsTelegramCommand:
 
         mock_table = MagicMock()
         mock_table.scan.return_value = {'Items': [], 'ScannedCount': 0}
+        mock_table.query.return_value = {'Items': [], 'Count': 0, 'ScannedCount': 0}
 
         with patch.object(tc, '_get_table', return_value=mock_table):
             with patch.object(tc, 'send_telegram_message_to') as mock_send:
@@ -671,6 +673,8 @@ class TestStatsTelegramCommand:
 
         mock_table = MagicMock()
         mock_table.scan.return_value = {'Items': items, 'ScannedCount': 3}
+        mock_table.query.return_value = {'Items': items, 'Count': len(items), 'ScannedCount': len(items)}
+        mock_table.meta.client.batch_get_item.return_value = {'Responses': {mock_table.name: items}}
 
         with patch.object(tc, '_get_table', return_value=mock_table):
             with patch.object(tc, 'send_telegram_message_to') as mock_send:
@@ -694,6 +698,8 @@ class TestStatsTelegramCommand:
 
         mock_table = MagicMock()
         mock_table.scan.return_value = {'Items': items, 'ScannedCount': 3}
+        mock_table.query.return_value = {'Items': items, 'Count': len(items), 'ScannedCount': len(items)}
+        mock_table.meta.client.batch_get_item.return_value = {'Responses': {mock_table.name: items}}
 
         with patch.object(tc, '_get_table', return_value=mock_table):
             with patch.object(tc, 'send_telegram_message_to') as mock_send:
@@ -708,6 +714,7 @@ class TestStatsTelegramCommand:
 
         mock_table = MagicMock()
         mock_table.scan.return_value = {'Items': [], 'ScannedCount': 0}
+        mock_table.query.return_value = {'Items': [], 'Count': 0, 'ScannedCount': 0}
 
         with patch.object(tc, '_get_table', return_value=mock_table):
             with patch.object(tc, 'send_telegram_message_to') as mock_send:
@@ -722,6 +729,7 @@ class TestStatsTelegramCommand:
 
         mock_table = MagicMock()
         mock_table.scan.return_value = {'Items': [], 'ScannedCount': 0}
+        mock_table.query.return_value = {'Items': [], 'Count': 0, 'ScannedCount': 0}
 
         with patch.object(tc, '_get_table', return_value=mock_table):
             with patch.object(tc, 'send_telegram_message_to'):
@@ -741,6 +749,8 @@ class TestStatsTelegramCommand:
 
         mock_table = MagicMock()
         mock_table.scan.return_value = {'Items': items, 'ScannedCount': 2}
+        mock_table.query.return_value = {'Items': items, 'Count': len(items), 'ScannedCount': len(items)}
+        mock_table.meta.client.batch_get_item.return_value = {'Responses': {mock_table.name: items}}
 
         with patch.object(tc, '_get_table', return_value=mock_table):
             with patch.object(tc, 'send_telegram_message_to') as mock_send:
