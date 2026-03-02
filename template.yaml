@@ -280,7 +280,10 @@ Resources:
       Description: Bouncer v3.0.0 - AWS 命令審批執行
       AutoPublishAlias: live
       DeploymentPreference:
-        Type: AllAtOnce
+        Type: Canary10Percent5Minutes
+        Alarms:
+          - !Ref HighErrorAlarm
+          - !Ref ApiGateway5xxAlarm
       DeadLetterQueue:
         Type: SQS
         TargetArn: !GetAtt ApprovalFunctionDLQ.Arn
