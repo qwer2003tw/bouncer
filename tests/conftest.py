@@ -186,6 +186,18 @@ def _cleanup_tables(request):
         _accounts._accounts_table = mock_dynamodb.Table('bouncer-accounts')
     except Exception:
         pass
+    try:
+        import mcp_upload as _mcp_upload
+        # mcp_upload uses `from db import table` — re-inject after db reset
+        _mcp_upload.table = mock_dynamodb.Table('clawdbot-approval-requests')
+    except Exception:
+        pass
+    try:
+        import mcp_execute as _mcp_execute
+        if hasattr(_mcp_execute, 'table'):
+            _mcp_execute.table = mock_dynamodb.Table('clawdbot-approval-requests')
+    except Exception:
+        pass
     yield
     for table_name, key_attrs in _ALL_TABLE_KEYS.items():
         try:
