@@ -140,3 +140,13 @@ from constants import (  # noqa: F401
     GRANT_SESSION_ENABLED,
     AUTO_APPROVE_PREFIXES, BLOCKED_PATTERNS,
 )
+
+# --- Deploy Frontend (sprint9-003) ---
+from mcp_deploy_frontend import (  # noqa: F401
+    mcp_tool_deploy_frontend,
+    _get_cache_control,
+    _get_content_type,
+    _has_blocked_extension,
+    _validate_files,
+    _PROJECT_CONFIG,
+)

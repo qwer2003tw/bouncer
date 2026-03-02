@@ -49,6 +49,7 @@ from mcp_admin import (
     mcp_tool_list_pending, mcp_tool_remove_account, mcp_tool_list_safelist,
 )
 from mcp_history import mcp_tool_history, mcp_tool_stats
+from mcp_deploy_frontend import mcp_tool_deploy_frontend
 from callbacks import (
     handle_command_callback, handle_account_add_callback, handle_account_remove_callback,
     handle_deploy_callback, handle_upload_callback, handle_upload_batch_callback,
@@ -501,6 +502,7 @@ TOOL_HANDLERS = {
     'bouncer_revoke_grant': mcp_tool_revoke_grant,
     'bouncer_history': mcp_tool_history,
     'bouncer_stats': mcp_tool_stats,
+    'bouncer_deploy_frontend': mcp_tool_deploy_frontend,
 }
 
 # Deployer handlers are lazy-imported to avoid cold-start cost
