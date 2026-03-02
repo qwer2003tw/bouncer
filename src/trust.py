@@ -37,6 +37,7 @@ __all__ = [
     'is_trust_excluded',
     'should_trust_approve',
     'should_trust_approve_upload',
+    'track_command_executed',
 ]
 
 # DynamoDB - via db.py (lazy init)
@@ -390,6 +391,42 @@ def should_trust_approve(
         return False, None, "Trust session expired"
 
     return True, session, f"Trust session active ({remaining}s remaining)"
+
+
+# ============================================================================
+# Command tracking (sprint9-007-phase-a)
+# ============================================================================
+
+def track_command_executed(trust_id: str, command: str, success: bool) -> None:
+    """Append a command summary entry to the trust session's commands_executed list.
+
+    Uses DynamoDB list_append with if_not_exists to initialise the list on first
+    write.  This is fire-and-forget: errors are logged but never propagated.
+
+    Args:
+        trust_id: Trust session DDB primary key (request_id)
+        command:  AWS CLI command string (truncated to 100 chars)
+        success:  True if command succeeded, False if it failed
+    """
+    try:
+        entry = {
+            'cmd': command[:100],
+            'ts': int(time.time()),
+            'success': success,
+        }
+        _get_table().update_item(
+            Key={'request_id': trust_id},
+            UpdateExpression=(
+                'SET commands_executed = '
+                'list_append(if_not_exists(commands_executed, :empty), :cmd)'
+            ),
+            ExpressionAttributeValues={
+                ':empty': [],
+                ':cmd': [entry],
+            },
+        )
+    except Exception as exc:
+        logger.error('track_command_executed failed for %s: %s', trust_id, exc)
 
 
 # ============================================================================

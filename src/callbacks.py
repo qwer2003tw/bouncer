@@ -12,7 +12,7 @@ import logging
 from utils import response, format_size_human, build_info_lines
 from commands import execute_command
 from paging import store_paged_output, send_remaining_pages
-from trust import create_trust_session
+from trust import create_trust_session, track_command_executed
 from telegram import escape_markdown, update_message, answer_callback
 from notifications import send_trust_auto_approve_notification
 from constants import DEFAULT_ACCOUNT_ID, RESULT_TTL, TRUST_SESSION_MAX_UPLOADS, TRUST_SESSION_MAX_COMMANDS
@@ -931,6 +931,10 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
             source=item_source,
             reason=reason,
         )
+
+        # Track command in trust session for summary (sprint9-007-phase-a)
+        is_failed = result.startswith('❌')
+        track_command_executed(trust_id, cmd, not is_failed)
 
         # Audit log
         log_decision(
