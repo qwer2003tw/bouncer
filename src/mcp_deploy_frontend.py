@@ -115,6 +115,10 @@ def _validate_files(files: list) -> Optional[str]:
         if not fname:
             return f"File #{i + 1}: filename is required"
 
+        # Path traversal prevention
+        if '..' in fname or fname.startswith('/') or fname.startswith('\\'):
+            return f"Invalid filename '{fname}': path traversal not allowed"
+
         if fname in filenames:
             return f"Duplicate filename: {fname}"
         filenames.add(fname)

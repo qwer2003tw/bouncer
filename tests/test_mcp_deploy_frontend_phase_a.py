@@ -136,6 +136,24 @@ class TestValidation:
         assert _is_error(r)
         assert "Duplicate" in body["error"]
 
+    def test_validate_files_path_traversal_rejected(self):
+        files = [
+            {"filename": "../etc/passwd", "content": _b64("malicious"), "content_type": "text/plain"},
+        ]
+        r = _call({"project": "ztp-files", "files": files, "source": "bot", "trust_scope": "ts"})
+        body = _parse(r)
+        assert _is_error(r)
+        assert "path traversal" in body["error"].lower()
+
+    def test_validate_files_absolute_path_rejected(self):
+        files = [
+            {"filename": "/etc/shadow", "content": _b64("malicious"), "content_type": "text/plain"},
+        ]
+        r = _call({"project": "ztp-files", "files": files, "source": "bot", "trust_scope": "ts"})
+        body = _parse(r)
+        assert _is_error(r)
+        assert "path traversal" in body["error"].lower()
+
 
 # ---------------------------------------------------------------------------
 # Cache-Control and Content-Type helpers

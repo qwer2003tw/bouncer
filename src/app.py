@@ -897,6 +897,12 @@ def handle_telegram_webhook(event: dict) -> dict:
         return handle_upload_callback(action, request_id, item, message_id, callback['id'], user_id)
     elif request_action == 'upload_batch':
         return handle_upload_batch_callback(action, request_id, item, message_id, callback['id'], user_id)
+    elif request_action == 'deploy_frontend':
+        # Phase B 會實作完整 handler，Phase A 先加 placeholder
+        answer_callback(callback['id'], "收到，部署中...")
+        logger.info("[DEPLOY-FRONTEND] Callback received for request_id=%s (Phase B pending)", request_id)
+        # TODO: Phase B will implement full deploy logic here
+        return response(200, {'ok': True})
     else:
         return handle_command_callback(action, request_id, item, message_id, callback['id'], user_id)
 
