@@ -17,7 +17,7 @@ from telegram import escape_markdown, update_message, answer_callback
 from notifications import send_trust_auto_approve_notification
 from constants import DEFAULT_ACCOUNT_ID, RESULT_TTL, TRUST_SESSION_MAX_UPLOADS, TRUST_SESSION_MAX_COMMANDS
 from metrics import emit_metric
-from mcp_upload import execute_upload
+from mcp_upload import execute_upload, _verify_upload
 
 
 # DynamoDB tables from db.py (no circular dependency)
@@ -704,6 +704,7 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
         date_str = _time.strftime('%Y-%m-%d')
         uploaded = []
         errors = []
+        verification_failed = []
 
         for i, fm in enumerate(files_manifest):
             fname = fm.get('filename', 'unknown')
@@ -738,15 +739,19 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
                         Body=content_bytes,
                         ContentType=fm.get('content_type', 'application/octet-stream'),
                     )
-                # Verify file exists after upload
-                try:
-                    s3.head_object(Bucket=bucket, Key=fkey)
-                except Exception as verify_err:
-                    raise Exception(f"HeadObject verification failed: {verify_err}")
+
+                # Verify file exists after upload (non-blocking)
+                vr = _verify_upload(s3, bucket, fkey, fname)
+                if not vr.verified:
+                    verification_failed.append(fname)
+                    # Non-blocking: record in verification_failed but still count as uploaded
+
                 uploaded.append({
                     'filename': fname,
-                    's3_uri': f"s3://{bucket}/{fkey}",
+                    's3_uri': vr.s3_uri,
                     'size': fm.get('size', 0),
+                    'verified': vr.verified,
+                    's3_size': vr.s3_size,
                 })
             except Exception as e:
                 errors.append({'filename': fname, 'reason': str(e)[:120]})
@@ -784,6 +789,7 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
             'uploaded_details': _json.dumps(uploaded),
             'failed_details': _json.dumps(errors),
             'total_files': total_files,
+            'verification_failed': _json.dumps(verification_failed),
         })
         emit_metric('Bouncer', 'Upload', 1, dimensions={'Status': 'approved', 'Type': 'batch'})
 

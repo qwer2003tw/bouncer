@@ -707,15 +707,13 @@ class TestBatchUploadVerification:
 
         updated = app_module.table.get_item(Key={'request_id': 'batch-verify-partial'})['Item']
         assert updated['status'] == 'approved'
-        assert updated['upload_status'] == 'partial'
-        assert int(updated['uploaded_count']) == 2
-        assert int(updated['error_count']) == 1
-
-        uploaded_files = json.loads(updated['uploaded_files'])
-        failed_files = json.loads(updated['failed_files'])
-        assert 'bad.css' in failed_files
-        assert 'good.js' in uploaded_files
-        assert 'ok.html' in uploaded_files
+        # verification failure is non-blocking; upload_status reflects S3 put success
+        assert updated['upload_status'] == 'completed'
+        # all 3 files were put/copied successfully to S3
+        assert int(updated['uploaded_count']) == 3
+        # verification_failed tracks which files failed head_object
+        verification_failed = json.loads(updated.get('verification_failed', '[]'))
+        assert 'bad.css' in verification_failed
 
     @patch('callbacks.answer_callback')
     @patch('callbacks.update_message')
@@ -759,10 +757,12 @@ class TestBatchUploadVerification:
         handle_upload_batch_callback('approve', 'batch-verify-reason', item, 12345, 'cb-r', '999')
 
         updated = app_module.table.get_item(Key={'request_id': 'batch-verify-reason'})['Item']
-        failed_details = json.loads(updated['failed_details'])
-        assert len(failed_details) == 1
-        assert failed_details[0]['filename'] == 'err.js'
-        assert 'reason' in failed_details[0]
+        # verification failure is non-blocking; not in failed_details
+        failed_details = json.loads(updated.get('failed_details', '[]'))
+        assert len(failed_details) == 0
+        # verification_failed tracks the head_object failures
+        verification_failed = json.loads(updated.get('verification_failed', '[]'))
+        assert 'err.js' in verification_failed
 
 
 # ============================================================================
