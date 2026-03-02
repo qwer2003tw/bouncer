@@ -836,6 +836,213 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
     return response(200, {'ok': True})
 
 
+# ============================================================================
+# Deploy Frontend Callback (sprint9-003 Phase B)
+# ============================================================================
+
+def handle_deploy_frontend_callback(request_id: str, action: str, item: dict, message_id: int, callback_id: str, user_id: str) -> dict:
+    """處理前端部署的審批 callback
+
+    action=approve: 從 DDB 讀 staged_files + target_info → S3 copy → CloudFront invalidation
+    action=deny:    更新 DDB status=rejected，不執行任何部署
+    """
+    import json as _json
+    import boto3
+
+    table = _get_table()
+
+    project = item.get('project', '')
+    staging_bucket = item.get('staging_bucket', '')
+    frontend_bucket = item.get('frontend_bucket', '')
+    distribution_id = item.get('distribution_id', '')
+    source = item.get('source', '')
+    reason = item.get('reason', '')
+    files_json = item.get('files', '[]')
+    file_count = int(item.get('file_count', 0))
+    total_size = int(item.get('total_size', 0))
+
+    safe_reason = escape_markdown(reason)
+    size_str = format_size_human(total_size)
+    source_line = build_info_lines(source=source)
+
+    if action == 'deny':
+        answer_callback(callback_id, '❌ 已拒絕')
+        _update_request_status(table, request_id, 'rejected', user_id)
+        update_message(
+            message_id,
+            f"❌ *已拒絕前端部署*\n\n"
+            f"📋 *請求 ID：* `{request_id}`\n"
+            f"{source_line}"
+            f"📦 *專案：* {escape_markdown(project)}\n"
+            f"📄 {file_count} 個檔案 ({size_str})\n"
+            f"💬 *原因：* {safe_reason}",
+        )
+        return response(200, {'ok': True})
+
+    # action == 'approve'
+    try:
+        files_manifest = _json.loads(files_json)
+    except Exception:
+        answer_callback(callback_id, '❌ 檔案清單解析失敗')
+        return response(500, {'error': 'Failed to parse files manifest'})
+
+    answer_callback(callback_id, '🚀 部署中...')
+    update_message(
+        message_id,
+        f"⏳ *前端部署中...*\n\n"
+        f"📋 *請求 ID：* `{request_id}`\n"
+        f"{source_line}"
+        f"📦 *專案：* {escape_markdown(project)}\n"
+        f"📄 {file_count} 個檔案 ({size_str})\n"
+        f"💬 *原因：* {safe_reason}\n\n"
+        f"進度: 0/{file_count}",
+        remove_buttons=True,
+    )
+
+    # S3 client
+    s3 = boto3.client('s3')
+
+    deployed = []
+    failed = []
+
+    for i, fm in enumerate(files_manifest):
+        filename = fm.get('filename', 'unknown')
+        staged_key = fm.get('s3_key', '')
+        content_type = fm.get('content_type', 'application/octet-stream')
+        cache_control = fm.get('cache_control', 'no-cache')
+        target_key = filename  # deploy to root of frontend bucket
+
+        try:
+            s3.copy_object(
+                CopySource={'Bucket': staging_bucket, 'Key': staged_key},
+                Bucket=frontend_bucket,
+                Key=target_key,
+                ContentType=content_type,
+                CacheControl=cache_control,
+                MetadataDirective='REPLACE',
+            )
+            deployed.append({'filename': filename, 's3_key': target_key})
+        except Exception as exc:
+            logger.error("[DEPLOY-FRONTEND] copy_object failed for %s: %s", filename, exc)
+            failed.append({'filename': filename, 'reason': str(exc)[:200]})
+
+        # Progress update every 5 files
+        if (i + 1) % 5 == 0 or i == len(files_manifest) - 1:
+            try:
+                update_message(
+                    message_id,
+                    f"⏳ *前端部署中...*\n\n"
+                    f"📋 *請求 ID：* `{request_id}`\n"
+                    f"進度: {i + 1}/{file_count}",
+                )
+            except Exception:
+                pass
+
+    success_count = len(deployed)
+    fail_count = len(failed)
+
+    if success_count == 0:
+        deploy_status = 'deploy_failed'
+    elif fail_count == 0:
+        deploy_status = 'deployed'
+    else:
+        deploy_status = 'partial_deploy'
+
+    # CloudFront invalidation
+    cf_invalidation_failed = False
+    if success_count > 0:
+        try:
+            cf = boto3.client('cloudfront')
+            cf.create_invalidation(
+                DistributionId=distribution_id,
+                InvalidationBatch={
+                    'Paths': {'Quantity': 1, 'Items': ['/*']},
+                    'CallerReference': request_id,
+                },
+            )
+        except Exception as exc:
+            logger.error("[DEPLOY-FRONTEND] CloudFront invalidation failed for dist=%s: %s", distribution_id, exc)
+            cf_invalidation_failed = True
+
+    # Update DDB
+    extra_attrs = {
+        'deploy_status': deploy_status,
+        'deployed_count': success_count,
+        'failed_count': fail_count,
+        'deployed_files': _json.dumps([d['filename'] for d in deployed]),
+        'failed_files': _json.dumps([f['filename'] for f in failed]),
+        'deployed_details': _json.dumps(deployed),
+        'failed_details': _json.dumps(failed),
+        'cf_invalidation_failed': cf_invalidation_failed,
+    }
+    _update_request_status(table, request_id, 'approved', user_id, extra_attrs=extra_attrs)
+
+    emit_metric('Bouncer', 'DeployFrontend', 1, dimensions={'Status': deploy_status, 'Project': project})
+
+    # Build result message
+    cf_warn = "\n⚠️ *CloudFront Invalidation 失敗* (S3 已完成)" if cf_invalidation_failed else ""
+    fail_line = f"\n❗ 失敗: {fail_count} 個" if fail_count > 0 else ""
+
+    if deploy_status == 'deploy_failed':
+        status_emoji = '❌'
+        title = '前端部署失敗'
+    elif deploy_status == 'partial_deploy':
+        status_emoji = '⚠️'
+        title = '前端部署部分成功'
+    else:
+        status_emoji = '✅'
+        title = '前端部署完成'
+
+    update_message(
+        message_id,
+        f"{status_emoji} *{title}*\n\n"
+        f"📋 *請求 ID：* `{request_id}`\n"
+        f"{source_line}"
+        f"📦 *專案：* {escape_markdown(project)}\n"
+        f"📄 成功: {success_count}/{file_count} 個檔案 ({size_str})"
+        f"{fail_line}\n"
+        f"🌐 *目標 Bucket：* `{escape_markdown(frontend_bucket)}`\n"
+        f"☁️ *CloudFront：* `{escape_markdown(distribution_id)}`\n"
+        f"💬 *原因：* {safe_reason}"
+        f"{cf_warn}",
+    )
+
+    # Send Telegram result notification (silent)
+    try:
+        from notifications import _send_message_silent
+        if deploy_status == 'deployed':
+            notif_text = (
+                f"✅ 前端部署成功\n"
+                f"📦 {project} — {success_count} 個檔案\n"
+                f"🆔 `{request_id}`"
+            )
+        elif deploy_status == 'partial_deploy':
+            notif_text = (
+                f"⚠️ 前端部署部分成功\n"
+                f"📦 {project} — {success_count}/{file_count} 成功，{fail_count} 失敗\n"
+                f"🆔 `{request_id}`"
+            )
+        else:
+            notif_text = (
+                f"❌ 前端部署失敗\n"
+                f"📦 {project} — 全部 {file_count} 個檔案失敗\n"
+                f"🆔 `{request_id}`"
+            )
+        if cf_invalidation_failed:
+            notif_text += "\n⚠️ CloudFront Invalidation 失敗"
+        _send_message_silent(notif_text)
+    except Exception as notif_exc:
+        logger.warning("[DEPLOY-FRONTEND] Result notification failed: %s", notif_exc)
+
+    return response(200, {
+        'ok': True,
+        'deploy_status': deploy_status,
+        'deployed_count': success_count,
+        'failed_count': fail_count,
+        'cf_invalidation_failed': cf_invalidation_failed,
+    })
+
+
 def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_role: str,
                                     trust_id: str, source: str = ''):
     """信任開啟後，自動執行同 trust_scope + account 的排隊中請求"""
