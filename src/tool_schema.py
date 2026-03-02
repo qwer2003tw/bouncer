@@ -632,3 +632,60 @@ MCP_TOOLS = {
         }
     }
 }
+
+# Injected by sprint9-003 Phase A
+MCP_TOOLS['bouncer_deploy_frontend'] = {
+    'description': (
+        '一鍵前端部署：上傳所有 frontend files 到 staging bucket，'
+        '一次 Telegram 審批後自動執行 S3 deploy + CloudFront invalidation。\n\n'
+        '所有 files 以 base64 content 傳入，系統自動設定 Content-Type 和 Cache-Control：\n'
+        '  index.html → no-cache, no-store, must-revalidate\n'
+        '  assets/*   → max-age=31536000, immutable\n'
+        '  其他       → no-cache\n\n'
+        'index.html 必須存在；不支援 .exe/.sh/.py 等可執行檔副檔名。'
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'project': {
+                'type': 'string',
+                'description': '專案名稱（目前支援：ztp-files）',
+            },
+            'files': {
+                'type': 'array',
+                'description': '要部署的檔案清單，每個含 filename + base64 content',
+                'items': {
+                    'type': 'object',
+                    'properties': {
+                        'filename': {
+                            'type': 'string',
+                            'description': '目標路徑，例如 index.html 或 assets/index-abc.js',
+                        },
+                        'content': {
+                            'type': 'string',
+                            'description': 'Base64 encoded file content',
+                        },
+                        'content_type': {
+                            'type': 'string',
+                            'description': 'MIME type（可選，自動推斷）',
+                        },
+                    },
+                    'required': ['filename', 'content'],
+                },
+            },
+            'reason': {
+                'type': 'string',
+                'description': '部署原因（顯示於審批通知）',
+            },
+            'source': {
+                'type': 'string',
+                'description': '請求來源識別（例如：Private Bot (ZTP Files - Sprint X)）',
+            },
+            'trust_scope': {
+                'type': 'string',
+                'description': '信任範圍識別符（用於 Trust Session 匹配）',
+            },
+        },
+        'required': ['project', 'files', 'source', 'trust_scope'],
+    },
+}

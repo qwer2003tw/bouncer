@@ -688,7 +688,7 @@ def send_presigned_batch_notification(
 
 # ============================================================================
 # Trust Session Summary (sprint9-007-phase-a)
-# ============================================================================
+# =====================================================================
 
 def send_trust_session_summary(trust_item: dict) -> None:
     """Send a Telegram summary when a trust session ends (revoke or expiry).
@@ -761,3 +761,90 @@ def send_trust_session_summary(trust_item: dict) -> None:
 
     except Exception as exc:
         logger.error('[TRUST SUMMARY] send_trust_session_summary error: %s', exc)
+# Deploy Frontend Notification (sprint9-003)
+# ============================================================================
+
+def send_deploy_frontend_notification(
+    request_id: str,
+    files_summary: list,
+    target_info: dict,
+    project: str = "",
+    reason: str = "",
+    source: str = "",
+) -> "NotificationResult":
+    """Send a Telegram approval request for a frontend deployment.
+
+    Args:
+        request_id:     Bouncer request ID.
+        files_summary:  List of dicts with filename, size, cache_control.
+        target_info:    Dict with frontend_bucket, distribution_id, region.
+        project:        Project name (e.g. "ztp-files").
+        reason:         Human-readable deploy reason.
+        source:         Requesting agent/bot name.
+
+    Returns:
+        NotificationResult(ok, message_id)
+    """
+    try:
+        from utils import format_size_human
+
+        total_size = sum(int(f.get("size", 0)) for f in files_summary)
+        total_size_str = format_size_human(total_size)
+        file_count = len(files_summary)
+
+        # Build per-file list (max 10 displayed)
+        file_lines = []
+        for i, f in enumerate(files_summary[:10]):
+            fname = f.get("filename", "?")
+            fsize = format_size_human(int(f.get("size", 0)))
+            cc = f.get("cache_control", "")
+            if "immutable" in cc:
+                cc_short = "immutable"
+            elif "no-store" in cc:
+                cc_short = "no-cache"
+            else:
+                cc_short = "no-cache"
+            file_lines.append(f"  \u2022 `{fname}` ({fsize}) \u2192 {cc_short}")
+        if file_count > 10:
+            file_lines.append(f"  _...and {file_count - 10} more files_")
+
+        files_text = "\n".join(file_lines)
+
+        safe_project = _escape_markdown(project or "unknown")
+        safe_source = _escape_markdown(source or "Unknown")
+        safe_reason = _escape_markdown(reason or "No reason provided")
+        safe_bucket = _escape_markdown(target_info.get("frontend_bucket", ""))
+        safe_dist = _escape_markdown(target_info.get("distribution_id", ""))
+
+        text = (
+            f"\U0001f680 *Frontend Deploy Request*\n\n"
+            f"\U0001f4e6 *Project:* `{safe_project}`\n"
+            f"\U0001f5c2 *Target Bucket:* `{safe_bucket}`\n"
+            f"\u2601\ufe0f *CloudFront:* `{safe_dist}`\n"
+            f"\U0001f4c1 *Files ({file_count}, {total_size_str}):*\n"
+            f"{files_text}\n\n"
+            f"\U0001f916 *Source:* {safe_source}\n"
+            f"\U0001f4ac *Reason:* {safe_reason}\n\n"
+            f"\U0001f194 *ID:* `{request_id}`\n"
+            f"\u23f0 *Expires in {UPLOAD_TIMEOUT // 60} min*"
+        )
+
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "\u2705 Approve", "callback_data": f"approve:{request_id}"},
+                    {"text": "\u274c Reject", "callback_data": f"deny:{request_id}"},
+                ],
+            ]
+        }
+
+        result = _send_message(text, keyboard)
+        ok = bool(result and result.get("ok"))
+        message_id = None
+        if ok:
+            message_id = result.get("result", {}).get("message_id")
+        return NotificationResult(ok=ok, message_id=message_id)
+
+    except Exception as exc:
+        logger.error("[DEPLOY-FRONTEND] send_deploy_frontend_notification error: %s", exc)
+        return NotificationResult(ok=False, message_id=None)
