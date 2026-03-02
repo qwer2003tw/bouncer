@@ -114,6 +114,18 @@ TRUST_SESSION_ENABLED = os.environ.get('TRUST_SESSION_ENABLED', 'true').lower() 
 TRUST_SESSION_MAX_UPLOADS = 5  # 信任時段內最多上傳 5 個檔案（0=不信任上傳）
 TRUST_UPLOAD_MAX_BYTES_PER_FILE = 5 * 1024 * 1024  # 5MB per file
 TRUST_UPLOAD_MAX_BYTES_TOTAL = 20 * 1024 * 1024  # 20MB per trust session
+
+# upload_batch payload safe limit (base64 encoded bytes)
+# Lambda sync invocation hard limit = 6MB via API Gateway.
+# base64 inflates raw content by ~37%; reserve headroom for JSON overhead.
+# 3.5MB base64 ≈ 2.5MB raw — safe for Lambda + API Gateway.
+UPLOAD_BATCH_PAYLOAD_SAFE_LIMIT = 3_500_000  # 3.5MB base64
+
+# Per-file base64 size limit for upload_batch.
+# Single file base64 size must also stay within the overall batch safe limit.
+# 3.5MB base64 ≈ 2.55MB raw — prevents one file from swamping a batch.
+UPLOAD_BATCH_PER_FILE_B64_LIMIT = 3_500_000  # 3.5MB base64 per file
+
 TRUST_UPLOAD_BLOCKED_EXTENSIONS = [
     '.sh', '.bash', '.exe', '.bat', '.ps1', '.py', '.rb',
     '.jar', '.war', '.zip', '.tar.gz', '.7z', '.bin',
