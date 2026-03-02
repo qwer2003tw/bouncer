@@ -194,6 +194,178 @@ def _mark_request_timeout(request_id: str) -> None:
 
 
 # ============================================================================
+# Trust Expiry Handler (sprint8-007)
+# ============================================================================
+
+def handle_trust_expiry(event: dict) -> dict:
+    """Handle EventBridge Scheduler trigger fired when a trust session expires.
+
+    Triggered by TrustExpiryNotifier.schedule() at trust session expires_at.
+
+    Acceptance scenarios:
+    1. Queries pending requests matching the expired trust session's source +
+       trust_scope (stored on the trust session item).
+    2. Sends a Telegram notification: "trust 已過期，N 個 pending 請求需手動審批".
+    3. Returns gracefully when no pending requests exist.
+    4. Handles DynamoDB / missing-trust-id errors without raising.
+
+    Args:
+        event: EventBridge Scheduler event containing ``trust_id``.
+
+    Returns:
+        Response dict (always 200 — handler is best-effort).
+    """
+    trust_id = event.get('trust_id')
+    if not trust_id:
+        logger.warning("[TRUST-EXPIRY] Missing trust_id in event")
+        return response(200, {'ok': True, 'skipped': True, 'reason': 'missing_trust_id'})
+
+    logger.info("[TRUST-EXPIRY] Processing expiry notification for trust_id=%s", trust_id)
+
+    # Fetch the trust session item to get source + trust_scope
+    try:
+        trust_item = table.get_item(Key={'request_id': trust_id}).get('Item')
+    except Exception as exc:
+        logger.error("[TRUST-EXPIRY] DynamoDB error fetching trust session %s: %s", trust_id, exc)
+        return response(200, {'ok': True, 'skipped': True, 'reason': 'db_error'})
+
+    if not trust_item:
+        logger.info("[TRUST-EXPIRY] Trust session %s not found (already revoked?) — skipping", trust_id)
+        return response(200, {'ok': True, 'skipped': True, 'reason': 'not_found'})
+
+    source = trust_item.get('source', '') or trust_item.get('bound_source', '')
+    trust_scope = trust_item.get('trust_scope', '')
+
+    # Query pending requests that match source + trust_scope
+    pending_requests = _query_pending_for_trust(source=source, trust_scope=trust_scope)
+    pending_count = len(pending_requests)
+
+    logger.info(
+        "[TRUST-EXPIRY] trust_id=%s source=%r trust_scope=%r pending_count=%d",
+        trust_id, source, trust_scope, pending_count,
+    )
+
+    # Send Telegram notification
+    _send_trust_expiry_notification(
+        trust_id=trust_id,
+        source=source,
+        trust_scope=trust_scope,
+        pending_count=pending_count,
+        pending_requests=pending_requests,
+    )
+
+    emit_metric('Bouncer', 'TrustExpired', 1)
+    return response(200, {
+        'ok': True,
+        'trust_id': trust_id,
+        'source': source,
+        'trust_scope': trust_scope,
+        'pending_count': pending_count,
+    })
+
+
+def _query_pending_for_trust(source: str, trust_scope: str) -> list:
+    """Query pending requests that match the expired trust session's source.
+
+    Uses the ``source-created-index`` GSI to efficiently find matching
+    pending requests without a full table scan.
+
+    Args:
+        source:      Source string bound to the trust session.
+        trust_scope: Trust scope identifier (used as fallback when source is empty).
+
+    Returns:
+        List of pending request items (may be empty).
+    """
+    effective_source = source or trust_scope
+    if not effective_source:
+        logger.warning("[TRUST-EXPIRY] No source or trust_scope — cannot query pending requests")
+        return []
+
+    try:
+        resp = table.query(
+            IndexName='source-created-index',
+            KeyConditionExpression='#src = :source',
+            FilterExpression='#status = :status',
+            ExpressionAttributeNames={'#src': 'source', '#status': 'status'},
+            ExpressionAttributeValues={
+                ':source': effective_source,
+                ':status': 'pending_approval',
+            },
+            ScanIndexForward=False,
+            Limit=100,
+        )
+        items = resp.get('Items', [])
+        logger.info(
+            "[TRUST-EXPIRY] Found %d pending_approval items for source=%r",
+            len(items), effective_source,
+        )
+        return items
+    except Exception as exc:
+        logger.error("[TRUST-EXPIRY] Failed to query pending requests for source=%r: %s", effective_source, exc)
+        return []
+
+
+def _send_trust_expiry_notification(
+    trust_id: str,
+    source: str,
+    trust_scope: str,
+    pending_count: int,
+    pending_requests: list,
+) -> None:
+    """Send Telegram notification that a trust session has expired.
+
+    Args:
+        trust_id:        Trust session ID.
+        source:          Source string from the expired trust session.
+        trust_scope:     Trust scope identifier.
+        pending_count:   Number of pending requests needing manual approval.
+        pending_requests: List of pending request items (for display).
+    """
+    from telegram import send_telegram_message_silent
+
+    safe_source = escape_markdown(source or trust_scope or trust_id[:20])
+
+    if pending_count == 0:
+        text = (
+            f"⏰ *信任時段已過期*\n\n"
+            f"🤖 *來源：* {safe_source}\n"
+            f"🔑 `{trust_id}`\n\n"
+            f"✅ 目前無 pending 請求需要審批。"
+        )
+    else:
+        # Build a short summary of the pending requests
+        lines = []
+        for i, item in enumerate(pending_requests[:5]):
+            req_id = item.get('request_id', '')[:20]
+            cmd_preview = item.get('command', item.get('display_summary', ''))[:60]
+            lines.append(f"  {i + 1}\\. `{req_id}` — `{escape_markdown(cmd_preview)}`")
+        if pending_count > 5:
+            lines.append(f"  _{pending_count - 5} 個更多\\.\\.\\._ ")
+
+        pending_details = "\n".join(lines)
+        text = (
+            f"⏰ *信任時段已過期*\n\n"
+            f"🤖 *來源：* {safe_source}\n"
+            f"🔑 `{trust_id}`\n\n"
+            f"⚠️ *{pending_count} 個 pending 請求需手動審批：*\n"
+            f"{pending_details}"
+        )
+
+    try:
+        send_telegram_message_silent(text)
+        logger.info(
+            "[TRUST-EXPIRY] Sent expiry notification for trust_id=%s (pending=%d)",
+            trust_id, pending_count,
+        )
+    except Exception as exc:
+        logger.error(
+            "[TRUST-EXPIRY] Failed to send Telegram notification for trust %s: %s",
+            trust_id, exc,
+        )
+
+
+# ============================================================================
 # Lambda Handler
 # ============================================================================
 
@@ -205,6 +377,10 @@ def lambda_handler(event: dict, context) -> dict:
     # EventBridge Scheduler cleanup trigger (sprint7-002)
     if event.get('source') == 'bouncer-scheduler' and event.get('action') == 'cleanup_expired':
         return handle_cleanup_expired(event)
+
+    # EventBridge Scheduler trust expiry notification trigger (sprint8-007)
+    if event.get('source') == 'bouncer-scheduler' and event.get('action') == 'trust_expiry':
+        return handle_trust_expiry(event)
 
     # 支援 Function URL (rawPath) 和 API Gateway (path)
     path = event.get('rawPath') or event.get('path') or '/'

@@ -199,3 +199,167 @@ def set_scheduler_service(svc: SchedulerService) -> None:
     """Override the module-level singleton (for testing)."""
     global _default_service
     _default_service = svc
+
+
+# ─── TrustExpiryNotifier ──────────────────────────────────────────────────────
+
+
+def trust_expiry_schedule_name(trust_id: str) -> str:
+    """Return a deterministic schedule name for a trust session expiry.
+
+    Prefixed with ``bouncer-trust-`` to distinguish from request expiry
+    schedules (``bouncer-expire-``).
+
+    EventBridge Scheduler names must match ``[a-zA-Z0-9_-]{1,64}``.
+    """
+    safe = "".join(c if c.isalnum() or c in ("-", "_") else "-" for c in trust_id)
+    return f"bouncer-trust-{safe}"[:64]
+
+
+class TrustExpiryNotifier:
+    """Manages EventBridge Scheduler schedules for trust session expiry notification.
+
+    Responsibilities (single class, clean design):
+    - ``schedule()``: Create a one-time EventBridge schedule that fires when a
+      trust session expires, triggering the ``trust_expiry`` handler.
+    - ``cancel()``: Delete the schedule when a trust session is revoked early.
+
+    Design principles:
+    - All operations are non-raising (failures logged at ERROR, falsy returned).
+    - Naming: ``bouncer-trust-{safe_trust_id}`` distinguishes from request
+      expiry schedules (``bouncer-expire-``).
+    - Injected ``scheduler_service`` for full testability without AWS calls.
+    """
+
+    def __init__(self, scheduler_service: Optional[SchedulerService] = None):
+        """
+        Args:
+            scheduler_service: Inject a SchedulerService (or mock) for testing.
+                               Defaults to the module-level singleton.
+        """
+        self._svc = scheduler_service  # resolved lazily to avoid import-time side-effects
+
+    def _get_svc(self) -> SchedulerService:
+        if self._svc is None:
+            self._svc = get_scheduler_service()
+        return self._svc
+
+    def schedule(self, trust_id: str, expires_at: int) -> bool:
+        """Schedule an EventBridge one-time trigger for *trust_id* at *expires_at*.
+
+        The trigger fires the Lambda with ``action=trust_expiry`` so the handler
+        can query pending requests and send a Telegram notification.
+
+        Args:
+            trust_id:   Trust session ID (DynamoDB primary key).
+            expires_at: Unix timestamp when the trust session expires.
+
+        Returns:
+            ``True`` on success, ``False`` on any failure (non-raising).
+        """
+        svc = self._get_svc()
+        if not svc._enabled:
+            logger.debug(
+                "[TRUST-NOTIFIER] Scheduler disabled — skipping trust expiry schedule for %s",
+                trust_id,
+            )
+            return False
+
+        if not svc._lambda_arn or not svc._role_arn:
+            logger.warning(
+                "[TRUST-NOTIFIER] Missing LAMBDA_ARN or ROLE_ARN — cannot schedule trust expiry for %s",
+                trust_id,
+            )
+            return False
+
+        try:
+            client = svc._get_client()
+            name = trust_expiry_schedule_name(trust_id)
+            at_expr = _format_schedule_time(expires_at)
+
+            client.create_schedule(
+                Name=name,
+                GroupName=svc._group_name,
+                ScheduleExpression=at_expr,
+                ScheduleExpressionTimezone="UTC",
+                FlexibleTimeWindow={"Mode": "OFF"},
+                ActionAfterCompletion="DELETE",
+                Target={
+                    "Arn": svc._lambda_arn,
+                    "RoleArn": svc._role_arn,
+                    "Input": json.dumps(
+                        {
+                            "source": "bouncer-scheduler",
+                            "action": "trust_expiry",
+                            "trust_id": trust_id,
+                        }
+                    ),
+                },
+            )
+            logger.info(
+                "[TRUST-NOTIFIER] Created expiry schedule '%s' for trust %s at %s",
+                name, trust_id, at_expr,
+            )
+            return True
+
+        except Exception as exc:
+            logger.error(
+                "[TRUST-NOTIFIER] Failed to create expiry schedule for trust %s: %s",
+                trust_id, exc,
+            )
+            return False
+
+    def cancel(self, trust_id: str) -> bool:
+        """Delete the expiry schedule for *trust_id* (called on revoke).
+
+        Returns:
+            ``True`` on success or if schedule did not exist, ``False`` on error.
+        """
+        svc = self._get_svc()
+        if not svc._enabled:
+            return False
+
+        name = trust_expiry_schedule_name(trust_id)
+        try:
+            client = svc._get_client()
+            client.delete_schedule(Name=name, GroupName=svc._group_name)
+            logger.info(
+                "[TRUST-NOTIFIER] Cancelled trust expiry schedule '%s' for trust %s",
+                name, trust_id,
+            )
+            return True
+        except Exception as exc:
+            # ResourceNotFoundException → already fired or never created → OK
+            exc_name = type(exc).__name__
+            exc_str = str(exc)
+            if "ResourceNotFound" in exc_name or "NotFound" in exc_name \
+                    or "ResourceNotFound" in exc_str:
+                logger.debug(
+                    "[TRUST-NOTIFIER] Schedule '%s' not found (already fired or never created)",
+                    name,
+                )
+                return True
+            logger.error(
+                "[TRUST-NOTIFIER] Failed to cancel trust expiry schedule for trust %s: %s",
+                trust_id, exc,
+            )
+            return False
+
+
+# ─── module-level TrustExpiryNotifier singleton ───────────────────────────────
+
+_default_notifier: Optional[TrustExpiryNotifier] = None
+
+
+def get_trust_expiry_notifier() -> TrustExpiryNotifier:
+    """Return the module-level singleton TrustExpiryNotifier."""
+    global _default_notifier
+    if _default_notifier is None:
+        _default_notifier = TrustExpiryNotifier()
+    return _default_notifier
+
+
+def set_trust_expiry_notifier(notifier: TrustExpiryNotifier) -> None:
+    """Override the module-level singleton (for testing)."""
+    global _default_notifier
+    _default_notifier = notifier

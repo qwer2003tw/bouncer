@@ -868,3 +868,444 @@ class TestSourceBindingEdgeCases:
             )
         assert session is None, "Mismatch must block"
         assert mock_log.warning.called, "Warning must be logged on mismatch"
+
+
+# ============================================================================
+# Sprint8-007: Trust Expiry Notification Tests (Approach B — Aggressive)
+# ============================================================================
+
+class TestTrustExpiryNotifier:
+    """Tests for TrustExpiryNotifier class (sprint8-007).
+
+    Verifies:
+    1. create_trust_session() builds an EventBridge one-time schedule.
+    2. revoke_trust_session() cancels the schedule.
+    3. TrustExpiryNotifier.schedule() / cancel() delegate to SchedulerService.
+    4. Scheduler failure is graceful (non-raising).
+    """
+
+    # ── Scenario 1: create_trust_session builds a schedule ───────────────────
+
+    def test_create_trust_session_schedules_expiry(self, app_module):
+        """create_trust_session() calls TrustExpiryNotifier.schedule()."""
+        import scheduler_service as sched_mod
+
+        mock_notifier = MagicMock()
+        original = sched_mod.get_trust_expiry_notifier()
+        sched_mod.set_trust_expiry_notifier(mock_notifier)
+        try:
+            import trust as trust_mod
+            trust_id = trust_mod.create_trust_session(
+                'expiry-scope-1', '111111111111', '999999999',
+                source='bot-A'
+            )
+            # schedule() must be called once with correct trust_id
+            mock_notifier.schedule.assert_called_once()
+            call_kwargs = mock_notifier.schedule.call_args
+            assert call_kwargs.kwargs.get('trust_id') == trust_id or \
+                   (call_kwargs.args and call_kwargs.args[0] == trust_id)
+        finally:
+            sched_mod.set_trust_expiry_notifier(original)
+
+    def test_create_trust_session_schedule_includes_expires_at(self, app_module):
+        """The expires_at passed to schedule() is in the future."""
+        import scheduler_service as sched_mod
+        import time
+
+        mock_notifier = MagicMock()
+        original = sched_mod.get_trust_expiry_notifier()
+        sched_mod.set_trust_expiry_notifier(mock_notifier)
+        try:
+            import trust as trust_mod
+            trust_mod.create_trust_session(
+                'expiry-scope-2', '111111111111', '999999999',
+                source='bot-A'
+            )
+            call_kwargs = mock_notifier.schedule.call_args
+            expires_at = call_kwargs.kwargs.get('expires_at') or (
+                call_kwargs.args[1] if len(call_kwargs.args) > 1 else None
+            )
+            assert expires_at is not None
+            assert expires_at > time.time(), "expires_at must be in the future"
+        finally:
+            sched_mod.set_trust_expiry_notifier(original)
+
+    # ── Scenario 4: revoke_trust_session() cancels the schedule ─────────────
+
+    def test_revoke_trust_session_cancels_schedule(self, app_module):
+        """revoke_trust_session() calls TrustExpiryNotifier.cancel()."""
+        import scheduler_service as sched_mod
+
+        mock_notifier = MagicMock()
+        original = sched_mod.get_trust_expiry_notifier()
+        sched_mod.set_trust_expiry_notifier(mock_notifier)
+        try:
+            import trust as trust_mod
+            # Create first so we have a trust_id
+            trust_id = trust_mod.create_trust_session(
+                'revoke-expiry-1', '111111111111', '999999999',
+                source='bot-B'
+            )
+            mock_notifier.reset_mock()  # clear the schedule() call
+
+            trust_mod.revoke_trust_session(trust_id)
+            mock_notifier.cancel.assert_called_once()
+            call_kwargs = mock_notifier.cancel.call_args
+            called_trust_id = call_kwargs.kwargs.get('trust_id') or (
+                call_kwargs.args[0] if call_kwargs.args else None
+            )
+            assert called_trust_id == trust_id
+        finally:
+            sched_mod.set_trust_expiry_notifier(original)
+
+    # ── TrustExpiryNotifier.schedule() delegates to SchedulerService ─────────
+
+    def test_trust_expiry_notifier_schedule_calls_create_schedule(self):
+        """TrustExpiryNotifier.schedule() calls EventBridge create_schedule."""
+        from scheduler_service import TrustExpiryNotifier, SchedulerService
+        import time
+
+        mock_client = MagicMock()
+        svc = SchedulerService(
+            scheduler_client=mock_client,
+            lambda_arn='arn:aws:lambda:us-east-1:111:function:bouncer',
+            role_arn='arn:aws:iam::111:role/scheduler-role',
+            group_name='test-group',
+            enabled=True,
+        )
+        notifier = TrustExpiryNotifier(scheduler_service=svc)
+        expires_at = int(time.time()) + 600
+
+        result = notifier.schedule(trust_id='trust-abc123-111', expires_at=expires_at)
+
+        assert result is True
+        mock_client.create_schedule.assert_called_once()
+        call_kwargs = mock_client.create_schedule.call_args[1]
+        assert call_kwargs['Name'].startswith('bouncer-trust-')
+        # Payload must contain trust_id and action=trust_expiry
+        import json
+        payload = json.loads(call_kwargs['Target']['Input'])
+        assert payload['action'] == 'trust_expiry'
+        assert payload['trust_id'] == 'trust-abc123-111'
+
+    def test_trust_expiry_notifier_cancel_calls_delete_schedule(self):
+        """TrustExpiryNotifier.cancel() calls EventBridge delete_schedule."""
+        from scheduler_service import TrustExpiryNotifier, SchedulerService
+
+        mock_client = MagicMock()
+        svc = SchedulerService(
+            scheduler_client=mock_client,
+            lambda_arn='arn:aws:lambda:us-east-1:111:function:bouncer',
+            role_arn='arn:aws:iam::111:role/scheduler-role',
+            group_name='test-group',
+            enabled=True,
+        )
+        notifier = TrustExpiryNotifier(scheduler_service=svc)
+
+        result = notifier.cancel(trust_id='trust-abc123-111')
+
+        assert result is True
+        mock_client.delete_schedule.assert_called_once()
+
+    def test_trust_expiry_notifier_cancel_handles_not_found(self):
+        """cancel() returns True when schedule does not exist (already fired)."""
+        from scheduler_service import TrustExpiryNotifier, SchedulerService
+
+        mock_client = MagicMock()
+        mock_client.delete_schedule.side_effect = Exception("ResourceNotFoundException")
+        svc = SchedulerService(
+            scheduler_client=mock_client,
+            lambda_arn='arn:aws:lambda:us-east-1:111:function:bouncer',
+            role_arn='arn:aws:iam::111:role/scheduler-role',
+            group_name='test-group',
+            enabled=True,
+        )
+        notifier = TrustExpiryNotifier(scheduler_service=svc)
+
+        result = notifier.cancel(trust_id='trust-does-not-exist')
+        assert result is True  # ResourceNotFound → treat as OK
+
+    # ── Scheduler failure is graceful ─────────────────────────────────────────
+
+    def test_scheduler_failure_does_not_raise_on_create(self, app_module):
+        """Scheduler failure during create_trust_session is non-raising."""
+        import scheduler_service as sched_mod
+
+        mock_notifier = MagicMock()
+        mock_notifier.schedule.side_effect = RuntimeError("AWS scheduler down")
+        original = sched_mod.get_trust_expiry_notifier()
+        sched_mod.set_trust_expiry_notifier(mock_notifier)
+        try:
+            import trust as trust_mod
+            # Must NOT raise even though notifier.schedule() raises
+            trust_id = trust_mod.create_trust_session(
+                'expiry-fail-create', '111111111111', '999999999'
+            )
+            assert trust_id is not None, "trust_id should be returned despite scheduler failure"
+        finally:
+            sched_mod.set_trust_expiry_notifier(original)
+
+    def test_scheduler_failure_does_not_raise_on_revoke(self, app_module):
+        """Scheduler failure during revoke_trust_session is non-raising."""
+        import scheduler_service as sched_mod
+
+        mock_notifier = MagicMock()
+        mock_notifier.cancel.side_effect = RuntimeError("AWS scheduler down")
+        original = sched_mod.get_trust_expiry_notifier()
+        sched_mod.set_trust_expiry_notifier(mock_notifier)
+        try:
+            import trust as trust_mod
+            trust_id = trust_mod.create_trust_session(
+                'expiry-fail-revoke', '111111111111', '999999999'
+            )
+            mock_notifier.reset_mock()
+            mock_notifier.cancel.side_effect = RuntimeError("AWS scheduler down")
+            result = trust_mod.revoke_trust_session(trust_id)
+            assert result is True, "revoke must succeed despite scheduler failure"
+        finally:
+            sched_mod.set_trust_expiry_notifier(original)
+
+    # ── Disabled scheduler skips gracefully ───────────────────────────────────
+
+    def test_notifier_disabled_returns_false(self):
+        """TrustExpiryNotifier with disabled SchedulerService returns False."""
+        from scheduler_service import TrustExpiryNotifier, SchedulerService
+        import time
+
+        svc = SchedulerService(enabled=False)
+        notifier = TrustExpiryNotifier(scheduler_service=svc)
+        result = notifier.schedule(trust_id='trust-disabled', expires_at=int(time.time()) + 600)
+        assert result is False
+
+    def test_notifier_missing_arn_returns_false(self):
+        """TrustExpiryNotifier with missing ARNs returns False gracefully."""
+        from scheduler_service import TrustExpiryNotifier, SchedulerService
+        import time
+
+        svc = SchedulerService(lambda_arn='', role_arn='', enabled=True)
+        notifier = TrustExpiryNotifier(scheduler_service=svc)
+        result = notifier.schedule(trust_id='trust-no-arn', expires_at=int(time.time()) + 600)
+        assert result is False
+
+
+class TestHandleTrustExpiry:
+    """Tests for app.handle_trust_expiry() handler (sprint8-007).
+
+    Verifies acceptance scenarios 2 & 3:
+    2. Handler queries pending requests for same source + trust_scope.
+    3. Sends Telegram notification with pending count.
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup(self, app_module):
+        self.app = app_module
+
+    # ── Scenario 2+3: queries pending and sends notification ─────────────────
+
+    @patch('telegram.send_telegram_message_silent')
+    def test_handle_trust_expiry_with_pending_requests(self, mock_silent, app_module):
+        """handler finds pending requests and sends a notification with correct count."""
+        import time
+
+        table = app_module.table
+        now = int(time.time())
+
+        # Insert a trust session item
+        trust_id = 'trust-expiry-test-001'
+        source = 'expiry-notify-source'
+        table.put_item(Item={
+            'request_id': trust_id,
+            'type': 'trust_session',
+            'trust_scope': 'expiry-scope-001',
+            'source': source,
+            'bound_source': source,
+            'account_id': '111111111111',
+            'approved_by': '999999999',
+            'created_at': now - 700,
+            'expires_at': now - 10,
+            'command_count': 2,
+            'ttl': now + 3600,
+        })
+
+        # Insert 2 pending requests with matching source
+        for i in range(2):
+            req_id = f'req-expiry-notify-{i:03d}'
+            table.put_item(Item={
+                'request_id': req_id,
+                'type': 'request',
+                'source': source,
+                'status': 'pending_approval',
+                'command': f'aws s3 ls s3://bucket-{i}',
+                'reason': 'test',
+                'account_id': '111111111111',
+                'created_at': now - 60 + i,
+                'ttl': now + 300,
+            })
+
+        event = {
+            'source': 'bouncer-scheduler',
+            'action': 'trust_expiry',
+            'trust_id': trust_id,
+        }
+        result = app_module.lambda_handler(event, None)
+
+        assert result['statusCode'] == 200
+        body = json.loads(result['body'])
+        assert body['ok'] is True
+        assert body['pending_count'] == 2
+        assert body['trust_id'] == trust_id
+
+        # Telegram notification should have been sent
+        assert mock_silent.called
+
+    @patch('telegram.send_telegram_message_silent')
+    def test_handle_trust_expiry_no_pending_requests(self, mock_silent, app_module):
+        """Edge case: no pending requests → notification sent, count=0."""
+        import time
+
+        table = app_module.table
+        now = int(time.time())
+
+        trust_id = 'trust-expiry-no-pending-001'
+        source = 'expiry-no-pending-source-007b'
+        table.put_item(Item={
+            'request_id': trust_id,
+            'type': 'trust_session',
+            'trust_scope': 'expiry-scope-no-pending',
+            'source': source,
+            'bound_source': source,
+            'account_id': '111111111111',
+            'approved_by': '999999999',
+            'created_at': now - 700,
+            'expires_at': now - 10,
+            'command_count': 0,
+            'ttl': now + 3600,
+        })
+
+        event = {
+            'source': 'bouncer-scheduler',
+            'action': 'trust_expiry',
+            'trust_id': trust_id,
+        }
+        result = app_module.lambda_handler(event, None)
+
+        assert result['statusCode'] == 200
+        body = json.loads(result['body'])
+        assert body['ok'] is True
+        assert body['pending_count'] == 0
+        # Notification still sent (informing 0 pending)
+        assert mock_silent.called
+
+    @patch('telegram.send_telegram_message_silent')
+    def test_handle_trust_expiry_missing_trust_id(self, mock_silent, app_module):
+        """Missing trust_id → skipped gracefully, no notification."""
+        event = {
+            'source': 'bouncer-scheduler',
+            'action': 'trust_expiry',
+            # no trust_id
+        }
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+        body = json.loads(result['body'])
+        assert body['skipped'] is True
+        assert body['reason'] == 'missing_trust_id'
+        mock_silent.assert_not_called()
+
+    @patch('telegram.send_telegram_message_silent')
+    def test_handle_trust_expiry_trust_not_found(self, mock_silent, app_module):
+        """Trust session already revoked → skipped gracefully."""
+        event = {
+            'source': 'bouncer-scheduler',
+            'action': 'trust_expiry',
+            'trust_id': 'trust-nonexistent-abc123',
+        }
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+        body = json.loads(result['body'])
+        assert body['skipped'] is True
+        assert body['reason'] == 'not_found'
+        mock_silent.assert_not_called()
+
+    @patch('telegram.send_telegram_message_silent')
+    def test_handle_trust_expiry_notification_content(self, mock_silent, app_module):
+        """Notification text mentions 'N 個 pending' when N > 0."""
+        import time
+
+        table = app_module.table
+        now = int(time.time())
+
+        trust_id = 'trust-expiry-content-test-001'
+        source = 'expiry-content-source-007b'
+        table.put_item(Item={
+            'request_id': trust_id,
+            'type': 'trust_session',
+            'trust_scope': 'expiry-content-scope',
+            'source': source,
+            'bound_source': source,
+            'account_id': '111111111111',
+            'approved_by': '999999999',
+            'created_at': now - 700,
+            'expires_at': now - 10,
+            'command_count': 1,
+            'ttl': now + 3600,
+        })
+
+        # 1 pending request
+        table.put_item(Item={
+            'request_id': 'req-content-test-001',
+            'type': 'request',
+            'source': source,
+            'status': 'pending_approval',
+            'command': 'aws ec2 describe-instances',
+            'reason': 'check',
+            'account_id': '111111111111',
+            'created_at': now - 30,
+            'ttl': now + 300,
+        })
+
+        event = {
+            'source': 'bouncer-scheduler',
+            'action': 'trust_expiry',
+            'trust_id': trust_id,
+        }
+        app_module.lambda_handler(event, None)
+
+        assert mock_silent.called
+        notification_text = mock_silent.call_args[0][0]
+        assert '1' in notification_text  # pending count
+        assert '信任時段已過期' in notification_text or 'trust' in notification_text.lower() or '過期' in notification_text
+
+    @patch('telegram.send_telegram_message_silent')
+    def test_lambda_handler_routes_trust_expiry(self, mock_silent, app_module):
+        """lambda_handler correctly routes trust_expiry action."""
+        import time
+
+        table = app_module.table
+        now = int(time.time())
+
+        trust_id = 'trust-route-test-007b'
+        source = 'route-test-source-007b'
+        table.put_item(Item={
+            'request_id': trust_id,
+            'type': 'trust_session',
+            'trust_scope': 'route-scope-007b',
+            'source': source,
+            'bound_source': source,
+            'account_id': '111111111111',
+            'approved_by': '999999999',
+            'created_at': now - 700,
+            'expires_at': now - 5,
+            'command_count': 0,
+            'ttl': now + 3600,
+        })
+
+        event = {
+            'source': 'bouncer-scheduler',
+            'action': 'trust_expiry',
+            'trust_id': trust_id,
+        }
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+        body = json.loads(result['body'])
+        # Must return trust_id in response (proves routing hit handle_trust_expiry)
+        assert body.get('trust_id') == trust_id

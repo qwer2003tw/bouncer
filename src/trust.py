@@ -215,6 +215,10 @@ def create_trust_session(
 ) -> str:
     """Create a trust session and store ``bound_source`` for future validation.
 
+    Also schedules an EventBridge one-time trigger (via TrustExpiryNotifier) so
+    that when the session expires, pending requests from the same source are
+    notified.
+
     Args:
         trust_scope:  Stable caller-provided identifier
         account_id:   AWS account ID
@@ -252,11 +256,19 @@ def create_trust_session(
     }
 
     _get_table().put_item(Item=item)
+
+    # Schedule expiry notification (best-effort, non-raising)
+    try:
+        from scheduler_service import get_trust_expiry_notifier
+        get_trust_expiry_notifier().schedule(trust_id=trust_id, expires_at=expires_at)
+    except Exception as exc:  # pragma: no cover
+        logger.error("Failed to schedule trust expiry notification for %s: %s", trust_id, exc)
+
     return trust_id
 
 
 def revoke_trust_session(trust_id: str) -> bool:
-    """Revoke (delete) a trust session.
+    """Revoke (delete) a trust session and cancel its expiry schedule.
 
     Args:
         trust_id: Trust session ID
@@ -266,6 +278,14 @@ def revoke_trust_session(trust_id: str) -> bool:
     """
     try:
         _get_table().delete_item(Key={'request_id': trust_id})
+
+        # Cancel the EventBridge expiry schedule (best-effort, non-raising)
+        try:
+            from scheduler_service import get_trust_expiry_notifier
+            get_trust_expiry_notifier().cancel(trust_id=trust_id)
+        except Exception as exc:  # pragma: no cover
+            logger.error("Failed to cancel trust expiry schedule for %s: %s", trust_id, exc)
+
         return True
     except Exception as e:
         logger.error(f"Revoke trust session error: {e}")
