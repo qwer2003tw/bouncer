@@ -283,7 +283,6 @@ Resources:
         Type: Canary10Percent5Minutes
         Alarms:
           - !Ref HighErrorAlarm
-          - !Ref ApiGateway5xxAlarm
       DeadLetterQueue:
         Type: SQS
         TargetArn: !GetAtt ApprovalFunctionDLQ.Arn
