@@ -841,8 +841,8 @@ def send_deploy_frontend_notification(
         keyboard = {
             "inline_keyboard": [
                 [
-                    {"text": "\u2705 Approve", "callback_data": f"approve:{request_id}"},
-                    {"text": "\u274c Reject", "callback_data": f"deny:{request_id}"},
+                    {"text": "✅ 批准部署", "callback_data": f"approve:{request_id}"},
+                    {"text": "❌ 拒絕", "callback_data": f"deny:{request_id}"},
                 ],
             ]
         }
