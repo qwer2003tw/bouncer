@@ -1057,7 +1057,70 @@ class TestDeployerExtra:
         })
         body = json.loads(result['body'])
         assert 'result' in body
-    
+
+    def test_deploy_history_with_project_param(self, app_module):
+        """project 參數正確傳遞 — 不應回傳 Missing required parameter 錯誤"""
+        with patch('deployer.get_deploy_history', return_value=[
+            {'deploy_id': 'deploy-abc', 'project_id': 'bouncer', 'status': 'SUCCESS'}
+        ]):
+            result = app_module.handle_mcp_tool_call(
+                'test-history-1',
+                'bouncer_deploy_history',
+                {'project': 'bouncer'}
+            )
+        body = json.loads(result['body'])
+        # Must succeed — no error
+        assert 'result' in body, f"Expected result but got: {body}"
+        assert 'error' not in body, f"Got unexpected error: {body.get('error')}"
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['project_id'] == 'bouncer'
+        assert 'history' in content
+
+    def test_deploy_history_mcp_tool_exists(self, app_module):
+        """bouncer_deploy_history tool 在 MCP tools/list schema 中存在"""
+        from tool_schema import MCP_TOOLS
+        assert 'bouncer_deploy_history' in MCP_TOOLS, \
+            "bouncer_deploy_history not found in MCP_TOOLS schema"
+        spec = MCP_TOOLS['bouncer_deploy_history']
+        assert 'parameters' in spec
+        props = spec['parameters'].get('properties', {})
+        assert 'project' in props, \
+            f"'project' param missing from schema. Found: {list(props.keys())}"
+
+    def test_deploy_history_param_mapping_correct(self, app_module):
+        """parameter name mapping 正確：schema 用 'project'，handler 也讀 'project'"""
+        from tool_schema import MCP_TOOLS
+
+        # 1. Schema must use 'project' (not 'project_id') as the required field
+        spec = MCP_TOOLS['bouncer_deploy_history']
+        required = spec['parameters'].get('required', [])
+        assert 'project' in required, \
+            f"Expected 'project' in required list, got: {required}"
+        assert 'project_id' not in required, \
+            "'project_id' should NOT be in required — schema must use 'project'"
+
+        # 2. Handler must accept 'project' key (empty project → error, non-empty → no error)
+        # passing project_id (wrong key) should trigger the Missing required parameter error
+        result_wrong_key = app_module.handle_mcp_tool_call(
+            'test-history-wrong',
+            'bouncer_deploy_history',
+            {'project_id': 'bouncer'}  # Wrong key — should fail
+        )
+        body_wrong = json.loads(result_wrong_key['body'])
+        assert 'error' in body_wrong, \
+            "Passing 'project_id' instead of 'project' should return an error"
+
+        # passing project (correct key) should succeed
+        with patch('deployer.get_deploy_history', return_value=[]):
+            result_correct_key = app_module.handle_mcp_tool_call(
+                'test-history-correct',
+                'bouncer_deploy_history',
+                {'project': 'bouncer'}  # Correct key — should succeed
+            )
+        body_correct = json.loads(result_correct_key['body'])
+        assert 'result' in body_correct, \
+            f"Passing 'project' should succeed but got: {body_correct}"
+
     def test_deploy_status_missing_id(self, app_module):
         """部署狀態缺少 ID"""
         result = app_module.handle_mcp_tool_call('test-1', 'bouncer_deploy_status', {})
