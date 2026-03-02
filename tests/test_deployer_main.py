@@ -1250,3 +1250,372 @@ class TestDeployNotificationFallback:
 # ============================================================================
 # Upload Deny Callback Account Display Test
 # ============================================================================
+
+
+# ============================================================================
+# Sprint8-002: Deploy Error Extraction Tests (Approach B — Aggressive)
+# ============================================================================
+
+import sys as _sys
+import os as _os
+_sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), '..', 'src'))
+from deployer import DeployErrorExtractor  # noqa: E402
+
+
+class TestDeployErrorExtractor:
+    """Unit tests for DeployErrorExtractor — all 4 acceptance scenarios + edge cases."""
+
+    # ------------------------------------------------------------------
+    # Scenario 1: Extract up to 5 lines containing error keywords
+    # ------------------------------------------------------------------
+
+    def test_extract_picks_up_failed_keyword(self):
+        """Lines with 'FAILED' are extracted."""
+        output = "Build step FAILED\nSome normal line\n"
+        lines = DeployErrorExtractor.extract(output)
+        assert any('FAILED' in l for l in lines)
+
+    def test_extract_picks_up_error_colon_keyword(self):
+        """Lines with 'Error:' are extracted."""
+        output = "Error: something went wrong\nAnother line\n"
+        lines = DeployErrorExtractor.extract(output)
+        assert any('Error:' in l for l in lines)
+
+    def test_extract_picks_up_already_exists_keyword(self):
+        """Lines with 'already exists' are extracted."""
+        output = "Stack already exists in CREATE_COMPLETE state\n"
+        lines = DeployErrorExtractor.extract(output)
+        assert any('already exists' in l for l in lines)
+
+    def test_extract_max_5_lines(self):
+        """At most 5 lines are returned even when more match."""
+        lines_in = [f"Error: line {i}" for i in range(10)]
+        output = '\n'.join(lines_in)
+        result = DeployErrorExtractor.extract(output)
+        assert len(result) <= 5
+
+    def test_extract_returns_empty_for_no_match(self):
+        """Returns empty list when no error keywords present."""
+        output = "Build started\nDeploy success\nAll good\n"
+        result = DeployErrorExtractor.extract(output)
+        assert result == []
+
+    # ------------------------------------------------------------------
+    # Scenario 4 + edge case: Truncation at 400 KB
+    # ------------------------------------------------------------------
+
+    def test_truncate_if_needed_large_output(self):
+        """Output > 400 KB is truncated."""
+        big = 'x' * (400 * 1024 + 1000)
+        result = DeployErrorExtractor.truncate_if_needed(big)
+        assert len(result.encode('utf-8')) <= 400 * 1024 + 50  # allow truncation marker
+        assert '[...truncated]' in result
+
+    def test_truncate_if_needed_small_output(self):
+        """Output ≤ 400 KB is returned unchanged."""
+        small = 'hello world\n' * 100
+        result = DeployErrorExtractor.truncate_if_needed(small)
+        assert result == small
+
+    def test_extract_handles_400kb_input(self):
+        """extract() silently truncates oversized input and still returns lines."""
+        error_line = "Error: this is an error line\n"
+        padding = 'normal log line\n' * ((400 * 1024) // 16)
+        big_output = error_line + padding
+        result = DeployErrorExtractor.extract(big_output)
+        # Should not raise; may or may not contain the error line depending on truncation
+        assert isinstance(result, list)
+
+    # ------------------------------------------------------------------
+    # Edge case: duplicate lines
+    # ------------------------------------------------------------------
+
+    def test_extract_deduplicates_identical_lines(self):
+        """Duplicate error lines are counted once."""
+        output = '\n'.join(['Error: same problem'] * 10)
+        result = DeployErrorExtractor.extract(output)
+        assert result.count('Error: same problem') == 1
+
+    def test_extract_all_duplicate_lines_gives_single_entry(self):
+        """When all lines are identical duplicates, only one entry is returned."""
+        output = '\n'.join(['FAILED: deploy aborted'] * 20)
+        result = DeployErrorExtractor.extract(output)
+        assert len(result) == 1
+
+    # ------------------------------------------------------------------
+    # Telegram formatting
+    # ------------------------------------------------------------------
+
+    def test_format_for_telegram_top_3(self):
+        """format_for_telegram returns at most 3 lines."""
+        lines = [f"Error: issue {i}" for i in range(5)]
+        text = DeployErrorExtractor.format_for_telegram(lines)
+        assert text.count('•') == 3
+
+    def test_format_for_telegram_empty(self):
+        """format_for_telegram returns empty string for no errors."""
+        assert DeployErrorExtractor.format_for_telegram([]) == ''
+
+    # ------------------------------------------------------------------
+    # from_sfn_history
+    # ------------------------------------------------------------------
+
+    def test_from_sfn_history_extracts_cause(self):
+        """from_sfn_history extracts error lines from executionFailedEventDetails.cause."""
+        events = [
+            {
+                'executionFailedEventDetails': {
+                    'cause': 'Error: CloudFormation stack already exists\nDeployment FAILED'
+                }
+            }
+        ]
+        result = DeployErrorExtractor.from_sfn_history(events)
+        assert len(result) > 0
+        assert any('Error:' in l or 'FAILED' in l or 'already exists' in l for l in result)
+
+    def test_from_sfn_history_empty_events(self):
+        """from_sfn_history returns [] for empty history."""
+        result = DeployErrorExtractor.from_sfn_history([])
+        assert result == []
+
+    def test_from_sfn_history_no_error_fields(self):
+        """from_sfn_history returns [] when events have no error fields."""
+        events = [
+            {'type': 'ExecutionStarted', 'executionStartedEventDetails': {'input': '{}'}},
+        ]
+        result = DeployErrorExtractor.from_sfn_history(events)
+        assert result == []
+
+
+# ============================================================================
+# Sprint8-002: Integration tests — get_deploy_status FAILED path
+# ============================================================================
+
+class TestGetDeployStatusFailedPath:
+    """Integration: verify error_lines are stored in DDB and Telegram notified."""
+
+    @pytest.fixture
+    def deployer_mod(self, mock_dynamodb):
+        """Fresh deployer module with mocked tables."""
+        for mod_name in list(sys.modules.keys()):
+            if 'deployer' in mod_name:
+                del sys.modules[mod_name]
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        import deployer as dep
+        dep.history_table = mock_dynamodb.Table('bouncer-deploy-history')
+        dep.locks_table = mock_dynamodb.Table('bouncer-deploy-locks')
+        dep.projects_table = mock_dynamodb.Table('bouncer-projects')
+        yield dep
+        sys.path.pop(0)
+
+    def _put_running_deploy(self, deployer_mod, deploy_id, execution_arn):
+        """Helper: insert a RUNNING deploy record."""
+        deployer_mod.history_table.put_item(Item={
+            'deploy_id': deploy_id,
+            'project_id': 'test-proj',
+            'status': 'RUNNING',
+            'execution_arn': execution_arn,
+            'started_at': int(time.time()) - 60,
+        })
+
+    # ------------------------------------------------------------------
+    # Scenario 2: error_lines stored to DynamoDB
+    # ------------------------------------------------------------------
+
+    def test_error_lines_stored_in_ddb_on_failed(self, deployer_mod):
+        """When SFN status is FAILED, error_lines list is stored in DynamoDB."""
+        deploy_id = 'test-fail-ddb-001'
+        execution_arn = 'arn:aws:states:us-east-1:123456789:execution:test:fail-001'
+        self._put_running_deploy(deployer_mod, deploy_id, execution_arn)
+
+        mock_sfn = MagicMock()
+        mock_sfn.describe_execution.return_value = {'status': 'FAILED'}
+        mock_sfn.get_execution_history.return_value = {
+            'events': [
+                {
+                    'executionFailedEventDetails': {
+                        'cause': 'Error: CloudFormation stack deployment FAILED\nalready exists in this account'
+                    }
+                }
+            ]
+        }
+
+        with patch.object(deployer_mod, 'sfn_client', mock_sfn), \
+             patch('deployer.send_deploy_failure_notification'):
+            result = deployer_mod.get_deploy_status(deploy_id)
+
+        # DynamoDB record should have error_lines
+        item = deployer_mod.history_table.get_item(Key={'deploy_id': deploy_id})['Item']
+        assert 'error_lines' in item
+        assert isinstance(item['error_lines'], list)
+        # The returned record should also carry error_lines
+        assert 'error_lines' in result
+
+    # ------------------------------------------------------------------
+    # Scenario 3: Telegram notification contains top 3 error lines
+    # ------------------------------------------------------------------
+
+    def test_telegram_notification_called_with_error_lines(self, deployer_mod):
+        """send_deploy_failure_notification is called with non-empty error_lines."""
+        deploy_id = 'test-fail-tg-002'
+        execution_arn = 'arn:aws:states:us-east-1:123456789:execution:test:fail-002'
+        self._put_running_deploy(deployer_mod, deploy_id, execution_arn)
+
+        mock_sfn = MagicMock()
+        mock_sfn.describe_execution.return_value = {'status': 'FAILED'}
+        mock_sfn.get_execution_history.return_value = {
+            'events': [
+                {
+                    'executionFailedEventDetails': {
+                        'cause': 'Error: first issue\nError: second issue\nFAILED: third\nalready exists\n'
+                    }
+                }
+            ]
+        }
+
+        captured = {}
+
+        def capture_notification(did, pid, error_lines):
+            captured['deploy_id'] = did
+            captured['error_lines'] = error_lines
+
+        with patch.object(deployer_mod, 'sfn_client', mock_sfn), \
+             patch('deployer.send_deploy_failure_notification', side_effect=capture_notification):
+            deployer_mod.get_deploy_status(deploy_id)
+
+        assert captured.get('deploy_id') == deploy_id
+        assert len(captured.get('error_lines', [])) > 0
+
+    def test_send_deploy_failure_notification_includes_top3(self, deployer_mod):
+        """send_deploy_failure_notification message contains up to 3 error lines."""
+        from deployer import send_deploy_failure_notification
+
+        error_lines = ['Error: line 1', 'Error: line 2', 'Error: line 3', 'FAILED: line 4']
+        captured_texts = []
+
+        def fake_send(text):
+            captured_texts.append(text)
+
+        # send_telegram_message_silent is imported inside send_deploy_failure_notification
+        # via 'from telegram import ...', so patch it on the telegram module
+        with patch('telegram.send_telegram_message_silent', fake_send):
+            send_deploy_failure_notification('d-001', 'my-proj', error_lines)
+
+        assert len(captured_texts) == 1
+        msg = captured_texts[0]
+        # Should include at most top 3
+        assert 'Error: line 1' in msg
+        assert 'Error: line 2' in msg
+        assert 'Error: line 3' in msg
+        # Line 4 is beyond top 3 — should NOT appear
+        assert 'FAILED: line 4' not in msg
+
+    # ------------------------------------------------------------------
+    # Scenario 1: SFN FAILED → extract ≤ 5 lines with correct keywords
+    # ------------------------------------------------------------------
+
+    def test_sfn_failed_extracts_max_5_lines(self, deployer_mod):
+        """get_deploy_status: on SFN FAILED, at most 5 error_lines returned."""
+        deploy_id = 'test-fail-max5-003'
+        execution_arn = 'arn:aws:states:us-east-1:123456789:execution:test:fail-003'
+        self._put_running_deploy(deployer_mod, deploy_id, execution_arn)
+
+        many_errors = '\n'.join([f'Error: problem {i}' for i in range(20)])
+        mock_sfn = MagicMock()
+        mock_sfn.describe_execution.return_value = {'status': 'FAILED'}
+        mock_sfn.get_execution_history.return_value = {
+            'events': [{'executionFailedEventDetails': {'cause': many_errors}}]
+        }
+
+        with patch.object(deployer_mod, 'sfn_client', mock_sfn), \
+             patch('deployer.send_deploy_failure_notification'):
+            result = deployer_mod.get_deploy_status(deploy_id)
+
+        assert len(result.get('error_lines', [])) <= 5
+
+    # ------------------------------------------------------------------
+    # Scenario 4: 400 KB truncation in extraction path
+    # ------------------------------------------------------------------
+
+    def test_sfn_large_output_truncated(self, deployer_mod):
+        """When SFN cause exceeds 400 KB, extraction still succeeds (no exception)."""
+        deploy_id = 'test-fail-trunc-004'
+        execution_arn = 'arn:aws:states:us-east-1:123456789:execution:test:fail-004'
+        self._put_running_deploy(deployer_mod, deploy_id, execution_arn)
+
+        big_cause = 'normal log line\n' * ((400 * 1024) // 16) + 'Error: final error\n'
+        mock_sfn = MagicMock()
+        mock_sfn.describe_execution.return_value = {'status': 'FAILED'}
+        mock_sfn.get_execution_history.return_value = {
+            'events': [{'executionFailedEventDetails': {'cause': big_cause}}]
+        }
+
+        with patch.object(deployer_mod, 'sfn_client', mock_sfn), \
+             patch('deployer.send_deploy_failure_notification'):
+            result = deployer_mod.get_deploy_status(deploy_id)
+
+        # Must not raise; error_lines should be a list
+        assert isinstance(result.get('error_lines', []), list)
+
+    # ------------------------------------------------------------------
+    # Edge case: empty execution history
+    # ------------------------------------------------------------------
+
+    def test_sfn_failed_empty_history(self, deployer_mod):
+        """When SFN history is empty, error_lines is an empty list (stored in DDB)."""
+        deploy_id = 'test-fail-empty-005'
+        execution_arn = 'arn:aws:states:us-east-1:123456789:execution:test:fail-005'
+        self._put_running_deploy(deployer_mod, deploy_id, execution_arn)
+
+        mock_sfn = MagicMock()
+        mock_sfn.describe_execution.return_value = {'status': 'FAILED'}
+        mock_sfn.get_execution_history.return_value = {'events': []}
+
+        with patch.object(deployer_mod, 'sfn_client', mock_sfn), \
+             patch('deployer.send_deploy_failure_notification'):
+            result = deployer_mod.get_deploy_status(deploy_id)
+
+        item = deployer_mod.history_table.get_item(Key={'deploy_id': deploy_id})['Item']
+        assert 'error_lines' in item
+        assert item['error_lines'] == []
+
+    # ------------------------------------------------------------------
+    # Sanity: SUCCEEDED path does NOT store error_lines
+    # ------------------------------------------------------------------
+
+    def test_sfn_succeeded_no_error_lines(self, deployer_mod):
+        """On SFN SUCCEEDED, no error_lines stored."""
+        deploy_id = 'test-success-006'
+        execution_arn = 'arn:aws:states:us-east-1:123456789:execution:test:success-006'
+        self._put_running_deploy(deployer_mod, deploy_id, execution_arn)
+
+        mock_sfn = MagicMock()
+        mock_sfn.describe_execution.return_value = {'status': 'SUCCEEDED'}
+
+        with patch.object(deployer_mod, 'sfn_client', mock_sfn), \
+             patch('deployer.send_deploy_failure_notification') as mock_notif:
+            result = deployer_mod.get_deploy_status(deploy_id)
+
+        assert 'error_lines' not in result
+        mock_notif.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # Edge: history_get raises exception → error_lines is empty list, doesn't crash
+    # ------------------------------------------------------------------
+
+    def test_sfn_history_exception_graceful(self, deployer_mod):
+        """If get_execution_history raises, error_lines defaults to [] and deploy continues."""
+        deploy_id = 'test-fail-exc-007'
+        execution_arn = 'arn:aws:states:us-east-1:123456789:execution:test:fail-007'
+        self._put_running_deploy(deployer_mod, deploy_id, execution_arn)
+
+        mock_sfn = MagicMock()
+        mock_sfn.describe_execution.return_value = {'status': 'FAILED'}
+        mock_sfn.get_execution_history.side_effect = Exception('SFN history unavailable')
+
+        with patch.object(deployer_mod, 'sfn_client', mock_sfn), \
+             patch('deployer.send_deploy_failure_notification'):
+            result = deployer_mod.get_deploy_status(deploy_id)
+
+        # Should not raise; status should be FAILED
+        assert result.get('status') == 'FAILED'

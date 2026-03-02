@@ -5,6 +5,7 @@ MCP tools for SAM deployment
 import json
 import logging
 import os
+import re
 import subprocess
 import time
 import uuid
@@ -421,6 +422,115 @@ def cancel_deploy(deploy_id: str) -> dict:
     return {'status': 'cancelled', 'deploy_id': deploy_id}
 
 
+# ============================================================================
+# Deploy Error Extraction
+# ============================================================================
+
+# Max output size before truncation (400 KB)
+_ERROR_OUTPUT_MAX_BYTES = 400 * 1024
+
+# Keywords that indicate an error line (case-sensitive patterns)
+_ERROR_KEYWORDS = re.compile(r'FAILED|Error:|already exists', re.IGNORECASE)
+
+# Max error lines to extract and store
+_ERROR_LINES_MAX = 5
+
+
+class DeployErrorExtractor:
+    """Extract, deduplicate, and format key error lines from SFN execution output.
+
+    Design goals (Approach B — Aggressive / Clean):
+    - Single responsibility: extraction logic fully encapsulated in this class.
+    - No global state; easy to unit-test in isolation.
+    - Truncation guard prevents DynamoDB 400 KB item size limit.
+    """
+
+    MAX_LINES: int = _ERROR_LINES_MAX
+    MAX_OUTPUT_BYTES: int = _ERROR_OUTPUT_MAX_BYTES
+
+    @staticmethod
+    def truncate_if_needed(text: str, max_bytes: int = _ERROR_OUTPUT_MAX_BYTES) -> str:
+        """Return *text* truncated to *max_bytes* UTF-8 bytes (if necessary)."""
+        encoded = text.encode('utf-8', errors='replace')
+        if len(encoded) <= max_bytes:
+            return text
+        truncated = encoded[:max_bytes].decode('utf-8', errors='replace')
+        return truncated + '\n[...truncated]'
+
+    @classmethod
+    def extract(cls, output: str, max_lines: int = _ERROR_LINES_MAX) -> list:
+        """Extract up to *max_lines* unique error lines from *output*.
+
+        A line is included if it matches any of: "FAILED", "Error:", "already exists".
+        Duplicate lines (after stripping) are removed while preserving order.
+        """
+        safe_output = cls.truncate_if_needed(output)
+        seen: set = set()
+        result: list = []
+        for raw_line in safe_output.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if _ERROR_KEYWORDS.search(line) and line not in seen:
+                seen.add(line)
+                result.append(line)
+                if len(result) >= max_lines:
+                    break
+        return result
+
+    @staticmethod
+    def format_for_telegram(error_lines: list, max_top: int = 3) -> str:
+        """Return a compact multi-line string of the top *max_top* error lines."""
+        top = error_lines[:max_top]
+        if not top:
+            return ''
+        return '\n'.join(f'• {line}' for line in top)
+
+    @classmethod
+    def from_sfn_history(cls, history_events: list) -> list:
+        """Extract error lines from a list of SFN execution history events.
+
+        Scans *output* and *cause* fields of each event for error keywords.
+        """
+        combined_parts: list = []
+        for event in history_events:
+            details = event.get('executionFailedEventDetails') or {}
+            cause = details.get('cause') or ''
+            if cause:
+                combined_parts.append(cause)
+
+            task_failed = event.get('taskFailedEventDetails') or {}
+            task_cause = task_failed.get('cause') or ''
+            if task_cause:
+                combined_parts.append(task_cause)
+
+            # Also check lambdaFunctionFailedEventDetails
+            lambda_failed = event.get('lambdaFunctionFailedEventDetails') or {}
+            lambda_cause = lambda_failed.get('cause') or ''
+            if lambda_cause:
+                combined_parts.append(lambda_cause)
+
+        combined = '\n'.join(combined_parts)
+        return cls.extract(combined)
+
+
+def send_deploy_failure_notification(deploy_id: str, project_id: str, error_lines: list):
+    """Send a Telegram notification with deploy failure details and top 3 error lines."""
+    try:
+        from telegram import send_telegram_message_silent, escape_markdown
+        error_text = DeployErrorExtractor.format_for_telegram(error_lines)
+        error_block = f"\n\n📋 *錯誤摘要：*\n{escape_markdown(error_text)}" if error_text else ''
+        text = (
+            f"❌ *部署失敗*\n\n"
+            f"🆔 *部署 ID：* `{deploy_id}`\n"
+            f"📦 *專案：* `{project_id}`"
+            f"{error_block}"
+        )
+        send_telegram_message_silent(text)
+    except Exception as exc:
+        logger.warning(f"[deployer] send_deploy_failure_notification failed: {exc}")
+
+
 def get_deploy_status(deploy_id: str) -> dict:
     """取得部署狀態"""
     record = get_deploy_record(deploy_id)
@@ -438,11 +548,31 @@ def get_deploy_status(deploy_id: str) -> dict:
             if sfn_status in ['SUCCEEDED', 'FAILED', 'TIMED_OUT', 'ABORTED']:
                 new_status = 'SUCCESS' if sfn_status == 'SUCCEEDED' else 'FAILED'
                 finished_at = int(time.time())
-                update_deploy_record(deploy_id, {
+                ddb_update: dict = {
                     'status': new_status,
-                    'finished_at': finished_at
-                })
+                    'finished_at': finished_at,
+                }
+
+                # --- Sprint8-002: extract error lines on failure ---
+                error_lines: list = []
+                if sfn_status == 'FAILED':
+                    try:
+                        history_resp = _get_sfn_client().get_execution_history(
+                            executionArn=execution_arn,
+                            maxResults=100,
+                            reverseOrder=True,
+                        )
+                        history_events = history_resp.get('events', [])
+                        error_lines = DeployErrorExtractor.from_sfn_history(history_events)
+                    except Exception as hist_exc:
+                        logger.warning(f"[deployer] get_execution_history failed: {hist_exc}")
+
+                    ddb_update['error_lines'] = error_lines
+
+                update_deploy_record(deploy_id, ddb_update)
                 record['status'] = new_status
+                if error_lines:
+                    record['error_lines'] = error_lines
 
                 project_id = record.get('project_id', '')
                 deploy_status = 'success' if new_status == 'SUCCESS' else 'failed'
@@ -456,6 +586,10 @@ def get_deploy_status(deploy_id: str) -> dict:
 
                 # 釋放鎖
                 release_lock(record.get('project_id'))
+
+                # --- 通知 Telegram (failure only) ---
+                if sfn_status == 'FAILED':
+                    send_deploy_failure_notification(deploy_id, project_id, error_lines)
 
         except Exception as e:
             logger.error(f"Error getting execution status: {e}")
