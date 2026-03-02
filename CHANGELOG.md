@@ -158,3 +158,20 @@ All notable changes to this project will be documented in this file.
 - DynamoDB table initialization centralized in `db.py` via `_LazyTable` pattern
 - Deduplicated `send_telegram_message_to()` and `sanitize_filename()` functions
 - Lambda memory increased 256MB → 512MB for improved cold start performance
+
+## [3.8.0] - 2026-03-02
+
+### Fixed
+- `bouncer_deploy_history` CLI `--args` parameter mapping — now correctly passes `project` parameter
+- Deploy failure message truncation — key error lines (up to 5) now stored in DynamoDB and included in Telegram notification
+- REST endpoint `handle_clawdbot_request` missing Unicode normalization (NFKC) before risk checks
+- EarlyValidation errors now show actionable CFN import steps instead of generic message
+- Pre-existing test failures: GSI mock isolation, trust source binding, stats scan→query (7 tests fixed)
+
+### Added
+- LambdaLogGroup CFN import support via SAM-transformed template (`sam build + sam package` flow)
+- `bouncer_upload_batch` S3 verification after upload — non-blocking, results in `verification_failed`
+- Trust session expiry notification — when trust expires, pending requests are notified via Telegram
+
+### Security
+- Added `AWS::Logs::LogGroup: LogGroupName` to `_RESOURCE_ID_KEYS` for correct CFN import resource identification
