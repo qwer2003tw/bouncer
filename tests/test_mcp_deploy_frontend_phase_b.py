@@ -436,3 +436,60 @@ class TestDDBFields:
         failed = json.loads(extra['failed_details'])
         assert isinstance(failed, list)
         assert failed == []
+
+
+# ---------------------------------------------------------------------------
+# Progress update during approve
+# ---------------------------------------------------------------------------
+
+class TestApproveProgressUpdate:
+    """Verify update_message is called with progress info during S3 copy loop."""
+
+    def _make_large_item(self):
+        """6 files — ensures the % 5 == 0 progress branch fires at file #5."""
+        files = [
+            {
+                'filename': f'assets/chunk-{i:03d}.js',
+                's3_key': f'pending/{_REQUEST_ID}/assets/chunk-{i:03d}.js',
+                'content_type': 'application/javascript',
+                'cache_control': 'max-age=31536000, immutable',
+                'size': 1024,
+            }
+            for i in range(6)
+        ]
+        import json as _json
+        return {
+            'request_id': _REQUEST_ID,
+            'action': 'deploy_frontend',
+            'status': 'pending_approval',
+            'project': 'ztp-files',
+            'staging_bucket': _STAGING_BUCKET,
+            'frontend_bucket': _FRONTEND_BUCKET,
+            'distribution_id': _DISTRIBUTION_ID,
+            'region': 'us-east-1',
+            'source': 'Private Bot (ZTP Files)',
+            'reason': 'Sprint 9 deploy',
+            'files': _json.dumps(files),
+            'file_count': len(files),
+            'total_size': sum(f['size'] for f in files),
+            'created_at': 1700000000,
+        }
+
+    def test_approve_sends_progress_update(self):
+        """update_message should be called with '進度:' during the copy loop."""
+        mock_s3, mock_cf, mock_table, boto3_client = _patch_all()
+        with patch('boto3.client', side_effect=boto3_client), \
+             patch('callbacks._get_table', return_value=mock_table), \
+             patch('callbacks.answer_callback'), \
+             patch('callbacks.update_message') as mock_update, \
+             patch('callbacks._update_request_status'), \
+             patch('callbacks.emit_metric'), \
+             patch('notifications._send_message_silent'):
+            _call_callback(action='approve', item=self._make_large_item())
+
+        # At least one update_message call must contain progress info
+        progress_calls = [
+            c for c in mock_update.call_args_list
+            if len(c[0]) > 1 and '進度' in c[0][1]
+        ]
+        assert len(progress_calls) >= 1, "Expected at least one progress update_message call"

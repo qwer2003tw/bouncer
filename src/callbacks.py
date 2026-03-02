@@ -840,7 +840,7 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
 # Deploy Frontend Callback (sprint9-003 Phase B)
 # ============================================================================
 
-def handle_deploy_frontend_callback(request_id: str, action: str, item: dict, message_id: int, callback_id: str, user_id: str) -> dict:
+def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str) -> dict:
     """處理前端部署的審批 callback
 
     action=approve: 從 DDB 讀 staged_files + target_info → S3 copy → CloudFront invalidation
