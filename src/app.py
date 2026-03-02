@@ -791,12 +791,25 @@ def handle_telegram_webhook(event: dict) -> dict:
     # 特殊處理：撤銷信任時段
     if action == 'revoke_trust':
         emit_metric('Bouncer', 'ApprovalAction', 1, dimensions={'Action': action})
+        # Fetch trust item before deletion for summary (sprint9-007-phase-a)
+        trust_item_for_summary = None
+        try:
+            _resp = table.get_item(Key={'request_id': request_id})
+            trust_item_for_summary = _resp.get('Item')
+        except Exception as _e:
+            logger.warning('Failed to fetch trust item for summary: %s', _e)
         success = revoke_trust_session(request_id)
         emit_metric('Bouncer', 'TrustSession', 1, dimensions={'Event': 'revoked'})
         message_id = callback.get('message', {}).get('message_id')
         if success:
             update_message(message_id, f"🛑 *信任時段已結束*\n\n`{request_id}`", remove_buttons=True)
             answer_callback(callback['id'], '🛑 信任已結束')
+            # Send execution summary (sprint9-007-phase-a)
+            if trust_item_for_summary:
+                try:
+                    send_trust_session_summary(trust_item_for_summary)
+                except Exception as _se:
+                    logger.error('send_trust_session_summary error: %s', _se)
         else:
             answer_callback(callback['id'], '❌ 撤銷失敗')
         return response(200, {'ok': True})
@@ -931,4 +944,4 @@ def verify_hmac(headers: dict, body: str) -> bool:
 
 
 # Notification functions moved to notifications.py — re-exported for backward compat
-from notifications import send_approval_request  # noqa: F401, E402
+from notifications import send_approval_request, send_trust_session_summary  # noqa: F401, E402

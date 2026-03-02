@@ -25,7 +25,7 @@ from accounts import (
 from paging import store_paged_output
 from rate_limit import RateLimitExceeded, PendingLimitExceeded, check_rate_limit
 from trust import (
-    increment_trust_command_count, should_trust_approve,
+    increment_trust_command_count, should_trust_approve, track_command_executed,
 )
 from db import table
 from notifications import (
@@ -750,6 +750,9 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
     # Record execution error to DDB if command failed (sprint9-001)
     if is_failed:
         record_execution_error(table, request_id, exit_code=-1, error_output=result)
+
+    # Track command in trust session for end-of-session summary (sprint9-007-phase-a)
+    track_command_executed(trust_session['request_id'], ctx.command, not is_failed)
 
     response_data = {
         'status': 'trust_auto_approved',

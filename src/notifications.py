@@ -684,3 +684,80 @@ def send_presigned_batch_notification(
 
     except Exception as e:
         logger.error(f"[PRESIGNED] send_presigned_batch_notification error: {e}")
+
+
+# ============================================================================
+# Trust Session Summary (sprint9-007-phase-a)
+# ============================================================================
+
+def send_trust_session_summary(trust_item: dict) -> None:
+    """Send a Telegram summary when a trust session ends (revoke or expiry).
+
+    Formats a message listing all commands executed during the trust session,
+    with success/failure counts and truncation for large sessions.
+
+    Args:
+        trust_item: DynamoDB trust session item (may contain commands_executed list)
+    """
+    try:
+        commands_executed = trust_item.get('commands_executed', [])
+        trust_id_short = str(trust_item.get('request_id', ''))[-12:]
+
+        # No commands — send brief notification
+        if not commands_executed:
+            text = (
+                "\U0001f513 *\u4fe1\u4efb\u6642\u6bb5\u7d50\u675f\uff08\u624b\u52d5\u6492\u92b7\uff09*\n\n"
+                "\U0001f194 `" + trust_id_short + "`\n"
+                "\U0001f4cb \u7121\u547d\u4ee4\u57f7\u884c"
+            )
+            _send_message_silent(text)
+            return
+
+        # Calculate duration
+        import time as _t
+        created_at = int(trust_item.get('created_at', 0))
+        duration_secs = int(_t.time()) - created_at if created_at else 0
+        duration_mins = duration_secs // 60
+        duration_sec_part = duration_secs % 60
+        duration_str = str(duration_mins) + " \u5206 " + str(duration_sec_part) + " \u79d2"
+
+        # Count failures
+        total = len(commands_executed)
+        fail_count = sum(1 for e in commands_executed if not e.get('success', True))
+
+        # Build command list (max 10 shown)
+        display_limit = 10
+        display_cmds = commands_executed[:display_limit]
+        truncated = total > display_limit
+
+        cmd_lines = []
+        for i, entry in enumerate(display_cmds, start=1):
+            cmd = entry.get('cmd', '')[:80]
+            ok_icon = "\u2705" if entry.get('success', True) else "\u274c"
+            cmd_lines.append("  " + str(i) + "\\. " + ok_icon + " `" + _escape_markdown(cmd) + "`")
+        if truncated:
+            cmd_lines.append("  _...\u9084\u6709 " + str(total - display_limit) + " \u500b\u547d\u4ee4_")
+
+        cmd_block = "\n".join(cmd_lines)
+
+        # Result line
+        if fail_count == 0:
+            result_line = "\u2705 \u5168\u90e8\u6210\u529f"
+        else:
+            result_line = "\u26a0\ufe0f " + str(fail_count) + " \u500b\u5931\u6557\uff08\u8acb\u67e5\u770b CloudWatch Logs\uff09"
+
+        executed_label = "\u57f7\u884c\u4e86 " + str(total) + " \u500b\u547d\u4ee4\uff1a"
+
+        text = (
+            "\U0001f513 *\u4fe1\u4efb\u6642\u6bb5\u7d50\u675f\uff08\u624b\u52d5\u6492\u92b7\uff09*\n\n"
+            "\U0001f194 `" + trust_id_short + "`\n"
+            "\u23f1 \u6642\u9577\uff1a" + duration_str + "\n"
+            "\U0001f4cb " + executed_label + "\n"
+            + cmd_block + "\n\n"
+            + result_line
+        )
+
+        _send_message_silent(text)
+
+    except Exception as exc:
+        logger.error('[TRUST SUMMARY] send_trust_session_summary error: %s', exc)
