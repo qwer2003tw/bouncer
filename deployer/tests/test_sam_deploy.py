@@ -21,13 +21,8 @@ Covers:
 from __future__ import annotations
 
 import sys
-import os
-import importlib
-import types
 from pathlib import Path
-from typing import List
-from unittest.mock import MagicMock, patch, call
-import subprocess
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -38,8 +33,8 @@ import pytest
 SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-import sam_deploy  # noqa: E402
-from sam_deploy import (
+import sam_deploy  # noqa: E402, F401
+from sam_deploy import (  # noqa: E402
     CloudFormationImporter,
     ConflictResource,
     DeployResult,
@@ -863,3 +858,434 @@ class TestMainWithParams:
         assert exc.value.code == 0
         assert "--role-arn" in captured_cmd
         assert "arn:aws:iam::123:role/cfn" in captured_cmd
+
+
+# ===========================================================================
+# 16. NEW: _RESOURCE_ID_KEYS includes AWS::Logs::LogGroup (sprint8-001)
+# ===========================================================================
+
+
+class TestResourceIdKeyLogGroup:
+    def test_loggroup_key_is_loggroup_name(self):
+        """_RESOURCE_ID_KEYS must map AWS::Logs::LogGroup → LogGroupName."""
+        from sam_deploy import _RESOURCE_ID_KEYS
+        assert _RESOURCE_ID_KEYS["AWS::Logs::LogGroup"] == "LogGroupName"
+
+    def test_physical_id_to_identifier_loggroup(self):
+        result = _physical_id_to_identifier("AWS::Logs::LogGroup", "/aws/lambda/my-fn")
+        assert result == {"LogGroupName": "/aws/lambda/my-fn"}
+
+    def test_conflict_resource_loggroup_import_record(self):
+        c = ConflictResource(
+            "LambdaLogGroup",
+            "AWS::Logs::LogGroup",
+            "/aws/lambda/bouncer-prod-function",
+        )
+        record = c.to_import_record()
+        assert record["ResourceType"] == "AWS::Logs::LogGroup"
+        assert record["LogicalResourceId"] == "LambdaLogGroup"
+        assert record["ResourceIdentifier"] == {
+            "LogGroupName": "/aws/lambda/bouncer-prod-function"
+        }
+
+
+# ===========================================================================
+# 17. NEW: SamPackager class (sprint8-001, approach-b)
+# ===========================================================================
+
+
+class TestSamPackager:
+    """Unit tests for SamPackager.build_and_package."""
+
+    def _make_mock_run(self, returncode: int = 0, stdout: str = "", stderr: str = ""):
+        mock_proc = MagicMock()
+        mock_proc.returncode = returncode
+        mock_proc.stdout = stdout
+        mock_proc.stderr = stderr
+        return MagicMock(return_value=mock_proc)
+
+    def test_build_and_package_calls_sam_build_then_sam_package(self, tmp_path):
+        """build_and_package must call sam build then sam package."""
+        from sam_deploy import SamPackager
+
+        template = tmp_path / "template.yaml"
+        template.write_text("Transform: AWS::Serverless-2016-10-31\n")
+
+        calls = []
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = ""
+        mock_proc.stderr = ""
+
+        def mock_run(cmd, **kwargs):
+            calls.append(cmd[0:2])  # just capture ['sam', 'build'] / ['sam', 'package']
+            return mock_proc
+
+        packager = SamPackager(str(template), run_fn=mock_run)
+        url = packager.build_and_package(s3_bucket="test-bucket")
+
+        assert ["sam", "build"] in calls
+        assert ["sam", "package"] in calls
+        assert url.startswith("s3://test-bucket/")
+        assert url.endswith("packaged-template.yaml")
+
+    def test_build_failure_raises(self, tmp_path):
+        """If sam build fails, RuntimeError should be raised."""
+        from sam_deploy import SamPackager
+
+        template = tmp_path / "template.yaml"
+        template.write_text("Transform: AWS::Serverless-2016-10-31\n")
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 1
+        mock_proc.stdout = ""
+        mock_proc.stderr = "Build failed"
+
+        packager = SamPackager(str(template), run_fn=MagicMock(return_value=mock_proc))
+        with pytest.raises(RuntimeError, match="Command failed"):
+            packager.build_and_package(s3_bucket="test-bucket")
+
+    def test_missing_bucket_raises(self, tmp_path, monkeypatch):
+        """When SAM_PACKAGE_BUCKET is not set, RuntimeError should be raised."""
+        from sam_deploy import SamPackager
+
+        monkeypatch.delenv("SAM_PACKAGE_BUCKET", raising=False)
+        template = tmp_path / "template.yaml"
+        template.write_text("Transform: AWS::Serverless-2016-10-31\n")
+
+        packager = SamPackager(str(template))
+        with pytest.raises(RuntimeError, match="SAM_PACKAGE_BUCKET"):
+            packager.build_and_package()
+
+    def test_bucket_from_env(self, tmp_path, monkeypatch):
+        """build_and_package should use SAM_PACKAGE_BUCKET env var when no arg given."""
+        from sam_deploy import SamPackager
+
+        monkeypatch.setenv("SAM_PACKAGE_BUCKET", "env-bucket")
+        template = tmp_path / "template.yaml"
+        template.write_text("Transform: AWS::Serverless-2016-10-31\n")
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = ""
+        mock_proc.stderr = ""
+
+        packager = SamPackager(str(template), run_fn=MagicMock(return_value=mock_proc))
+        url = packager.build_and_package()
+        assert "env-bucket" in url
+
+
+# ===========================================================================
+# 18. NEW: import_resources uses packaged template for SAM YAML (sprint8-001)
+# ===========================================================================
+
+
+class TestImportUsesPackagedTemplateForSamYaml:
+    """When a conflict involves a SAM-transform type (e.g. LogGroup),
+    import_resources must invoke the SamPackager and pass TemplateURL
+    to the create_change_set call."""
+
+    LOGGROUP_CONFLICT = ConflictResource(
+        "LambdaLogGroup",
+        "AWS::Logs::LogGroup",
+        "/aws/lambda/bouncer-prod-function",
+    )
+
+    def _make_cfn_client(self):
+        client = MagicMock()
+        client.describe_stacks.return_value = {"Stacks": [{"StackStatus": "CREATE_COMPLETE"}]}
+        client.describe_change_set.return_value = {"Status": "CREATE_COMPLETE"}
+        client.get_waiter.return_value.wait = MagicMock()
+        return client
+
+    def _make_packager(self, url: str = "s3://bucket/key/packaged-template.yaml"):
+        packager = MagicMock()
+        packager.build_and_package.return_value = url
+        return packager
+
+    def test_loggroup_conflict_calls_packager(self):
+        """LogGroup conflict → SamPackager.build_and_package() is invoked."""
+        cfn = self._make_cfn_client()
+        packager = self._make_packager()
+        imp = CloudFormationImporter(STACK, cfn_client=cfn, sam_packager=packager)
+
+        result = imp.import_resources([self.LOGGROUP_CONFLICT])
+
+        assert result is True
+        packager.build_and_package.assert_called_once()
+
+    def test_loggroup_conflict_passes_template_url_to_changeset(self):
+        """TemplateURL from packager must be passed to create_change_set."""
+        cfn = self._make_cfn_client()
+        s3_url = "s3://my-bucket/sam-packaged/abc/packaged-template.yaml"
+        packager = self._make_packager(url=s3_url)
+        imp = CloudFormationImporter(STACK, cfn_client=cfn, sam_packager=packager)
+
+        imp.import_resources([self.LOGGROUP_CONFLICT])
+
+        call_kwargs = cfn.create_change_set.call_args[1]
+        assert call_kwargs.get("TemplateURL") == s3_url
+        assert call_kwargs["ChangeSetType"] == "IMPORT"
+
+    def test_non_sam_type_does_not_call_packager(self, mock_cfn_client):
+        """SQS queue conflict should NOT invoke SamPackager."""
+        packager = self._make_packager()
+        imp = CloudFormationImporter(STACK, cfn_client=mock_cfn_client, sam_packager=packager)
+
+        sqs_conflict = ConflictResource("MyQueue", "AWS::SQS::Queue", "https://sqs.../q")
+        imp.import_resources([sqs_conflict])
+
+        packager.build_and_package.assert_not_called()
+        # TemplateURL should NOT be present in call_kwargs
+        call_kwargs = mock_cfn_client.create_change_set.call_args[1]
+        assert "TemplateURL" not in call_kwargs
+
+    def test_mixed_conflicts_with_loggroup_uses_packager(self, mock_cfn_client):
+        """If ANY conflict is a SAM-transform type, packager is invoked."""
+        packager = self._make_packager()
+        imp = CloudFormationImporter(STACK, cfn_client=mock_cfn_client, sam_packager=packager)
+
+        conflicts = [
+            ConflictResource("MyQueue", "AWS::SQS::Queue", "https://sqs.../q"),
+            self.LOGGROUP_CONFLICT,
+        ]
+        imp.import_resources(conflicts)
+
+        packager.build_and_package.assert_called_once()
+        call_kwargs = mock_cfn_client.create_change_set.call_args[1]
+        assert "TemplateURL" in call_kwargs
+
+    def test_dry_run_does_not_call_packager(self):
+        """In dry-run mode, packager should NOT be invoked."""
+        cfn = self._make_cfn_client()
+        packager = self._make_packager()
+        imp = CloudFormationImporter(STACK, cfn_client=cfn, dry_run=True, sam_packager=packager)
+
+        imp.import_resources([self.LOGGROUP_CONFLICT])
+
+        packager.build_and_package.assert_not_called()
+
+
+# ===========================================================================
+# 19. NEW: --dry-run-import plan display (sprint8-001)
+# ===========================================================================
+
+
+class TestDryRunImportPlan:
+    """Verify that --dry-run-import correctly shows the import plan."""
+
+    LOGGROUP_CONFLICT_OUTPUT = (
+        "Error: Failed to create/update the stack.\n"
+        "Resource handler returned message: \"/aws/lambda/bouncer-prod-function already exists\" "
+        "[RequestToken: abc, HandlerErrorCode: AlreadyExists]\n"
+        "  ResourceLogicalId: LambdaLogGroup, ResourceType: AWS::Logs::LogGroup, "
+        "ResourcePhysicalId: /aws/lambda/bouncer-prod-function]"
+    )
+
+    def _make_proc(self, rc: int, stdout: str = "", stderr: str = "") -> MagicMock:
+        p = MagicMock()
+        p.returncode = rc
+        p.stdout = stdout
+        p.stderr = stderr
+        return p
+
+    def test_dry_run_prints_loggroup_conflict(self, monkeypatch, mock_cfn_client, capsys):
+        """--dry-run-import with LogGroup conflict prints resource details."""
+        monkeypatch.setenv("STACK_NAME", STACK)
+        monkeypatch.delenv("SAM_PARAMS", raising=False)
+        monkeypatch.delenv("CFN_ROLE_ARN", raising=False)
+        monkeypatch.delenv("TARGET_ROLE_ARN", raising=False)
+
+        first_call = self._make_proc(1, stdout=self.LOGGROUP_CONFLICT_OUTPUT)
+
+        with patch(
+            "sam_deploy.subprocess.run", return_value=first_call
+        ), patch("sam_deploy.boto3.client", return_value=mock_cfn_client):
+            with pytest.raises(SystemExit) as exc:
+                main(["--dry-run-import"])
+
+        assert exc.value.code == 2
+        captured = capsys.readouterr()
+        assert "LambdaLogGroup" in captured.out
+        assert "AWS::Logs::LogGroup" in captured.out
+
+    def test_dry_run_no_api_calls_on_loggroup(self, monkeypatch, mock_cfn_client):
+        """--dry-run-import must not call create_change_set even for LogGroup."""
+        monkeypatch.setenv("STACK_NAME", STACK)
+        monkeypatch.delenv("SAM_PARAMS", raising=False)
+        monkeypatch.delenv("CFN_ROLE_ARN", raising=False)
+        monkeypatch.delenv("TARGET_ROLE_ARN", raising=False)
+
+        first_call = self._make_proc(1, stdout=self.LOGGROUP_CONFLICT_OUTPUT)
+
+        with patch(
+            "sam_deploy.subprocess.run", return_value=first_call
+        ), patch("sam_deploy.boto3.client", return_value=mock_cfn_client):
+            with pytest.raises(SystemExit):
+                main(["--dry-run-import"])
+
+        mock_cfn_client.create_change_set.assert_not_called()
+
+    def test_dry_run_exits_2_for_loggroup(self, monkeypatch, mock_cfn_client):
+        """--dry-run-import with parseable conflict must exit with code 2."""
+        monkeypatch.setenv("STACK_NAME", STACK)
+        monkeypatch.delenv("SAM_PARAMS", raising=False)
+        monkeypatch.delenv("CFN_ROLE_ARN", raising=False)
+        monkeypatch.delenv("TARGET_ROLE_ARN", raising=False)
+
+        first_call = self._make_proc(1, stdout=self.LOGGROUP_CONFLICT_OUTPUT)
+
+        with patch(
+            "sam_deploy.subprocess.run", return_value=first_call
+        ), patch("sam_deploy.boto3.client", return_value=mock_cfn_client):
+            with pytest.raises(SystemExit) as exc:
+                main(["--dry-run-import"])
+
+        assert exc.value.code == 2
+
+
+# ===========================================================================
+# 20. C-unique: Fine-grained LogGroup edge cases (merged from approach-c)
+# ===========================================================================
+
+# Sample CFN error output with a LogGroup conflict (used by C-originated tests)
+_LOGGROUP_CONFLICT_OUTPUT_C = (
+    "Error: Failed to create/update the stack.\n"
+    "Resource handler returned message: \"/aws/lambda/bouncer-prod-function already exists\" "
+    "[RequestToken: abc123, HandlerErrorCode: AlreadyExists]\n"
+    "  ResourceLogicalId: LambdaLogGroup, ResourceType: AWS::Logs::LogGroup, "
+    "ResourcePhysicalId: /aws/lambda/bouncer-prod-function]"
+)
+
+
+class TestLogGroupEdgeCasesFromC:
+    """Edge case tests from approach-c that cover paths not tested by B's packager-injection style."""
+
+    def test_resource_id_keys_has_loggroup(self):
+        """_RESOURCE_ID_KEYS must contain AWS::Logs::LogGroup key."""
+        from sam_deploy import _RESOURCE_ID_KEYS
+        assert "AWS::Logs::LogGroup" in _RESOURCE_ID_KEYS
+
+    def test_resource_id_keys_does_not_use_id_for_loggroup(self):
+        """LogGroup must NOT fall back to the generic 'Id' key."""
+        from sam_deploy import _RESOURCE_ID_KEYS
+        assert _RESOURCE_ID_KEYS.get("AWS::Logs::LogGroup") != "Id"
+        result = _physical_id_to_identifier(
+            "AWS::Logs::LogGroup", "/aws/lambda/bouncer-prod-function"
+        )
+        assert "Id" not in result
+        assert "LogGroupName" in result
+
+    def test_import_detects_loggroup_conflict(self, importer):
+        """parse_conflicts should extract LogGroup conflict from CFN error output."""
+        conflicts = importer.parse_conflicts(_LOGGROUP_CONFLICT_OUTPUT_C)
+        assert len(conflicts) == 1
+        c = conflicts[0]
+        assert c.logical_id == "LambdaLogGroup"
+        assert c.resource_type == "AWS::Logs::LogGroup"
+        assert c.physical_id == "/aws/lambda/bouncer-prod-function"
+
+    def test_loggroup_import_record_uses_loggroup_name(self, importer):
+        """to_import_record() for LogGroup must use LogGroupName identifier."""
+        c = ConflictResource(
+            "LambdaLogGroup",
+            "AWS::Logs::LogGroup",
+            "/aws/lambda/bouncer-prod-function",
+        )
+        record = c.to_import_record()
+        assert record["ResourceIdentifier"] == {
+            "LogGroupName": "/aws/lambda/bouncer-prod-function"
+        }
+
+    def test_import_loggroup_physical_id_extracted(self, importer):
+        """LogGroupName (physical ID) must be correctly extracted from CFN error output."""
+        conflicts = importer.parse_conflicts(_LOGGROUP_CONFLICT_OUTPUT_C)
+        assert len(conflicts) == 1
+        assert conflicts[0].physical_id == "/aws/lambda/bouncer-prod-function"
+
+    def test_loggroup_physical_id_becomes_identifier_value(self):
+        """The extracted physical ID must map to LogGroupName in the import identifier."""
+        log_group_name = "/aws/lambda/bouncer-prod-function"
+        result = _physical_id_to_identifier("AWS::Logs::LogGroup", log_group_name)
+        assert result == {"LogGroupName": log_group_name}
+
+    def test_loggroup_physical_id_strips_whitespace(self, importer):
+        """Trailing whitespace in physical ID from CFN output must be stripped."""
+        output_with_space = (
+            "Resource handler returned message: \"/aws/lambda/bouncer-prod-function already exists\" "
+            "[RequestToken: abc, HandlerErrorCode: AlreadyExists]\n"
+            "  ResourceLogicalId: LambdaLogGroup, ResourceType: AWS::Logs::LogGroup, "
+            "ResourcePhysicalId: /aws/lambda/bouncer-prod-function  ]"
+        )
+        conflicts = importer.parse_conflicts(output_with_space)
+        assert len(conflicts) == 1
+        assert conflicts[0].physical_id == "/aws/lambda/bouncer-prod-function"
+
+
+# ===========================================================================
+# 21. C-unique: Subprocess integration for LogGroup import (approach-c)
+# ===========================================================================
+
+
+class TestLogGroupSubprocessIntegrationFromC:
+    """Tests from approach-c that exercise the non-injected subprocess path.
+    These complement B's packager-injection tests by covering the full
+    _get_packaged_template_url -> _find_sam_template -> SamPackager pipeline."""
+
+    def test_sam_package_failure_returns_false(self, mock_cfn_client):
+        """If sam build fails, import_resources must return False (not crash)."""
+        imp = CloudFormationImporter(STACK, cfn_client=mock_cfn_client)
+        conflicts = [
+            ConflictResource(
+                "LambdaLogGroup", "AWS::Logs::LogGroup", "/aws/lambda/bouncer-prod-function"
+            )
+        ]
+
+        sam_build_fail = MagicMock()
+        sam_build_fail.returncode = 1
+        sam_build_fail.stdout = ""
+        sam_build_fail.stderr = "Build error: missing dependencies"
+
+        with patch("sam_deploy.subprocess.run", return_value=sam_build_fail):
+            result = imp.import_resources(conflicts)
+
+        assert result is False
+
+    def test_import_loggroup_dry_run_no_subprocess(self, mock_cfn_client):
+        """dry_run=True must not invoke subprocess even for LogGroup conflicts."""
+        imp = CloudFormationImporter(STACK, cfn_client=mock_cfn_client, dry_run=True)
+        conflicts = [
+            ConflictResource(
+                "LambdaLogGroup", "AWS::Logs::LogGroup", "/aws/lambda/bouncer-prod-function"
+            )
+        ]
+
+        subprocess_calls = []
+
+        def should_not_be_called(cmd, **kwargs):
+            subprocess_calls.append(cmd)
+            raise AssertionError(f"subprocess.run must not be called in dry-run, got: {cmd}")
+
+        with patch("sam_deploy.subprocess.run", side_effect=should_not_be_called):
+            result = imp.import_resources(conflicts)
+
+        assert result is True
+        assert subprocess_calls == []
+        mock_cfn_client.create_change_set.assert_not_called()
+
+    def test_dry_run_loggroup_prints_plan(self, mock_cfn_client, capsys):
+        """dry_run should print the import plan with physical ID visible."""
+        imp = CloudFormationImporter(STACK, cfn_client=mock_cfn_client, dry_run=True)
+        conflicts = [
+            ConflictResource(
+                "LambdaLogGroup", "AWS::Logs::LogGroup", "/aws/lambda/bouncer-prod-function"
+            )
+        ]
+
+        with patch("sam_deploy.subprocess.run", side_effect=AssertionError("no subprocess")):
+            imp.import_resources(conflicts)
+
+        captured = capsys.readouterr()
+        assert "LambdaLogGroup" in captured.out
+        assert "/aws/lambda/bouncer-prod-function" in captured.out
+        assert "dry-run" in captured.out.lower()
