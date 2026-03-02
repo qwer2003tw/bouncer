@@ -147,6 +147,17 @@ def _parse_upload_request(req_id, arguments: dict) -> 'dict | UploadContext':
             'isError': True
         })
 
+    # 驗證 base64 padding（截斷檢測）
+    if len(content_b64) % 4 != 0:
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': (
+                'Invalid base64 content: length is not a multiple of 4. '
+                'This usually means the content was truncated by OS argument length limits. '
+                'Use the HTTP API directly or bouncer_request_presigned for large files.'
+            )})}],
+            'isError': True
+        })
+
     # 解碼 base64 驗證格式
     try:
         content_bytes = base64.b64decode(content_b64)
@@ -705,7 +716,19 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
                 'isError': True,
             })
 
-        # Decode base64
+        # Decode base64 (validate padding first)
+        if len(content_b64) % 4 != 0:
+            return mcp_result(req_id, {
+                'content': [{'type': 'text', 'text': json.dumps({
+                    'status': 'error',
+                    'error': (
+                        f'File #{i+1} ({fname}): Invalid base64 content: length is not a multiple of 4. '
+                        'This usually means the content was truncated by OS argument length limits. '
+                        'Use the HTTP API directly or bouncer_request_presigned for large files.'
+                    ),
+                })}],
+                'isError': True,
+            })
         try:
             content_bytes = base64.b64decode(content_b64)
         except Exception:
