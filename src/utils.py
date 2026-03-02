@@ -282,7 +282,8 @@ def mcp_error(req_id, code: int, message: str) -> dict:
 
 def log_decision(table, request_id, command, reason, source, account_id,
                  decision_type, risk_score=None, risk_factors=None,
-                 sequence_modifier=None, **kwargs):
+                 sequence_modifier=None, exit_code: Optional[int] = None,
+                 error_output: Optional[str] = None, **kwargs):
     """統一的決策記錄函數 — 記錄所有審批決策到 requests 表"""
     now = int(time.time())
     item = {
@@ -307,9 +308,48 @@ def log_decision(table, request_id, command, reason, source, account_id,
         item['risk_factors'] = risk_factors[:5]
     if sequence_modifier is not None:
         item['sequence_modifier'] = str(sequence_modifier)
+    if exit_code is not None:
+        item['exit_code'] = exit_code
+    if error_output is not None:
+        if len(error_output) > 2000:
+            error_output = error_output[:2000] + '[truncated]'
+        item['error_output'] = error_output or '(no output)'
     item.update({k: v for k, v in kwargs.items() if v is not None})
     try:
         table.put_item(Item=item)
     except Exception as e:
         logger.error(f"[AUDIT] Failed to log decision: {e}")
     return item
+
+
+def record_execution_error(table, request_id: str, exit_code: int,
+                           error_output: str) -> None:
+    """DDB update_item — 記錄命令執行失敗詳情到已存在的 request 記錄。
+
+    更新欄位：status, exit_code, error_output, executed_at。
+    使用 update_item 以避免覆蓋已有欄位。
+    失敗時只 log，不 raise。
+    """
+    # Truncate error_output
+    if len(error_output) > 2000:
+        error_output = error_output[:2000] + '[truncated]'
+    if not error_output:
+        error_output = '(no output)'
+    if exit_code is None:
+        exit_code = -1  # unknown
+    try:
+        table.update_item(
+            Key={'request_id': request_id},
+            UpdateExpression=(
+                'SET #s = :s, exit_code = :ec, error_output = :eo, executed_at = :ea'
+            ),
+            ExpressionAttributeNames={'#s': 'status'},
+            ExpressionAttributeValues={
+                ':s': 'executed_error',
+                ':ec': exit_code,
+                ':eo': error_output,
+                ':ea': int(time.time()),
+            },
+        )
+    except Exception as e:
+        logger.error(f"[AUDIT] Failed to record execution error for {request_id}: {e}")
