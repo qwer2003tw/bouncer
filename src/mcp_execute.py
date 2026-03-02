@@ -16,7 +16,7 @@ from typing import Optional
 
 
 
-from utils import mcp_result, mcp_error, generate_request_id, log_decision, generate_display_summary
+from utils import mcp_result, mcp_error, generate_request_id, log_decision, generate_display_summary, record_execution_error
 from commands import get_block_reason, is_auto_approve, execute_command, _split_chain
 from accounts import (
     init_default_account, get_account, list_accounts,
@@ -519,10 +519,12 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
             return None  # 已用過或並發衝突 → fallthrough
 
         # 執行命令
+        grant_req_id = generate_request_id(ctx.command)
         result = execute_command(ctx.command, ctx.assume_role)
-        cmd_status = 'error' if result.startswith('❌') else 'success'
+        is_failed = result.startswith('❌')
+        cmd_status = 'error' if is_failed else 'success'
         emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'grant'})
-        paged = store_paged_output(generate_request_id(ctx.command), result)
+        paged = store_paged_output(grant_req_id, result)
 
         # 計算剩餘資訊
         granted_commands = grant.get('granted_commands', [])
@@ -537,7 +539,7 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
         # Audit log
         log_decision(
             table=table,
-            request_id=generate_request_id(ctx.command),
+            request_id=grant_req_id,
             command=ctx.command,
             reason=ctx.reason,
             source=ctx.source,
@@ -551,6 +553,10 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
             mode='mcp',
         )
 
+        # Record execution error to DDB if command failed (sprint9-001)
+        if is_failed:
+            record_execution_error(table, grant_req_id, exit_code=-1, error_output=result)
+
         response_data = {
             'status': 'grant_auto_approved',
             'command': ctx.command,
@@ -560,6 +566,8 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
             'grant_id': grant_id,
             'remaining': remaining_info,
         }
+        if is_failed:
+            response_data['exit_code'] = -1
 
         if paged.get('paged'):
             response_data['paged'] = True
@@ -586,21 +594,23 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
     if not is_auto_approve(ctx.command):
         return None
 
+    request_id = generate_request_id(ctx.command)
     result = execute_command(ctx.command, ctx.assume_role)
-    cmd_status = 'error' if result.startswith('❌') else 'success'
+    is_failed = result.startswith('\u274c')  # ❌
+    cmd_status = 'error' if is_failed else 'success'
     emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'auto_approve'})
-    paged = store_paged_output(generate_request_id(ctx.command), result)
+    paged = store_paged_output(request_id, result)
 
     # Silent Telegram notification for safelist auto-approve
     try:
         result_preview = (result[:300] if result else '(無輸出)').strip()
-        reason_line = f"💬 *原因：* {escape_markdown(ctx.reason or '(未填寫)')}\n" if ctx.reason else ""
+        reason_line = f"\U0001f4ac *原因：* {escape_markdown(ctx.reason or '(未填寫)')}\n" if ctx.reason else ""
         _notif_text = (
-            f"⚡ *自動執行*\n\n"
-            f"🤖 *來源：* {escape_markdown(ctx.source or '(unknown)')}\n"
+            f"\u26a1 *自動執行*\n\n"
+            f"\U0001f916 *來源：* {escape_markdown(ctx.source or '(unknown)')}\n"
             f"{reason_line}"
-            f"📋 *命令：*\n```\n{ctx.command[:300]}\n```\n\n"
-            f"✅ *結果：*\n```\n{result_preview}\n```"
+            f"\U0001f4cb *命令：*\n```\n{ctx.command[:300]}\n```\n\n"
+            f"\u2705 *結果：*\n```\n{result_preview}\n```"
         )
         send_telegram_message_silent(_notif_text)
     except Exception:
@@ -608,7 +618,7 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
 
     log_decision(
         table=table,
-        request_id=generate_request_id(ctx.command),
+        request_id=request_id,
         command=ctx.command,
         reason=ctx.reason,
         source=ctx.source,
@@ -621,6 +631,10 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
         mode='mcp',
     )
 
+    # Record execution error to DDB if command failed (sprint9-001)
+    if is_failed:
+        record_execution_error(table, request_id, exit_code=-1, error_output=result)
+
     response_data = {
         'status': 'auto_approved',
         'command': ctx.command,
@@ -628,6 +642,8 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
         'account_name': ctx.account_name,
         'result': paged['result']
     }
+    if is_failed:
+        response_data['exit_code'] = -1
 
     if paged.get('paged'):
         response_data['paged'] = True
@@ -689,10 +705,12 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
     new_count = increment_trust_command_count(trust_session['request_id'])
 
     # 執行命令
+    request_id = generate_request_id(ctx.command)
     result = execute_command(ctx.command, ctx.assume_role)
-    cmd_status = 'error' if result.startswith('❌') else 'success'
+    is_failed = result.startswith('❌')
+    cmd_status = 'error' if is_failed else 'success'
     emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'trust'})
-    paged = store_paged_output(generate_request_id(ctx.command), result)
+    paged = store_paged_output(request_id, result)
 
     # 計算剩餘時間
     remaining = int(trust_session.get('expires_at', 0)) - int(time.time())
@@ -707,7 +725,7 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
 
     log_decision(
         table=table,
-        request_id=generate_request_id(ctx.command),
+        request_id=request_id,
         command=ctx.command,
         reason=ctx.reason,
         source=ctx.source,
@@ -721,6 +739,10 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
         mode='mcp',
     )
 
+    # Record execution error to DDB if command failed (sprint9-001)
+    if is_failed:
+        record_execution_error(table, request_id, exit_code=-1, error_output=result)
+
     response_data = {
         'status': 'trust_auto_approved',
         'command': ctx.command,
@@ -731,6 +753,8 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
         'remaining': remaining_str,
         'command_count': f"{new_count}/{TRUST_SESSION_MAX_COMMANDS}"
     }
+    if is_failed:
+        response_data['exit_code'] = -1
 
     if paged.get('paged'):
         response_data['paged'] = True
