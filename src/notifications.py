@@ -690,7 +690,7 @@ def send_presigned_batch_notification(
 # Trust Session Summary (sprint9-007-phase-a)
 # =====================================================================
 
-def send_trust_session_summary(trust_item: dict) -> None:
+def send_trust_session_summary(trust_item: dict, end_reason: str = 'revoke') -> None:
     """Send a Telegram summary when a trust session ends (revoke or expiry).
 
     Formats a message listing all commands executed during the trust session,
@@ -698,15 +698,24 @@ def send_trust_session_summary(trust_item: dict) -> None:
 
     Args:
         trust_item: DynamoDB trust session item (may contain commands_executed list)
+        end_reason: 'revoke' (manual revoke) or 'expiry' (auto expiry via scheduler)
     """
     try:
         commands_executed = trust_item.get('commands_executed', [])
         trust_id_short = str(trust_item.get('request_id', ''))[-12:]
 
+        # Header differs by end reason
+        if end_reason == 'expiry':
+            # 🔓 信任時段結束（自動到期）
+            header = "\U0001f513 *\u4fe1\u4efb\u6642\u6bb5\u7d50\u675f\uff08\u81ea\u52d5\u5230\u671f\uff09*"
+        else:
+            # 🔓 信任時段結束（手動撒銷）
+            header = "\U0001f513 *\u4fe1\u4efb\u6642\u6bb5\u7d50\u675f\uff08\u624b\u52d5\u6492\u92b7\uff09*"
+
         # No commands — send brief notification
         if not commands_executed:
             text = (
-                "\U0001f513 *\u4fe1\u4efb\u6642\u6bb5\u7d50\u675f\uff08\u624b\u52d5\u6492\u92b7\uff09*\n\n"
+                header + "\n\n"
                 "\U0001f194 `" + trust_id_short + "`\n"
                 "\U0001f4cb \u7121\u547d\u4ee4\u57f7\u884c"
             )
@@ -749,7 +758,7 @@ def send_trust_session_summary(trust_item: dict) -> None:
         executed_label = "\u57f7\u884c\u4e86 " + str(total) + " \u500b\u547d\u4ee4\uff1a"
 
         text = (
-            "\U0001f513 *\u4fe1\u4efb\u6642\u6bb5\u7d50\u675f\uff08\u624b\u52d5\u6492\u92b7\uff09*\n\n"
+            header + "\n\n"
             "\U0001f194 `" + trust_id_short + "`\n"
             "\u23f1 \u6642\u9577\uff1a" + duration_str + "\n"
             "\U0001f4cb " + executed_label + "\n"

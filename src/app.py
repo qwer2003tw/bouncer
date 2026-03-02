@@ -234,8 +234,28 @@ def handle_trust_expiry(event: dict) -> dict:
         logger.info("[TRUST-EXPIRY] Trust session %s not found (already revoked?) — skipping", trust_id)
         return response(200, {'ok': True, 'skipped': True, 'reason': 'not_found'})
 
+    # De-duplicate: skip if summary was already sent (e.g. session was revoked first)
+    if trust_item.get('summary_sent'):
+        logger.info("[TRUST-EXPIRY] Summary already sent for trust_id=%s — skipping", trust_id)
+        return response(200, {'ok': True, 'skipped': True, 'reason': 'summary_already_sent'})
+
     source = trust_item.get('source', '') or trust_item.get('bound_source', '')
     trust_scope = trust_item.get('trust_scope', '')
+
+    # Send execution summary (sprint9-007-phase-b)
+    try:
+        send_trust_session_summary(trust_item, end_reason='expiry')
+        # Mark summary_sent=True to prevent duplicate on revoke (best-effort)
+        try:
+            table.update_item(
+                Key={'request_id': trust_id},
+                UpdateExpression='SET summary_sent = :t',
+                ExpressionAttributeValues={':t': True},
+            )
+        except Exception as _mark_exc:
+            logger.warning("[TRUST-EXPIRY] Failed to mark summary_sent for %s: %s", trust_id, _mark_exc)
+    except Exception as _sum_exc:
+        logger.error("[TRUST-EXPIRY] send_trust_session_summary error for %s: %s", trust_id, _sum_exc)
 
     # Query pending requests that match source + trust_scope
     pending_requests = _query_pending_for_trust(source=source, trust_scope=trust_scope)
@@ -806,8 +826,9 @@ def handle_telegram_webhook(event: dict) -> dict:
         if success:
             update_message(message_id, f"🛑 *信任時段已結束*\n\n`{request_id}`", remove_buttons=True)
             answer_callback(callback['id'], '🛑 信任已結束')
-            # Send execution summary (sprint9-007-phase-a)
-            if trust_item_for_summary:
+            # Send execution summary (sprint9-007-phase-a/b)
+            # Skip if summary already sent by expiry handler (sprint9-007-phase-b)
+            if trust_item_for_summary and not trust_item_for_summary.get('summary_sent'):
                 try:
                     send_trust_session_summary(trust_item_for_summary)
                 except Exception as _se:
