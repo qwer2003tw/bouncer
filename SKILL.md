@@ -600,6 +600,10 @@ mcporter call bouncer bouncer_deploy_history project="bouncer" limit=5
 mcporter call bouncer bouncer_project_list
 ```
 
+**⚠️ Deploy 狀態 Poll 規則（重要）：**
+- ✅ **用 `bouncer_deploy_status`** 查部署進度 — 直接查 DDB，不發 Telegram 通知
+- ❌ **禁止用 `bouncer_execute + aws stepfunctions describe-execution`** — 每次執行都發一則自動通知，造成通知洗版
+
 ---
 
 ## Account Management
