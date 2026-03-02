@@ -847,7 +847,6 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
     action=deny:    更新 DDB status=rejected，不執行任何部署
     """
     import json as _json
-    import boto3
 
     table = _get_table()
 
@@ -899,9 +898,6 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
         remove_buttons=True,
     )
 
-    # S3 client
-    s3 = boto3.client('s3')
-
     deployed = []
     failed = []
 
@@ -912,19 +908,20 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
         cache_control = fm.get('cache_control', 'no-cache')
         target_key = filename  # deploy to root of frontend bucket
 
-        try:
-            s3.copy_object(
-                CopySource={'Bucket': staging_bucket, 'Key': staged_key},
-                Bucket=frontend_bucket,
-                Key=target_key,
-                ContentType=content_type,
-                CacheControl=cache_control,
-                MetadataDirective='REPLACE',
-            )
+        cmd = (
+            f"aws s3 cp s3://{staging_bucket}/{staged_key} "
+            f"s3://{frontend_bucket}/{target_key} "
+            f"--content-type \"{content_type}\" "
+            f"--cache-control \"{cache_control}\" "
+            f"--metadata-directive REPLACE "
+            f"--region us-east-1"
+        )
+        output = execute_command(cmd)
+        if output.startswith('❌'):
+            logger.error("[DEPLOY-FRONTEND] execute_command failed for %s: %s", filename, output)
+            failed.append({'filename': filename, 'reason': output[:200]})
+        else:
             deployed.append({'filename': filename, 's3_key': target_key})
-        except Exception as exc:
-            logger.error("[DEPLOY-FRONTEND] copy_object failed for %s: %s", filename, exc)
-            failed.append({'filename': filename, 'reason': str(exc)[:200]})
 
         # Progress update every 5 files
         if (i + 1) % 5 == 0 or i == len(files_manifest) - 1:
@@ -951,17 +948,15 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
     # CloudFront invalidation
     cf_invalidation_failed = False
     if success_count > 0:
-        try:
-            cf = boto3.client('cloudfront')
-            cf.create_invalidation(
-                DistributionId=distribution_id,
-                InvalidationBatch={
-                    'Paths': {'Quantity': 1, 'Items': ['/*']},
-                    'CallerReference': request_id,
-                },
-            )
-        except Exception as exc:
-            logger.error("[DEPLOY-FRONTEND] CloudFront invalidation failed for dist=%s: %s", distribution_id, exc)
+        cf_cmd = (
+            f"aws cloudfront create-invalidation "
+            f"--distribution-id {distribution_id} "
+            f"--paths '/*' "
+            f"--region us-east-1"
+        )
+        cf_output = execute_command(cf_cmd)
+        if cf_output.startswith('❌'):
+            logger.error("[DEPLOY-FRONTEND] CloudFront invalidation failed for dist=%s: %s", distribution_id, cf_output)
             cf_invalidation_failed = True
 
     # Update DDB
