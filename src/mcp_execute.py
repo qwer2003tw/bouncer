@@ -207,7 +207,15 @@ def _parse_execute_request(req_id, arguments: dict) -> 'dict | ExecuteContext':
         return mcp_error(req_id, -32602, 'Missing required parameter: command')
 
     if not trust_scope:
-        return mcp_error(req_id, -32602, 'Missing required parameter: trust_scope (use session key or stable ID)')
+        return mcp_error(req_id, -32602, (
+            'Missing required parameter: trust_scope\n\n'
+            'trust_scope is a stable caller identifier used for trust session matching.\n'
+            'Examples:\n'
+            '  - "private-bot-main"        (for general usage)\n'
+            '  - "private-bot-deploy"      (for deployment tasks)\n'
+            '  - "private-bot-kubectl"     (for kubectl operations)\n\n'
+            'Use a consistent value per bot/task to enable trust session auto-approval.'
+        ))
 
     # 初始化預設帳號
     init_default_account()
