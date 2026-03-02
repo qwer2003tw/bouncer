@@ -35,6 +35,7 @@ from constants import (
     DEFAULT_ACCOUNT_ID,
     TRUST_SESSION_MAX_UPLOADS,
     TRUST_UPLOAD_MAX_BYTES_PER_FILE, TRUST_UPLOAD_MAX_BYTES_TOTAL,
+    UPLOAD_BATCH_PAYLOAD_SAFE_LIMIT, UPLOAD_BATCH_PER_FILE_B64_LIMIT,
     APPROVAL_TTL_BUFFER, UPLOAD_TIMEOUT,
 )
 
@@ -570,6 +571,52 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
         return mcp_result(req_id, {
             'content': [{'type': 'text', 'text': json.dumps({
                 'status': 'error', 'error': f'Too many files: {len(files)} (max 50)',
+            })}],
+            'isError': True,
+        })
+
+    # ---- Early payload size validation (before any base64 decode) ----
+    # Per-file check runs first to give the most specific error message.
+    # Total check catches aggregate over-limit when no single file stands out.
+    # Both checks must happen before decode to prevent silent Lambda failures.
+    for i, f in enumerate(files):
+        file_b64_size = len(str(f.get('content', '')).strip())
+        if file_b64_size > UPLOAD_BATCH_PER_FILE_B64_LIMIT:
+            fname = str(f.get('filename', f'file #{i+1}')).strip()
+            file_mb = file_b64_size / 1024 / 1024
+            limit_mb = UPLOAD_BATCH_PER_FILE_B64_LIMIT / 1024 / 1024
+            return mcp_result(req_id, {
+                'content': [{'type': 'text', 'text': json.dumps({
+                    'status': 'error',
+                    'error': (
+                        f'File #{i+1} ({fname}): base64 payload too large: '
+                        f'{file_mb:.2f}MB (per-file safe limit {limit_mb:.1f}MB). '
+                        f'Use bouncer_request_presigned_batch for large files.'
+                    ),
+                    'suggestion': 'bouncer_request_presigned_batch',
+                    'file_index': i + 1,
+                    'filename': fname,
+                    'file_b64_size': file_b64_size,
+                    'per_file_limit': UPLOAD_BATCH_PER_FILE_B64_LIMIT,
+                })}],
+                'isError': True,
+            })
+
+    total_b64_size = sum(len(str(f.get('content', '')).strip()) for f in files)
+    if total_b64_size > UPLOAD_BATCH_PAYLOAD_SAFE_LIMIT:
+        total_mb = total_b64_size / 1024 / 1024
+        safe_mb = UPLOAD_BATCH_PAYLOAD_SAFE_LIMIT / 1024 / 1024
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'error',
+                'error': (
+                    f'Batch payload too large: {total_mb:.2f}MB base64 '
+                    f'(safe limit {safe_mb:.1f}MB). '
+                    f'Use bouncer_request_presigned_batch for large files.'
+                ),
+                'suggestion': 'bouncer_request_presigned_batch',
+                'payload_size': total_b64_size,
+                'safe_limit': UPLOAD_BATCH_PAYLOAD_SAFE_LIMIT,
             })}],
             'isError': True,
         })
