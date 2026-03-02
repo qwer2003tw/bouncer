@@ -2,6 +2,63 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.9.0] - 2026-03-02
+
+### Added
+- `bouncer_deploy_frontend` MCP tool — one-click frontend deploy: staging → one approval → S3 copy + CloudFront invalidation (sprint9-003, closes #32 #34)
+- `execute_command` integration for `deploy_frontend` callbacks — no extra Lambda IAM permissions needed
+- Trust session expiry summary — automatic Telegram notification on revoke/expiry showing executed commands list and success/failure counts (sprint9-007)
+- Execution error tracking to DynamoDB: `exit_code`, `error_output`, `executed_at` fields on failure (sprint9-001, closes #38)
+
+### Fixed
+- `bouncer_upload_batch` early payload size validation — rejects oversized payloads **before** base64 decode to prevent Lambda silent failure (sprint9-002, closes #33)
+- `trust_scope` missing error message improved with explicit examples (sprint9-005, closes #36)
+- base64 truncation detection from OS CLI argument length limit — immediate error when `len(content) % 4 != 0` (sprint9-006, closes #37)
+- Trust expiry notification for non-execute requests — shows action type correctly (sprint9-008, closes #40)
+- `deploy_frontend` callback parameter order + test mock (sprint9-003b-fixup)
+
+### Changed
+- Deployment strategy reverted canary → AllAtOnce (frequent releases, canary unsuitable)
+
+## [3.8.0] - 2026-03-02
+
+### Added
+- LambdaLogGroup CFN import support via SAM-transformed template (`sam build + sam package` flow) (sprint8-001)
+- `bouncer_upload_batch` S3 verification after upload — non-blocking, results tracked in `verification_failed` field (sprint8-006, closes #35)
+- Trust session expiry notification — when trust expires, affected pending requests are notified via Telegram (sprint8-007)
+- `bouncer-exec` skill v1.0 — CLI-like wrapper for `bouncer_execute` with clean output and auto-poll
+
+### Fixed
+- `bouncer_deploy_history` CLI `--args` parameter mapping — `project` parameter now correctly passed (sprint8-004)
+- Deploy failure message truncation — key error lines (up to 5) now stored in DynamoDB and included in Telegram notification (sprint8-002)
+- REST endpoint `handle_clawdbot_request` missing Unicode normalization (NFKC) before risk checks (sprint8-003)
+- EarlyValidation errors now show actionable CFN import steps instead of generic message (sprint8-005)
+- Pre-existing test failures: GSI mock isolation, trust source binding, stats scan→query (7 tests fixed, sprint8-008+009)
+- `test_approve_trust_batch` regression (sprint8-008)
+
+### Security
+- Added `AWS::Logs::LogGroup: LogGroupName` to `_RESOURCE_ID_KEYS` for correct CFN import resource identification
+
+## [3.7.0] - 2026-03-01
+
+### Added
+- `sam_deploy.py`: auto-imports pre-existing CloudFormation resources on deploy conflict + `--dry-run-import` flag (sprint7-005, closes #28)
+- `SchedulerService`: centralized EventBridge Scheduler management for cleanup tasks
+- `TrustSession` dataclass: typed wrapper for trust session records
+
+### Fixed
+- `bouncer_execute`: `&&` chained commands now execute sequentially with proper risk-checking per sub-command (sprint7-001, closes #30)
+- Over-truncation of large command output (CloudWatch Logs etc.) — full pagination via `PaginatedOutput` dataclass (sprint7-004, closes #27)
+- Trust session source binding — prevents cross-source trust reuse (sprint7-006, bouncer-sec-010)
+- DynamoDB history/stats queries now use GSI instead of full table Scan — prevents timeout at scale (sprint7-003)
+- EventBridge Scheduler auto-removes expired approval request buttons (sprint7-002, closes #21)
+- LambdaLogGroup CFN import conflict (sprint7-010)
+
+### Refactored
+- DynamoDB table initialization centralized in `db.py` via `_LazyTable` pattern (sprint7-008)
+- Deduplicated `send_telegram_message_to()` and `sanitize_filename()` functions (sprint7-007)
+- Lambda memory increased 256MB → 512MB for improved cold start performance (sprint7-009)
+
 ## [3.6.0] - 2026-02-28
 
 ### Fixed
@@ -138,40 +195,3 @@ All notable changes to this project will be documented in this file.
 
 ### Tests
 - Backend: 886 passed (+18 regression tests) / coverage 81.52%
-
-
-## [3.7.0] - 2026-03-01
-
-### Fixed
-- `bouncer_execute`: `&&` chained commands now execute sequentially with proper risk-checking per sub-command (#30)
-- Over-truncation of large command output (CloudWatch Logs etc.) — full pagination via `PaginatedOutput` dataclass (#27)
-- Trust session source binding — prevents cross-source trust reuse (bouncer-sec-010)
-- DynamoDB history/stats queries now use GSI instead of full table Scan — prevents timeout at scale
-- EventBridge Scheduler auto-removes expired approval request buttons (#21)
-
-### Added
-- `sam_deploy.py`: auto-imports pre-existing CloudFormation resources on deploy conflict + `--dry-run-import` flag (#28)
-- `SchedulerService`: centralized EventBridge Scheduler management for cleanup tasks
-- `TrustSession` dataclass: typed wrapper for trust session records
-
-### Refactored
-- DynamoDB table initialization centralized in `db.py` via `_LazyTable` pattern
-- Deduplicated `send_telegram_message_to()` and `sanitize_filename()` functions
-- Lambda memory increased 256MB → 512MB for improved cold start performance
-
-## [3.8.0] - 2026-03-02
-
-### Fixed
-- `bouncer_deploy_history` CLI `--args` parameter mapping — now correctly passes `project` parameter
-- Deploy failure message truncation — key error lines (up to 5) now stored in DynamoDB and included in Telegram notification
-- REST endpoint `handle_clawdbot_request` missing Unicode normalization (NFKC) before risk checks
-- EarlyValidation errors now show actionable CFN import steps instead of generic message
-- Pre-existing test failures: GSI mock isolation, trust source binding, stats scan→query (7 tests fixed)
-
-### Added
-- LambdaLogGroup CFN import support via SAM-transformed template (`sam build + sam package` flow)
-- `bouncer_upload_batch` S3 verification after upload — non-blocking, results in `verification_failed`
-- Trust session expiry notification — when trust expires, pending requests are notified via Telegram
-
-### Security
-- Added `AWS::Logs::LogGroup: LogGroupName` to `_RESOURCE_ID_KEYS` for correct CFN import resource identification

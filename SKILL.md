@@ -6,6 +6,19 @@ metadata: {"openclaw": {"emoji": "🔐", "requires": {"bins": ["mcporter"]}}}
 
 # Bouncer - AWS Command Approval System
 
+## ⚡ 推薦：用 bouncer-exec skill 執行 AWS 命令
+
+```bash
+# 輸出 clean（無 JSON wrapper），自動 poll 等審批
+bash ~/.openclaw/workspace/skills/bouncer-exec/scripts/bouncer_exec.sh aws s3 ls
+bash ~/.openclaw/workspace/skills/bouncer-exec/scripts/bouncer_exec.sh aws sts get-caller-identity
+```
+
+**只有以下 MCP-only tools 才用 `mcporter` 直接呼叫：**
+`bouncer_deploy`, `bouncer_deploy_frontend`, `bouncer_upload`, `bouncer_upload_batch`, `bouncer_request_grant`, `bouncer_trust_status` 等
+
+---
+
 Use `mcporter` to execute AWS CLI commands through the Bouncer approval system.
 
 **API:** `https://n8s3f1mus6.execute-api.us-east-1.amazonaws.com/prod/`
@@ -50,6 +63,17 @@ mcporter call bouncer bouncer_status request_id="abc123"
 - 使用 session key 或其他穩定 ID（不要用 source，source 是顯示用）
 - 同一個 bot 不同任務應有不同 trust_scope
 - 上傳 tools（bouncer_upload / bouncer_upload_batch）trust_scope 是 optional
+
+**缺少 trust_scope 時的錯誤訊息（v3.9.0 改善）：**
+```
+Missing required parameter: trust_scope
+
+trust_scope is a stable caller identifier used for trust session matching.
+Examples:
+  - "private-bot-main"        (for general usage)
+  - "private-bot-deploy"      (for deployment tasks)
+  - "private-bot-kubectl"     (for kubectl operations)
+```
 
 ### source（所有操作必填）
 
@@ -173,6 +197,26 @@ mcporter call bouncer bouncer_upload_batch \
 - 每檔 5MB、總計 20MB
 - 副檔名黑名單（同 bouncer_upload）
 - 檔名自動消毒（path traversal、null bytes 等）
+
+**⚠️ 大檔案早期驗證（v3.9.0）：**
+payload 超過 3.5MB base64（約 2.5MB raw）時，**在 decode 前**立即返回明確錯誤：
+```json
+{
+  "status": "validation_error",
+  "message": "Total payload too large: ... bytes (limit 3500000). Use bouncer_request_presigned_batch for large files.",
+  "suggestion": "bouncer_request_presigned_batch"
+}
+```
+→ 改用 `bouncer_request_presigned_batch` 避免 Lambda 靜默失敗。
+
+**⚠️ base64 截斷偵測（v3.9.0）：**
+透過 CLI args 傳入的 base64 content 若被 OS 截斷（`len % 4 != 0`），立即返回錯誤：
+```json
+{
+  "status": "validation_error",
+  "message": "Invalid base64 content: likely truncated by OS argument length limit. Use HTTP API or bouncer_request_presigned."
+}
+```
 
 **審批按鈕：**
 - `[📁 批准上傳]` — 只批准這批
@@ -366,6 +410,39 @@ presigned_batch → PUT 上傳 → confirm_upload 驗證 → (verified=true) →
 
 審批時選「🔓 信任10分鐘」，期間同 trust_scope 的操作自動執行。
 
+### 信任時段結束摘要（v3.9.0 新增）
+Trust session **revoke 或自動到期**時，Bouncer 會自動發送 Telegram 摘要：
+```
+🔓 信任時段結束（手動撤銷）
+⏱ 時長：8 分 32 秒
+📋 執行了 5 個命令：
+  1. ✅ aws s3 ls s3://bucket
+  2. ✅ aws ec2 describe-instances
+  3. ❌ aws s3 cp /nonexistent ...
+  ...
+✅ 4 成功 / ❌ 1 失敗
+```
+
+### ⚡ 批次操作正確流程（重要！）
+
+需要執行多個命令時，**不要一個一個等審批**，應該：
+
+```
+✅ 正確流程：
+1. 把所有命令一次全部發出（全部帶同一 trust_scope）
+   → 全部進入 pending 狀態
+2. Steven 看到第一個請求，按「🔓 信任10分鐘」
+3. Bouncer 建立 trust session，並自動執行所有同 trust_scope 的 pending 命令
+4. 後續新命令帶同一 trust_scope → 繼續自動執行
+
+❌ 錯誤流程：
+1. 發第一個命令 → 等審批 → 審批後才發第二個
+   → 信任時段已建立，但第二個命令是新的 pending，不在 trust 建立當下
+   → 第二個命令可能需要再次審批（trust 不一定能 match）
+```
+
+**關鍵原則：先批量發出所有 pending，再等 Steven 一次批准信任。**
+
 ### 特性
 - 時長：10 分鐘
 - 命令上限：20 次/session
@@ -439,6 +516,56 @@ mcporter call bouncer bouncer_grant_status grant_id="grant-abc123"
 
 ---
 
+## Frontend Deployer
+
+### bouncer_deploy_frontend
+一鍵前端部署：staging → 一次審批 → S3 copy + CloudFront invalidation，取代原本 3-5 次審批流程。
+
+> **實作說明：** 審批通過後，S3 cp 和 CloudFront invalidation 走 `execute_command`（CodeBuild 執行），不需要給 Bouncer Lambda 額外 IAM 權限。
+
+```bash
+mcporter call bouncer bouncer_deploy_frontend \
+  project="ztp-files" \
+  files='[
+    {"filename":"index.html","content":"'$(base64 -w0 index.html)'","content_type":"text/html"},
+    {"filename":"assets/app.js","content":"'$(base64 -w0 assets/app.js)'","content_type":"application/javascript"}
+  ]' \
+  reason="前端部署" \
+  source="Private Bot (ZTP Files deploy)" \
+  trust_scope="private-bot-deploy"
+```
+
+**Parameters:**
+| 參數 | 必填 | 說明 |
+|------|------|------|
+| `project` | ✅ | 專案名稱（目前支援：`ztp-files`）|
+| `files` | ✅ | JSON array: `[{filename, content(base64), content_type?}]` |
+| `reason` | ✅ | 部署原因 |
+| `source` | ✅ | 來源標識 |
+| `trust_scope` | ✅ | 穩定呼叫者 ID |
+
+**Cache-Control 自動設定：**
+- `index.html` → `no-cache, no-store, must-revalidate`
+- `assets/*` → `max-age=31536000, immutable`
+- 其他 → `no-cache`
+
+**Limits:**
+- 必須包含 `index.html`
+- 每檔 10MB、總計 50MB
+- 副檔名黑名單：`.sh .exe .py .jar .zip .tar .gz .7z .bat .ps1 .rb .war .bin .bash`
+- 不支援 path traversal（`../`）
+
+**審批按鈕：**
+- `[✅ 批准部署]` — 自動 S3 copy + CloudFront invalidation
+- `[❌ 拒絕]`
+
+**已設定專案：**
+| project | frontend_bucket | distribution_id |
+|---------|----------------|-----------------|
+| `ztp-files` | `ztp-files-dev-frontendbucket-nvvimv31xp3v` | `E176PW0SA5JF29` |
+
+---
+
 ## SAM Deployer
 
 ### bouncer_deploy
@@ -493,6 +620,29 @@ mcporter call bouncer bouncer_remove_account account_id="111111111111" source="B
 
 ---
 
+## Execution Error Tracking（v3.9.0）
+
+命令執行失敗（exit code != 0）時，Bouncer 自動記錄到 DynamoDB，並在 MCP response 加上 `exit_code` 欄位。
+
+**DDB 新增欄位（失敗時）：**
+| 欄位 | 說明 |
+|------|------|
+| `status` | `executed_error` |
+| `exit_code` | AWS CLI 退出碼（e.g. 255） |
+| `error_output` | 錯誤輸出前 2000 字元 |
+| `executed_at` | 執行完成時間（Unix timestamp） |
+
+**MCP response 範例（失敗時）：**
+```json
+{
+  "status": "auto_approved",
+  "result": "❌ usage: aws [options] ...",
+  "exit_code": 255
+}
+```
+
+---
+
 ## Other Tools
 
 ### bouncer_get_page
@@ -522,6 +672,7 @@ mcporter call bouncer bouncer_get_page page_id="abc123:page:2"
 | `bouncer_request_presigned` | 取得單檔 presigned PUT URL | 自動 |
 | `bouncer_request_presigned_batch` | 取得批量 presigned PUT URL | 自動 |
 | `bouncer_confirm_upload` | 驗證 presigned batch 上傳結果，確認 S3 files 存在 | 自動 |
+| `bouncer_deploy_frontend` | 前端一鍵部署（staging→S3→CloudFront）| 需審批 |
 | `bouncer_deploy` | 部署 SAM 專案 | 需審批 |
 | `bouncer_deploy_status` | 查詢部署狀態 | 自動 |
 | `bouncer_deploy_cancel` | 取消部署 | 自動 |

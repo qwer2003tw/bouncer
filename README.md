@@ -1,6 +1,6 @@
 # Bouncer
 
-> 🔐 AWS 命令審批執行系統 v2.0
+> 🔐 AWS 命令審批執行系統 v3.9.0
 > 
 > 讓 AI Agent 安全執行 AWS 命令。危險命令透過 Telegram 審批後才執行。
 
@@ -100,14 +100,17 @@ mcporter call bouncer.bouncer_deploy \
 | `bouncer_upload_batch` | 批量上傳多個小檔案（base64，< 500KB/檔）⚠️ deprecated | 需審批（信任期間可自動） |
 | `bouncer_request_presigned` | 生成單檔 S3 presigned PUT URL，client 直傳，無大小限制 | **不需審批**（staging bucket）|
 | `bouncer_request_presigned_batch` | 批量生成 N 個 presigned PUT URL，前端部署推薦用法 | **不需審批**（staging bucket）|
+| `bouncer_deploy_frontend` | 前端一鍵部署：staging → 一次審批 → S3 copy + CloudFront invalidation | 需審批 |
 
-> **前端部署推薦流程：** `bouncer_request_presigned_batch` 取得所有 URL → client 並行 PUT → `bouncer_execute s3 cp` 搬到正式 bucket（需審批）
+> **前端部署推薦流程：** `bouncer_deploy_frontend` 一鍵完成（推薦）；或 `bouncer_request_presigned_batch` 取得 URL → PUT → `bouncer_execute s3 cp`（手動）
 
 ### 信任時段 (Trust Session)
 | Tool | 說明 | 審批 |
 |------|------|------|
 | `bouncer_approve_trust` | 開啟信任時段 | 由審批者觸發 |
 | `bouncer_revoke_trust` | 撤銷信任時段 | 自動 |
+
+> **v3.9.0 新增：** Trust session revoke/到期時，自動發 Telegram 摘要（執行命令清單、成功/失敗計數）。
 
 ### 批次授權 (Grant Session)
 | Tool | 說明 | 審批 |
