@@ -322,6 +322,27 @@ def log_decision(table, request_id, command, reason, source, account_id,
     return item
 
 
+def extract_exit_code(output: str) -> Optional[int]:
+    """從命令輸出解析 exit code。
+
+    - 匹配 `(exit code: N)` → return N
+    - 以 `❌` 開頭且無 exit code marker → return -1（Bouncer-formatted error）
+    - 成功（無 error marker）→ return None
+
+    Args:
+        output: 命令輸出字串
+
+    Returns:
+        exit code（int）或 None（表示成功/無錯誤）
+    """
+    m = re.search(r'\(exit code:\s*(\d+)\)', output)
+    if m:
+        return int(m.group(1))
+    if output.startswith('❌'):
+        return -1  # Bouncer-formatted error, unknown exit code
+    return None
+
+
 def record_execution_error(table, request_id: str, exit_code: int,
                            error_output: str) -> None:
     """DDB update_item — 記錄命令執行失敗詳情到已存在的 request 記錄。

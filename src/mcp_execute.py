@@ -16,7 +16,7 @@ from typing import Optional
 
 
 
-from utils import mcp_result, mcp_error, generate_request_id, log_decision, generate_display_summary, record_execution_error
+from utils import mcp_result, mcp_error, generate_request_id, log_decision, generate_display_summary, record_execution_error, extract_exit_code
 from commands import get_block_reason, is_auto_approve, execute_command, _split_chain
 from accounts import (
     init_default_account, get_account, list_accounts,
@@ -529,7 +529,8 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
         # 執行命令
         grant_req_id = generate_request_id(ctx.command)
         result = execute_command(ctx.command, ctx.assume_role)
-        is_failed = result.startswith('❌')
+        _exit_code = extract_exit_code(result)
+        is_failed = _exit_code is not None and _exit_code != 0
         cmd_status = 'error' if is_failed else 'success'
         emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'grant'})
         paged = store_paged_output(grant_req_id, result)
@@ -563,7 +564,7 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
 
         # Record execution error to DDB if command failed (sprint9-001)
         if is_failed:
-            record_execution_error(table, grant_req_id, exit_code=-1, error_output=result)
+            record_execution_error(table, grant_req_id, exit_code=_exit_code, error_output=result)
 
         response_data = {
             'status': 'grant_auto_approved',
@@ -575,7 +576,7 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
             'remaining': remaining_info,
         }
         if is_failed:
-            response_data['exit_code'] = -1
+            response_data['exit_code'] = _exit_code
 
         if paged.get('paged'):
             response_data['paged'] = True
@@ -604,7 +605,8 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
 
     request_id = generate_request_id(ctx.command)
     result = execute_command(ctx.command, ctx.assume_role)
-    is_failed = result.startswith('\u274c')  # ❌
+    _exit_code = extract_exit_code(result)
+    is_failed = _exit_code is not None and _exit_code != 0
     cmd_status = 'error' if is_failed else 'success'
     emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'auto_approve'})
     paged = store_paged_output(request_id, result)
@@ -641,7 +643,7 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
 
     # Record execution error to DDB if command failed (sprint9-001)
     if is_failed:
-        record_execution_error(table, request_id, exit_code=-1, error_output=result)
+        record_execution_error(table, request_id, exit_code=_exit_code, error_output=result)
 
     response_data = {
         'status': 'auto_approved',
@@ -651,7 +653,7 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
         'result': paged['result']
     }
     if is_failed:
-        response_data['exit_code'] = -1
+        response_data['exit_code'] = _exit_code
 
     if paged.get('paged'):
         response_data['paged'] = True
@@ -715,7 +717,8 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
     # 執行命令
     request_id = generate_request_id(ctx.command)
     result = execute_command(ctx.command, ctx.assume_role)
-    is_failed = result.startswith('❌')
+    _exit_code = extract_exit_code(result)
+    is_failed = _exit_code is not None and _exit_code != 0
     cmd_status = 'error' if is_failed else 'success'
     emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'trust'})
     paged = store_paged_output(request_id, result)
@@ -749,7 +752,7 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
 
     # Record execution error to DDB if command failed (sprint9-001)
     if is_failed:
-        record_execution_error(table, request_id, exit_code=-1, error_output=result)
+        record_execution_error(table, request_id, exit_code=_exit_code, error_output=result)
 
     # Track command in trust session for end-of-session summary (sprint9-007-phase-a)
     track_command_executed(trust_session['request_id'], ctx.command, not is_failed)
@@ -765,7 +768,7 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
         'command_count': f"{new_count}/{TRUST_SESSION_MAX_COMMANDS}"
     }
     if is_failed:
-        response_data['exit_code'] = -1
+        response_data['exit_code'] = _exit_code
 
     if paged.get('paged'):
         response_data['paged'] = True
