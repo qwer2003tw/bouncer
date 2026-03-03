@@ -535,7 +535,11 @@ def get_deploy_status(deploy_id: str) -> dict:
     """取得部署狀態"""
     record = get_deploy_record(deploy_id)
     if not record:
-        return {'error': '部署記錄不存在'}
+        return {
+            'status': 'pending',
+            'deploy_id': deploy_id,
+            'message': 'Deploy record not found yet, please retry',
+        }
 
     # 如果有 execution_arn，查詢 Step Functions 狀態
     execution_arn = record.get('execution_arn')
@@ -593,6 +597,17 @@ def get_deploy_status(deploy_id: str) -> dict:
 
         except Exception as e:
             logger.error(f"Error getting execution status: {e}")
+
+    # Add timing fields to response
+    status = record.get('status', '')
+    started_at = record.get('started_at')
+    finished_at = record.get('finished_at')
+    if started_at:
+        started_at_int = int(started_at)
+        if status == 'RUNNING':
+            record['elapsed_seconds'] = int(time.time()) - started_at_int
+        elif status in ('SUCCESS', 'FAILED') and finished_at:
+            record['duration_seconds'] = int(finished_at) - started_at_int
 
     return record
 
@@ -708,14 +723,17 @@ def mcp_tool_deploy_status(req_id: str, arguments: dict) -> dict:
         return mcp_error(req_id, -32602, 'Missing required parameter: deploy_id')
 
     record = get_deploy_status(deploy_id)
-    if 'error' in record:
-        return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps(record)}],
-            'isError': True
-        })
+
+    # Only set isError for actual errors (not for pending/running/success/failed statuses)
+    # status=pending means record not yet available — agent should retry, not error out
+    is_error = (
+        'error' in record
+        and record.get('status') not in ('pending', 'PENDING', 'RUNNING', 'SUCCESS', 'FAILED')
+    )
 
     return mcp_result(req_id, {
-        'content': [{'type': 'text', 'text': json.dumps(decimal_to_native(record), indent=2, ensure_ascii=False)}]
+        'content': [{'type': 'text', 'text': json.dumps(decimal_to_native(record), indent=2, ensure_ascii=False)}],
+        'isError': is_error,
     })
 
 
