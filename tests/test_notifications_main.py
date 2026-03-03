@@ -399,9 +399,9 @@ class TestNotificationsCoverage:
         text, keyboard = send_mock.call_args[0]
         # Dangerous path shows "高危操作"
         assert '高危' in text or '⚠️' in text
-        # keyboard should have "確認執行"
+        # keyboard should have "Confirm" (English button)
         buttons_flat = [btn['text'] for row in keyboard['inline_keyboard'] for btn in row]
-        assert any('確認' in b for b in buttons_flat)
+        assert any('Confirm' in b for b in buttons_flat)
 
     def test_send_approval_request_long_command_truncated(self):
         """Commands longer than 500 chars are truncated in the message."""
@@ -706,9 +706,9 @@ class TestNotificationsCoverage:
         assert '可授權' in text
         assert '需個別審批' in text
         assert '已攔截' in text
-        # Should have "只批准安全的" button when both grantable and requires_individual exist
+        # Should have "Approve Safe Only" button when both grantable and requires_individual exist
         buttons = [btn['text'] for row in keyboard['inline_keyboard'] for btn in row]
-        assert any('安全' in b for b in buttons)
+        assert any('Safe' in b for b in buttons)
 
     def test_send_grant_request_many_commands_truncated(self):
         """More than 10 grantable commands shows truncation notice."""
