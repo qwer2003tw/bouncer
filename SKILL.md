@@ -14,6 +14,13 @@ bash ~/.openclaw/workspace/skills/bouncer-exec/scripts/bouncer_exec.sh aws s3 ls
 bash ~/.openclaw/workspace/skills/bouncer-exec/scripts/bouncer_exec.sh aws sts get-caller-identity
 ```
 
+**✅ v3.10.0 特殊字元支援（#49 #51）：**
+含空格、pipe (`|`)、括號等特殊字元的參數現在自動用雙引號包裹，`aws_cli_split` 解析正確。
+```bash
+# pipe 字元現在正確處理
+bash bouncer_exec.sh aws s3 ls --query "Contents[?Size > \`1000\`]"
+```
+
 **只有以下 MCP-only tools 才用 `mcporter` 直接呼叫：**
 `bouncer_deploy`, `bouncer_deploy_frontend`, `bouncer_upload`, `bouncer_upload_batch`, `bouncer_request_grant`, `bouncer_trust_status` 等
 
@@ -113,6 +120,12 @@ mcporter call bouncer bouncer_execute \
 - `pending_approval` — 需要 Telegram 審批
 - `blocked` — 被封鎖（含 `block_reason` 和 `suggestion`）
 - `trust_auto_approved` — 信任期間自動執行
+
+**✅ v3.10.0 Telegram 審批按鈕（英文化 + Bot API 9.4 style）：**
+- `[✅ Approve]` (green) / `[❌ Reject]` (red) — 一般審批
+- `[🔓 Trust 10min]` (blue) — 建立信任時段
+- `[⏹ End Trust]` / `[🚫 Revoke Grant]` — 撤銷
+- `[⏰ expires_at]` — 顯示「5 分鐘後過期（UTC 14:35）」（UTC 絕對時間）
 
 **⚠️ Lambda 環境變數保護（B-LAMBDA-01）：**
 - `lambda update-function-configuration --environment Variables={}` → **BLOCKED**（空值覆寫保護）
@@ -603,6 +616,10 @@ mcporter call bouncer bouncer_project_list
 **⚠️ Deploy 狀態 Poll 規則（重要）：**
 - ✅ **用 `bouncer_deploy_status`** 查部署進度 — 直接查 DDB，不發 Telegram 通知
 - ❌ **禁止用 `bouncer_execute + aws stepfunctions describe-execution`** — 每次執行都發一則自動通知，造成通知洗版
+
+**✅ v3.10.0 deploy_status 行為改善（#47）：**
+- `deploy_id` 不存在時回傳 `{status: "pending"}` 而非 error（避免 race condition）
+- RUNNING 時回傳 `elapsed_seconds`；SUCCESS/FAILED 時回傳 `duration_seconds`
 
 ---
 

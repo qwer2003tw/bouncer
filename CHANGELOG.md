@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.10.0] - 2026-03-03
+
+### Fixed
+- `deployer.py` — `get_deploy_status()` record 不存在時回傳 `{status: pending}` 而非 error；加 `elapsed_seconds`（RUNNING）和 `duration_seconds`（SUCCESS/FAILED）(sprint10-001, closes #47)
+- `mcp_execute.py` + `utils.py` — execution error tracking 改用 regex 抓 `(exit code: N)`，不再只偵測 ❌ prefix (sprint10-002, closes #48)
+- `bouncer_exec.sh` — 含空格/pipe 字元的參數自動用雙引號包裹，解決 aws_cli_split 解析問題 (sprint10-003, closes #49, closes #51)
+
+### Changed
+- `notifications.py` — 11 個 Telegram 按鈕文字改為英文（Approve/Reject/Trust 10min 等） (sprint10-004, closes #46)
+- `notifications.py` — 按鈕加入 Bot API 9.4 `style` 欄位（success=green/danger=red/primary=blue）(sprint10-004, closes #41)
+- `notifications.py` — expires_at 顯示加入 UTC 絕對時間（如「5 分鐘後過期（UTC 14:35）」）(sprint10-005, closes #42)
+
+### Tests
+- 新增 `tests/test_deployer_sprint10_001.py`（18 tests）
+- 新增 `tests/test_mcp_execute_sprint10_002.py`（21 tests）
+- 新增 `tests/test_button_ux_sprint10.py`（6 tests）
+- Backend: 1539 tests, coverage 89%
+
 ## [3.9.0] - 2026-03-02
 
 ### Added
