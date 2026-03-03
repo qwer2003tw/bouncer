@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # bouncer_exec.sh — Execute AWS CLI commands via Bouncer with clean output
 # Usage: bouncer_exec.sh [--reason "..."] [--account <id>] <aws command...>
+#        --reason / --account can appear anywhere (before or after aws command)
 set -euo pipefail
 
 # ── Config ──
@@ -9,35 +10,50 @@ MAX_POLL_TIME=600  # 10 minutes
 SOURCE_PREFIX="Agent"
 TRUST_SCOPE="agent-bouncer-exec"
 
-# ── Parse optional flags ──
+# ── Parse all args — strip --reason / --account from any position ──
 REASON=""
 ACCOUNT=""
+AWS_ARGS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --reason)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --reason requires a value" >&2
+        exit 1
+      fi
       REASON="$2"
       shift 2
       ;;
     --account)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --account requires a value" >&2
+        exit 1
+      fi
       ACCOUNT="$2"
       shift 2
       ;;
     *)
-      break
+      AWS_ARGS+=("$1")
+      shift
       ;;
   esac
 done
 
 # ── Validate ──
-if [[ $# -eq 0 ]]; then
+if [[ ${#AWS_ARGS[@]} -eq 0 ]]; then
   echo "Usage: bouncer_exec.sh [--reason \"...\"] [--account <id>] <aws command...>" >&2
   exit 1
 fi
 
-COMMAND="$*"
-REASON="${REASON:-$COMMAND}"
-SOURCE="${SOURCE_PREFIX} (${COMMAND})"
+# Build COMMAND string with proper quoting for each argument
+# This preserves args with spaces, pipes, and other special characters
+COMMAND=$(printf '%q ' "${AWS_ARGS[@]}")
+# Remove trailing space
+COMMAND="${COMMAND% }"
+
+REASON="${REASON:-${COMMAND}}"
+SOURCE="${SOURCE_PREFIX} (${AWS_ARGS[*]})"
 
 # ── Helper: extract and clean result ──
 extract_result() {
