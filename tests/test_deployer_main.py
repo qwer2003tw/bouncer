@@ -485,7 +485,9 @@ class TestDeployerModule:
         deployer.history_table = deployer_tables.Table('bouncer-deploy-history')
         
         result = deployer.get_deploy_status('nonexistent')
-        assert 'error' in result
+        # Sprint10-001: record not found now returns {status: pending} instead of {error: ...}
+        assert result.get('status') == 'pending'
+        assert 'error' not in result
         
         sys.path.pop(0)
     
@@ -563,8 +565,12 @@ class TestDeployerMCPTools:
     """Deployer MCP Tools 測試"""
     
     def test_mcp_tool_deploy_status_not_found(self, app_module):
-        """查詢不存在的部署狀態"""
-        with patch('deployer.get_deploy_status', return_value={'error': '部署記錄不存在'}):
+        """查詢不存在的部署狀態 — Sprint10-001: 回傳 pending 而非 error"""
+        with patch('deployer.get_deploy_status', return_value={
+            'status': 'pending',
+            'deploy_id': 'nonexistent',
+            'message': 'Deploy record not found yet, please retry',
+        }):
             event = {
                 'rawPath': '/mcp',
                 'headers': {'x-approval-secret': 'test-secret'},
@@ -585,8 +591,11 @@ class TestDeployerMCPTools:
             result = app_module.lambda_handler(event, None)
             body = json.loads(result['body'])
             
+            # Sprint10-001: should return status=pending with isError=False
+            assert body['result'].get('isError', False) is False
             content = json.loads(body['result']['content'][0]['text'])
-            assert 'error' in content
+            assert content['status'] == 'pending'
+            assert 'error' not in content
     
     def test_mcp_tool_deploy_cancel_missing_id(self, app_module):
         """取消部署缺少 ID"""
