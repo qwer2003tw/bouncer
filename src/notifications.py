@@ -213,8 +213,8 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
         keyboard = {
             'inline_keyboard': [
                 [
-                    {'text': '⚠️ 確認執行', 'callback_data': f'approve:{request_id}'},
-                    {'text': '❌ 拒絕', 'callback_data': f'deny:{request_id}'}
+                    {'text': '⚠️ Confirm', 'callback_data': f'approve:{request_id}', 'style': 'primary'},
+                    {'text': '❌ Reject', 'callback_data': f'deny:{request_id}', 'style': 'danger'}
                 ]
             ]
         }
@@ -232,9 +232,9 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
         keyboard = {
             'inline_keyboard': [
                 [
-                    {'text': '✅ 批准', 'callback_data': f'approve:{request_id}'},
-                    {'text': '🔓 信任10分鐘', 'callback_data': f'approve_trust:{request_id}'},
-                    {'text': '❌ 拒絕', 'callback_data': f'deny:{request_id}'}
+                    {'text': '✅ Approve', 'callback_data': f'approve:{request_id}', 'style': 'success'},
+                    {'text': '🔓 Trust 10min', 'callback_data': f'approve_trust:{request_id}', 'style': 'primary'},
+                    {'text': '❌ Reject', 'callback_data': f'deny:{request_id}', 'style': 'danger'}
                 ]
             ]
         }
@@ -275,8 +275,8 @@ def send_account_approval_request(request_id: str, action: str, account_id: str,
 
     keyboard = {
         'inline_keyboard': [[
-            {'text': '✅ 批准', 'callback_data': f'approve:{request_id}'},
-            {'text': '❌ 拒絕', 'callback_data': f'deny:{request_id}'}
+            {'text': '✅ Approve', 'callback_data': f'approve:{request_id}', 'style': 'success'},
+            {'text': '❌ Reject', 'callback_data': f'deny:{request_id}', 'style': 'danger'}
         ]]
     }
 
@@ -316,7 +316,7 @@ def send_trust_auto_approve_notification(command: str, trust_id: str, remaining:
 
     keyboard = {
         'inline_keyboard': [[
-            {'text': '🛑 結束信任', 'callback_data': f'revoke_trust:{trust_id}'}
+            {'text': '🛑 End Trust', 'callback_data': f'revoke_trust:{trust_id}', 'style': 'danger'}
         ]]
     }
 
@@ -403,14 +403,14 @@ def send_grant_request_notification(
         buttons = []
         if grantable or requires_individual:
             buttons.append([
-                {'text': '✅ 全部批准', 'callback_data': f'grant_approve_all:{grant_id}'},
+                {'text': '✅ Approve All', 'callback_data': f'grant_approve_all:{grant_id}', 'style': 'success'},
             ])
             if grantable and requires_individual:
                 buttons[0].append(
-                    {'text': '✅ 只批准安全的', 'callback_data': f'grant_approve_safe:{grant_id}'},
+                    {'text': '✅ Approve Safe Only', 'callback_data': f'grant_approve_safe:{grant_id}', 'style': 'success'},
                 )
         buttons.append([
-            {'text': '❌ 拒絕', 'callback_data': f'grant_deny:{grant_id}'},
+            {'text': '❌ Reject', 'callback_data': f'grant_deny:{grant_id}', 'style': 'danger'},
         ])
 
         keyboard = {'inline_keyboard': buttons}
@@ -456,7 +456,7 @@ def send_grant_execute_notification(
 
         keyboard = {
             'inline_keyboard': [[
-                {'text': '🛑 撤銷 Grant', 'callback_data': f'grant_revoke:{grant_id}'}
+                {'text': '🛑 Revoke Grant', 'callback_data': f'grant_revoke:{grant_id}', 'style': 'danger'}
             ]]
         }
 
@@ -536,7 +536,7 @@ def send_trust_upload_notification(
 
         keyboard = {
             'inline_keyboard': [[
-                {'text': '🛑 結束信任', 'callback_data': f'revoke_trust:{trust_id}'}
+                {'text': '🛑 End Trust', 'callback_data': f'revoke_trust:{trust_id}', 'style': 'danger'}
             ]]
         }
 
@@ -602,11 +602,11 @@ def send_batch_upload_notification(
         keyboard = {
             'inline_keyboard': [
                 [
-                    {'text': '📁 批准上傳', 'callback_data': f'approve:{batch_id}'},
-                    {'text': '❌ 拒絕', 'callback_data': f'deny:{batch_id}'},
+                    {'text': '📁 Approve Upload', 'callback_data': f'approve:{batch_id}', 'style': 'success'},
+                    {'text': '❌ Reject', 'callback_data': f'deny:{batch_id}', 'style': 'danger'},
                 ],
                 [
-                    {'text': '🔓 批准 + 信任10分鐘', 'callback_data': f'approve_trust:{batch_id}'},
+                    {'text': '🔓 Approve + Trust 10min', 'callback_data': f'approve_trust:{batch_id}', 'style': 'success'},
                 ],
             ]
         }
@@ -841,8 +841,8 @@ def send_deploy_frontend_notification(
         keyboard = {
             "inline_keyboard": [
                 [
-                    {"text": "✅ 批准部署", "callback_data": f"approve:{request_id}"},
-                    {"text": "❌ 拒絕", "callback_data": f"deny:{request_id}"},
+                    {"text": "✅ Approve Deploy", "callback_data": f"approve:{request_id}", "style": "success"},
+                    {"text": "❌ Reject", "callback_data": f"deny:{request_id}", "style": "danger"},
                 ],
             ]
         }
