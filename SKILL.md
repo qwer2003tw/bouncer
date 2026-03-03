@@ -739,6 +739,25 @@ mcporter call bouncer bouncer_get_page page_id="abc123:page:2"
 
 ---
 
+## ⚠️ Known Limitations
+
+### Shell substitution 不展開
+Bouncer 用 `aws_cli_split` 解析命令，**不走 bash**，所以 shell substitution `$(...)` 和變數 `$VAR` 不會被展開。
+
+```bash
+# ❌ 不行 — $(date +%s) 會被當成 literal 字串
+aws cloudwatch get-metric-statistics --start-time $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# ✅ Agent 先算好值再 inline 進命令字串
+import datetime
+start = (datetime.datetime.utcnow() - datetime.timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
+command = f"aws cloudwatch get-metric-statistics --start-time {start} ..."
+```
+
+直接在 terminal 跑 AWS CLI 時，bash 會先展開 `$(...)`；透過 Bouncer 沒有這一層展開。
+
+---
+
 ## Command Classification
 
 | Type | Behavior | Examples |
