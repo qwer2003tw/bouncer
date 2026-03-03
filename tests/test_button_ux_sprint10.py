@@ -1,15 +1,25 @@
 """
 Sprint 10-004: Button UX regression tests
+Validates: English text, style field, valid style values, backward-compatible callback_data
 """
 import re
+import importlib
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-import notifications
 
 VALID_STYLES = {'success', 'primary', 'danger'}
 CHINESE = re.compile(r'[\u4e00-\u9fff]')
+
+@pytest.fixture(autouse=True)
+def fresh_notifications():
+    """Reload notifications before each test to prevent mock pollution from other test modules."""
+    import notifications as notif_mod
+    importlib.reload(notif_mod)
+    # Re-inject into sys.modules and local scope
+    sys.modules['notifications'] = notif_mod
+    yield notif_mod
 
 def extract_buttons(keyboard):
     if not keyboard:
@@ -30,46 +40,46 @@ def check_buttons(buttons):
         assert not CHINESE.search(btn.get('text', '')), f"Chinese in button: {btn['text']}"
 
 class TestApprovalRequestButtons:
-    def test_normal_approve_buttons(self):
-        with patch('notifications._send_message') as m:
+    def test_normal_approve_buttons(self, fresh_notifications):
+        with patch.object(fresh_notifications, '_send_message') as m:
             m.return_value = {'ok': True, 'result': {'message_id': 1}}
-            notifications.send_approval_request('req-001', 'aws s3 ls', 'test', source='test')
+            fresh_notifications.send_approval_request('req-001', 'aws s3 ls', 'test', source='test')
             kb = get_keyboard(m)
             check_buttons(extract_buttons(kb))
 
-    def test_approve_button_style_success(self):
-        with patch('notifications._send_message') as m:
+    def test_approve_button_style_success(self, fresh_notifications):
+        with patch.object(fresh_notifications, '_send_message') as m:
             m.return_value = {'ok': True, 'result': {'message_id': 1}}
-            notifications.send_approval_request('req-002', 'aws s3 ls', 'test', source='test')
+            fresh_notifications.send_approval_request('req-002', 'aws s3 ls', 'test', source='test')
             kb = get_keyboard(m)
             btns = extract_buttons(kb)
             approve = [b for b in btns if 'Approve' in b.get('text', '')]
             assert approve, f"No Approve button, got: {[b['text'] for b in btns]}"
             assert all(b['style'] == 'success' for b in approve)
 
-    def test_reject_button_style_danger(self):
-        with patch('notifications._send_message') as m:
+    def test_reject_button_style_danger(self, fresh_notifications):
+        with patch.object(fresh_notifications, '_send_message') as m:
             m.return_value = {'ok': True, 'result': {'message_id': 1}}
-            notifications.send_approval_request('req-003', 'aws s3 ls', 'test', source='test')
+            fresh_notifications.send_approval_request('req-003', 'aws s3 ls', 'test', source='test')
             kb = get_keyboard(m)
             btns = extract_buttons(kb)
             reject = [b for b in btns if 'Reject' in b.get('text', '')]
             assert reject, f"No Reject button, got: {[b['text'] for b in btns]}"
             assert all(b['style'] == 'danger' for b in reject)
 
-    def test_callback_data_contains_request_id(self):
-        with patch('notifications._send_message') as m:
+    def test_callback_data_contains_request_id(self, fresh_notifications):
+        with patch.object(fresh_notifications, '_send_message') as m:
             m.return_value = {'ok': True, 'result': {'message_id': 1}}
-            notifications.send_approval_request('req-abc-123', 'aws s3 ls', 'test', source='test')
+            fresh_notifications.send_approval_request('req-abc-123', 'aws s3 ls', 'test', source='test')
             kb = get_keyboard(m)
             cds = [b.get('callback_data','') for b in extract_buttons(kb)]
             assert any('req-abc-123' in cd for cd in cds), f"request_id not in callbacks: {cds}"
 
 class TestGrantButtons:
-    def test_grant_buttons(self):
-        with patch('notifications._send_message') as m:
+    def test_grant_buttons(self, fresh_notifications):
+        with patch.object(fresh_notifications, '_send_message') as m:
             m.return_value = {'ok': True, 'result': {'message_id': 1}}
-            notifications.send_grant_request_notification(
+            fresh_notifications.send_grant_request_notification(
                 grant_id='g-001',
                 commands_detail=[{'command': 'aws s3 ls', 'risk': 'low', 'blocked': False}],
                 reason='test', source='test', account_id='123',
@@ -79,11 +89,10 @@ class TestGrantButtons:
             check_buttons(extract_buttons(kb))
 
 class TestStyleValues:
-    def test_no_invalid_style_values(self):
-        """No button should have style outside success/primary/danger."""
-        with patch('notifications._send_message') as m:
+    def test_no_invalid_style_values(self, fresh_notifications):
+        with patch.object(fresh_notifications, '_send_message') as m:
             m.return_value = {'ok': True, 'result': {'message_id': 1}}
-            notifications.send_approval_request('req-x', 'aws ec2 describe-instances', 'test', source='test')
+            fresh_notifications.send_approval_request('req-x', 'aws ec2 describe-instances', 'test', source='test')
             kb = get_keyboard(m)
             for btn in extract_buttons(kb):
                 if 'style' in btn:
