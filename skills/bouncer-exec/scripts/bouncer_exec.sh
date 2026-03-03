@@ -35,7 +35,17 @@ if [[ $# -eq 0 ]]; then
   exit 1
 fi
 
-COMMAND="$*"
+# Build COMMAND with proper quoting for args containing spaces or special chars
+COMMAND_PARTS=()
+for arg in "$@"; do
+    if [[ "$arg" == *" "* || "$arg" == *"|"* || "$arg" == *"'"* || "$arg" == *">"* || "$arg" == *"<"* ]]; then
+        # Wrap in double-quotes, escape internal double-quotes
+        COMMAND_PARTS+=("\"${arg//\"/\\\"}\"")
+    else
+        COMMAND_PARTS+=("$arg")
+    fi
+done
+COMMAND="${COMMAND_PARTS[*]}"
 REASON="${REASON:-$COMMAND}"
 SOURCE="${SOURCE_PREFIX} (${COMMAND})"
 
