@@ -615,7 +615,11 @@ mcporter call bouncer bouncer_project_list
 
 **⚠️ Deploy 狀態 Poll 規則（重要）：**
 - ✅ **用 `bouncer_deploy_status`** 查部署進度 — 直接查 DDB，不發 Telegram 通知
+- ✅ **一律 spawn sub-agent 追蹤 deploy**，主 session 繼續回應其他問題
+- ✅ **只看 `status` 欄位**（`pending`/`RUNNING`/`SUCCESS`/`FAILED`）
+- ❌ **不看 `phase` 欄位** — 整個 deploy 過程一直顯示 `INITIALIZING`，不準確（bug #53）
 - ❌ **禁止用 `bouncer_execute + aws stepfunctions describe-execution`** — 每次執行都發一則自動通知，造成通知洗版
+- ❌ **不知道前一個請求狀態，不能自己重發** — 5 分鐘 pending 先問 Steven，等確認才重發
 
 **✅ v3.10.0 deploy_status 行為改善（#47）：**
 - `deploy_id` 不存在時回傳 `{status: "pending"}` 而非 error（避免 race condition）
