@@ -1260,9 +1260,9 @@ class TestDeployNotificationFallback:
             call_args = mock_urlopen.call_args
             request_obj = call_args[0][0]
             body = request_obj.data.decode('utf-8')
-            import urllib.parse
-            params = urllib.parse.parse_qs(body)
-            text = params['text'][0]
+            import json
+            params = json.loads(body)
+            text = params['text']
             assert '222222222222' in text
             assert '帳號' in text
 
@@ -1288,9 +1288,9 @@ class TestDeployNotificationFallback:
             call_args = mock_urlopen.call_args
             request_obj = call_args[0][0]
             body = request_obj.data.decode('utf-8')
-            import urllib.parse
-            params = urllib.parse.parse_qs(body)
-            text = params['text'][0]
+            import json
+            params = json.loads(body)
+            text = params['text']
             assert 'Dev (222222222222)' in text
 
     def test_notification_no_account_at_all(self, app_module):
@@ -1313,9 +1313,9 @@ class TestDeployNotificationFallback:
             call_args = mock_urlopen.call_args
             request_obj = call_args[0][0]
             body = request_obj.data.decode('utf-8')
-            import urllib.parse
-            params = urllib.parse.parse_qs(body)
-            text = params['text'][0]
+            import json
+            params = json.loads(body)
+            text = params['text']
             assert '帳號' not in text
 
 

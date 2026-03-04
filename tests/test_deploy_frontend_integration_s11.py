@@ -90,7 +90,7 @@ def _patch_all(s3_side_effect=None, cf_side_effect=None):
     mock_table = MagicMock()
     call_state = {'s3_call_index': 0}
 
-    def _execute_side_effect(cmd):
+    def _execute_side_effect(cmd, **kwargs):
         if 'cloudfront create-invalidation' in cmd:
             if cf_side_effect is not None:
                 return cf_side_effect
@@ -251,7 +251,7 @@ class TestCFInvalidationCmdFormat:
     def test_cf_not_called_when_all_files_fail(self):
         """CF invalidation must NOT be called when all S3 copies fail"""
         mock_execute, mock_table = _patch_all(
-            s3_side_effect=lambda cmd: 'An error occurred (AccessDenied): (exit code: 255)'
+            s3_side_effect=lambda cmd, **kwargs: 'An error occurred (AccessDenied): (exit code: 255)'
         )
         with patch('callbacks.execute_command', mock_execute), \
              patch('callbacks._get_table', return_value=mock_table), \
@@ -320,7 +320,7 @@ class TestIsExecuteFailedAWSCLIFormat:
             'The specified bucket does not exist (exit code: 255)'
         )
         mock_execute, mock_table = _patch_all(
-            s3_side_effect=lambda cmd: aws_error
+            s3_side_effect=lambda cmd, **kwargs: aws_error
         )
         with patch('callbacks.execute_command', mock_execute), \
              patch('callbacks._get_table', return_value=mock_table), \

@@ -12,6 +12,8 @@ import sys
 import os
 import time
 import pytest
+import importlib
+import sys
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -52,12 +54,21 @@ def app_mod():
         yield app
 
 
+@pytest.fixture(autouse=True)
+def fresh_telegram_trust():
+    import telegram as tg
+    importlib.reload(tg)
+    sys.modules['telegram'] = tg
+    yield
+
+
 class TestCmdPreviewFallback:
     """Test the cmd_preview fallback chain in _send_trust_expiry_notification."""
 
     def _call_send_notification(self, app_mod, pending_requests):
         """Call _send_trust_expiry_notification directly."""
-        with patch('telegram.send_telegram_message_silent') as mock_silent:
+        with patch('telegram.send_telegram_message_silent') as mock_silent, \
+             patch('telegram.send_telegram_message') as mock_msg:
             app_mod._send_trust_expiry_notification(
                 trust_id='trust-test-001',
                 source='Test Bot',
@@ -65,7 +76,11 @@ class TestCmdPreviewFallback:
                 pending_count=len(pending_requests),
                 pending_requests=pending_requests,
             )
-            return mock_silent.call_args[0][0] if mock_silent.called else ''
+            if mock_msg.called:
+                return mock_msg.call_args[0][0]
+            if mock_silent.called:
+                return mock_silent.call_args[0][0]
+            return ''
 
     def test_command_field_used_when_present(self, app_mod):
         """When 'command' is present, it should be displayed."""
