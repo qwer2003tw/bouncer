@@ -398,3 +398,80 @@ class TestSendDeployFrontendNotification:
             result = send_deploy_frontend_notification("req-y", files_summary, target_info)
 
         assert result.ok is False
+
+
+# ---------------------------------------------------------------------------
+# Sprint 11-000: deploy_role_arn in DDB (Phase A)
+# ---------------------------------------------------------------------------
+
+class TestDeployRoleArnPhaseA:
+    """Verify that deploy_role_arn is stored in the DDB pending record (Phase A)."""
+
+    def _run_happy(self, extra_files=None):
+        files = _make_files(extra_files)
+        mock_s3 = MagicMock()
+        mock_table = MagicMock()
+        mock_notif_result = MagicMock()
+        mock_notif_result.ok = True
+        mock_notif_result.message_id = 12345
+
+        with patch("mcp_deploy_frontend.boto3") as mock_boto3, \
+             patch("mcp_deploy_frontend.table", mock_table), \
+             patch("mcp_deploy_frontend.send_deploy_frontend_notification", return_value=mock_notif_result), \
+             patch("notifications.post_notification_setup"):
+            mock_boto3.client.return_value = mock_s3
+            result = _call({
+                "project": "ztp-files",
+                "files": files,
+                "reason": "Sprint 11 deploy",
+                "source": "Private Bot",
+                "trust_scope": "ts-ztp",
+            })
+        return result, mock_table
+
+    def test_ddb_item_contains_deploy_role_arn(self):
+        """deploy_role_arn from _PROJECT_CONFIG must be present in the DDB item."""
+        result, mock_table = self._run_happy()
+        item = mock_table.put_item.call_args[1]["Item"]
+        assert "deploy_role_arn" in item
+        assert item["deploy_role_arn"] == "arn:aws:iam::190825685292:role/ztp-files-frontend-deploy-role"
+
+    def test_ddb_item_deploy_role_arn_is_none_when_not_configured(self):
+        """When a project has no deploy_role_arn in config, DDB item must have None (not absent)."""
+        import mcp_deploy_frontend as mdf
+        original_config = dict(mdf._PROJECT_CONFIG)
+        # Temporarily add a project without deploy_role_arn
+        mdf._PROJECT_CONFIG["test-project"] = {
+            "frontend_bucket": "test-bucket",
+            "distribution_id": "TESTDIST123",
+            "region": "us-east-1",
+            # No deploy_role_arn key
+        }
+        try:
+            files = _make_files()
+            mock_s3 = MagicMock()
+            mock_table = MagicMock()
+            mock_notif_result = MagicMock()
+            mock_notif_result.ok = True
+            mock_notif_result.message_id = 42
+
+            with patch("mcp_deploy_frontend.boto3") as mock_boto3, \
+                 patch("mcp_deploy_frontend.table", mock_table), \
+                 patch("mcp_deploy_frontend.send_deploy_frontend_notification", return_value=mock_notif_result), \
+                 patch("notifications.post_notification_setup"):
+                mock_boto3.client.return_value = mock_s3
+                _call({
+                    "project": "test-project",
+                    "files": files,
+                    "reason": "Backward compat test",
+                    "source": "Bot",
+                    "trust_scope": "ts",
+                })
+
+            item = mock_table.put_item.call_args[1]["Item"]
+            # Key must be present; value must be None (backward compat)
+            assert "deploy_role_arn" in item
+            assert item["deploy_role_arn"] is None
+        finally:
+            mdf._PROJECT_CONFIG.clear()
+            mdf._PROJECT_CONFIG.update(original_config)

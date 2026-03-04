@@ -35,6 +35,7 @@ _PROJECT_CONFIG = {
         "frontend_bucket": "ztp-files-dev-frontendbucket-nvvimv31xp3v",
         "distribution_id": "E176PW0SA5JF29",
         "region": "us-east-1",
+        "deploy_role_arn": "arn:aws:iam::190825685292:role/ztp-files-frontend-deploy-role",
     }
 }
 
@@ -291,6 +292,7 @@ def mcp_tool_deploy_frontend(req_id: str, arguments: dict) -> dict:
         "frontend_bucket": project_config["frontend_bucket"],
         "distribution_id": project_config["distribution_id"],
         "region": project_config.get("region", "us-east-1"),
+        "deploy_role_arn": project_config.get("deploy_role_arn"),
         "staging_bucket": staging_bucket,
         "files": json.dumps(files_manifest),
         "file_count": len(processed_files),

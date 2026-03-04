@@ -98,7 +98,7 @@ def _patch_all(s3_side_effect=None, cf_side_effect=None):
     # Track call index to distinguish s3 cp calls from CF invalidation call
     call_state = {'s3_call_index': 0, 'total_files': len(_FILES_MANIFEST)}
 
-    def _execute_side_effect(cmd):
+    def _execute_side_effect(cmd, **kwargs):
         if 'cloudfront create-invalidation' in cmd:
             if cf_side_effect is not None:
                 return cf_side_effect
@@ -518,3 +518,131 @@ class TestApproveProgressUpdate:
             if len(c[0]) > 1 and '進度' in c[0][1]
         ]
         assert len(progress_calls) >= 1, "Expected at least one progress update_message call"
+
+
+# ---------------------------------------------------------------------------
+# Sprint 11-000: assume_role_arn forwarded to execute_command (Phase B)
+# ---------------------------------------------------------------------------
+
+_DEPLOY_ROLE_ARN = "arn:aws:iam::190825685292:role/ztp-files-frontend-deploy-role"
+
+
+class TestDeployRoleArnPhaseB:
+    """Verify Phase B passes deploy_role_arn to execute_command for both
+    S3 copy and CloudFront invalidation, and falls back gracefully when absent."""
+
+    def _make_item_with_role(self):
+        item = _make_item()
+        item['deploy_role_arn'] = _DEPLOY_ROLE_ARN
+        return item
+
+    def _make_item_without_role(self):
+        """Simulate an older DDB record that has no deploy_role_arn field."""
+        item = _make_item()
+        item.pop('deploy_role_arn', None)
+        return item
+
+    def _make_item_none_role(self):
+        """DDB record where deploy_role_arn was explicitly stored as None."""
+        item = _make_item()
+        item['deploy_role_arn'] = None
+        return item
+
+    # --- With role: all execute_command calls must carry assume_role_arn ---
+
+    def test_s3_copy_called_with_assume_role_arn(self):
+        """Each S3 copy execute_command call must include assume_role_arn=<arn>."""
+        mock_execute = MagicMock(return_value='upload: s3://...')
+        with patch('callbacks.execute_command', mock_execute), \
+             patch('callbacks._get_table', return_value=MagicMock()), \
+             patch('callbacks.answer_callback'), \
+             patch('callbacks.update_message'), \
+             patch('callbacks._update_request_status'), \
+             patch('callbacks.emit_metric'), \
+             patch('notifications._send_message_silent'):
+            _call_callback(action='approve', item=self._make_item_with_role())
+
+        s3_calls = [c for c in mock_execute.call_args_list if 's3 cp' in c[0][0]]
+        assert len(s3_calls) > 0, "Expected at least one S3 cp call"
+        for c in s3_calls:
+            kwargs = c[1]
+            assert 'assume_role_arn' in kwargs, "Missing assume_role_arn kwarg on S3 cp call"
+            assert kwargs['assume_role_arn'] == _DEPLOY_ROLE_ARN
+
+    def test_cf_invalidation_called_with_assume_role_arn(self):
+        """CloudFront invalidation execute_command call must include assume_role_arn=<arn>."""
+        mock_execute = MagicMock(return_value='{}')
+        with patch('callbacks.execute_command', mock_execute), \
+             patch('callbacks._get_table', return_value=MagicMock()), \
+             patch('callbacks.answer_callback'), \
+             patch('callbacks.update_message'), \
+             patch('callbacks._update_request_status'), \
+             patch('callbacks.emit_metric'), \
+             patch('notifications._send_message_silent'):
+            _call_callback(action='approve', item=self._make_item_with_role())
+
+        cf_calls = [c for c in mock_execute.call_args_list if 'cloudfront create-invalidation' in c[0][0]]
+        assert len(cf_calls) == 1, "Expected exactly one CF invalidation call"
+        kwargs = cf_calls[0][1]
+        assert 'assume_role_arn' in kwargs, "Missing assume_role_arn kwarg on CF invalidation call"
+        assert kwargs['assume_role_arn'] == _DEPLOY_ROLE_ARN
+
+    # --- Without role (absent): fallback to Lambda execution role ---
+
+    def test_s3_copy_fallback_when_role_absent(self):
+        """When deploy_role_arn is absent from DDB, execute_command must be called
+        with assume_role_arn=None (fallback to Lambda execution role)."""
+        mock_execute = MagicMock(return_value='upload: s3://...')
+        with patch('callbacks.execute_command', mock_execute), \
+             patch('callbacks._get_table', return_value=MagicMock()), \
+             patch('callbacks.answer_callback'), \
+             patch('callbacks.update_message'), \
+             patch('callbacks._update_request_status'), \
+             patch('callbacks.emit_metric'), \
+             patch('notifications._send_message_silent'):
+            _call_callback(action='approve', item=self._make_item_without_role())
+
+        s3_calls = [c for c in mock_execute.call_args_list if 's3 cp' in c[0][0]]
+        assert len(s3_calls) > 0
+        for c in s3_calls:
+            # assume_role_arn must be None (item.get returns None when key absent)
+            kwargs = c[1]
+            assert 'assume_role_arn' in kwargs
+            assert kwargs['assume_role_arn'] is None
+
+    def test_cf_invalidation_fallback_when_role_absent(self):
+        """When deploy_role_arn is absent, CF invalidation must also use assume_role_arn=None."""
+        mock_execute = MagicMock(return_value='{}')
+        with patch('callbacks.execute_command', mock_execute), \
+             patch('callbacks._get_table', return_value=MagicMock()), \
+             patch('callbacks.answer_callback'), \
+             patch('callbacks.update_message'), \
+             patch('callbacks._update_request_status'), \
+             patch('callbacks.emit_metric'), \
+             patch('notifications._send_message_silent'):
+            _call_callback(action='approve', item=self._make_item_without_role())
+
+        cf_calls = [c for c in mock_execute.call_args_list if 'cloudfront create-invalidation' in c[0][0]]
+        assert len(cf_calls) == 1
+        kwargs = cf_calls[0][1]
+        assert 'assume_role_arn' in kwargs
+        assert kwargs['assume_role_arn'] is None
+
+    def test_s3_copy_fallback_when_role_is_none(self):
+        """When deploy_role_arn is explicitly None in DDB, execute_command
+        must receive assume_role_arn=None (backward compat guard)."""
+        mock_execute = MagicMock(return_value='upload: s3://...')
+        with patch('callbacks.execute_command', mock_execute), \
+             patch('callbacks._get_table', return_value=MagicMock()), \
+             patch('callbacks.answer_callback'), \
+             patch('callbacks.update_message'), \
+             patch('callbacks._update_request_status'), \
+             patch('callbacks.emit_metric'), \
+             patch('notifications._send_message_silent'):
+            _call_callback(action='approve', item=self._make_item_none_role())
+
+        s3_calls = [c for c in mock_execute.call_args_list if 's3 cp' in c[0][0]]
+        assert len(s3_calls) > 0
+        for c in s3_calls:
+            kwargs = c[1]
+            assert kwargs['assume_role_arn'] is None

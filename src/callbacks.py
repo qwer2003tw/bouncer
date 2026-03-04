@@ -869,6 +869,7 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
     files_json = item.get('files', '[]')
     file_count = int(item.get('file_count', 0))
     total_size = int(item.get('total_size', 0))
+    deploy_role_arn = item.get('deploy_role_arn')
 
     safe_reason = escape_markdown(reason)
     size_str = format_size_human(total_size)
@@ -926,7 +927,7 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
             f"--metadata-directive REPLACE "
             f"--region us-east-1"
         )
-        output = execute_command(cmd)
+        output = execute_command(cmd, assume_role_arn=deploy_role_arn)
         if _is_execute_failed(output):
             logger.error("[DEPLOY-FRONTEND] execute_command failed for %s: %s", filename, output)
             failed.append({'filename': filename, 'reason': output[:200]})
@@ -964,7 +965,7 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
             f"--paths '/*' "
             f"--region us-east-1"
         )
-        cf_output = execute_command(cf_cmd)
+        cf_output = execute_command(cf_cmd, assume_role_arn=deploy_role_arn)
         if _is_execute_failed(cf_output):
             logger.error("[DEPLOY-FRONTEND] CloudFront invalidation failed for dist=%s: %s", distribution_id, cf_output)
             cf_invalidation_failed = True
