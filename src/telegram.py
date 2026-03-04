@@ -23,6 +23,7 @@ __all__ = [
     'update_message',
     'answer_callback',
     'update_and_answer',
+    'send_chat_action',
     '_telegram_request',
     '_telegram_requests_parallel',
 ]
@@ -241,3 +242,18 @@ def update_and_answer(message_id: int, text: str, callback_id: str, callback_tex
     start_time = time.time()
     _telegram_requests_parallel(requests)
     logger.debug(f"[TIMING] update_and_answer parallel: {(time.time() - start_time) * 1000:.0f}ms")
+
+
+def send_chat_action(action: str = 'typing') -> None:
+    """發送 typing/upload 等狀態給 Telegram（fire-and-forget，失敗不影響主流程）
+
+    Args:
+        action: Telegram chat action (預設 'typing')
+    """
+    try:
+        _telegram_request('sendChatAction', {
+            'chat_id': APPROVED_CHAT_ID,
+            'action': action,
+        })
+    except Exception as e:
+        logger.debug(f'[send_chat_action] ignored error: {e}')

@@ -20,6 +20,7 @@ import unicodedata
 from telegram import (  # noqa: F401
     escape_markdown,
     update_message, answer_callback,
+    send_chat_action,
 )
 from trust import (  # noqa: F401
     revoke_trust_session, create_trust_session,
@@ -558,6 +559,7 @@ def _get_deployer_handler(tool_name: str):
 def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
     """處理 MCP tool 呼叫"""
     emit_metric('Bouncer', 'ToolCall', 1, dimensions={'ToolName': tool_name})
+    send_chat_action('typing')
 
     # Standard tool handlers
     handler = TOOL_HANDLERS.get(tool_name)
