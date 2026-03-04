@@ -143,6 +143,19 @@ def escape_markdown(text: str) -> str:
     return text
 
 
+def _strip_unsupported_button_fields(keyboard: dict) -> dict:
+    """Remove fields not supported by Telegram API (e.g. style)."""
+    if not keyboard:
+        return keyboard
+    result = dict(keyboard)
+    if 'inline_keyboard' in result:
+        result['inline_keyboard'] = [
+            [{k: v for k, v in btn.items() if k != 'style'} for btn in row]
+            for row in result['inline_keyboard']
+        ]
+    return result
+
+
 def send_telegram_message(text: str, reply_markup: dict = None) -> dict:
     """發送 Telegram 消息
 
@@ -155,8 +168,8 @@ def send_telegram_message(text: str, reply_markup: dict = None) -> dict:
         'parse_mode': 'Markdown'
     }
     if reply_markup:
-        data['reply_markup'] = json.dumps(reply_markup)
-    return _telegram_request('sendMessage', data)
+        data['reply_markup'] = _strip_unsupported_button_fields(reply_markup)
+    return _telegram_request('sendMessage', data, json_body=True)
 
 
 def send_telegram_message_silent(text: str, reply_markup: dict = None):
@@ -168,8 +181,8 @@ def send_telegram_message_silent(text: str, reply_markup: dict = None):
         'disable_notification': True
     }
     if reply_markup:
-        data['reply_markup'] = json.dumps(reply_markup)
-    _telegram_request('sendMessage', data)
+        data['reply_markup'] = _strip_unsupported_button_fields(reply_markup)
+    _telegram_request('sendMessage', data, json_body=True)
 
 
 def send_telegram_message_to(chat_id: str, text: str, parse_mode: str = None):
@@ -198,8 +211,8 @@ def update_message(message_id: int, text: str, remove_buttons: bool = False):
         'parse_mode': 'Markdown'
     }
     if remove_buttons:
-        data['reply_markup'] = json.dumps({'inline_keyboard': []})
-    _telegram_request('editMessageText', data)
+        data['reply_markup'] = {'inline_keyboard': []}
+    _telegram_request('editMessageText', data, json_body=True)
 
 
 def answer_callback(callback_id: str, text: str):
