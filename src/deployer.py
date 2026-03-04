@@ -531,6 +531,20 @@ def send_deploy_failure_notification(deploy_id: str, project_id: str, error_line
         logger.warning(f"[deployer] send_deploy_failure_notification failed: {exc}")
 
 
+def _get_progress_hint(elapsed: int) -> str:
+    """Sprint11-009 (#53): 根據 elapsed_seconds 回傳人類可讀的進度提示。
+
+    由於 DDB record 沒有 granular phase 欄位，用時間估算目前大致在哪個階段。
+    這只是 hint，不保證準確，但比永遠顯示 INITIALIZING 更有用。
+    """
+    if elapsed < 30:
+        return "正在初始化..."
+    elif elapsed < 120:
+        return "正在 build（SAM + Lambda layer）"
+    else:
+        return "正在部署 CloudFormation stack"
+
+
 def get_deploy_status(deploy_id: str) -> dict:
     """取得部署狀態"""
     record = get_deploy_record(deploy_id)
@@ -543,10 +557,13 @@ def get_deploy_status(deploy_id: str) -> dict:
 
     # 如果有 execution_arn，查詢 Step Functions 狀態
     execution_arn = record.get('execution_arn')
+    # Sprint11-009 (#56): track SFN raw status separately from build/deploy status
+    _sfn_raw_status: str | None = None
     if execution_arn and record.get('status') == 'RUNNING':
         try:
             response = _get_sfn_client().describe_execution(executionArn=execution_arn)
-            sfn_status = response.get('status')
+            _sfn_raw_status = response.get('status')
+            sfn_status = _sfn_raw_status
 
             # 同步狀態
             if sfn_status in ['SUCCEEDED', 'FAILED', 'TIMED_OUT', 'ABORTED']:
@@ -605,9 +622,26 @@ def get_deploy_status(deploy_id: str) -> dict:
     if started_at:
         started_at_int = int(started_at)
         if status == 'RUNNING':
-            record['elapsed_seconds'] = int(time.time()) - started_at_int
+            elapsed = int(time.time()) - started_at_int
+            record['elapsed_seconds'] = elapsed
+            # Sprint11-009 (#53): add progress_hint instead of static 'phase'
+            record['progress_hint'] = _get_progress_hint(elapsed)
         elif status in ('SUCCESS', 'FAILED') and finished_at:
             record['duration_seconds'] = int(finished_at) - started_at_int
+
+    # Sprint11-009 (#56): clarify SFN vs build status when they diverge.
+    # SFN SUCCEEDED only means the workflow state machine completed — the actual
+    # build (CodeBuild/SAM) may still have failed.  Expose both so agents do not
+    # mistake SFN completion for a successful deploy.
+    if _sfn_raw_status is not None:
+        record['sfn_status'] = _sfn_raw_status
+        # build_status mirrors the canonical DDB status field
+        record['build_status'] = record.get('status', status)
+        if _sfn_raw_status == 'SUCCEEDED' and record.get('status') == 'FAILED':
+            record['note'] = (
+                'SFN workflow completed but build failed. '
+                'Check error_summary for details.'
+            )
 
     return record
 
