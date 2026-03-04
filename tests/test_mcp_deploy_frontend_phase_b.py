@@ -3,11 +3,14 @@ Tests for sprint9-003 Phase B: handle_deploy_frontend_callback
 
 Covers:
   - deny action: DDB status=rejected, no S3 ops, Telegram update
-  - approve action (full success): S3 copy_object called for each file, CF invalidation, DDB updated
+  - approve action (full success): s3_target.put_object called for each file, CF invalidation, DDB updated
   - approve action (partial failure): deployed/failed lists correct, DDB records partial_deploy
   - approve action (full failure): deploy_failed status, no CF invalidation
   - CloudFront invalidation failure: S3 result preserved, cf_invalidation_failed=True in response
   - app.py routing: deploy_frontend dispatches to handle_deploy_frontend_callback
+
+NOTE: Refactored in sprint12 — uses boto3 directly instead of execute_command.
+      s3_staging.get_object (Lambda role) + s3_target.put_object (assumed role).
 """
 import json
 import sys
@@ -28,6 +31,7 @@ _STAGING_BUCKET = 'bouncer-uploads-190825685292'
 _FRONTEND_BUCKET = 'ztp-files-dev-frontendbucket-nvvimv31xp3v'
 _DISTRIBUTION_ID = 'E176PW0SA5JF29'
 _REQUEST_ID = 'req-deploy-test-001'
+_DEPLOY_ROLE_ARN = "arn:aws:iam::190825685292:role/ztp-files-frontend-deploy-role"
 
 _FILES_MANIFEST = [
     {
@@ -54,9 +58,9 @@ _FILES_MANIFEST = [
 ]
 
 
-def _make_item(files_manifest=None):
+def _make_item(files_manifest=None, deploy_role_arn=_DEPLOY_ROLE_ARN):
     manifest = files_manifest if files_manifest is not None else _FILES_MANIFEST
-    return {
+    item = {
         'request_id': _REQUEST_ID,
         'action': 'deploy_frontend',
         'status': 'pending_approval',
@@ -72,6 +76,9 @@ def _make_item(files_manifest=None):
         'total_size': sum(f['size'] for f in manifest),
         'created_at': 1700000000,
     }
+    if deploy_role_arn is not None:
+        item['deploy_role_arn'] = deploy_role_arn
+    return item
 
 
 def _call_callback(action='approve', item=None, message_id=999, callback_id='cb-001', user_id='user-123'):
@@ -86,38 +93,99 @@ def _call_callback(action='approve', item=None, message_id=999, callback_id='cb-
     )
 
 
-def _patch_all(s3_side_effect=None, cf_side_effect=None):
-    """Return (mock_execute_command, mock_table) and set up side effects.
+def _run_approve(item=None, s3_get_side_effects=None, s3_put_side_effects=None,
+                 cf_side_effect=None, assume_role_fail=False):
+    """Run approve callback with boto3 mocked. Returns (result, mock_s3_staging, mock_s3_target, mock_cf, mock_update_status, mock_update)."""
+    if item is None:
+        item = _make_item()
 
-    s3_side_effect: if provided, a callable(cmd) -> str or a side_effect list for
-                    the s3 cp calls only (CF call comes last).
-    cf_side_effect: if provided, a string starting with '❌' that the CF call returns.
-    """
-    mock_table = MagicMock()
+    mock_s3_staging = MagicMock()
+    mock_s3_target = MagicMock()
+    mock_cf = MagicMock()
+    mock_sts = MagicMock()
 
-    # Track call index to distinguish s3 cp calls from CF invalidation call
-    call_state = {'s3_call_index': 0, 'total_files': len(_FILES_MANIFEST)}
+    # Setup staging get_object
+    if s3_get_side_effects is not None:
+        get_call_idx = {'n': 0}
+        def _get(Bucket, Key):
+            idx = get_call_idx['n']
+            get_call_idx['n'] += 1
+            e = s3_get_side_effects[idx] if idx < len(s3_get_side_effects) else None
+            if isinstance(e, Exception):
+                raise e
+            bm = MagicMock()
+            bm.read.return_value = b'content'
+            return {'Body': bm}
+        mock_s3_staging.get_object.side_effect = _get
+    else:
+        bm = MagicMock()
+        bm.read.return_value = b'content'
+        mock_s3_staging.get_object.return_value = {'Body': bm}
 
-    def _execute_side_effect(cmd, **kwargs):
-        if 'cloudfront create-invalidation' in cmd:
-            if cf_side_effect is not None:
-                return cf_side_effect
-            return '{}'
-        # S3 cp call
-        idx = call_state['s3_call_index']
-        call_state['s3_call_index'] += 1
-        if s3_side_effect is not None:
-            if callable(s3_side_effect):
-                result = s3_side_effect(cmd)
-                return result
-            elif isinstance(s3_side_effect, list):
-                return s3_side_effect[idx] if idx < len(s3_side_effect) else 'upload: s3://...'
-            else:
-                return str(s3_side_effect)
-        return 'upload: s3://...'
+    # Setup target put_object
+    if s3_put_side_effects is not None:
+        put_call_idx = {'n': 0}
+        def _put(**kwargs):
+            idx = put_call_idx['n']
+            put_call_idx['n'] += 1
+            e = s3_put_side_effects[idx] if idx < len(s3_put_side_effects) else None
+            if isinstance(e, Exception):
+                raise e
+            return {}
+        mock_s3_target.put_object.side_effect = _put
+    else:
+        mock_s3_target.put_object.return_value = {}
 
-    mock_execute = MagicMock(side_effect=_execute_side_effect)
-    return mock_execute, mock_table
+    # Setup CF
+    if cf_side_effect is not None:
+        mock_cf.create_invalidation.side_effect = cf_side_effect
+    else:
+        mock_cf.create_invalidation.return_value = {'Invalidation': {'Id': 'INV-001'}}
+
+    # Setup STS
+    if assume_role_fail:
+        mock_sts.assume_role.side_effect = Exception("AccessDenied: cannot assume role")
+    else:
+        mock_sts.assume_role.return_value = {
+            'Credentials': {
+                'AccessKeyId': 'AKIA-test',
+                'SecretAccessKey': 'secret-test',
+                'SessionToken': 'token-test',
+            }
+        }
+
+    deploy_role_arn = item.get('deploy_role_arn')
+    no_role_s3_count = {'n': 0}
+
+    def _boto3_client_smart(service, **kwargs):
+        if service == 'sts':
+            return mock_sts
+        if service == 'cloudfront':
+            return mock_cf
+        if service == 's3':
+            if kwargs:  # has credentials kwargs -> assumed role -> target
+                return mock_s3_target
+            if not deploy_role_arn:
+                # no role path: first call = s3_target, second = s3_staging
+                no_role_s3_count['n'] += 1
+                if no_role_s3_count['n'] == 1:
+                    return mock_s3_target
+                return mock_s3_staging
+            # role path: no-kwargs call is always staging
+            return mock_s3_staging
+        return MagicMock()
+
+    with patch('callbacks._boto3') as mock_boto3_mod, \
+         patch('callbacks._get_table', return_value=MagicMock()), \
+         patch('callbacks.answer_callback'), \
+         patch('callbacks.update_message') as mock_update, \
+         patch('callbacks._update_request_status') as mock_update_status, \
+         patch('callbacks.emit_metric'), \
+         patch('notifications._send_message_silent'):
+        mock_boto3_mod.client.side_effect = _boto3_client_smart
+        result = _call_callback(action='approve', item=item)
+
+    return result, mock_s3_staging, mock_s3_target, mock_cf, mock_update_status, mock_update
 
 
 # ---------------------------------------------------------------------------
@@ -126,9 +194,7 @@ def _patch_all(s3_side_effect=None, cf_side_effect=None):
 
 class TestDenyAction:
     def test_deny_updates_ddb_to_rejected(self):
-        mock_execute, mock_table = _patch_all()
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=mock_table), \
+        with patch('callbacks._get_table', return_value=MagicMock()), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status') as mock_update_status:
@@ -138,19 +204,16 @@ class TestDenyAction:
         assert args[2] == 'rejected'
 
     def test_deny_does_not_call_s3(self):
-        mock_execute, mock_table = _patch_all()
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=mock_table), \
+        with patch('callbacks._get_table', return_value=MagicMock()), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
+             patch('callbacks._boto3') as mock_boto3, \
              patch('callbacks._update_request_status'):
             _call_callback(action='deny')
-        mock_execute.assert_not_called()
+        mock_boto3.client.assert_not_called()
 
     def test_deny_returns_200(self):
-        mock_execute, mock_table = _patch_all()
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=mock_table), \
+        with patch('callbacks._get_table', return_value=MagicMock()), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status'):
@@ -158,9 +221,7 @@ class TestDenyAction:
         assert result['statusCode'] == 200
 
     def test_deny_sends_telegram_update(self):
-        mock_execute, mock_table = _patch_all()
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=mock_table), \
+        with patch('callbacks._get_table', return_value=MagicMock()), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message') as mock_update, \
              patch('callbacks._update_request_status'):
@@ -176,81 +237,62 @@ class TestDenyAction:
 
 class TestApproveFullSuccess:
     def _run(self):
-        mock_execute, mock_table = _patch_all()
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=mock_table), \
-             patch('callbacks.answer_callback'), \
-             patch('callbacks.update_message') as mock_update, \
-             patch('callbacks._update_request_status') as mock_update_status, \
-             patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
-            result = _call_callback(action='approve')
-        return result, mock_execute, mock_table, mock_update, mock_update_status
+        return _run_approve()
 
-    def test_s3_copy_called_for_each_file(self):
-        result, mock_execute, *_ = self._run()
-        # calls = N s3 cp + 1 CF invalidation
-        s3_calls = [c for c in mock_execute.call_args_list if 's3 cp' in c[0][0]]
-        assert len(s3_calls) == len(_FILES_MANIFEST)
+    def test_s3_put_object_called_for_each_file(self):
+        result, _, mock_s3_target, *_ = self._run()
+        assert mock_s3_target.put_object.call_count == len(_FILES_MANIFEST)
 
-    def test_s3_copy_uses_correct_source_bucket(self):
-        result, mock_execute, *_ = self._run()
-        s3_calls = [c for c in mock_execute.call_args_list if 's3 cp' in c[0][0]]
-        first_cmd = s3_calls[0][0][0]
-        assert _STAGING_BUCKET in first_cmd
+    def test_s3_get_object_called_for_each_file(self):
+        result, mock_s3_staging, *_ = self._run()
+        assert mock_s3_staging.get_object.call_count == len(_FILES_MANIFEST)
 
-    def test_s3_copy_uses_correct_target_bucket(self):
-        result, mock_execute, *_ = self._run()
-        s3_calls = [c for c in mock_execute.call_args_list if 's3 cp' in c[0][0]]
-        first_cmd = s3_calls[0][0][0]
-        assert _FRONTEND_BUCKET in first_cmd
+    def test_s3_get_uses_correct_staging_bucket(self):
+        result, mock_s3_staging, *_ = self._run()
+        first_call_kwargs = mock_s3_staging.get_object.call_args_list[0][1]
+        assert first_call_kwargs['Bucket'] == _STAGING_BUCKET
 
-    def test_s3_copy_passes_content_type(self):
-        result, mock_execute, *_ = self._run()
-        s3_calls = [c for c in mock_execute.call_args_list if 's3 cp' in c[0][0]]
-        first_cmd = s3_calls[0][0][0]
-        assert 'text/html' in first_cmd
+    def test_s3_put_uses_correct_frontend_bucket(self):
+        result, _, mock_s3_target, *_ = self._run()
+        first_call_kwargs = mock_s3_target.put_object.call_args_list[0][1]
+        assert first_call_kwargs['Bucket'] == _FRONTEND_BUCKET
 
-    def test_s3_copy_passes_cache_control(self):
-        result, mock_execute, *_ = self._run()
-        s3_calls = [c for c in mock_execute.call_args_list if 's3 cp' in c[0][0]]
-        first_cmd = s3_calls[0][0][0]
-        assert 'no-cache' in first_cmd
+    def test_s3_put_passes_content_type(self):
+        result, _, mock_s3_target, *_ = self._run()
+        first_call_kwargs = mock_s3_target.put_object.call_args_list[0][1]
+        assert first_call_kwargs['ContentType'] == 'text/html'
 
-    def test_s3_copy_metadata_replace(self):
-        result, mock_execute, *_ = self._run()
-        s3_calls = [c for c in mock_execute.call_args_list if 's3 cp' in c[0][0]]
-        first_cmd = s3_calls[0][0][0]
-        assert 'REPLACE' in first_cmd
+    def test_s3_put_passes_cache_control(self):
+        result, _, mock_s3_target, *_ = self._run()
+        first_call_kwargs = mock_s3_target.put_object.call_args_list[0][1]
+        assert 'no-cache' in first_call_kwargs['CacheControl']
 
     def test_cf_invalidation_called(self):
-        result, mock_execute, *_ = self._run()
-        cf_calls = [c for c in mock_execute.call_args_list if 'cloudfront create-invalidation' in c[0][0]]
-        assert len(cf_calls) == 1
-        cf_cmd = cf_calls[0][0][0]
-        assert _DISTRIBUTION_ID in cf_cmd
-        assert '/*' in cf_cmd
+        result, _, _, mock_cf, *_ = self._run()
+        mock_cf.create_invalidation.assert_called_once()
+        call_kwargs = mock_cf.create_invalidation.call_args[1]
+        assert call_kwargs['DistributionId'] == _DISTRIBUTION_ID
+        paths = call_kwargs['InvalidationBatch']['Paths']['Items']
+        assert '/*' in paths
 
     def test_cf_caller_reference_is_request_id(self):
-        # execute_command doesn't use CallerReference - the cmd uses distribution-id
-        # This is a no-op test now; CF cmd uses --distribution-id flag
-        result, mock_execute, *_ = self._run()
-        cf_calls = [c for c in mock_execute.call_args_list if 'cloudfront create-invalidation' in c[0][0]]
-        assert len(cf_calls) == 1
+        result, _, _, mock_cf, *_ = self._run()
+        call_kwargs = mock_cf.create_invalidation.call_args[1]
+        assert call_kwargs['InvalidationBatch']['CallerReference'] == _REQUEST_ID
 
     def test_ddb_updated_with_approved_status(self):
-        result, _, _, _, mock_update_status = self._run()
+        result, _, _, _, mock_update_status, _ = self._run()
         mock_update_status.assert_called()
         args = mock_update_status.call_args[0]
         assert args[2] == 'approved'
 
     def test_ddb_updated_with_deploy_status_deployed(self):
-        result, _, _, _, mock_update_status = self._run()
+        result, _, _, _, mock_update_status, _ = self._run()
         extra = mock_update_status.call_args[1].get('extra_attrs', {})
         assert extra.get('deploy_status') == 'deployed'
 
     def test_ddb_deployed_count_equals_file_count(self):
-        result, _, _, _, mock_update_status = self._run()
+        result, _, _, _, mock_update_status, _ = self._run()
         extra = mock_update_status.call_args[1].get('extra_attrs', {})
         assert extra.get('deployed_count') == len(_FILES_MANIFEST)
         assert extra.get('failed_count') == 0
@@ -267,57 +309,45 @@ class TestApproveFullSuccess:
         assert body['cf_invalidation_failed'] is False
 
     def test_telegram_update_shows_success(self):
-        result, _, _, mock_update, _ = self._run()
+        result, _, _, _, _, mock_update = self._run()
         last_call_msg = mock_update.call_args_list[-1][0][1]
         assert '完成' in last_call_msg or '✅' in last_call_msg
 
 
 # ---------------------------------------------------------------------------
-# Approve - Partial Failure
+# Approve - Partial Failure (second put_object fails)
 # ---------------------------------------------------------------------------
 
 class TestApprovePartialFailure:
     def _run(self):
-        call_count = {'n': 0}
-        def s3_side_effect(cmd):
-            call_count['n'] += 1
-            if call_count['n'] == 2:
-                return '❌ S3 access denied'
-            return 'upload: s3://...'
-
-        mock_execute, mock_table = _patch_all(s3_side_effect=s3_side_effect)
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=mock_table), \
-             patch('callbacks.answer_callback'), \
-             patch('callbacks.update_message'), \
-             patch('callbacks._update_request_status') as mock_update_status, \
-             patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
-            result = _call_callback(action='approve')
-        return result, mock_execute, mock_table, mock_update_status
+        put_side_effects = [
+            None,                                          # index.html -> success
+            Exception("S3 access denied for file 2"),    # app-abc123.js -> fail
+            None,                                          # style-def456.css -> success
+        ]
+        return _run_approve(s3_put_side_effects=put_side_effects)
 
     def test_partial_deploy_status(self):
-        result, _, _, mock_update_status = self._run()
+        result, _, _, _, mock_update_status, _ = self._run()
         extra = mock_update_status.call_args[1].get('extra_attrs', {})
         assert extra.get('deploy_status') == 'partial_deploy'
 
     def test_deployed_count_and_failed_count(self):
-        result, _, _, mock_update_status = self._run()
+        result, _, _, _, mock_update_status, _ = self._run()
         extra = mock_update_status.call_args[1].get('extra_attrs', {})
         assert extra.get('deployed_count') == 2
         assert extra.get('failed_count') == 1
 
     def test_failed_files_recorded(self):
-        result, _, _, mock_update_status = self._run()
+        result, _, _, _, mock_update_status, _ = self._run()
         extra = mock_update_status.call_args[1].get('extra_attrs', {})
         failed = json.loads(extra.get('failed_files', '[]'))
         assert len(failed) == 1
         assert 'app-abc123.js' in failed[0]
 
     def test_cf_invalidation_still_called_on_partial(self):
-        result, mock_execute, *_ = self._run()
-        cf_calls = [c for c in mock_execute.call_args_list if 'cloudfront create-invalidation' in c[0][0]]
-        assert len(cf_calls) == 1
+        result, _, _, mock_cf, *_ = self._run()
+        mock_cf.create_invalidation.assert_called_once()
 
     def test_response_partial_status(self):
         result, *_ = self._run()
@@ -326,34 +356,26 @@ class TestApprovePartialFailure:
 
 
 # ---------------------------------------------------------------------------
-# Approve - Full Failure
+# Approve - Full Failure (all put_object fail)
 # ---------------------------------------------------------------------------
 
 class TestApproveFullFailure:
     def _run(self):
-        # All s3 cp calls return error
-        mock_execute, mock_table = _patch_all(
-            s3_side_effect=lambda cmd: '❌ S3 error for all files'
-        )
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=mock_table), \
-             patch('callbacks.answer_callback'), \
-             patch('callbacks.update_message'), \
-             patch('callbacks._update_request_status') as mock_update_status, \
-             patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
-            result = _call_callback(action='approve')
-        return result, mock_execute, mock_table, mock_update_status
+        put_side_effects = [
+            Exception("S3 error file 1"),
+            Exception("S3 error file 2"),
+            Exception("S3 error file 3"),
+        ]
+        return _run_approve(s3_put_side_effects=put_side_effects)
 
     def test_deploy_failed_status(self):
-        result, _, _, mock_update_status = self._run()
+        result, _, _, _, mock_update_status, _ = self._run()
         extra = mock_update_status.call_args[1].get('extra_attrs', {})
         assert extra.get('deploy_status') == 'deploy_failed'
 
     def test_cf_not_called_on_full_failure(self):
-        result, mock_execute, *_ = self._run()
-        cf_calls = [c for c in mock_execute.call_args_list if 'cloudfront create-invalidation' in c[0][0]]
-        assert len(cf_calls) == 0
+        result, _, _, mock_cf, *_ = self._run()
+        mock_cf.create_invalidation.assert_not_called()
 
     def test_response_deploy_failed(self):
         result, *_ = self._run()
@@ -367,23 +389,11 @@ class TestApproveFullFailure:
 
 class TestCFInvalidationFailure:
     def _run(self):
-        mock_execute, mock_table = _patch_all(
-            cf_side_effect='❌ CF rate limit exceeded'
-        )
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=mock_table), \
-             patch('callbacks.answer_callback'), \
-             patch('callbacks.update_message') as mock_update, \
-             patch('callbacks._update_request_status') as mock_update_status, \
-             patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
-            result = _call_callback(action='approve')
-        return result, mock_execute, mock_table, mock_update, mock_update_status
+        return _run_approve(cf_side_effect=Exception("CF rate limit exceeded"))
 
     def test_s3_still_succeeds(self):
-        result, mock_execute, *_ = self._run()
-        s3_calls = [c for c in mock_execute.call_args_list if 's3 cp' in c[0][0]]
-        assert len(s3_calls) == len(_FILES_MANIFEST)
+        result, _, mock_s3_target, *_ = self._run()
+        assert mock_s3_target.put_object.call_count == len(_FILES_MANIFEST)
 
     def test_cf_invalidation_failed_flag_true(self):
         result, *_ = self._run()
@@ -391,17 +401,17 @@ class TestCFInvalidationFailure:
         assert body['cf_invalidation_failed'] is True
 
     def test_deploy_status_still_deployed(self):
-        result, _, _, _, mock_update_status = self._run()
+        result, _, _, _, mock_update_status, _ = self._run()
         extra = mock_update_status.call_args[1].get('extra_attrs', {})
         assert extra.get('deploy_status') == 'deployed'
 
     def test_telegram_message_warns_about_cf(self):
-        result, _, _, mock_update, _ = self._run()
+        result, _, _, _, _, mock_update = self._run()
         last_msg = mock_update.call_args_list[-1][0][1]
         assert 'CloudFront' in last_msg or 'Invalidation' in last_msg
 
     def test_ddb_cf_flag_recorded(self):
-        result, _, _, _, mock_update_status = self._run()
+        result, _, _, _, mock_update_status, _ = self._run()
         extra = mock_update_status.call_args[1].get('extra_attrs', {})
         assert extra.get('cf_invalidation_failed') is True
 
@@ -430,15 +440,7 @@ class TestAppRouting:
 
 class TestDDBFields:
     def test_deployed_details_is_json_list(self):
-        mock_execute, mock_table = _patch_all()
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=mock_table), \
-             patch('callbacks.answer_callback'), \
-             patch('callbacks.update_message'), \
-             patch('callbacks._update_request_status') as mock_update_status, \
-             patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
-            _call_callback(action='approve')
+        result, _, _, _, mock_update_status, _ = _run_approve()
         extra = mock_update_status.call_args[1].get('extra_attrs', {})
         details = json.loads(extra['deployed_details'])
         assert isinstance(details, list)
@@ -448,15 +450,7 @@ class TestDDBFields:
         assert 's3_key' in first
 
     def test_failed_details_empty_on_full_success(self):
-        mock_execute, mock_table = _patch_all()
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=mock_table), \
-             patch('callbacks.answer_callback'), \
-             patch('callbacks.update_message'), \
-             patch('callbacks._update_request_status') as mock_update_status, \
-             patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
-            _call_callback(action='approve')
+        result, _, _, _, mock_update_status, _ = _run_approve()
         extra = mock_update_status.call_args[1].get('extra_attrs', {})
         failed = json.loads(extra['failed_details'])
         assert isinstance(failed, list)
@@ -468,10 +462,10 @@ class TestDDBFields:
 # ---------------------------------------------------------------------------
 
 class TestApproveProgressUpdate:
-    """Verify update_message is called with progress info during S3 copy loop."""
+    """Verify update_message is called with progress info during copy loop."""
 
     def _make_large_item(self):
-        """6 files — ensures the % 5 == 0 progress branch fires at file #5."""
+        """6 files -- ensures the % 5 == 0 progress branch fires at file #5."""
         files = [
             {
                 'filename': f'assets/chunk-{i:03d}.js',
@@ -482,7 +476,6 @@ class TestApproveProgressUpdate:
             }
             for i in range(6)
         ]
-        import json as _json
         return {
             'request_id': _REQUEST_ID,
             'action': 'deploy_frontend',
@@ -494,23 +487,16 @@ class TestApproveProgressUpdate:
             'region': 'us-east-1',
             'source': 'Private Bot (ZTP Files)',
             'reason': 'Sprint 9 deploy',
-            'files': _json.dumps(files),
+            'files': json.dumps(files),
             'file_count': len(files),
             'total_size': sum(f['size'] for f in files),
             'created_at': 1700000000,
+            'deploy_role_arn': _DEPLOY_ROLE_ARN,
         }
 
     def test_approve_sends_progress_update(self):
-        """update_message should be called with '進度:' during the copy loop."""
-        mock_execute, mock_table = _patch_all()
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=mock_table), \
-             patch('callbacks.answer_callback'), \
-             patch('callbacks.update_message') as mock_update, \
-             patch('callbacks._update_request_status'), \
-             patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
-            _call_callback(action='approve', item=self._make_large_item())
+        """update_message should be called with progress info during the copy loop."""
+        result, _, _, _, _, mock_update = _run_approve(item=self._make_large_item())
 
         # At least one update_message call must contain progress info
         progress_calls = [
@@ -521,128 +507,37 @@ class TestApproveProgressUpdate:
 
 
 # ---------------------------------------------------------------------------
-# Sprint 11-000: assume_role_arn forwarded to execute_command (Phase B)
+# Sprint 12: deploy_role_arn -- boto3 assumed role vs Lambda role
 # ---------------------------------------------------------------------------
 
-_DEPLOY_ROLE_ARN = "arn:aws:iam::190825685292:role/ztp-files-frontend-deploy-role"
-
-
 class TestDeployRoleArnPhaseB:
-    """Verify Phase B passes deploy_role_arn to execute_command for both
-    S3 copy and CloudFront invalidation, and falls back gracefully when absent."""
+    """Verify Phase B uses assumed-role boto3 client for S3 target and CF,
+    and falls back to Lambda role when deploy_role_arn is absent."""
 
-    def _make_item_with_role(self):
-        item = _make_item()
-        item['deploy_role_arn'] = _DEPLOY_ROLE_ARN
-        return item
+    def test_sts_assume_role_success_deploys_all_files(self):
+        """When deploy_role_arn is set and assume_role succeeds, all files deploy."""
+        result, *_ = _run_approve()
+        body = json.loads(result['body'])
+        assert body['deployed_count'] == len(_FILES_MANIFEST)
 
-    def _make_item_without_role(self):
-        """Simulate an older DDB record that has no deploy_role_arn field."""
-        item = _make_item()
+    def test_s3_target_put_object_called_with_assumed_creds(self):
+        """s3_target (assumed role) put_object must be called for each file."""
+        result, _, mock_s3_target, *_ = _run_approve()
+        assert mock_s3_target.put_object.call_count == len(_FILES_MANIFEST)
+
+    def test_no_role_fallback_deploys_all_files(self):
+        """When deploy_role_arn is absent, Lambda role is used and all files deploy."""
+        item = _make_item(deploy_role_arn=None)
         item.pop('deploy_role_arn', None)
-        return item
+        result, _, mock_s3_target, *_ = _run_approve(item=item)
+        body = json.loads(result['body'])
+        assert body['deployed_count'] == len(_FILES_MANIFEST)
+        assert mock_s3_target.put_object.call_count == len(_FILES_MANIFEST)
 
-    def _make_item_none_role(self):
-        """DDB record where deploy_role_arn was explicitly stored as None."""
-        item = _make_item()
-        item['deploy_role_arn'] = None
-        return item
-
-    # --- With role: all execute_command calls must carry assume_role_arn ---
-
-    def test_s3_copy_called_with_assume_role_arn(self):
-        """Each S3 copy execute_command call must include assume_role_arn=<arn>."""
-        mock_execute = MagicMock(return_value='upload: s3://...')
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=MagicMock()), \
-             patch('callbacks.answer_callback'), \
-             patch('callbacks.update_message'), \
-             patch('callbacks._update_request_status'), \
-             patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
-            _call_callback(action='approve', item=self._make_item_with_role())
-
-        s3_calls = [c for c in mock_execute.call_args_list if 's3 cp' in c[0][0]]
-        assert len(s3_calls) > 0, "Expected at least one S3 cp call"
-        for c in s3_calls:
-            kwargs = c[1]
-            assert 'assume_role_arn' in kwargs, "Missing assume_role_arn kwarg on S3 cp call"
-            assert kwargs['assume_role_arn'] == _DEPLOY_ROLE_ARN
-
-    def test_cf_invalidation_called_with_assume_role_arn(self):
-        """CloudFront invalidation execute_command call must include assume_role_arn=<arn>."""
-        mock_execute = MagicMock(return_value='{}')
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=MagicMock()), \
-             patch('callbacks.answer_callback'), \
-             patch('callbacks.update_message'), \
-             patch('callbacks._update_request_status'), \
-             patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
-            _call_callback(action='approve', item=self._make_item_with_role())
-
-        cf_calls = [c for c in mock_execute.call_args_list if 'cloudfront create-invalidation' in c[0][0]]
-        assert len(cf_calls) == 1, "Expected exactly one CF invalidation call"
-        kwargs = cf_calls[0][1]
-        assert 'assume_role_arn' in kwargs, "Missing assume_role_arn kwarg on CF invalidation call"
-        assert kwargs['assume_role_arn'] == _DEPLOY_ROLE_ARN
-
-    # --- Without role (absent): fallback to Lambda execution role ---
-
-    def test_s3_copy_fallback_when_role_absent(self):
-        """When deploy_role_arn is absent from DDB, execute_command must be called
-        with assume_role_arn=None (fallback to Lambda execution role)."""
-        mock_execute = MagicMock(return_value='upload: s3://...')
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=MagicMock()), \
-             patch('callbacks.answer_callback'), \
-             patch('callbacks.update_message'), \
-             patch('callbacks._update_request_status'), \
-             patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
-            _call_callback(action='approve', item=self._make_item_without_role())
-
-        s3_calls = [c for c in mock_execute.call_args_list if 's3 cp' in c[0][0]]
-        assert len(s3_calls) > 0
-        for c in s3_calls:
-            # assume_role_arn must be None (item.get returns None when key absent)
-            kwargs = c[1]
-            assert 'assume_role_arn' in kwargs
-            assert kwargs['assume_role_arn'] is None
-
-    def test_cf_invalidation_fallback_when_role_absent(self):
-        """When deploy_role_arn is absent, CF invalidation must also use assume_role_arn=None."""
-        mock_execute = MagicMock(return_value='{}')
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=MagicMock()), \
-             patch('callbacks.answer_callback'), \
-             patch('callbacks.update_message'), \
-             patch('callbacks._update_request_status'), \
-             patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
-            _call_callback(action='approve', item=self._make_item_without_role())
-
-        cf_calls = [c for c in mock_execute.call_args_list if 'cloudfront create-invalidation' in c[0][0]]
-        assert len(cf_calls) == 1
-        kwargs = cf_calls[0][1]
-        assert 'assume_role_arn' in kwargs
-        assert kwargs['assume_role_arn'] is None
-
-    def test_s3_copy_fallback_when_role_is_none(self):
-        """When deploy_role_arn is explicitly None in DDB, execute_command
-        must receive assume_role_arn=None (backward compat guard)."""
-        mock_execute = MagicMock(return_value='upload: s3://...')
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=MagicMock()), \
-             patch('callbacks.answer_callback'), \
-             patch('callbacks.update_message'), \
-             patch('callbacks._update_request_status'), \
-             patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
-            _call_callback(action='approve', item=self._make_item_none_role())
-
-        s3_calls = [c for c in mock_execute.call_args_list if 's3 cp' in c[0][0]]
-        assert len(s3_calls) > 0
-        for c in s3_calls:
-            kwargs = c[1]
-            assert kwargs['assume_role_arn'] is None
+    def test_assume_role_fail_all_files_go_to_failed(self):
+        """When assume_role raises, all files must be in failed[], deploy_failed."""
+        result, *_ = _run_approve(assume_role_fail=True)
+        body = json.loads(result['body'])
+        assert body['deploy_status'] == 'deploy_failed'
+        assert body['failed_count'] == len(_FILES_MANIFEST)
+        assert body['deployed_count'] == 0

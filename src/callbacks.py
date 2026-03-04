@@ -6,6 +6,7 @@ Bouncer - Telegram Callback 處理模組
 
 import time
 import logging
+import boto3 as _boto3
 
 
 # 從其他模組導入
@@ -912,27 +913,99 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
     deployed = []
     failed = []
 
+    # 1. Assume deploy role (if provided) — assumed role writes to frontend bucket
+    creds = None
+    if deploy_role_arn:
+        sts = _boto3.client('sts')
+        try:
+            creds = sts.assume_role(
+                RoleArn=deploy_role_arn,
+                RoleSessionName=f"bouncer-deploy-{request_id[:16]}",
+            )['Credentials']
+            s3_target = _boto3.client(
+                's3',
+                aws_access_key_id=creds['AccessKeyId'],
+                aws_secret_access_key=creds['SecretAccessKey'],
+                aws_session_token=creds['SessionToken'],
+            )
+        except Exception as e:
+            logger.error("[DEPLOY-FRONTEND] AssumeRole failed for %s: %s", deploy_role_arn, e)
+            failed = [
+                {'filename': fm.get('filename', 'unknown'), 'reason': f'AssumeRole failed: {e}'}
+                for fm in files_manifest
+            ]
+            deploy_status = 'deploy_failed'
+            extra_attrs = {
+                'deploy_status': deploy_status,
+                'deployed_count': 0,
+                'failed_count': len(failed),
+                'deployed_files': _json.dumps([]),
+                'failed_files': _json.dumps([f['filename'] for f in failed]),
+                'deployed_details': _json.dumps([]),
+                'failed_details': _json.dumps(failed),
+                'cf_invalidation_failed': False,
+            }
+            _update_request_status(table, request_id, 'approved', user_id, extra_attrs=extra_attrs)
+            emit_metric('Bouncer', 'DeployFrontend', 1, dimensions={'Status': deploy_status, 'Project': project})
+            update_message(
+                message_id,
+                f"❌ *前端部署失敗*\n\n"
+                f"📋 *請求 ID：* `{request_id}`\n"
+                f"{source_line}"
+                f"📦 *專案：* {escape_markdown(project)}\n"
+                f"❗ AssumeRole 失敗，全部 {file_count} 個檔案無法部署\n"
+                f"💬 *原因：* {safe_reason}",
+            )
+            return response(200, {
+                'ok': True,
+                'deploy_status': deploy_status,
+                'deployed_count': 0,
+                'failed_count': len(failed),
+                'cf_invalidation_failed': False,
+            })
+    else:
+        s3_target = _boto3.client('s3')  # Lambda role (fallback)
+
+    # s3_staging uses Lambda role (already has staging bucket read)
+    s3_staging = _boto3.client('s3')
+
+    # 2. For each file: read from staging bucket, write to frontend bucket
     for i, fm in enumerate(files_manifest):
         filename = fm.get('filename', 'unknown')
         staged_key = fm.get('s3_key', '')
         content_type = fm.get('content_type', 'application/octet-stream')
         cache_control = fm.get('cache_control', 'no-cache')
-        target_key = filename  # deploy to root of frontend bucket
 
-        cmd = (
-            f"aws s3 cp s3://{staging_bucket}/{staged_key} "
-            f"s3://{frontend_bucket}/{target_key} "
-            f"--content-type \"{content_type}\" "
-            f"--cache-control \"{cache_control}\" "
-            f"--metadata-directive REPLACE "
-            f"--region us-east-1"
-        )
-        output = execute_command(cmd, assume_role_arn=deploy_role_arn)
-        if _is_execute_failed(output):
-            logger.error("[DEPLOY-FRONTEND] execute_command failed for %s: %s", filename, output)
-            failed.append({'filename': filename, 'reason': output[:200]})
-        else:
-            deployed.append({'filename': filename, 's3_key': target_key})
+        try:
+            # Read from staging (Lambda role)
+            obj = s3_staging.get_object(Bucket=staging_bucket, Key=staged_key)
+            body = obj['Body'].read()
+
+            # Write to frontend (assumed role or Lambda role)
+            s3_target.put_object(
+                Bucket=frontend_bucket,
+                Key=filename,
+                Body=body,
+                ContentType=content_type,
+                CacheControl=cache_control,
+            )
+            deployed.append({'filename': filename, 's3_key': filename})
+            logger.info(
+                "[DEPLOY-FRONTEND] [AUDIT] uploaded file=%s size=%d content_type=%s "
+                "source=%s target=s3://%s/%s request_id=%s project=%s",
+                filename, len(body), content_type,
+                f"s3://{staging_bucket}/{staged_key}",
+                frontend_bucket, filename, request_id, project,
+            )
+        except Exception as e:
+            logger.error(
+                "[DEPLOY-FRONTEND] [AUDIT] upload_failed file=%s error=%s "
+                "source=%s target=s3://%s/%s request_id=%s project=%s",
+                filename, str(e)[:200],
+                f"s3://{staging_bucket}/{staged_key}",
+                frontend_bucket, filename, request_id, project,
+            )
+            failed.append({'filename': filename, 'reason': str(e)[:200]})
 
         # Progress update every 5 files
         if (i + 1) % 5 == 0 or i == len(files_manifest) - 1:
@@ -956,18 +1029,28 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
     else:
         deploy_status = 'partial_deploy'
 
-    # CloudFront invalidation
+    # 3. CloudFront invalidation (assumed role or Lambda role)
     cf_invalidation_failed = False
     if success_count > 0:
-        cf_cmd = (
-            f"aws cloudfront create-invalidation "
-            f"--distribution-id {distribution_id} "
-            f"--paths '/*' "
-            f"--region us-east-1"
-        )
-        cf_output = execute_command(cf_cmd, assume_role_arn=deploy_role_arn)
-        if _is_execute_failed(cf_output):
-            logger.error("[DEPLOY-FRONTEND] CloudFront invalidation failed for dist=%s: %s", distribution_id, cf_output)
+        try:
+            if creds:
+                cf = _boto3.client(
+                    'cloudfront',
+                    aws_access_key_id=creds['AccessKeyId'],
+                    aws_secret_access_key=creds['SecretAccessKey'],
+                    aws_session_token=creds['SessionToken'],
+                )
+            else:
+                cf = _boto3.client('cloudfront')
+            cf.create_invalidation(
+                DistributionId=distribution_id,
+                InvalidationBatch={
+                    'Paths': {'Quantity': 1, 'Items': ['/*']},
+                    'CallerReference': request_id,
+                },
+            )
+        except Exception as e:
+            logger.error("[DEPLOY-FRONTEND] CloudFront invalidation failed for dist=%s: %s", distribution_id, e)
             cf_invalidation_failed = True
 
     # Update DDB
