@@ -23,6 +23,16 @@ from mcp_upload import execute_upload, _verify_upload
 # DynamoDB tables from db.py (no circular dependency)
 import db as _db
 
+
+def _is_execute_failed(output: str) -> bool:
+    """判斷 execute_command 輸出是否代表失敗。
+    支援：❌ prefix（Bouncer 格式）和 (exit code: N) 格式（AWS CLI 直接輸出）。
+    """
+    from utils import extract_exit_code
+    code = extract_exit_code(output)
+    return code is not None and code != 0
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -218,7 +228,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         cb_text = '✅ 執行中 + 🔓 信任啟動' if action == 'approve_trust' else '✅ 執行中...'
         answer_callback(callback_id, cb_text)
         result = execute_command(command, assume_role)
-        cmd_status = 'failed' if result.startswith('❌') else 'success'
+        cmd_status = 'failed' if _is_execute_failed(result) else 'success'
         emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'manual_approve'})
         paged = store_paged_output(request_id, result)
 
@@ -917,7 +927,7 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
             f"--region us-east-1"
         )
         output = execute_command(cmd)
-        if output.startswith('❌'):
+        if _is_execute_failed(output):
             logger.error("[DEPLOY-FRONTEND] execute_command failed for %s: %s", filename, output)
             failed.append({'filename': filename, 'reason': output[:200]})
         else:
@@ -955,7 +965,7 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
             f"--region us-east-1"
         )
         cf_output = execute_command(cf_cmd)
-        if cf_output.startswith('❌'):
+        if _is_execute_failed(cf_output):
             logger.error("[DEPLOY-FRONTEND] CloudFront invalidation failed for dist=%s: %s", distribution_id, cf_output)
             cf_invalidation_failed = True
 
@@ -1102,7 +1112,7 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
 
         # 執行命令
         result = execute_command(cmd, item_assume_role)
-        cmd_status = 'error' if result.startswith('❌') else 'success'
+        cmd_status = 'error' if _is_execute_failed(result) else 'success'
         emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'trust_callback'})
         paged = store_paged_output(req_id, result)
 
@@ -1135,7 +1145,7 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
         )
 
         # Track command in trust session for summary (sprint9-007-phase-a)
-        is_failed = result.startswith('❌')
+        is_failed = _is_execute_failed(result)
         track_command_executed(trust_id, cmd, not is_failed)
 
         # Audit log
