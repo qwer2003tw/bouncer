@@ -1,6 +1,6 @@
 # Bouncer
 
-> 🔐 AWS 命令審批執行系統 v3.11.0
+> 🔐 AWS 命令審批執行系統 v3.11.1
 > 
 > 讓 AI Agent 安全執行 AWS 命令。危險命令透過 Telegram 審批後才執行。
 

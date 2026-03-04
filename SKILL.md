@@ -536,7 +536,6 @@ mcporter call bouncer bouncer_grant_status grant_id="grant-abc123"
 
 > **實作說明（v3.11.1）：** 審批通過後，Bouncer Lambda 先用自己的 role 從暫存 bucket 讀取檔案到記憶體，再 assume 各專案的 `deploy_role_arn` role，用 boto3 直接 put_object 到前端 bucket + CloudFront invalidation。deploy role **不需要**暫存 bucket 的任何讀取權限。每個檔案上傳都有審計 log（含 user_id）。
 
-> **⚠️ v3.11.0 (closes #67)：** 每個 project 必須在 `PROJECT_CONFIGS` 中設定 `deploy_role_arn`（IAM role ARN）。Bouncer 審批後會 assume 該 role 執行 S3 copy + CloudFront invalidation，取代原本的 Lambda execution role。
 
 ```bash
 mcporter call bouncer bouncer_deploy_frontend \
@@ -585,7 +584,7 @@ mcporter call bouncer bouncer_deploy_frontend \
 >     "ztp-files": {
 >         "frontend_bucket": "ztp-files-dev-frontendbucket-nvvimv31xp3v",
 >         "distribution_id": "E176PW0SA5JF29",
->         "deploy_role_arn": "arn:aws:iam::190825685292:role/ztp-files-deploy-role",
+>         "deploy_role_arn": "arn:aws:iam::190825685292:role/ztp-files-dev-frontend-deploy-role",
 >     }
 > }
 > ```
