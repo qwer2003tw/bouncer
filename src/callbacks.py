@@ -992,18 +992,18 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
             deployed.append({'filename': filename, 's3_key': filename})
             logger.info(
                 "[DEPLOY-FRONTEND] [AUDIT] uploaded file=%s size=%d content_type=%s "
-                "source=%s target=s3://%s/%s request_id=%s project=%s",
+                "source=%s target=s3://%s/%s request_id=%s project=%s user_id=%s",
                 filename, len(body), content_type,
                 f"s3://{staging_bucket}/{staged_key}",
-                frontend_bucket, filename, request_id, project,
+                frontend_bucket, filename, request_id, project, user_id,
             )
         except Exception as e:
             logger.error(
                 "[DEPLOY-FRONTEND] [AUDIT] upload_failed file=%s error=%s "
-                "source=%s target=s3://%s/%s request_id=%s project=%s",
+                "source=%s target=s3://%s/%s request_id=%s project=%s user_id=%s",
                 filename, str(e)[:200],
                 f"s3://{staging_bucket}/{staged_key}",
-                frontend_bucket, filename, request_id, project,
+                frontend_bucket, filename, request_id, project, user_id,
             )
             failed.append({'filename': filename, 'reason': str(e)[:200]})
 
