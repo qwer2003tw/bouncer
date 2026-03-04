@@ -344,7 +344,7 @@ def _send_trust_expiry_notification(
         pending_count:   Number of pending requests needing manual approval.
         pending_requests: List of pending request items (for display).
     """
-    from telegram import send_telegram_message_silent
+    from telegram import send_telegram_message, send_telegram_message_silent
 
     safe_source = escape_markdown(source or trust_scope or trust_id[:20])
 
@@ -379,10 +379,13 @@ def _send_trust_expiry_notification(
         )
 
     try:
-        send_telegram_message_silent(text)
+        if pending_count > 0:
+            send_telegram_message(text)   # ring: pending requests need manual approval
+        else:
+            send_telegram_message_silent(text)  # silent: no action needed
         logger.info(
-            "[TRUST-EXPIRY] Sent expiry notification for trust_id=%s (pending=%d)",
-            trust_id, pending_count,
+            "[TRUST-EXPIRY] Sent expiry notification for trust_id=%s (pending=%d, ring=%s)",
+            trust_id, pending_count, pending_count > 0,
         )
     except Exception as exc:
         logger.error(
