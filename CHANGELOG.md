@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.11.1] - 2026-03-04
+
+### Fixed
+- `callbacks.py` — `deploy_frontend` 改用 boto3 直接操作，deploy role 不再需要暫存 bucket 讀取權限（closes #67）
+- `callbacks.py` — `deploy_frontend` 加入每個檔案的審計 log（file, size, source, target, request_id, project, user_id）
+
 ## [3.11.0] - 2026-03-04
 
 ### Added
