@@ -434,7 +434,7 @@ class TestDeployRoleArnPhaseA:
         result, mock_table = self._run_happy()
         item = mock_table.put_item.call_args[1]["Item"]
         assert "deploy_role_arn" in item
-        assert item["deploy_role_arn"] == "arn:aws:iam::190825685292:role/ztp-files-frontend-deploy-role"
+        assert item["deploy_role_arn"] == "arn:aws:iam::190825685292:role/ztp-files-dev-frontend-deploy-role"
 
     def test_ddb_item_deploy_role_arn_is_none_when_not_configured(self):
         """When a project has no deploy_role_arn in config, DDB item must have None (not absent)."""
