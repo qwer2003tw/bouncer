@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.11.0] - 2026-03-04
+
+### Added
+- `bouncer_deploy_frontend` — 改用 per-project `deploy_role_arn`（IAM role），不再依賴 Lambda execution role；PROJECT_CONFIGS 每個專案需設定 `deploy_role_arn` (sprint11-001, closes #67)
+- `deploy_status` response 新增 `progress_hint` 欄位（顯示目前階段：正在初始化 / build / CloudFormation）和 `sfn_status` 欄位（Step Functions execution status，與 `build_status` 分開）(sprint11-002, closes #53 #56)
+- `sendChatAction` typing indicator — 命令執行中向 Telegram 發送 "typing" 視覺回饋 (sprint11-003, closes #61)
+
+### Fixed
+- Telegram inline keyboard `style` 欄位已移除（非標準 Bot API 欄位）；改用 `json_body=True` 正確序列化 `reply_markup`，按鈕現在正確渲染 (sprint11-004, closes #60)
+- Trust session 過期且有 pending 請求時改為響鈴通知（`sound` flag），而非靜默通知 (sprint11-005, closes #65)
+
+### Tests
+- 新增 `bouncer_deploy_frontend` Phase B integration tests（execute_command S3 copy format + failure detection）(closes #59)
+- Backend: 1539+ tests
+
 ## [3.10.0] - 2026-03-03
 
 ### Fixed

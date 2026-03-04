@@ -534,7 +534,9 @@ mcporter call bouncer bouncer_grant_status grant_id="grant-abc123"
 ### bouncer_deploy_frontend
 一鍵前端部署：staging → 一次審批 → S3 copy + CloudFront invalidation，取代原本 3-5 次審批流程。
 
-> **實作說明：** 審批通過後，S3 cp 和 CloudFront invalidation 走 `execute_command`（CodeBuild 執行），不需要給 Bouncer Lambda 額外 IAM 權限。
+> **實作說明：** 審批通過後，S3 cp 和 CloudFront invalidation 走 `execute_command`（CodeBuild 執行），Bouncer 會 assume 各專案設定的 `deploy_role_arn` IAM role 執行操作，不需要給 Bouncer Lambda 額外 IAM 權限。
+
+> **⚠️ v3.11.0 (closes #67)：** 每個 project 必須在 `PROJECT_CONFIGS` 中設定 `deploy_role_arn`（IAM role ARN）。Bouncer 審批後會 assume 該 role 執行 S3 copy + CloudFront invalidation，取代原本的 Lambda execution role。
 
 ```bash
 mcporter call bouncer bouncer_deploy_frontend \
@@ -573,9 +575,20 @@ mcporter call bouncer bouncer_deploy_frontend \
 - `[❌ 拒絕]`
 
 **已設定專案：**
-| project | frontend_bucket | distribution_id |
-|---------|----------------|-----------------|
-| `ztp-files` | `ztp-files-dev-frontendbucket-nvvimv31xp3v` | `E176PW0SA5JF29` |
+| project | frontend_bucket | distribution_id | deploy_role_arn |
+|---------|----------------|-----------------|-----------------|
+| `ztp-files` | `ztp-files-dev-frontendbucket-nvvimv31xp3v` | `E176PW0SA5JF29` | `arn:aws:iam::190825685292:role/ztp-files-deploy-role`（範例，實際依專案設定）|
+
+> **PROJECT_CONFIGS 設定範例（Lambda 端）：**
+> ```python
+> PROJECT_CONFIGS = {
+>     "ztp-files": {
+>         "frontend_bucket": "ztp-files-dev-frontendbucket-nvvimv31xp3v",
+>         "distribution_id": "E176PW0SA5JF29",
+>         "deploy_role_arn": "arn:aws:iam::190825685292:role/ztp-files-deploy-role",
+>     }
+> }
+> ```
 
 ---
 
@@ -624,6 +637,11 @@ mcporter call bouncer bouncer_project_list
 **✅ v3.10.0 deploy_status 行為改善（#47）：**
 - `deploy_id` 不存在時回傳 `{status: "pending"}` 而非 error（避免 race condition）
 - RUNNING 時回傳 `elapsed_seconds`；SUCCESS/FAILED 時回傳 `duration_seconds`
+
+**✅ v3.11.0 deploy_status 新增欄位（#53 #56）：**
+- `progress_hint` — 人類可讀的目前階段描述（e.g. `"正在初始化"` / `"build 執行中"` / `"CloudFormation 更新中"`）
+- `sfn_status` — Step Functions execution 狀態（`RUNNING`/`SUCCEEDED`/`FAILED`），與 CodeBuild 的 `build_status` 分開顯示
+- 用 `progress_hint` 取代舊的 `phase` 欄位（`phase` 一直顯示 `INITIALIZING`，不準確）
 
 ---
 
