@@ -35,7 +35,7 @@ _PROJECT_CONFIG = {
         "frontend_bucket": "ztp-files-dev-frontendbucket-nvvimv31xp3v",
         "distribution_id": "E176PW0SA5JF29",
         "region": "us-east-1",
-        "deploy_role_arn": "arn:aws:iam::190825685292:role/ztp-files-frontend-deploy-role",
+        "deploy_role_arn": "arn:aws:iam::190825685292:role/ztp-files-dev-frontend-deploy-role",
     }
 }
 
