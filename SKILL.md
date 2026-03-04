@@ -534,7 +534,7 @@ mcporter call bouncer bouncer_grant_status grant_id="grant-abc123"
 ### bouncer_deploy_frontend
 一鍵前端部署：staging → 一次審批 → S3 copy + CloudFront invalidation，取代原本 3-5 次審批流程。
 
-> **實作說明：** 審批通過後，S3 cp 和 CloudFront invalidation 走 `execute_command`（CodeBuild 執行），Bouncer 會 assume 各專案設定的 `deploy_role_arn` IAM role 執行操作，不需要給 Bouncer Lambda 額外 IAM 權限。
+> **實作說明（v3.11.1）：** 審批通過後，Bouncer Lambda 先用自己的 role 從暫存 bucket 讀取檔案到記憶體，再 assume 各專案的 `deploy_role_arn` role，用 boto3 直接 put_object 到前端 bucket + CloudFront invalidation。deploy role **不需要**暫存 bucket 的任何讀取權限。每個檔案上傳都有審計 log（含 user_id）。
 
 > **⚠️ v3.11.0 (closes #67)：** 每個 project 必須在 `PROJECT_CONFIGS` 中設定 `deploy_role_arn`（IAM role ARN）。Bouncer 審批後會 assume 該 role 執行 S3 copy + CloudFront invalidation，取代原本的 Lambda execution role。
 
