@@ -550,9 +550,10 @@ def get_deploy_status(deploy_id: str) -> dict:
     record = get_deploy_record(deploy_id)
     if not record:
         return {
-            'status': 'pending',
+            'status': 'not_found',
             'deploy_id': deploy_id,
-            'message': 'Deploy record not found yet, please retry',
+            'message': 'Deploy record not found. The deploy may not have started yet, or the record has been cleaned up.',
+            'hint': 'If the deploy was just approved, retry in a few seconds. If the request expired, re-issue bouncer_deploy.',
         }
 
     # 如果有 execution_arn，查詢 Step Functions 狀態
@@ -758,11 +759,22 @@ def mcp_tool_deploy_status(req_id: str, arguments: dict) -> dict:
 
     record = get_deploy_status(deploy_id)
 
-    # Only set isError for actual errors (not for pending/running/success/failed statuses)
-    # status=pending means record not yet available — agent should retry, not error out
+    # TTL expiry check: if the approval record still exists but TTL has passed → expired
+    if record.get('status') == 'pending':
+        ttl = int(record.get('ttl', 0))
+        if ttl and int(time.time()) > ttl:
+            record = {
+                'status': 'expired',
+                'deploy_id': deploy_id,
+                'message': '部署請求已過期，未在時限內批准',
+                'hint': 'Re-issue bouncer_deploy to create a new deploy request.',
+            }
+
+    # Only set isError for actual errors (not for status values that are informational)
+    # not_found / expired = informational (agent can decide what to do); never set isError
     is_error = (
         'error' in record
-        and record.get('status') not in ('pending', 'PENDING', 'RUNNING', 'SUCCESS', 'FAILED')
+        and record.get('status') not in ('pending', 'PENDING', 'RUNNING', 'SUCCESS', 'FAILED', 'not_found', 'expired')
     )
 
     return mcp_result(req_id, {
