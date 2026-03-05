@@ -24,6 +24,7 @@ __all__ = [
     'answer_callback',
     'update_and_answer',
     'send_chat_action',
+    'send_message_with_entities',
     '_telegram_request',
     '_telegram_requests_parallel',
 ]
@@ -257,3 +258,31 @@ def send_chat_action(action: str = 'typing') -> None:
         })
     except Exception as e:
         logger.debug(f'[send_chat_action] ignored error: {e}')
+
+
+def send_message_with_entities(text: str, entities: list, reply_markup: dict = None, silent: bool = False) -> dict:
+    """Send a Telegram message using entities mode (no parse_mode).
+
+    Uses Telegram's entities API instead of parse_mode='Markdown', which
+    avoids all Markdown escape issues. Offsets/lengths must be in UTF-16
+    code units (see telegram_entities.py for correct calculation).
+
+    Args:
+        text:         Plain text content of the message.
+        entities:     List of Telegram entity dicts with type/offset/length.
+        reply_markup: Optional inline keyboard or reply keyboard markup.
+        silent:       If True, sends without notification sound.
+
+    Returns:
+        Telegram API response dict.
+    """
+    data = {
+        'chat_id': APPROVED_CHAT_ID,
+        'text': text,
+        'entities': entities,
+    }
+    if silent:
+        data['disable_notification'] = True
+    if reply_markup:
+        data['reply_markup'] = _strip_unsupported_button_fields(reply_markup)
+    return _telegram_request('sendMessage', data, json_body=True)
