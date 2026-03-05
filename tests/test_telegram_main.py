@@ -495,66 +495,46 @@ class TestTelegramCommandsGSI:
 class TestAnswerCallbackShowAlert:
     """Tests for answer_callback show_alert parameter (sprint13-002)"""
 
-    @patch('urllib.request.urlopen')
-    def test_answer_callback_default_no_show_alert(self, mock_urlopen):
-        """Default call: show_alert NOT in request body"""
-        from telegram import answer_callback
-        import json as _json
+    def test_answer_callback_default_no_show_alert(self, app_module):
+        """Default call: _telegram_request NOT called with show_alert in data"""
+        import telegram as tg
 
-        mock_response = MagicMock()
-        mock_response.read.return_value = b'{"ok": true}'
-        mock_urlopen.return_value.__enter__ = MagicMock(return_value=mock_response)
-        mock_urlopen.return_value.__exit__ = MagicMock(return_value=False)
+        with patch.object(tg, '_telegram_request') as mock_req:
+            tg.answer_callback('cb-001', 'Toast message')
 
-        answer_callback('cb-001', 'Toast message')
+        mock_req.assert_called_once()
+        call_args = mock_req.call_args
+        data = call_args[0][1]  # positional: method, data
 
-        call_args = mock_urlopen.call_args
-        request_obj = call_args[0][0]
-        body = _json.loads(request_obj.data.decode('utf-8'))
+        assert data['callback_query_id'] == 'cb-001'
+        assert data['text'] == 'Toast message'
+        assert 'show_alert' not in data
 
-        assert body['callback_query_id'] == 'cb-001'
-        assert body['text'] == 'Toast message'
-        assert 'show_alert' not in body
+    def test_answer_callback_show_alert_true(self, app_module):
+        """show_alert=True: data must include show_alert=True"""
+        import telegram as tg
 
-    @patch('urllib.request.urlopen')
-    def test_answer_callback_show_alert_true(self, mock_urlopen):
-        """show_alert=True: body must include show_alert=True"""
-        from telegram import answer_callback
-        import json as _json
+        with patch.object(tg, '_telegram_request') as mock_req:
+            tg.answer_callback('cb-002', '⚠️ 高危操作確認：正在執行...', show_alert=True)
 
-        mock_response = MagicMock()
-        mock_response.read.return_value = b'{"ok": true}'
-        mock_urlopen.return_value.__enter__ = MagicMock(return_value=mock_response)
-        mock_urlopen.return_value.__exit__ = MagicMock(return_value=False)
+        mock_req.assert_called_once()
+        data = mock_req.call_args[0][1]
 
-        answer_callback('cb-002', '⚠️ 高危操作確認：正在執行...', show_alert=True)
+        assert data['callback_query_id'] == 'cb-002'
+        assert data['text'] == '⚠️ 高危操作確認：正在執行...'
+        assert data.get('show_alert') is True
 
-        call_args = mock_urlopen.call_args
-        request_obj = call_args[0][0]
-        body = _json.loads(request_obj.data.decode('utf-8'))
+    def test_answer_callback_show_alert_false_not_in_body(self, app_module):
+        """show_alert=False explicitly: key should NOT appear in data"""
+        import telegram as tg
 
-        assert body['callback_query_id'] == 'cb-002'
-        assert body['text'] == '⚠️ 高危操作確認：正在執行...'
-        assert body.get('show_alert') is True
+        with patch.object(tg, '_telegram_request') as mock_req:
+            tg.answer_callback('cb-003', 'Normal toast', show_alert=False)
 
-    @patch('urllib.request.urlopen')
-    def test_answer_callback_show_alert_false_not_in_body(self, mock_urlopen):
-        """show_alert=False explicitly: key should NOT appear in request body"""
-        from telegram import answer_callback
-        import json as _json
+        mock_req.assert_called_once()
+        data = mock_req.call_args[0][1]
 
-        mock_response = MagicMock()
-        mock_response.read.return_value = b'{"ok": true}'
-        mock_urlopen.return_value.__enter__ = MagicMock(return_value=mock_response)
-        mock_urlopen.return_value.__exit__ = MagicMock(return_value=False)
-
-        answer_callback('cb-003', 'Normal toast', show_alert=False)
-
-        call_args = mock_urlopen.call_args
-        request_obj = call_args[0][0]
-        body = _json.loads(request_obj.data.decode('utf-8'))
-
-        assert 'show_alert' not in body
+        assert 'show_alert' not in data
 
 
 class TestHandleCommandCallbackShowAlert:
@@ -568,7 +548,7 @@ class TestHandleCommandCallbackShowAlert:
         # 'aws iam delete-role' matches DANGEROUS_PATTERNS
         app_module.table.put_item(Item={
             'request_id': request_id,
-            'command': 'aws iam delete-role --role-name TestRole',
+            'command': 'aws ec2 terminate-instances --instance-ids i-0abc123',
             'status': 'pending',
             'source': 'test',
             'reason': 'testing dangerous',
@@ -582,17 +562,17 @@ class TestHandleCommandCallbackShowAlert:
              patch('callbacks.store_paged_output') as mock_paged, \
              patch('callbacks.emit_metric'):
             mock_exec.return_value = 'Role deleted'
-            mock_paged.return_value = type('P', (), {
-                'result': 'Role deleted', 'paged': False,
-                'total_pages': 1, 'output_length': 12,
-                'get': lambda self, k, d=None: getattr(self, k, d),
-            })()
+            from paging import PaginatedOutput
+            mock_paged.return_value = PaginatedOutput(
+                paged=False, result='Role deleted',
+                page=1, total_pages=1, output_length=12,
+            )
 
             from callbacks import handle_command_callback
             handle_command_callback(
                 'approve', request_id,
                 {
-                    'command': 'aws iam delete-role --role-name TestRole',
+                    'command': 'aws ec2 terminate-instances --instance-ids i-0abc123',
                     'source': 'test', 'reason': 'testing',
                     'trust_scope': 'test', 'context': '',
                     'account_id': '123456789012', 'account_name': 'Test',
@@ -629,11 +609,11 @@ class TestHandleCommandCallbackShowAlert:
              patch('callbacks.store_paged_output') as mock_paged, \
              patch('callbacks.emit_metric'):
             mock_exec.return_value = 'bucket-list'
-            mock_paged.return_value = type('P', (), {
-                'result': 'bucket-list', 'paged': False,
-                'total_pages': 1, 'output_length': 11,
-                'get': lambda self, k, d=None: getattr(self, k, d),
-            })()
+            from paging import PaginatedOutput
+            mock_paged.return_value = PaginatedOutput(
+                paged=False, result='bucket-list',
+                page=1, total_pages=1, output_length=11,
+            )
 
             from callbacks import handle_command_callback
             handle_command_callback(
