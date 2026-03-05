@@ -92,10 +92,26 @@ class SchedulerService:
 
     # ── public API ────────────────────────────────────────────────────────────
 
-    def create_expiry_schedule(self, request_id: str, expires_at: int) -> bool:
+    def create_expiry_schedule(
+        self,
+        request_id: str,
+        expires_at: int,
+        *,
+        telegram_message_id: Optional[int] = None,
+        chat_id: Optional[int] = None,
+    ) -> bool:
         """Create a one-time EventBridge Scheduler schedule that fires at
         *expires_at* (Unix timestamp) and invokes the cleanup Lambda with the
         *request_id* payload.
+
+        Args:
+            request_id:          Bouncer request ID (DynamoDB primary key).
+            expires_at:          Unix timestamp when the request expires.
+            telegram_message_id: Optional Telegram message_id to embed in the
+                                 schedule payload as a fallback for the cleanup
+                                 handler when the DDB record is missing.
+            chat_id:             Optional Telegram chat_id to accompany
+                                 ``telegram_message_id`` in the fallback payload.
 
         Returns:
             ``True`` on success, ``False`` on any failure (non-raising).
@@ -116,6 +132,16 @@ class SchedulerService:
             name = schedule_name(request_id)
             at_expr = _format_schedule_time(expires_at)
 
+            payload: dict = {
+                "source": "bouncer-scheduler",
+                "action": "cleanup_expired",
+                "request_id": request_id,
+            }
+            if telegram_message_id is not None:
+                payload["telegram_message_id"] = telegram_message_id
+            if chat_id is not None:
+                payload["chat_id"] = chat_id
+
             client.create_schedule(
                 Name=name,
                 GroupName=self._group_name,
@@ -126,13 +152,7 @@ class SchedulerService:
                 Target={
                     "Arn": self._lambda_arn,
                     "RoleArn": self._role_arn,
-                    "Input": json.dumps(
-                        {
-                            "source": "bouncer-scheduler",
-                            "action": "cleanup_expired",
-                            "request_id": request_id,
-                        }
-                    ),
+                    "Input": json.dumps(payload),
                 },
             )
             logger.info("[SCHEDULER] Created expiry schedule '%s' for request %s at %s", name, request_id, at_expr)
