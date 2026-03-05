@@ -576,16 +576,29 @@ mcporter call bouncer bouncer_deploy_frontend \
 **已設定專案：**
 | project | frontend_bucket | distribution_id | deploy_role_arn |
 |---------|----------------|-----------------|-----------------|
-| `ztp-files` | `ztp-files-dev-frontendbucket-nvvimv31xp3v` | `E176PW0SA5JF29` | `arn:aws:iam::190825685292:role/ztp-files-deploy-role`（範例，實際依專案設定）|
+| `ztp-files` | `ztp-files-dev-frontendbucket-nvvimv31xp3v` | `E176PW0SA5JF29` | `arn:aws:iam::190825685292:role/ztp-files-dev-frontend-deploy-role` |
 
-> **PROJECT_CONFIGS 設定範例（Lambda 端）：**
-> ```python
-> PROJECT_CONFIGS = {
->     "ztp-files": {
->         "frontend_bucket": "ztp-files-dev-frontendbucket-nvvimv31xp3v",
->         "distribution_id": "E176PW0SA5JF29",
->         "deploy_role_arn": "arn:aws:iam::190825685292:role/ztp-files-dev-frontend-deploy-role",
->     }
+> **✅ v3.12.0：PROJECT_CONFIGS 從 DynamoDB 讀取（#68）**
+> 新增前端專案不需要 redeploy Bouncer！設定存在 DynamoDB，Lambda 啟動時自動載入。
+>
+> **新增專案流程：** 用 seed script 寫入 DynamoDB：
+> ```bash
+> cd /home/ec2-user/projects/bouncer
+> python3 scripts/seed_project_config.py \
+>   --project my-new-project \
+>   --frontend-bucket my-bucket-name \
+>   --distribution-id EXXXXXXXXX \
+>   --deploy-role-arn arn:aws:iam::190825685292:role/my-deploy-role
+> ```
+> 寫入後立即生效（Lambda 下次 cold start 或 cache 失效後載入），無需 redeploy。
+>
+> **DynamoDB 格式（參考）：**
+> ```json
+> {
+>   "pk": "PROJECT_CONFIG#my-new-project",
+>   "frontend_bucket": "my-bucket-name",
+>   "distribution_id": "EXXXXXXXXX",
+>   "deploy_role_arn": "arn:aws:iam::190825685292:role/my-deploy-role"
 > }
 > ```
 
@@ -628,7 +641,7 @@ mcporter call bouncer bouncer_project_list
 **⚠️ Deploy 狀態 Poll 規則（重要）：**
 - ✅ **用 `bouncer_deploy_status`** 查部署進度 — 直接查 DDB，不發 Telegram 通知
 - ✅ **一律 spawn sub-agent 追蹤 deploy**，主 session 繼續回應其他問題
-- ✅ **只看 `status` 欄位**（`pending`/`RUNNING`/`SUCCESS`/`FAILED`）
+- ✅ **只看 `status` 欄位**（`pending`/`RUNNING`/`SUCCESS`/`FAILED`/`expired`/`not_found`）
 - ❌ **不看 `phase` 欄位** — 整個 deploy 過程一直顯示 `INITIALIZING`，不準確（bug #53）
 - ❌ **禁止用 `bouncer_execute + aws stepfunctions describe-execution`** — 每次執行都發一則自動通知，造成通知洗版
 - ❌ **不知道前一個請求狀態，不能自己重發** — 5 分鐘 pending 先問 Steven，等確認才重發
@@ -641,6 +654,11 @@ mcporter call bouncer bouncer_project_list
 - `progress_hint` — 人類可讀的目前階段描述（e.g. `"正在初始化"` / `"build 執行中"` / `"CloudFormation 更新中"`）
 - `sfn_status` — Step Functions execution 狀態（`RUNNING`/`SUCCEEDED`/`FAILED`），與 CodeBuild 的 `build_status` 分開顯示
 - 用 `progress_hint` 取代舊的 `phase` 欄位（`phase` 一直顯示 `INITIALIZING`，不準確）
+
+**✅ v3.12.0 deploy_status 新增 status（#69）：**
+- `expired` — deploy record 存在但 TTL 已過期（部署可能已完成但記錄過舊）
+- `not_found` — deploy record 完全不存在（可能是錯誤的 deploy_id）
+- 不再用 `pending` 混用表示「找不到」，狀態語意更精確
 
 ---
 
