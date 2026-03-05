@@ -486,3 +486,171 @@ class TestTelegramCommandsGSI:
         sent_text = mock_send.call_args[0][1]
         # 統計文字應包含批准/拒絕/待審批資訊
         assert "批准" in sent_text or "approved" in sent_text.lower() or "✅" in sent_text
+
+
+# ============================================================================
+# Sprint 13-002: show_alert for DANGEROUS Commands
+# ============================================================================
+
+class TestAnswerCallbackShowAlert:
+    """Tests for answer_callback show_alert parameter (sprint13-002)"""
+
+    @patch('urllib.request.urlopen')
+    def test_answer_callback_default_no_show_alert(self, mock_urlopen):
+        """Default call: show_alert NOT in request body"""
+        from telegram import answer_callback
+        import json as _json
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = b'{"ok": true}'
+        mock_urlopen.return_value.__enter__ = MagicMock(return_value=mock_response)
+        mock_urlopen.return_value.__exit__ = MagicMock(return_value=False)
+
+        answer_callback('cb-001', 'Toast message')
+
+        call_args = mock_urlopen.call_args
+        request_obj = call_args[0][0]
+        body = _json.loads(request_obj.data.decode('utf-8'))
+
+        assert body['callback_query_id'] == 'cb-001'
+        assert body['text'] == 'Toast message'
+        assert 'show_alert' not in body
+
+    @patch('urllib.request.urlopen')
+    def test_answer_callback_show_alert_true(self, mock_urlopen):
+        """show_alert=True: body must include show_alert=True"""
+        from telegram import answer_callback
+        import json as _json
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = b'{"ok": true}'
+        mock_urlopen.return_value.__enter__ = MagicMock(return_value=mock_response)
+        mock_urlopen.return_value.__exit__ = MagicMock(return_value=False)
+
+        answer_callback('cb-002', '⚠️ 高危操作確認：正在執行...', show_alert=True)
+
+        call_args = mock_urlopen.call_args
+        request_obj = call_args[0][0]
+        body = _json.loads(request_obj.data.decode('utf-8'))
+
+        assert body['callback_query_id'] == 'cb-002'
+        assert body['text'] == '⚠️ 高危操作確認：正在執行...'
+        assert body.get('show_alert') is True
+
+    @patch('urllib.request.urlopen')
+    def test_answer_callback_show_alert_false_not_in_body(self, mock_urlopen):
+        """show_alert=False explicitly: key should NOT appear in request body"""
+        from telegram import answer_callback
+        import json as _json
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = b'{"ok": true}'
+        mock_urlopen.return_value.__enter__ = MagicMock(return_value=mock_response)
+        mock_urlopen.return_value.__exit__ = MagicMock(return_value=False)
+
+        answer_callback('cb-003', 'Normal toast', show_alert=False)
+
+        call_args = mock_urlopen.call_args
+        request_obj = call_args[0][0]
+        body = _json.loads(request_obj.data.decode('utf-8'))
+
+        assert 'show_alert' not in body
+
+
+class TestHandleCommandCallbackShowAlert:
+    """Tests for handle_command_callback DANGEROUS show_alert (sprint13-002)"""
+
+    def test_dangerous_command_approve_uses_show_alert(self, mock_dynamodb, app_module):
+        """DANGEROUS command approve → answer_callback called with show_alert=True"""
+        import time as _time
+
+        request_id = 'req-dangerous-001'
+        # 'aws iam delete-role' matches DANGEROUS_PATTERNS
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'command': 'aws iam delete-role --role-name TestRole',
+            'status': 'pending',
+            'source': 'test',
+            'reason': 'testing dangerous',
+            'account_id': '123456789012',
+            'created_at': int(_time.time()),
+        })
+
+        with patch('callbacks.answer_callback') as mock_answer, \
+             patch('callbacks.update_message'), \
+             patch('callbacks.execute_command') as mock_exec, \
+             patch('callbacks.store_paged_output') as mock_paged, \
+             patch('callbacks.emit_metric'):
+            mock_exec.return_value = 'Role deleted'
+            mock_paged.return_value = type('P', (), {
+                'result': 'Role deleted', 'paged': False,
+                'total_pages': 1, 'output_length': 12,
+                'get': lambda self, k, d=None: getattr(self, k, d),
+            })()
+
+            from callbacks import handle_command_callback
+            handle_command_callback(
+                'approve', request_id,
+                {
+                    'command': 'aws iam delete-role --role-name TestRole',
+                    'source': 'test', 'reason': 'testing',
+                    'trust_scope': 'test', 'context': '',
+                    'account_id': '123456789012', 'account_name': 'Test',
+                    'created_at': int(_time.time()),
+                },
+                999, 'cb-danger', 'user-1'
+            )
+
+        # answer_callback should have been called with show_alert=True
+        calls = mock_answer.call_args_list
+        assert any(
+            call[1].get('show_alert') is True or (len(call[0]) > 2 and call[0][2] is True)
+            for call in calls
+        ), f"Expected show_alert=True in one of: {calls}"
+
+    def test_safe_command_approve_no_show_alert(self, mock_dynamodb, app_module):
+        """Safe command approve → answer_callback called WITHOUT show_alert"""
+        import time as _time
+
+        request_id = 'req-safe-001'
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'command': 'aws s3 ls',
+            'status': 'pending',
+            'source': 'test',
+            'reason': 'listing',
+            'account_id': '123456789012',
+            'created_at': int(_time.time()),
+        })
+
+        with patch('callbacks.answer_callback') as mock_answer, \
+             patch('callbacks.update_message'), \
+             patch('callbacks.execute_command') as mock_exec, \
+             patch('callbacks.store_paged_output') as mock_paged, \
+             patch('callbacks.emit_metric'):
+            mock_exec.return_value = 'bucket-list'
+            mock_paged.return_value = type('P', (), {
+                'result': 'bucket-list', 'paged': False,
+                'total_pages': 1, 'output_length': 11,
+                'get': lambda self, k, d=None: getattr(self, k, d),
+            })()
+
+            from callbacks import handle_command_callback
+            handle_command_callback(
+                'approve', request_id,
+                {
+                    'command': 'aws s3 ls',
+                    'source': 'test', 'reason': 'listing',
+                    'trust_scope': 'test', 'context': '',
+                    'account_id': '123456789012', 'account_name': 'Test',
+                    'created_at': int(_time.time()),
+                },
+                999, 'cb-safe', 'user-1'
+            )
+
+        calls = mock_answer.call_args_list
+        # No call should have show_alert=True
+        assert not any(
+            call[1].get('show_alert') is True or (len(call[0]) > 2 and call[0][2] is True)
+            for call in calls
+        ), f"Expected no show_alert=True, but got: {calls}"

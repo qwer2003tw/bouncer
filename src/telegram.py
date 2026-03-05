@@ -217,12 +217,21 @@ def update_message(message_id: int, text: str, remove_buttons: bool = False):
     _telegram_request('editMessageText', data, json_body=True)
 
 
-def answer_callback(callback_id: str, text: str):
-    """回應 Telegram callback"""
+def answer_callback(callback_id: str, text: str, show_alert: bool = False):
+    """回應 Telegram callback
+
+    Args:
+        callback_id: Telegram callback query ID
+        text: 顯示文字（toast 或 alert）
+        show_alert: True → 顯示模態 alert popup（使用者需主動關閉）
+                    False → 顯示普通 toast notification（預設）
+    """
     data = {
         'callback_query_id': callback_id,
-        'text': text
+        'text': text,
     }
+    if show_alert:
+        data['show_alert'] = True
     _telegram_request('answerCallbackQuery', data)
 
 
