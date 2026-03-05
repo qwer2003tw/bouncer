@@ -107,12 +107,16 @@ def post_notification_setup(
             exc,
         )
 
-    # 2. Schedule EventBridge expiry trigger
+    # 2. Schedule EventBridge expiry trigger (embed telegram_message_id as fallback)
     try:
         from scheduler_service import get_scheduler_service
 
         svc = get_scheduler_service()
-        svc.create_expiry_schedule(request_id=request_id, expires_at=expires_at)
+        svc.create_expiry_schedule(
+            request_id=request_id,
+            expires_at=expires_at,
+            telegram_message_id=telegram_message_id,
+        )
     except Exception as exc:
         logger.error(
             "[POST-NOTIFY] Failed to create expiry schedule for %s: %s",

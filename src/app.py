@@ -112,7 +112,15 @@ def handle_cleanup_expired(event: dict) -> dict:
         return response(200, {'ok': True, 'skipped': True, 'reason': 'db_error'})
 
     if not item:
-        logger.info(f"[CLEANUP] Request {request_id} not found — skipping")
+        # Fallback: use message_id from schedule event payload
+        fallback_msg_id = event.get('telegram_message_id')
+        if fallback_msg_id:
+            try:
+                update_message(int(fallback_msg_id), "⏰ 此請求已過期", remove_buttons=True)
+            except Exception as e:
+                logger.warning("[CLEANUP] Fallback message update failed: %s", e)
+        logger.info("[CLEANUP] Request %s not found — %s",
+                    request_id, "buttons cleared via fallback" if fallback_msg_id else "skipping")
         return response(200, {'ok': True, 'skipped': True, 'reason': 'not_found'})
 
     current_status = item.get('status', 'pending')
