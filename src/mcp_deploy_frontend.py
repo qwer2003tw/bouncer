@@ -14,6 +14,7 @@ Phase B (callback / actual S3 deploy / CloudFront invalidation) is NOT included 
 import base64
 import json
 import logging
+import os
 import time
 from typing import Optional
 
@@ -27,7 +28,7 @@ from utils import generate_request_id, mcp_result
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Project Config (hardcoded; could be moved to DDB in the future)
+# Project Config (hardcoded fallback; primary source is DynamoDB bouncer-projects)
 # ---------------------------------------------------------------------------
 
 _PROJECT_CONFIG = {
@@ -38,6 +39,10 @@ _PROJECT_CONFIG = {
         "deploy_role_arn": "arn:aws:iam::190825685292:role/ztp-files-dev-frontend-deploy-role",
     }
 }
+
+# Environment variable for projects table (same as deployer.py)
+_PROJECTS_TABLE = os.environ.get('PROJECTS_TABLE', 'bouncer-projects')
+_REGION = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
 
 # ---------------------------------------------------------------------------
 # Security: Blocked Extensions
@@ -56,6 +61,95 @@ _BLOCKED_EXTENSIONS = {
 MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024   # 10 MB per file
 MAX_TOTAL_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB total
 MAX_FILE_COUNT = 200
+
+
+# ---------------------------------------------------------------------------
+# DynamoDB config lookup
+# ---------------------------------------------------------------------------
+
+def _get_frontend_config(project_id: str) -> Optional[dict]:
+    """Get frontend project config from DynamoDB bouncer-projects table.
+
+    The project record is expected to contain frontend-specific fields:
+      - frontend_bucket
+      - frontend_distribution_id  (CloudFront distribution ID)
+      - frontend_region            (optional, defaults to us-east-1)
+      - frontend_deploy_role_arn   (IAM role for S3/CF deploy)
+
+    Returns a normalised config dict (same shape as _PROJECT_CONFIG values),
+    or None if the project record does not exist or has no frontend fields.
+    """
+    try:
+        dynamodb = boto3.resource('dynamodb', region_name=_REGION)
+        projects_table = dynamodb.Table(_PROJECTS_TABLE)
+        resp = projects_table.get_item(Key={'project_id': project_id})
+        item = resp.get('Item')
+
+        if not item:
+            return None
+
+        # Map DDB item fields -> canonical config keys
+        frontend_bucket = item.get('frontend_bucket')
+        distribution_id = item.get('frontend_distribution_id')
+        region = item.get('frontend_region', 'us-east-1')
+        deploy_role_arn = item.get('frontend_deploy_role_arn')
+
+        if not frontend_bucket or not distribution_id:
+            # Project record exists but has no frontend config
+            return None
+
+        return {
+            'frontend_bucket': frontend_bucket,
+            'distribution_id': distribution_id,
+            'region': region,
+            'deploy_role_arn': deploy_role_arn,
+        }
+    except Exception as exc:
+        logger.warning(
+            "[deploy-frontend] DDB config lookup failed for %s: %s -- using hardcoded fallback",
+            project_id, exc,
+        )
+        return None
+
+
+def _get_project_config(project_id: str) -> Optional[dict]:
+    """Return frontend project config, preferring DynamoDB with hardcoded fallback.
+
+    Resolution order:
+    1. DynamoDB bouncer-projects table (primary)
+    2. Hardcoded _PROJECT_CONFIG dict (backward-compatible fallback)
+    """
+    ddb_config = _get_frontend_config(project_id)
+    if ddb_config is not None:
+        return ddb_config
+
+    # Fallback to hardcoded config for backward compatibility
+    hardcoded = _PROJECT_CONFIG.get(project_id)
+    if hardcoded:
+        logger.info(
+            "[deploy-frontend] Using hardcoded fallback config for project '%s'",
+            project_id,
+        )
+        return hardcoded
+
+    return None
+
+
+def _list_known_projects() -> list:
+    """Return list of known project IDs (DDB + hardcoded union)."""
+    known = set(_PROJECT_CONFIG.keys())
+    try:
+        dynamodb = boto3.resource('dynamodb', region_name=_REGION)
+        projects_table = dynamodb.Table(_PROJECTS_TABLE)
+        result = projects_table.scan(
+            ProjectionExpression='project_id, frontend_bucket',
+        )
+        for item in result.get('Items', []):
+            if item.get('frontend_bucket'):
+                known.add(item['project_id'])
+    except Exception:
+        pass
+    return sorted(known)
 
 
 # ---------------------------------------------------------------------------
@@ -192,9 +286,9 @@ def mcp_tool_deploy_frontend(req_id: str, arguments: dict) -> dict:
             "isError": True,
         })
 
-    project_config = _PROJECT_CONFIG.get(project)
+    project_config = _get_project_config(project)
     if not project_config:
-        available = list(_PROJECT_CONFIG.keys())
+        available = _list_known_projects()
         return mcp_result(req_id, {
             "content": [{"type": "text", "text": json.dumps({
                 "status": "error",
