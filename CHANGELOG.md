@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.12.0] - 2026-03-05
+
+### Added
+- `deploy_frontend` — PROJECT_CONFIGS 現在從 DynamoDB 讀取，新專案不需要 redeploy Bouncer (#68)
+- `telegram.py` — `build_entities_message()` + `send_message_with_entities()` entities 模式基礎層 Phase 1 (#52)
+
+### Fixed
+- `app.py` + `scheduler_service.py` — CLEANUP handler fallback：DDB record 不存在時用 schedule event payload 的 telegram_message_id 清按鈕 (#70)
+- `deployer.py` — `bouncer_deploy_status` 回 `expired` 當 TTL 已過，`not_found` 當 record 不存在，不再混用 `pending` (#69)
+
+### Tests
+- Backend: 1671 tests, coverage 89%
+
 ## [3.11.1] - 2026-03-04
 
 ### Fixed
