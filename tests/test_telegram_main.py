@@ -426,6 +426,15 @@ class TestWebhookMessage:
 # ============================================================================
 
 class TestTelegramCommandsGSI:
+
+    @pytest.fixture(autouse=True)
+    def fresh_app(self, app_module):
+        """Ensure app module is fresh for GSI tests."""
+        import importlib, sys
+        if 'telegram_commands' in sys.modules:
+            importlib.reload(sys.modules['telegram_commands'])
+        yield app_module
+
     """驗證 /pending 和 /stats 使用 GSI Query 而非 Scan"""
 
     def test_pending_command_uses_gsi_query(self, app_module):
