@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.14.0] - 2026-03-06
+
+### Fixed
+- `deployer.py` — deploy 審批通知後呼叫 `post_notification_setup()`，按鈕現在會在請求過期時自動清除 (#75)
+- `deployer.py` — `deploy_status` response 移除不準確的 `phase` 欄位（永遠顯示 INITIALIZING），改標記為 deprecated（#53）
+- `telegram.py` — button whitelist 現在保留 `style` 欄位（Telegram Bot API 9.4 支援），移除其他未知欄位 (#60)
+- `mcp_execute.py` — auto_approved / trust_auto_approved / grant 路徑 response 加入 `request_id` 欄位 (#71)
+- `bouncer_exec.sh` — `rate_limited` 狀態加明確處理：顯示提示、等 15 秒後重試一次 (#73)
+
+### Tests
+- Backend: 1810 tests, coverage 89%
+
 ## [3.13.1] - 2026-03-06
 
 ### Fixed
