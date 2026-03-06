@@ -57,7 +57,7 @@ run_pytest_safe() {
 # --all mode: collect all test files and split into batches of MAX_FILES
 if [[ "${1:-}" == "--all" ]]; then
     cd "$REPO_ROOT"
-    mapfile -t all_files < <(python3 -m pytest tests/ -q --collect-only -p no:randomly 2>/dev/null | grep "::test_" | sed 's/::test_.*//' | sort -u)
+    mapfile -t all_files < <(find tests/ deployer/tests/ mcp_server/ -name 'test_*.py' 2>/dev/null | sort -u)
 
     echo -e "${GREEN}Found ${#all_files[@]} test files. Splitting into batches of ${MAX_FILES}...${NC}"
 
