@@ -17,6 +17,7 @@ from typing import NamedTuple, Optional
 import telegram as _telegram
 from commands import is_dangerous, check_lambda_env_update
 from constants import COMMAND_APPROVAL_TIMEOUT, TRUST_SESSION_MAX_COMMANDS, UPLOAD_TIMEOUT, GRANT_APPROVAL_TIMEOUT
+from telegram_entities import MessageBuilder
 from utils import format_size_human, build_info_lines
 
 logger = logging.getLogger(__name__)
@@ -129,22 +130,17 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
                           source: str = None, account_id: str = None, account_name: str = None,
                           assume_role: str = None, context: str = None,
                           template_scan_result: dict = None) -> bool:
-    """發送 Telegram 審批請求
+    """發送 Telegram 審批請求（entities 模式，無 parse_mode）
 
     Returns:
         True if the Telegram message was sent successfully, False otherwise.
     """
     cmd_preview = command if len(command) <= 500 else command[:500] + '...'
-    # cmd_preview 放在 backtick code block 裡，不需要 escape
-    # reason/source/context 由 build_info_lines 內部 escape，這裡不再手動 escape
 
     dangerous = is_dangerous(command)
 
     # 特殊警告：lambda update-function-configuration --environment
     lambda_env_level, lambda_env_msg = check_lambda_env_update(command)
-    lambda_env_warning = ""
-    if lambda_env_level == 'DANGEROUS' and lambda_env_msg:
-        lambda_env_warning = f"\n🔴 *{_escape_markdown(lambda_env_msg)}*\n"
 
     if timeout < 60:
         timeout_str = f"{timeout} 秒"
@@ -153,27 +149,61 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
     else:
         timeout_str = f"{timeout // 3600} 小時"
 
-    source_line = build_info_lines(source=source, context=context)
-
+    # Build account line info
     if account_id and account_name:
-        safe_account_name = _escape_markdown(account_name) if account_name else ''
-        account_line = f"🏦 *帳號：* `{account_id}` ({safe_account_name})\n"
+        account_display = (account_id, account_name)
+        account_mode = 'named'
     elif assume_role:
         try:
             parsed_account_id = assume_role.split(':')[4]
             role_name = assume_role.split('/')[-1]
-            account_line = f"🏦 *帳號：* `{parsed_account_id}` ({role_name})\n"
+            account_display = (parsed_account_id, role_name)
+            account_mode = 'named'
         except Exception as e:
             logger.error(f"Error: {e}")
-            account_line = f"🏦 *Role：* `{assume_role}`\n"
+            account_display = (assume_role, None)
+            account_mode = 'role'
     else:
         default_account = os.environ.get('AWS_ACCOUNT_ID', '')
-        account_line = f"🏦 *帳號：* `{default_account}` (預設)\n"
+        account_display = (default_account, '預設')
+        account_mode = 'named'
 
-    safe_reason = _escape_markdown(reason)
+    # ---- Build message with MessageBuilder ----
+    mb = MessageBuilder()
 
-    # Build optional template scan block (Phase 4)
-    template_scan_block = ""
+    if dangerous:
+        mb.text("⚠️ ").bold("高危操作請求").text(" ⚠️").newline(2)
+    else:
+        mb.text("🔐 ").bold("AWS 執行請求").newline(2)
+
+    # Source / context lines (no escape needed)
+    if source:
+        mb.text("🤖 ").bold("來源：").text(f" {source}").newline()
+    if context:
+        mb.text("📝 ").bold("任務：").text(f" {context}").newline()
+
+    # Account line
+    if account_mode == 'named':
+        acc_id, acc_name = account_display
+        mb.text("🏦 ").bold("帳號：").text(" ").code(acc_id).text(f" ({acc_name})").newline()
+    else:
+        # role fallback
+        acc_id, _ = account_display
+        mb.text("🏦 ").bold("Role：").text(" ").code(acc_id).newline()
+
+    # Command
+    mb.text("📋 ").bold("命令：").newline()
+    mb.code(cmd_preview).newline(2)
+
+    # Reason
+    mb.text("💬 ").bold("原因：").text(f" {reason}").newline()
+
+    # Lambda env warning
+    if lambda_env_level == 'DANGEROUS' and lambda_env_msg:
+        mb.newline()
+        mb.text("🔴 ").bold(lambda_env_msg).newline()
+
+    # Template scan block
     if template_scan_result and template_scan_result.get('hit_count', 0) > 0:
         severity = template_scan_result.get('severity', 'unknown')
         hit_count = template_scan_result.get('hit_count', 0)
@@ -187,33 +217,30 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
             'low': '🟢',
         }.get(severity, '⚪')
 
-        escalate_note = " ⚠️ *強制人工審批*" if escalate else ""
-        template_scan_block = (
-            f"\n🔍 *Template Scan：* {severity_emoji} {severity.upper()} "
-            f"({hit_count} hits, score={max_score}){escalate_note}\n"
-        )
+        escalate_note = " ⚠️ 強制人工審批" if escalate else ""
+        mb.newline()
+        mb.text("🔍 ").bold("Template Scan：").text(
+            f" {severity_emoji} {severity.upper()} ({hit_count} hits, score={max_score}){escalate_note}"
+        ).newline()
 
-        # Show first 3 factor details
         factors = template_scan_result.get('factors', [])
         for factor in factors[:3]:
-            details = _escape_markdown(str(factor.get('details', '')))
-            template_scan_block += f"  • `{details}`\n"
+            details = str(factor.get('details', ''))
+            mb.text("  • ").code(details).newline()
         if len(factors) > 3:
-            template_scan_block += f"  _...及其他 {len(factors) - 3} 個風險_\n"
+            mb.text(f"  ...及其他 {len(factors) - 3} 個風險").newline()
 
     if dangerous:
-        text = (
-            f"⚠️ *高危操作請求* ⚠️\n\n"
-            f"{source_line}"
-            f"{account_line}"
-            f"📋 *命令：*\n`{cmd_preview}`\n\n"
-            f"💬 *原因：* {safe_reason}\n"
-            f"{lambda_env_warning}"
-            f"{template_scan_block}"
-            f"\n⚠️ *此操作可能不可逆，請仔細確認！*\n\n"
-            f"🆔 *ID：* `{request_id}`\n"
-            f"⏰ *{timeout_str}後過期*"
-        )
+        mb.newline()
+        mb.text("⚠️ ").bold("此操作可能不可逆，請仔細確認！").newline(2)
+
+    # ID and expiry
+    mb.text("🆔 ").bold("ID：").text(" ").code(request_id).newline()
+    mb.text("⏰ ").bold(f"{timeout_str}後過期")
+
+    text, entities = mb.build()
+
+    if dangerous:
         keyboard = {
             'inline_keyboard': [
                 [
@@ -223,16 +250,6 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
             ]
         }
     else:
-        text = (
-            f"🔐 *AWS 執行請求*\n\n"
-            f"{source_line}"
-            f"{account_line}"
-            f"📋 *命令：*\n`{cmd_preview}`\n\n"
-            f"💬 *原因：* {safe_reason}\n"
-            f"{template_scan_block}"
-            f"\n🆔 *ID：* `{request_id}`\n"
-            f"⏰ *{timeout_str}後過期*"
-        )
         keyboard = {
             'inline_keyboard': [
                 [
@@ -243,39 +260,39 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
             ]
         }
 
-    result = _send_message(text, keyboard)
+    result = _telegram.send_message_with_entities(text, entities, reply_markup=keyboard)
     ok = bool(result and result.get('ok'))
     message_id: Optional[int] = None
     if ok:
         message_id = result.get('result', {}).get('message_id')
     return NotificationResult(ok=ok, message_id=message_id)
 
-
 def send_account_approval_request(request_id: str, action: str, account_id: str, name: str, role_arn: str, source: str, context: str = None):
-    """發送帳號管理的 Telegram 審批請求"""
-    # build_info_lines escapes internally; name is escaped manually below
-    safe_name = _escape_markdown(name) if name else name
-    source_line = build_info_lines(source=source, context=context)
+    """發送帳號管理的 Telegram 審批請求（entities 模式，無 parse_mode）"""
+    mb = MessageBuilder()
 
     if action == 'add':
-        text = (
-            f"🔐 *新增 AWS 帳號請求*\n\n"
-            f"{source_line}"
-            f"🆔 *帳號 ID：* `{account_id}`\n"
-            f"📛 *名稱：* {safe_name}\n"
-            f"🔗 *Role：* `{role_arn}`\n\n"
-            f"📋 *請求 ID：* `{request_id}`\n"
-            f"⏰ *5 分鐘後過期*"
-        )
+        mb.text("🔐 ").bold("新增 AWS 帳號請求").newline(2)
     else:
-        text = (
-            f"🔐 *移除 AWS 帳號請求*\n\n"
-            f"{source_line}"
-            f"🆔 *帳號 ID：* `{account_id}`\n"
-            f"📛 *名稱：* {safe_name}\n\n"
-            f"📋 *請求 ID：* `{request_id}`\n"
-            f"⏰ *5 分鐘後過期*"
-        )
+        mb.text("🔐 ").bold("移除 AWS 帳號請求").newline(2)
+
+    # Source / context (no escape needed in entities mode)
+    if source:
+        mb.text("🤖 ").bold("來源：").text(f" {source}").newline()
+    if context:
+        mb.text("📝 ").bold("任務：").text(f" {context}").newline()
+
+    mb.text("🆔 ").bold("帳號 ID：").text(" ").code(account_id).newline()
+    mb.text("📛 ").bold("名稱：").text(f" {name or ''}").newline()
+
+    if action == 'add' and role_arn:
+        mb.text("🔗 ").bold("Role：").text(" ").code(role_arn).newline()
+
+    mb.newline()
+    mb.text("📋 ").bold("請求 ID：").text(" ").code(request_id).newline()
+    mb.text("⏰ ").bold("5 分鐘後過期")
+
+    text, entities = mb.build()
 
     keyboard = {
         'inline_keyboard': [[
@@ -284,8 +301,7 @@ def send_account_approval_request(request_id: str, action: str, account_id: str,
         ]]
     }
 
-    _send_message(text, keyboard)
-
+    _telegram.send_message_with_entities(text, entities, reply_markup=keyboard)
 
 def send_trust_auto_approve_notification(command: str, trust_id: str, remaining: str, count: int,
                                          result: str = None, source: str = None, reason: str = None):
@@ -492,22 +508,21 @@ def send_blocked_notification(
     block_reason: str,
     source: str = '',
 ) -> None:
-    """發送命令被封鎖的靜默通知"""
+    """發送命令被封鎖的靜默通知（entities 模式，無 parse_mode）"""
     try:
         cmd_preview = command[:100] + '...' if len(command) > 100 else command
 
-        text = (
-            f"🚫 *命令被封鎖*\n\n"
-            f"📋 `{cmd_preview}`\n"
-            f"❌ *原因：* {_escape_markdown(block_reason)}\n"
-            f"🤖 *來源：* {_escape_markdown(source or 'Unknown')}"
-        )
+        mb = MessageBuilder()
+        mb.text("🚫 ").bold("命令被封鎖").newline(2)
+        mb.text("📋 ").code(cmd_preview).newline()
+        mb.text("❌ ").bold("原因：").text(f" {block_reason}").newline()
+        mb.text("🤖 ").bold("來源：").text(f" {source or 'Unknown'}")
 
-        _send_message_silent(text)
+        text, entities = mb.build()
+        _telegram.send_message_with_entities(text, entities, silent=True)
 
     except Exception as e:
         logger.error(f"[BLOCKED] send_blocked_notification error: {e}")
-
 
 # ============================================================================
 # Trust Upload Notifications
