@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.13.0] - 2026-03-06
+
+### Added
+- `notifications.py` — 3 核心通知函數遷移至 entities 模式（#52 Phase 2）：`send_approval_request()`、`send_blocked_notification()`、`send_account_approval_request()`
+- `callbacks.py` + `telegram.py` — DANGEROUS 命令 approve 改用 `show_alert=True` modal alert（#62）
+- `paging.py` + `callbacks.py` — on-demand pagination：改為 Next Page button，不再自動發所有頁（#54）
+- `deployer/scripts/sam_deploy.py` — deploy 前驗證 GitHub PAT，HTTP 401 → 清楚錯誤訊息含 Secrets Manager 位置（#57）
+
+### Fixed
+- 14 個既有 failing tests 修復（not_found status、DDB project config mock、boto3 deploy assertion、test isolation）
+
+### Tests
+- Backend: 1768 tests, coverage 89%
+
 ## [3.12.0] - 2026-03-05
 
 ### Added
