@@ -12,9 +12,9 @@ import boto3 as _boto3
 # 從其他模組導入
 from utils import response, format_size_human, build_info_lines
 from commands import execute_command, is_dangerous
-from paging import store_paged_output, send_remaining_pages
+from paging import store_paged_output, get_paged_output
 from trust import create_trust_session, track_command_executed
-from telegram import escape_markdown, update_message, answer_callback
+from telegram import escape_markdown, update_message, answer_callback, send_telegram_message_silent
 from notifications import send_trust_auto_approve_notification
 from constants import DEFAULT_ACCOUNT_ID, RESULT_TTL, TRUST_SESSION_MAX_UPLOADS, TRUST_SESSION_MAX_COMMANDS
 from metrics import emit_metric
@@ -326,14 +326,24 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         max_preview = 800 if action == 'approve_trust' else 1000
         result_preview = result[:max_preview] if len(result) > max_preview else result
         if paged.get('paged'):
-            truncate_notice = f"\n\n⚠️ 輸出較長 ({paged['output_length']} 字元，共 {paged['total_pages']} 頁)"
+            truncate_notice = (
+                f"\n\n📄 *共 {paged['total_pages']} 頁* ({paged['output_length']} 字元)\n"
+                f"用 `bouncer_get_page` 查看更多，或點下方按鈕"
+            )
+            next_page_button = {
+                'inline_keyboard': [[{
+                    'text': f'➡️ Next Page (2/{paged["total_pages"]})',
+                    'callback_data': f'show_page:{request_id}:2',
+                }]]
+            }
         else:
             truncate_notice = ""
+            next_page_button = None
 
         title = "✅ *已批准並執行* + 🔓 *信任 10 分鐘*" if action == 'approve_trust' else "✅ *已批准並執行*"
 
-        update_message(
-            message_id,
+        # Send result message; append inline Next Page button when paged
+        send_telegram_message_silent(
             f"{title}\n\n"
             f"🆔 *ID：* `{request_id}`\n"
             f"{source_line}"
@@ -341,10 +351,10 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             f"📋 *命令：*\n`{cmd_preview}`\n\n"
             f"💬 *原因：* {safe_reason}\n\n"
             f"📤 *結果：*\n```\n{result_preview}\n```{truncate_notice}{trust_line}",
+            reply_markup=next_page_button,
         )
-        # 自動發送剩餘頁面
-        if paged.get('paged'):
-            send_remaining_pages(request_id, paged['total_pages'])
+        # Overwrite the approval message (remove buttons from it)
+        update_message(message_id, "✅ *已執行* — 見下方結果", remove_buttons=True)
 
     elif action == 'deny':
         now = int(time.time())
@@ -1133,6 +1143,57 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
         'failed_count': fail_count,
         'cf_invalidation_failed': cf_invalidation_failed,
     })
+
+
+
+# ============================================================================
+# Show Page Callback (sprint13-003 on-demand pagination)
+# ============================================================================
+
+def handle_show_page_callback(query: dict, request_id: str, page_num: int) -> dict:
+    """處理 show_page callback — 從 DynamoDB 拉取指定頁面並發送到 Telegram
+
+    callback_data 格式：show_page:{request_id}:{page_num}
+
+    Args:
+        query: Telegram callback query dict
+        request_id: 原始命令的 request_id
+        page_num: 要顯示的頁碼 (2-based)
+    """
+    callback_id = query.get('id', '')
+
+    page_id = f"{request_id}:page:{page_num}"
+    page_data = get_paged_output(page_id)
+
+    if 'error' in page_data:
+        answer_callback(callback_id, '❌ 頁面不存在或已過期')
+        return response(200, {'ok': True})
+
+    total_pages = page_data.get('total_pages', page_num)
+    has_more = page_num < total_pages
+
+    content_text = page_data.get('result', '')
+
+    # Build Next Page button if more pages remain
+    if has_more:
+        next_page_num = page_num + 1
+        next_btn = {
+            'inline_keyboard': [[{
+                'text': f'➡️ Next Page ({next_page_num}/{total_pages})',
+                'callback_data': f'show_page:{request_id}:{next_page_num}',
+            }]]
+        }
+    else:
+        next_btn = None
+
+    answer_callback(callback_id, f'📄 第 {page_num}/{total_pages} 頁')
+    send_telegram_message_silent(
+        f"📄 *第 {page_num}/{total_pages} 頁*\n\n```\n{content_text}\n```",
+        reply_markup=next_btn,
+    )
+
+    return response(200, {'ok': True})
+
 
 
 def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_role: str,

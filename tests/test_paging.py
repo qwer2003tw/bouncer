@@ -518,3 +518,129 @@ class TestTTL:
             assert 'ttl' in item
             assert item['ttl'] >= before + c.OUTPUT_PAGE_TTL - 5
             assert item['ttl'] <= before + c.OUTPUT_PAGE_TTL + 5
+
+
+# ===========================================================================
+# Sprint 13-003: On-demand pagination tests
+# ===========================================================================
+
+class TestOnDemandPagination:
+    """Tests for on-demand pagination via handle_show_page_callback (sprint13-003)"""
+
+    def test_handle_show_page_callback_page2(self, paging_module, mock_dynamodb, app_module):
+        """show_page callback: sends page 2 with Next Page button when more pages exist"""
+        import time as _time
+
+        # Create a paged output in DDB (3 pages)
+        output = 'X' * 12_000  # large enough for 3 pages
+        paged = paging_module.store_paged_output('req-on-demand-001', output)
+        assert paged.paged is True
+        assert paged.total_pages >= 3
+
+        query = {'id': 'cb-show-001', 'from': {'id': 999999999}, 'message': {'message_id': 1}}
+
+        with patch('callbacks.answer_callback') as mock_answer, \
+             patch('callbacks.send_telegram_message_silent') as mock_send:
+            from callbacks import handle_show_page_callback
+            result = handle_show_page_callback(query, 'req-on-demand-001', 2)
+
+        assert result['statusCode'] == 200
+        mock_answer.assert_called_once()
+        args = mock_answer.call_args[0]
+        assert '2/' in args[1]  # should say page 2/N
+
+        mock_send.assert_called_once()
+        send_kwargs = mock_send.call_args
+        # Should include Next Page button
+        markup = send_kwargs[1].get('reply_markup') or (send_kwargs[0][1] if len(send_kwargs[0]) > 1 else None)
+        assert markup is not None
+        assert 'inline_keyboard' in markup
+
+    def test_handle_show_page_callback_last_page_no_button(self, paging_module, mock_dynamodb, app_module):
+        """show_page callback: last page has no Next Page button"""
+        output = 'Y' * 12_000
+        paged = paging_module.store_paged_output('req-on-demand-002', output)
+        total = paged.total_pages
+
+        query = {'id': 'cb-show-002', 'from': {'id': 999999999}, 'message': {'message_id': 2}}
+
+        with patch('callbacks.answer_callback'), \
+             patch('callbacks.send_telegram_message_silent') as mock_send:
+            from callbacks import handle_show_page_callback
+            handle_show_page_callback(query, 'req-on-demand-002', total)
+
+        mock_send.assert_called_once()
+        send_kwargs = mock_send.call_args
+        # reply_markup should be None for last page
+        markup = send_kwargs[1].get('reply_markup') if send_kwargs[1] else None
+        assert markup is None
+
+    def test_handle_show_page_callback_expired_page(self, paging_module, mock_dynamodb, app_module):
+        """show_page callback: expired/missing page returns error"""
+        query = {'id': 'cb-show-003', 'from': {'id': 999999999}, 'message': {'message_id': 3}}
+
+        with patch('callbacks.answer_callback') as mock_answer, \
+             patch('callbacks.send_telegram_message_silent') as mock_send:
+            from callbacks import handle_show_page_callback
+            result = handle_show_page_callback(query, 'req-nonexistent-999', 2)
+
+        assert result['statusCode'] == 200
+        mock_answer.assert_called_once()
+        args = mock_answer.call_args[0]
+        assert '❌' in args[1]
+        mock_send.assert_not_called()
+
+
+class TestNoPaginationAutoPush:
+    """Tests that auto-push (send_remaining_pages) is no longer called (sprint13-003)"""
+
+    def test_auto_push_import_removed(self):
+        """send_remaining_pages should not be imported in callbacks.py"""
+        import ast, os
+        src = open(os.path.join(os.path.dirname(__file__), '..', 'src', 'callbacks.py')).read()
+        assert 'send_remaining_pages' not in src, "send_remaining_pages should not be in callbacks.py"
+
+    def test_on_demand_button_present_in_paged_output(self, mock_dynamodb, app_module):
+        """Paged command result → send_telegram_message_silent called with Next Page button"""
+        import time as _time
+
+        request_id = 'req-page-btn-001'
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'command': 'aws ec2 describe-instances',
+            'status': 'pending',
+            'source': 'test',
+            'reason': 'describe',
+            'account_id': '123456789012',
+            'account_name': 'Test',
+            'created_at': int(_time.time()),
+        })
+
+        large_output = 'EC2 instance\n' * 1000  # large output
+
+        with patch('callbacks.answer_callback'), \
+             patch('callbacks.update_message'), \
+             patch('callbacks.execute_command') as mock_exec, \
+             patch('callbacks.emit_metric'), \
+             patch('callbacks.send_telegram_message_silent') as mock_silent:
+            mock_exec.return_value = large_output
+
+            from callbacks import handle_command_callback
+            handle_command_callback(
+                'approve', request_id,
+                {
+                    'command': 'aws ec2 describe-instances',
+                    'source': 'test', 'reason': 'describe',
+                    'trust_scope': 'test', 'context': '',
+                    'account_id': '123456789012', 'account_name': 'Test',
+                    'created_at': int(_time.time()),
+                },
+                999, 'cb-page', 'user-1'
+            )
+
+        # Should have called send_telegram_message_silent with a reply_markup
+        mock_silent.assert_called()
+        call_kwargs = mock_silent.call_args[1] if mock_silent.call_args[1] else {}
+        markup = call_kwargs.get('reply_markup')
+        assert markup is not None, "Expected Next Page button in reply_markup"
+        assert 'inline_keyboard' in markup

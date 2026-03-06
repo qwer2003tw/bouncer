@@ -56,6 +56,7 @@ from callbacks import (
     handle_deploy_callback, handle_upload_callback, handle_upload_batch_callback,
     handle_grant_approve_all, handle_grant_approve_safe, handle_grant_deny,
     handle_deploy_frontend_callback,
+    handle_show_page_callback,
 )
 from telegram_commands import (  # noqa: F401
     handle_telegram_command, handle_accounts_command,
@@ -827,6 +828,23 @@ def handle_telegram_webhook(event: dict) -> dict:
         return response(400, {'error': 'Invalid callback data'})
 
     action, request_id = data.split(':', 1)
+
+    # 特殊處理：on-demand pagination (sprint13-003)
+    if action == 'show_page':
+        # callback_data: 'show_page:{original_request_id}:{page_num}'
+        parts = request_id.rsplit(':', 1)
+        if len(parts) == 2:
+            orig_request_id, page_num_str = parts
+            try:
+                page_num = int(page_num_str)
+            except ValueError:
+                answer_callback(callback['id'], '❌ 無效頁碼')
+                return response(400, {'error': 'Invalid page number'})
+            emit_metric('Bouncer', 'PageView', 1, dimensions={'Action': 'show_page'})
+            return handle_show_page_callback(callback, orig_request_id, page_num)
+        else:
+            answer_callback(callback['id'], '❌ 無效分頁請求')
+            return response(400, {'error': 'Invalid show_page data'})
 
     # 特殊處理：撤銷信任時段
     if action == 'revoke_trust':
