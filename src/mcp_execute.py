@@ -568,6 +568,7 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
 
         response_data = {
             'status': 'grant_auto_approved',
+            'request_id': grant_req_id,
             'command': ctx.command,
             'account': ctx.account_id,
             'account_name': ctx.account_name,
@@ -647,6 +648,7 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
 
     response_data = {
         'status': 'auto_approved',
+        'request_id': request_id,
         'command': ctx.command,
         'account': ctx.account_id,
         'account_name': ctx.account_name,
@@ -759,6 +761,7 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
 
     response_data = {
         'status': 'trust_auto_approved',
+        'request_id': request_id,
         'command': ctx.command,
         'account': ctx.account_id,
         'account_name': ctx.account_name,
