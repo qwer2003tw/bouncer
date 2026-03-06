@@ -18,7 +18,7 @@ import telegram as _telegram
 from commands import is_dangerous, check_lambda_env_update
 from constants import COMMAND_APPROVAL_TIMEOUT, TRUST_SESSION_MAX_COMMANDS, UPLOAD_TIMEOUT, GRANT_APPROVAL_TIMEOUT
 from telegram_entities import MessageBuilder
-from utils import format_size_human, build_info_lines
+from utils import format_size_human
 
 logger = logging.getLogger(__name__)
 
@@ -305,34 +305,36 @@ def send_account_approval_request(request_id: str, action: str, account_id: str,
 
 def send_trust_auto_approve_notification(command: str, trust_id: str, remaining: str, count: int,
                                          result: str = None, source: str = None, reason: str = None):
-    """發送 Trust Session 自動批准的靜默通知"""
+    """發送 Trust Session 自動批准的靜默通知（entities 模式，無 parse_mode）"""
     cmd_preview = command if len(command) <= 100 else command[:100] + '...'
-    # code block 內不需要 escape
 
-    result_preview = ""
+    mb = MessageBuilder()
+    mb.text("🔓 ").bold("自動批准").text(" (信任中)").newline()
+    mb.text("📋 ").code(cmd_preview).newline()
+    mb.text(f"📊 {count}/{TRUST_SESSION_MAX_COMMANDS}")
+
+    # Session info line: source · remaining
+    session_parts = []
+    if source:
+        session_parts.append(f"🤖 {source}")
+    if remaining:
+        session_parts.append(f"⏱ {remaining}")
+    if session_parts:
+        mb.newline().text(" · ".join(session_parts))
+
+    if reason:
+        mb.newline().text("💬 ").text(reason)
+
     if result:
         if result.startswith('❌') or 'error' in result.lower()[:100]:
             result_status = "❌"
         else:
             result_status = "✅"
         result_text = result[:500] + '...' if len(result) > 500 else result
-        # 用 code block（``` ）而非 inline code，避免多行內容破壞格式
-        result_preview = f"\n{result_status} *結果：*\n```\n{result_text}\n```"
+        mb.newline().text(f"{result_status} ").bold("結果：").newline()
+        mb.pre(result_text)
 
-    source_line = f"🤖 {_escape_markdown(source)} · " if source else ""
-    remaining_line = f"⏱ {remaining}" if remaining else ""
-    session_info = f"{source_line}{remaining_line}".strip()
-    session_line = f"\n{session_info}" if session_info else ""
-    reason_line = f"\n💬 {_escape_markdown(reason)}" if reason else ""
-
-    text = (
-        f"🔓 *自動批准* (信任中)\n"
-        f"📋 `{cmd_preview}`\n"
-        f"📊 {count}/{TRUST_SESSION_MAX_COMMANDS}"
-        f"{session_line}"
-        f"{reason_line}"
-        f"{result_preview}"
-    )
+    text, entities = mb.build()
 
     keyboard = {
         'inline_keyboard': [[
@@ -340,7 +342,7 @@ def send_trust_auto_approve_notification(command: str, trust_id: str, remaining:
         ]]
     }
 
-    _send_message_silent(text, keyboard)
+    _telegram.send_message_with_entities(text, entities, reply_markup=keyboard, silent=True)
 
 
 # ============================================================================
@@ -356,7 +358,7 @@ def send_grant_request_notification(
     ttl_minutes: int,
     allow_repeat: bool = False,
 ) -> None:
-    """發送 Grant Session 審批請求通知
+    """發送 Grant Session 審批請求通知（entities 模式，無 parse_mode）
 
     Args:
         grant_id: Grant ID
@@ -375,49 +377,45 @@ def send_grant_request_notification(
         requires_individual = [d for d in commands_detail if d.get('category') == 'requires_individual']
         blocked = [d for d in commands_detail if d.get('category') == 'blocked']
 
-        # 組裝命令清單文字
-        lines = []
-
         max_display = 10
 
+        mb = MessageBuilder()
+        mb.text("🔑 ").bold("批次權限申請").newline(2)
+        mb.text("🤖 ").bold("來源：").text(f" {source or 'Unknown'}").newline()
+        mb.text("💬 ").bold("原因：").text(f" {reason or ''}").newline()
+        mb.text("🏦 ").bold("帳號：").text(" ").code(str(account_id)).newline()
+        mb.text("⏱ ").bold("TTL：").text(f" {ttl_minutes} 分鐘 | 模式：{mode_str}")
+
         if grantable:
-            lines.append(f"\n✅ *可授權 ({len(grantable)}):*")
+            mb.newline(2).text("✅ ").bold(f"可授權 ({len(grantable)}):")
             for i, d in enumerate(grantable[:max_display]):
                 cmd_preview = d['command'][:80]
-                lines.append(f" {i+1}. `{cmd_preview}`")
+                mb.newline().text(f" {i+1}. ").code(cmd_preview)
             if len(grantable) > max_display:
-                lines.append(f" ...及其他 {len(grantable) - max_display} 個命令")
+                mb.newline().text(f" ...及其他 {len(grantable) - max_display} 個命令")
 
         if requires_individual:
-            lines.append(f"\n⚠️ *需個別審批 ({len(requires_individual)}):*")
+            mb.newline(2).text("⚠️ ").bold(f"需個別審批 ({len(requires_individual)}):")
             offset = len(grantable)
             for i, d in enumerate(requires_individual[:max_display]):
                 cmd_preview = d['command'][:80]
-                lines.append(f" {offset+i+1}. `{cmd_preview}`")
+                mb.newline().text(f" {offset+i+1}. ").code(cmd_preview)
             if len(requires_individual) > max_display:
-                lines.append(f" ...及其他 {len(requires_individual) - max_display} 個命令")
+                mb.newline().text(f" ...及其他 {len(requires_individual) - max_display} 個命令")
 
         if blocked:
-            lines.append(f"\n🚫 *已攔截 ({len(blocked)}):*")
+            mb.newline(2).text("🚫 ").bold(f"已攔截 ({len(blocked)}):")
             offset = len(grantable) + len(requires_individual)
             for i, d in enumerate(blocked[:max_display]):
                 cmd_preview = d['command'][:80]
-                lines.append(f" {offset+i+1}. `{cmd_preview}`")
+                mb.newline().text(f" {offset+i+1}. ").code(cmd_preview)
             if len(blocked) > max_display:
-                lines.append(f" ...及其他 {len(blocked) - max_display} 個命令")
+                mb.newline().text(f" ...及其他 {len(blocked) - max_display} 個命令")
 
-        commands_text = '\n'.join(lines)
+        mb.newline(2).text("🆔 ").bold("ID：").text(" ").code(grant_id)
+        mb.newline().text("⏰ ").bold(f"審批期限：{GRANT_APPROVAL_TIMEOUT // 60} 分鐘")
 
-        text = (
-            f"🔑 *批次權限申請*\n\n"
-            f"🤖 *來源：* {_escape_markdown(source or 'Unknown')}\n"
-            f"💬 *原因：* {_escape_markdown(reason or '')}\n"
-            f"🏦 *帳號：* `{account_id}`\n"
-            f"⏱ *TTL：* {ttl_minutes} 分鐘 | 模式：{mode_str}\n"
-            f"{commands_text}\n\n"
-            f"🆔 *ID：* `{grant_id}`\n"
-            f"⏰ *審批期限：{GRANT_APPROVAL_TIMEOUT // 60} 分鐘*"
-        )
+        text, entities = mb.build()
 
         # 根據是否有 requires_individual 決定按鈕
         buttons = []
@@ -434,7 +432,7 @@ def send_grant_request_notification(
         ])
 
         keyboard = {'inline_keyboard': buttons}
-        _send_message(text, keyboard)
+        _telegram.send_message_with_entities(text, entities, reply_markup=keyboard)
 
     except Exception as e:
         logger.error(f"[GRANT] send_grant_request_notification error: {e}")
@@ -446,7 +444,7 @@ def send_grant_execute_notification(
     result: str,
     remaining_info: str,
 ) -> None:
-    """發送 Grant Session 命令自動執行的靜默通知
+    """發送 Grant Session 命令自動執行的靜默通知（entities 模式，無 parse_mode）
 
     Args:
         command: 執行的命令
@@ -463,16 +461,17 @@ def send_grant_execute_notification(
             result_status = "✅"
 
         result_text = result[:500] + '...' if result and len(result) > 500 else (result or '')
-
         grant_short = grant_id[:20] + '...' if len(grant_id) > 20 else grant_id
 
-        text = (
-            f"🔑 *Grant 自動執行*\n"
-            f"📋 `{cmd_preview}`\n"
-            f"{result_status} *結果：*\n```\n{result_text}\n```\n"
-            f"📊 剩餘: {remaining_info}\n"
-            f"🆔 `{grant_short}`"
-        )
+        mb = MessageBuilder()
+        mb.text("🔑 ").bold("Grant 自動執行").newline()
+        mb.text("📋 ").code(cmd_preview).newline()
+        mb.text(f"{result_status} ").bold("結果：").newline()
+        mb.pre(result_text).newline()
+        mb.text("📊 剩餘: ").text(remaining_info).newline()
+        mb.text("🆔 ").code(grant_short)
+
+        text, entities = mb.build()
 
         keyboard = {
             'inline_keyboard': [[
@@ -480,7 +479,7 @@ def send_grant_execute_notification(
             ]]
         }
 
-        _send_message_silent(text, keyboard)
+        _telegram.send_message_with_entities(text, entities, reply_markup=keyboard, silent=True)
 
     except Exception as e:
         logger.error(f"[GRANT] send_grant_execute_notification error: {e}")
@@ -584,20 +583,11 @@ def send_batch_upload_notification(
     try:
         size_str = format_size_human(total_size)
 
-        # build_info_lines escapes internally; no manual escape needed
-        info_lines = build_info_lines(
-            source=source or 'Unknown',
-            reason=reason,
-        )
-        safe_account = _escape_markdown(account_name) if account_name else ''
-
         # Format extension groups
         ext_parts = []
         for ext, count in sorted(ext_counts.items()):
             ext_parts.append(f"{ext}: {count}")
         ext_line = ', '.join(ext_parts)
-
-        account_line = f"🏦 *帳號：* {safe_account}\n" if safe_account else ""
 
         # Timeout display
         timeout_val = timeout if timeout is not None else UPLOAD_TIMEOUT
@@ -608,15 +598,19 @@ def send_batch_upload_notification(
         else:
             timeout_str = f"{timeout_val // 3600} 小時"
 
-        text = (
-            f"📁 *批量上傳請求*\n\n"
-            f"{info_lines}"
-            f"{account_line}\n"
-            f"📄 *{file_count} 個檔案* ({size_str})\n"
-            f"📊 {ext_line}\n\n"
-            f"🆔 `{batch_id}`\n"
-            f"⏰ *{timeout_str}後過期*"
-        )
+        mb = MessageBuilder()
+        mb.text("📁 ").bold("批量上傳請求").newline(2)
+        mb.text("🤖 ").bold("來源：").text(f" {source or 'Unknown'}").newline()
+        mb.text("💬 ").bold("原因：").text(f" {reason or ''}").newline()
+        if account_name:
+            mb.text("🏦 ").bold("帳號：").text(f" {account_name}").newline()
+        mb.newline()
+        mb.text("📄 ").bold(f"{file_count} 個檔案").text(f" ({size_str})").newline()
+        mb.text(f"📊 {ext_line}").newline(2)
+        mb.text("🆔 ").code(batch_id).newline()
+        mb.text("⏰ ").bold(f"{timeout_str}後過期")
+
+        text, entities = mb.build()
 
         keyboard = {
             'inline_keyboard': [
@@ -630,7 +624,7 @@ def send_batch_upload_notification(
             ]
         }
 
-        result = _send_message(text, keyboard)
+        result = _telegram.send_message_with_entities(text, entities, reply_markup=keyboard)
         ok = bool(result and result.get('ok'))
         message_id: Optional[int] = None
         if ok:

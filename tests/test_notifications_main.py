@@ -615,7 +615,7 @@ class TestNotificationsCoverage:
 
     def test_send_trust_auto_approve_basic(self):
         """Basic trust auto-approve notification is sent silently."""
-        ctx, _, silent_mock = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         with ctx:
             self.notif.send_trust_auto_approve_notification(
                 command='aws s3 ls',
@@ -623,14 +623,15 @@ class TestNotificationsCoverage:
                 remaining='5 min',
                 count=2,
             )
-        silent_mock.assert_called_once()
-        text, keyboard = silent_mock.call_args[0]
+        entities_mock.assert_called_once()
+        text = entities_mock.call_args[0][0]
+        keyboard = entities_mock.call_args[1].get('reply_markup')
         assert '自動批准' in text
         assert 'aws s3 ls' in text
 
     def test_send_trust_auto_approve_with_result(self):
         """When result is provided, it appears in the message."""
-        ctx, _, silent_mock = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         with ctx:
             self.notif.send_trust_auto_approve_notification(
                 command='aws s3 ls',
@@ -639,12 +640,12 @@ class TestNotificationsCoverage:
                 count=1,
                 result='s3://bucket1\ns3://bucket2',
             )
-        text, _ = silent_mock.call_args[0]
+        text = entities_mock.call_args[0][0]
         assert '結果' in text
 
     def test_send_trust_auto_approve_with_error_result(self):
         """Error result prefix (❌) is detected and shown."""
-        ctx, _, silent_mock = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         with ctx:
             self.notif.send_trust_auto_approve_notification(
                 command='aws s3 ls',
@@ -653,12 +654,12 @@ class TestNotificationsCoverage:
                 count=3,
                 result='❌ Access denied',
             )
-        text, _ = silent_mock.call_args[0]
+        text = entities_mock.call_args[0][0]
         assert '❌' in text
 
     def test_send_trust_auto_approve_with_long_result(self):
         """Long result is truncated to 500 chars."""
-        ctx, _, silent_mock = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         with ctx:
             self.notif.send_trust_auto_approve_notification(
                 command='aws s3 ls',
@@ -667,12 +668,12 @@ class TestNotificationsCoverage:
                 count=1,
                 result='x' * 600,
             )
-        text, _ = silent_mock.call_args[0]
+        text = entities_mock.call_args[0][0]
         assert '...' in text
 
     def test_send_trust_auto_approve_with_source_and_reason(self):
         """source and reason appear in notification."""
-        ctx, _, silent_mock = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         with ctx:
             self.notif.send_trust_auto_approve_notification(
                 command='aws s3 ls',
@@ -682,13 +683,13 @@ class TestNotificationsCoverage:
                 source='TestBot',
                 reason='auto-deploy',
             )
-        text, _ = silent_mock.call_args[0]
+        text = entities_mock.call_args[0][0]
         assert 'TestBot' in text
         assert 'auto-deploy' in text
 
     def test_send_trust_auto_approve_revoke_button(self):
         """Keyboard has revoke button with correct trust_id."""
-        ctx, _, silent_mock = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         with ctx:
             self.notif.send_trust_auto_approve_notification(
                 command='aws s3 ls',
@@ -696,7 +697,7 @@ class TestNotificationsCoverage:
                 remaining='',
                 count=1,
             )
-        _, keyboard = silent_mock.call_args[0]
+        keyboard = entities_mock.call_args[1].get('reply_markup')
         callbacks = [btn['callback_data'] for row in keyboard['inline_keyboard'] for btn in row]
         assert any('trust-006' in cb for cb in callbacks)
 
@@ -706,7 +707,7 @@ class TestNotificationsCoverage:
 
     def test_send_grant_request_basic(self):
         """Basic grant request with grantable commands."""
-        ctx, send_mock, _ = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         commands_detail = [
             {'command': 'aws s3 ls', 'category': 'grantable'},
             {'command': 'aws s3 cp src dst', 'category': 'grantable'},
@@ -720,15 +721,16 @@ class TestNotificationsCoverage:
                 account_id='123456789012',
                 ttl_minutes=30,
             )
-        send_mock.assert_called_once()
-        text, keyboard = send_mock.call_args[0]
+        entities_mock.assert_called_once()
+        text = entities_mock.call_args[0][0]
+        keyboard = entities_mock.call_args[1].get('reply_markup')
         assert 'grant-001' in text
         assert 'batch deploy' in text
         assert '可授權' in text
 
     def test_send_grant_request_allow_repeat(self):
         """allow_repeat=True shows 可重複 mode."""
-        ctx, send_mock, _ = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         commands_detail = [
             {'command': 'aws s3 ls', 'category': 'grantable'},
         ]
@@ -742,12 +744,12 @@ class TestNotificationsCoverage:
                 ttl_minutes=60,
                 allow_repeat=True,
             )
-        text, _ = send_mock.call_args[0]
+        text = entities_mock.call_args[0][0]
         assert '可重複' in text
 
     def test_send_grant_request_mixed_categories(self):
         """Mixed grantable + requires_individual + blocked all appear."""
-        ctx, send_mock, _ = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         commands_detail = [
             {'command': 'aws s3 ls', 'category': 'grantable'},
             {'command': 'aws iam create-user', 'category': 'requires_individual'},
@@ -762,7 +764,8 @@ class TestNotificationsCoverage:
                 account_id='111111111111',
                 ttl_minutes=15,
             )
-        text, keyboard = send_mock.call_args[0]
+        text = entities_mock.call_args[0][0]
+        keyboard = entities_mock.call_args[1].get('reply_markup')
         assert '可授權' in text
         assert '需個別審批' in text
         assert '已攔截' in text
@@ -772,7 +775,7 @@ class TestNotificationsCoverage:
 
     def test_send_grant_request_many_commands_truncated(self):
         """More than 10 grantable commands shows truncation notice."""
-        ctx, send_mock, _ = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         commands_detail = [
             {'command': f'aws s3 ls bucket-{i}', 'category': 'grantable'}
             for i in range(15)
@@ -786,13 +789,13 @@ class TestNotificationsCoverage:
                 account_id='111111111111',
                 ttl_minutes=10,
             )
-        text, _ = send_mock.call_args[0]
+        text = entities_mock.call_args[0][0]
         assert '及其他' in text
 
     def test_send_grant_request_error_handling(self):
         """Exception inside the function is caught — does not raise."""
         # Pass invalid commands_detail to trigger error path
-        with patch.object(self.notif, '_send_message', side_effect=RuntimeError('fail')):
+        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=RuntimeError('fail')):
             # Should not raise
             self.notif.send_grant_request_notification(
                 grant_id='grant-err',
@@ -809,7 +812,7 @@ class TestNotificationsCoverage:
 
     def test_send_grant_execute_notification_success(self):
         """Grant execute notification sent silently."""
-        ctx, _, silent_mock = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         with ctx:
             self.notif.send_grant_execute_notification(
                 command='aws s3 ls',
@@ -817,14 +820,15 @@ class TestNotificationsCoverage:
                 result='bucket1\nbucket2',
                 remaining_info='2/3 commands, 10:00',
             )
-        silent_mock.assert_called_once()
-        text, keyboard = silent_mock.call_args[0]
+        entities_mock.assert_called_once()
+        text = entities_mock.call_args[0][0]
+        keyboard = entities_mock.call_args[1].get('reply_markup')
         assert 'Grant' in text
         assert 'grant-exec-001' in text[:50] or 'grant-exec' in text
 
     def test_send_grant_execute_notification_error_result(self):
         """Error result is detected and shown with ❌."""
-        ctx, _, silent_mock = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         with ctx:
             self.notif.send_grant_execute_notification(
                 command='aws s3 cp src dst',
@@ -832,12 +836,12 @@ class TestNotificationsCoverage:
                 result='❌ NoSuchBucket',
                 remaining_info='1/3',
             )
-        text, _ = silent_mock.call_args[0]
+        text = entities_mock.call_args[0][0]
         assert '❌' in text
 
     def test_send_grant_execute_notification_long_command(self):
         """Long command is truncated."""
-        ctx, _, silent_mock = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         with ctx:
             self.notif.send_grant_execute_notification(
                 command='aws s3 cp ' + 'x' * 200,
@@ -845,7 +849,7 @@ class TestNotificationsCoverage:
                 result='ok',
                 remaining_info='1/1',
             )
-        text, _ = silent_mock.call_args[0]
+        text = entities_mock.call_args[0][0]
         assert '...' in text
 
     # ------------------------------------------------------------------
@@ -983,7 +987,7 @@ class TestNotificationsCoverage:
 
     def test_send_batch_upload_notification_basic(self):
         """Batch upload notification is sent."""
-        ctx, send_mock, _ = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         with ctx:
             self.notif.send_batch_upload_notification(
                 batch_id='batch-001',
@@ -995,15 +999,15 @@ class TestNotificationsCoverage:
                 account_name='DevAccount',
                 trust_scope='test-session',
             )
-        send_mock.assert_called_once()
-        text, keyboard = send_mock.call_args[0]
+        entities_mock.assert_called_once()
+        text = entities_mock.call_args[0][0]
         assert '批量上傳' in text
         assert 'batch-001' in text
         assert '5 個檔案' in text
 
     def test_send_batch_upload_notification_error_handling(self):
         """Exception is caught — does not raise."""
-        with patch.object(self.notif, '_send_message', side_effect=RuntimeError('fail')):
+        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=RuntimeError('fail')):
             self.notif.send_batch_upload_notification(
                 batch_id='batch-err',
                 file_count=2,
@@ -1163,7 +1167,7 @@ class TestNotificationsCoverage:
 
     def test_send_grant_request_many_requires_individual(self):
         """More than 10 requires_individual commands shows truncation notice."""
-        ctx, send_mock, _ = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         commands_detail = [
             {'command': f'aws iam create-user --user-name user-{i}', 'category': 'requires_individual'}
             for i in range(12)
@@ -1177,12 +1181,12 @@ class TestNotificationsCoverage:
                 account_id='111111111111',
                 ttl_minutes=10,
             )
-        text, _ = send_mock.call_args[0]
+        text = entities_mock.call_args[0][0]
         assert '及其他' in text
 
     def test_send_grant_request_many_blocked(self):
         """More than 10 blocked commands shows truncation notice."""
-        ctx, send_mock, _ = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         commands_detail = [
             {'command': f'aws iam delete-account-{i}', 'category': 'blocked'}
             for i in range(12)
@@ -1196,12 +1200,12 @@ class TestNotificationsCoverage:
                 account_id='111111111111',
                 ttl_minutes=5,
             )
-        text, _ = send_mock.call_args[0]
+        text = entities_mock.call_args[0][0]
         assert '及其他' in text
 
     def test_send_grant_execute_notification_error_handling(self):
         """Exception in send_grant_execute_notification is caught — no crash."""
-        with patch.object(self.notif, '_send_message_silent', side_effect=RuntimeError('tg fail')):
+        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=RuntimeError('tg fail')):
             self.notif.send_grant_execute_notification(
                 command='aws s3 ls',
                 grant_id='grant-exec-err',

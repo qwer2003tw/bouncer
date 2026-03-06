@@ -475,19 +475,27 @@ class TestUploadNotifications:
         text = mock_send.call_args[0][0]
         assert 'MB' in text
 
-    @patch('notifications._send_message')
-    def test_batch_upload_notification(self, mock_send, app_module):
+    def test_batch_upload_notification(self, app_module):
+        import telegram as _tg
+        from unittest.mock import MagicMock
         from notifications import send_batch_upload_notification
-        send_batch_upload_notification(
-            batch_id='batch-123', file_count=5, total_size=10240,
-            ext_counts={'HTML': 2, 'JS': 3}, reason='deploy',
-            source='test-bot', account_name='Default'
-        )
-        mock_send.assert_called_once()
-        text = mock_send.call_args[0][0]
-        assert '批量上傳' in text
-        assert '5 個檔案' in text
-        assert 'HTML: 2' in text
+        mock_send = MagicMock(return_value={'ok': True, 'result': {'message_id': 1}})
+        orig = getattr(_tg, 'send_message_with_entities', None)
+        _tg.send_message_with_entities = mock_send
+        try:
+            send_batch_upload_notification(
+                batch_id='batch-123', file_count=5, total_size=10240,
+                ext_counts={'HTML': 2, 'JS': 3}, reason='deploy',
+                source='test-bot', account_name='Default'
+            )
+            mock_send.assert_called_once()
+            text = mock_send.call_args[0][0]
+            assert '批量上傳' in text
+            assert '5 個檔案' in text
+            assert 'HTML: 2' in text
+        finally:
+            if orig is not None:
+                _tg.send_message_with_entities = orig
 
     @patch('notifications._send_message_silent')
     def test_trust_upload_notification_no_source(self, mock_send, app_module):
