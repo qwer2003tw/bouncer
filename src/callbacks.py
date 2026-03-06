@@ -11,7 +11,7 @@ import boto3 as _boto3
 
 # 從其他模組導入
 from utils import response, format_size_human, build_info_lines
-from commands import execute_command
+from commands import execute_command, is_dangerous
 from paging import store_paged_output, send_remaining_pages
 from trust import create_trust_session, track_command_executed
 from telegram import escape_markdown, update_message, answer_callback
@@ -226,8 +226,12 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
     cmd_preview = command[:500] + '...' if len(command) > 500 else command
 
     if action in ('approve', 'approve_trust'):
-        cb_text = '✅ 執行中 + 🔓 信任啟動' if action == 'approve_trust' else '✅ 執行中...'
-        answer_callback(callback_id, cb_text)
+        if is_dangerous(command):
+            answer_callback(callback_id, '⚠️ 高危操作確認：正在執行...', show_alert=True)
+        elif action == 'approve_trust':
+            answer_callback(callback_id, '✅ 執行中 + 🔓 信任啟動')
+        else:
+            answer_callback(callback_id, '✅ 執行中...')
         result = execute_command(command, assume_role)
         cmd_status = 'failed' if _is_execute_failed(result) else 'success'
         emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'manual_approve'})
@@ -327,7 +331,6 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             truncate_notice = ""
 
         title = "✅ *已批准並執行* + 🔓 *信任 10 分鐘*" if action == 'approve_trust' else "✅ *已批准並執行*"
-        cb_text = '✅ 已執行 + 🔓 信任啟動' if action == 'approve_trust' else '✅ 已執行'
 
         update_message(
             message_id,
