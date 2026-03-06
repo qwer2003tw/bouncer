@@ -125,7 +125,7 @@ class TestGrantButtons:
 
 class TestStyleValues:
     def test_no_invalid_style_values(self, fresh_notifications):
-        with patch.object(fresh_notifications, '_send_message') as m:
+        with patch.object(fresh_notifications._telegram, 'send_message_with_entities') as m:
             m.return_value = {'ok': True, 'result': {'message_id': 1}}
             fresh_notifications.send_approval_request('req-x', 'aws ec2 describe-instances', 'test', source='test')
             kb = get_keyboard(m)
