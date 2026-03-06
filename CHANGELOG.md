@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [3.15.0] - 2026-03-06
+> **Hotfix patches**: CI entities mock check added; deployer tests run separately to avoid import conflict; stale `_send_message` mocks updated for entities Phase 3 migration.
 
 ### Security
 - `scripts/run-tests.sh` — 移除永久排除的安全測試（safelist、cross-account、assume-role、disabled-account），34 個安全測試現在在 CI 中跑 (#83)
