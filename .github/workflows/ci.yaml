@@ -121,8 +121,19 @@ jobs:
         run: |
           pip install boto3 moto pytest pytest-cov==7.0.0
           
+      - name: Check entities migration mock consistency
+        run: |
+          # If notifications.py has stale _send_message mocks in tests, CI catches it
+          STALE=$(grep -rn "patch.*'_send_message'" tests/ 2>/dev/null |                   grep -v "_mock_entities_send\|autouse\|conftest\|#\|send_telegram_message_silent" |                   grep -v "test_notifications_main\|test_app" || true)
+          if [ -n "$STALE" ]; then
+            echo "❌ Stale _send_message mock patches found (should be send_message_with_entities):"
+            echo "$STALE"
+            exit 1
+          fi
+          echo "✅ Entities mock patterns consistent"
+
       - name: Run pytest
-        run: pytest tests/ -v --tb=short -k "not safelist and not test_upload_cross_account_with_role and not test_upload_disabled_account and not test_cross_account_with_assume_role and not test_assume_role_failure" --cov=src --cov-report=term-missing --cov-fail-under=75
+        run: pytest tests/ deployer/tests/ -v --tb=short --cov=src --cov-report=term-missing --cov-fail-under=75
         env:
           AWS_DEFAULT_REGION: us-east-1
           TABLE_NAME: test-table
