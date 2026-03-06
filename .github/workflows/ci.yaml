@@ -132,8 +132,11 @@ jobs:
           fi
           echo "✅ Entities mock patterns consistent"
 
-      - name: Run pytest
-        run: pytest tests/ deployer/tests/ -v --tb=short --cov=src --cov-report=term-missing --cov-fail-under=75
+      - name: Run pytest (src tests)
+        run: pytest tests/ -v --tb=short --cov=src --cov-report=term-missing --cov-fail-under=75
+
+      - name: Run pytest (deployer tests)
+        run: cd deployer && python3 -m pytest tests/ -v --tb=short
         env:
           AWS_DEFAULT_REGION: us-east-1
           TABLE_NAME: test-table
