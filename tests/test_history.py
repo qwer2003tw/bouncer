@@ -708,6 +708,78 @@ class TestBouncerStats:
 
 
 # ===========================================================================
+# bouncer_stats GSI Query verification (regression for #81)
+# ===========================================================================
+
+
+class TestStatsGSIQueryUsage:
+    """Verify that mcp_tool_stats uses GSI Query instead of full-table Scan."""
+
+    def test_stats_uses_gsi_query_not_scan(self, mock_ddb):
+        """mcp_tool_stats() must use status-created-index Query, never Scan."""
+        dynamodb, requests_tbl, cmd_tbl = mock_ddb
+        mh = _import_mcp_history(requests_tbl)
+        mh.table = requests_tbl
+
+        _seed_requests(requests_tbl, [
+            _make_request("r1", status="approved", created_offset=-100),
+            _make_request("r2", status="denied", created_offset=-200),
+        ])
+
+        with patch.object(requests_tbl, "scan") as mock_scan,              patch.object(requests_tbl, "query", wraps=requests_tbl.query) as mock_query:
+            mh.table = requests_tbl
+            result = mh.mcp_tool_stats("req-1", {})
+
+        mock_scan.assert_not_called()
+        assert mock_query.called
+        # Verify it queries the correct GSI
+        assert any(
+            call.kwargs.get("IndexName") == "status-created-index"
+            for call in mock_query.call_args_list
+        )
+
+    def test_stats_gsi_counts_correct(self, mock_ddb):
+        """mcp_tool_stats via GSI returns correct counts for known statuses."""
+        dynamodb, requests_tbl, cmd_tbl = mock_ddb
+        mh = _import_mcp_history(requests_tbl)
+
+        _seed_requests(requests_tbl, [
+            _make_request("r1", status="approved", created_offset=-100),
+            _make_request("r2", status="approved", created_offset=-200),
+            _make_request("r3", status="denied", created_offset=-300),
+            _make_request("r4", status="pending_approval", created_offset=-400),
+            _make_request("r5", status="error", created_offset=-500),
+        ])
+
+        result = mh.mcp_tool_stats("req-1", {})
+        body = json.loads(result["body"])
+        data = json.loads(body["result"]["content"][0]["text"])
+
+        assert data["total_requests"] == 5
+        assert data["summary"]["approved"] == 2
+        assert data["summary"]["denied"] == 1
+        assert data["summary"]["pending"] == 1
+        assert data["by_status"]["error"] == 1
+
+    def test_stats_excludes_old_items_via_gsi(self, mock_ddb):
+        """Items older than 24h are not returned by the GSI range query."""
+        dynamodb, requests_tbl, cmd_tbl = mock_ddb
+        mh = _import_mcp_history(requests_tbl)
+
+        _seed_requests(requests_tbl, [
+            _make_request("r1", status="approved", created_offset=-100),        # recent
+            _make_request("r2", status="approved", created_offset=-25 * 3600),  # >24h ago
+        ])
+
+        result = mh.mcp_tool_stats("req-1", {})
+        body = json.loads(result["body"])
+        data = json.loads(body["result"]["content"][0]["text"])
+
+        assert data["total_requests"] == 1
+        assert data["summary"]["approved"] == 1
+
+
+# ===========================================================================
 # _compute_duration tests (unit)
 # ===========================================================================
 

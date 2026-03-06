@@ -12,7 +12,7 @@ import time
 from decimal import Decimal
 
 import boto3
-from boto3.dynamodb.conditions import Attr
+from boto3.dynamodb.conditions import Attr, Key
 
 from constants import TABLE_NAME
 from db import table
@@ -253,7 +253,12 @@ def _query_command_history_table(
     since_ts: int,
     exclusive_start_key: dict | None,
 ) -> tuple[list[dict], int]:
-    """Scan command-history table. Returns (items, scanned_count)."""
+    """Scan command-history table. Returns (items, scanned_count).
+
+    NOTE: CommandHistoryTable has no GSI (only pk/sk composite key). A full-table
+    Scan with FilterExpression is the only option here. This is acceptable because
+    command-history is queried infrequently and the table is expected to remain small.
+    """
     dynamodb = _get_dynamodb_resource()
     cmd_table = _get_command_history_table(dynamodb)
     if cmd_table is None:
@@ -394,21 +399,44 @@ def mcp_tool_stats(req_id: str, arguments: dict) -> dict:
     now_ts = int(time.time())
     since_ts = now_ts - 24 * 3600
 
-    try:
-        resp = table.scan(
-            FilterExpression=Attr("created_at").gte(since_ts),
-        )
-        items = resp.get("Items", [])
-        scanned = resp.get("ScannedCount", 0)
+    # Query status-created-index GSI for each known status value and merge results.
+    # This avoids a full table Scan — each Query uses the status PK with a created_at range.
+    # Unknown/future status values would be missed; this is an acceptable trade-off as
+    # the stats window is 24h and all current status values are enumerated below.
+    KNOWN_STATUSES = [
+        "approved", "auto_approved", "trust_approved", "grant_approved",
+        "denied", "blocked", "compliance_violation",
+        "pending", "pending_approval",
+        "error",
+    ]
 
-        # Handle pagination for stats (full scan)
-        while "LastEvaluatedKey" in resp:
-            resp = table.scan(
-                FilterExpression=Attr("created_at").gte(since_ts),
-                ExclusiveStartKey=resp["LastEvaluatedKey"],
+    try:
+        items: list = []
+        scanned = 0
+        for status_val in KNOWN_STATUSES:
+            resp = table.query(
+                IndexName="status-created-index",
+                KeyConditionExpression=(
+                    Key("status").eq(status_val) & Key("created_at").gte(since_ts)
+                ),
+                ScanIndexForward=False,
             )
-            items.extend(resp.get("Items", []))
-            scanned += resp.get("ScannedCount", 0)
+            batch = resp.get("Items", [])
+            items.extend(batch)
+            scanned += resp.get("ScannedCount", len(batch))
+            # Handle GSI pagination within each status
+            while "LastEvaluatedKey" in resp:
+                resp = table.query(
+                    IndexName="status-created-index",
+                    KeyConditionExpression=(
+                        Key("status").eq(status_val) & Key("created_at").gte(since_ts)
+                    ),
+                    ScanIndexForward=False,
+                    ExclusiveStartKey=resp["LastEvaluatedKey"],
+                )
+                batch = resp.get("Items", [])
+                items.extend(batch)
+                scanned += resp.get("ScannedCount", len(batch))
 
     except Exception as e:
         return mcp_error(req_id, -32603, f"Internal error: {e}")
