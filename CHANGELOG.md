@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.15.0] - 2026-03-06
+
+### Security
+- `scripts/run-tests.sh` — 移除永久排除的安全測試（safelist、cross-account、assume-role、disabled-account），34 個安全測試現在在 CI 中跑 (#83)
+
+### Fixed
+- `scripts/run-tests.sh` — 加入 `deployer/tests/` 到測試收集範圍，113 個 deployer 測試現在在 CI 跑 (#82)
+- `src/mcp_history.py` — `/stats` 指令改用 GSI query 而非全表 scan，降低費用和延遲 (#81)
+
+### Refactored
+- `src/notifications.py` — entities Phase 3：`send_trust_auto_approve_notification`、`send_batch_upload_notification`、`send_grant_request_notification`、`send_grant_execute_notification` 遷移至 entities 模式 (#52)
+
+### Tests
+- Backend: 1826 tests, coverage 89%
+
 ## [3.14.0] - 2026-03-06
 
 ### Fixed
