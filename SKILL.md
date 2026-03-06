@@ -668,6 +668,11 @@ mcporter call bouncer bouncer_project_list
 - `not_found` — deploy record 完全不存在（可能是錯誤的 deploy_id）
 - 不再用 `pending` 混用表示「找不到」，狀態語意更精確
 
+**✅ v3.14.0 deploy_status phase 欄位 deprecated（#53）：**
+- `phase` 欄位**已標記為 deprecated**，回傳中仍存在但**絕對不要使用**
+- 使用 `progress_hint` 取代（人類可讀的階段描述，準確反映實際進度）
+- `phase_note` 欄位說明棄用原因：「phase 欄位已 deprecated，請改用 progress_hint」
+
 ---
 
 ## Account Management
