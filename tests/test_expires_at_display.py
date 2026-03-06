@@ -22,14 +22,14 @@ from unittest.mock import patch, MagicMock, call
 class TestBatchUploadNotificationExpiry:
     """send_batch_upload_notification 應顯示「後過期」"""
 
-    @patch('telegram.send_telegram_message')
+    @patch('telegram.send_message_with_entities')
     def test_default_timeout_shows_5_minutes(self, mock_send, app_module):
         """預設 UPLOAD_TIMEOUT (300s) 顯示「5 分鐘後過期」"""
         captured = {}
 
-        def capture(text, keyboard=None):
+        def capture(text, entities, reply_markup=None):
             captured['text'] = text
-            return {'ok': True}
+            return {'ok': True, 'result': {'message_id': 1}}
 
         mock_send.side_effect = capture
 
@@ -47,14 +47,14 @@ class TestBatchUploadNotificationExpiry:
         assert '後過期' in captured['text'], f"Expected '後過期' in: {captured['text']}"
         assert '5 分鐘' in captured['text'], f"Expected '5 分鐘' in: {captured['text']}"
 
-    @patch('telegram.send_telegram_message')
+    @patch('telegram.send_message_with_entities')
     def test_explicit_timeout_120s_shows_2_minutes(self, mock_send, app_module):
         """明確傳入 timeout=120 顯示「2 分鐘後過期」"""
         captured = {}
 
-        def capture(text, keyboard=None):
+        def capture(text, entities, reply_markup=None):
             captured['text'] = text
-            return {'ok': True}
+            return {'ok': True, 'result': {'message_id': 1}}
 
         mock_send.side_effect = capture
 
@@ -71,14 +71,14 @@ class TestBatchUploadNotificationExpiry:
 
         assert '2 分鐘後過期' in captured['text'], f"Got: {captured['text']}"
 
-    @patch('telegram.send_telegram_message')
+    @patch('telegram.send_message_with_entities')
     def test_timeout_seconds_under_60(self, mock_send, app_module):
         """timeout < 60 秒時顯示秒數"""
         captured = {}
 
-        def capture(text, keyboard=None):
+        def capture(text, entities, reply_markup=None):
             captured['text'] = text
-            return {'ok': True}
+            return {'ok': True, 'result': {'message_id': 1}}
 
         mock_send.side_effect = capture
 
@@ -95,14 +95,14 @@ class TestBatchUploadNotificationExpiry:
 
         assert '30 秒後過期' in captured['text'], f"Got: {captured['text']}"
 
-    @patch('telegram.send_telegram_message')
+    @patch('telegram.send_message_with_entities')
     def test_batch_id_still_present(self, mock_send, app_module):
         """加入過期時間後，batch_id 仍存在於通知中"""
         captured = {}
 
-        def capture(text, keyboard=None):
+        def capture(text, entities, reply_markup=None):
             captured['text'] = text
-            return {'ok': True}
+            return {'ok': True, 'result': {'message_id': 1}}
 
         mock_send.side_effect = capture
 
@@ -127,14 +127,14 @@ class TestBatchUploadNotificationExpiry:
 class TestGrantNotificationExpiry:
     """send_grant_request_notification 應顯示「審批期限：5 分鐘」"""
 
-    @patch('telegram.send_telegram_message')
+    @patch('telegram.send_message_with_entities')
     def test_grant_notification_contains_approval_deadline(self, mock_send, app_module):
         """grant 審批通知含「審批期限」"""
         captured = {}
 
-        def capture(text, keyboard=None):
+        def capture(text, entities, reply_markup=None):
             captured['text'] = text
-            return {'ok': True}
+            return {'ok': True, 'result': {'message_id': 1}}
 
         mock_send.side_effect = capture
 
@@ -153,15 +153,15 @@ class TestGrantNotificationExpiry:
         assert 'text' in captured, "No text captured"
         assert '審批期限' in captured['text'], f"Expected '審批期限' in: {captured['text']}"
 
-    @patch('telegram.send_telegram_message')
+    @patch('telegram.send_message_with_entities')
     def test_grant_notification_shows_5_minutes(self, mock_send, app_module):
         """grant 審批期限為 GRANT_APPROVAL_TIMEOUT (300s = 5 分鐘)"""
         from constants import GRANT_APPROVAL_TIMEOUT
         captured = {}
 
-        def capture(text, keyboard=None):
+        def capture(text, entities, reply_markup=None):
             captured['text'] = text
-            return {'ok': True}
+            return {'ok': True, 'result': {'message_id': 1}}
 
         mock_send.side_effect = capture
 
@@ -182,14 +182,14 @@ class TestGrantNotificationExpiry:
         assert str(expected_minutes) in captured['text'], f"Expected '{expected_minutes}' in: {captured['text']}"
         assert '審批期限' in captured['text']
 
-    @patch('telegram.send_telegram_message')
+    @patch('telegram.send_message_with_entities')
     def test_grant_id_still_present(self, mock_send, app_module):
         """加入審批期限後，grant_id 仍存在"""
         captured = {}
 
-        def capture(text, keyboard=None):
+        def capture(text, entities, reply_markup=None):
             captured['text'] = text
-            return {'ok': True}
+            return {'ok': True, 'result': {'message_id': 1}}
 
         mock_send.side_effect = capture
 
