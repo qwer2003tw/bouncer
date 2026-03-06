@@ -112,7 +112,7 @@ class TestApprovalRequestButtons:
 
 class TestGrantButtons:
     def test_grant_buttons(self, fresh_notifications):
-        with patch.object(fresh_notifications, '_send_message') as m:
+        with patch.object(fresh_notifications._telegram, 'send_message_with_entities') as m:
             m.return_value = {'ok': True, 'result': {'message_id': 1}}
             fresh_notifications.send_grant_request_notification(
                 grant_id='g-001',
