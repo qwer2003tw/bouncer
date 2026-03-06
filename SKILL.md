@@ -131,6 +131,9 @@ mcporter call bouncer bouncer_execute \
 - `lambda update-function-configuration --environment Variables={}` → **BLOCKED**（空值覆寫保護）
 - `lambda update-function-configuration --environment Variables={...}` → **DANGEROUS**（帶值需審批，附警告）
 
+**✅ v3.13.0 DANGEROUS approve modal（#62）：**
+- DANGEROUS 命令批准時，Telegram callback 改用 `show_alert=True` modal alert，需二次確認才執行
+
 ### bouncer_status
 查詢審批請求狀態。
 
@@ -629,6 +632,11 @@ mcporter call bouncer bouncer_deploy \
   "hint": "Use bouncer_deploy_cancel to cancel the running deploy"
 }
 ```
+
+**✅ v3.13.0 GitHub PAT check（#57）：**
+- Deploy 開始前自動驗證 GitHub PAT（從 Secrets Manager 讀取）
+- PAT 無效（HTTP 401）→ 立即失敗，錯誤訊息含 Secrets Manager 位置（`sam-deployer/github-pat`）
+- 避免 git clone 失敗才發現 PAT 過期
 
 ### bouncer_deploy_status / bouncer_deploy_cancel / bouncer_deploy_history / bouncer_project_list
 ```bash
