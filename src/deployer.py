@@ -727,7 +727,7 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
     _db.table.put_item(Item=item)
 
     # 發送 Telegram 審批請求
-    send_deploy_approval_request(request_id, project, branch, reason, source, context=context)
+    send_deploy_approval_request(request_id, project, branch, reason, source, context=context, expires_at=ttl)
 
     if async_mode:
         return mcp_result(req_id, {
@@ -831,8 +831,21 @@ def mcp_tool_project_list(req_id, arguments: dict) -> dict:
 # Telegram Notifications
 # ============================================================================
 
-def send_deploy_approval_request(request_id: str, project: dict, branch: str, reason: str, source: str, context: str = None):
-    """發送部署審批請求到 Telegram"""
+def send_deploy_approval_request(request_id: str, project: dict, branch: str, reason: str, source: str, context: str = None, expires_at: int = None):
+    """發送部署審批請求到 Telegram
+
+    Args:
+        request_id:  Bouncer request ID.
+        project:     Project config dict.
+        branch:      Git branch to deploy.
+        reason:      Human-readable reason for the deploy.
+        source:      Requester identifier.
+        context:     Optional extra context string.
+        expires_at:  Unix timestamp when the request expires.  When provided,
+                     post_notification_setup() is called to store the
+                     telegram_message_id in DynamoDB and schedule EventBridge
+                     cleanup — fixing the "buttons never cleared" bug (#75).
+    """
     from telegram import send_telegram_message, escape_markdown
     from utils import build_info_lines
 
@@ -872,4 +885,23 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
         ]]
     }
 
-    send_telegram_message(text, reply_markup=keyboard)
+    response = send_telegram_message(text, reply_markup=keyboard)
+
+    # #75: schedule expiry cleanup so buttons are cleared when the request times out.
+    # post_notification_setup() stores telegram_message_id in DDB and creates an
+    # EventBridge one-time schedule that fires at expires_at to remove the keyboard.
+    if expires_at is not None:
+        telegram_message_id = (response or {}).get('result', {}).get('message_id')
+        if telegram_message_id:
+            try:
+                from notifications import post_notification_setup
+                post_notification_setup(
+                    request_id=request_id,
+                    telegram_message_id=telegram_message_id,
+                    expires_at=expires_at,
+                )
+            except Exception as exc:
+                import logging as _logging
+                _logging.getLogger(__name__).error(
+                    "[deployer] post_notification_setup failed for %s: %s", request_id, exc
+                )
