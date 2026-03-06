@@ -15,6 +15,8 @@ import json
 import sys
 import os
 import pytest
+import importlib
+import sys
 from unittest.mock import patch, MagicMock, call
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -155,6 +157,19 @@ def _run_approve(item=None, get_object_side_effect=None, put_object_side_effect=
 # S3 put_object Call Format — Integration Tests
 # (Updated from s3 cp command format; implementation now uses boto3 directly)
 # ---------------------------------------------------------------------------
+
+
+import importlib
+import sys
+
+@pytest.fixture(autouse=True)
+def fresh_callbacks():
+    """Prevent app_module fixture from polluting callbacks module."""
+    import callbacks as cb_mod
+    importlib.reload(cb_mod)
+    sys.modules['callbacks'] = cb_mod
+    yield cb_mod
+
 
 class TestS3CopyCmdFormat:
     """Verify that boto3 put_object is called with correct args for each file."""
