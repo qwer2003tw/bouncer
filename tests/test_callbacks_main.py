@@ -18,6 +18,37 @@ import boto3
 # Telegram Callback Handlers 測試
 # ============================================================================
 
+
+@pytest.fixture(autouse=True)
+def _mock_entities_send():
+    """Ensure send_message_with_entities is mocked for pre-entities tests."""
+    import sys, importlib
+    import telegram as _tg
+    from unittest.mock import MagicMock
+
+    mock_msg_id = 99999
+    mock_response = {'ok': True, 'result': {'message_id': mock_msg_id}}
+
+    # Save originals
+    orig_entities = getattr(_tg, 'send_message_with_entities', None)
+
+    # Replace only send_message_with_entities (entities Phase 2 migration)
+    mock_entities = MagicMock(return_value=mock_response)
+    _tg.send_message_with_entities = mock_entities
+
+    # Reload notifications so it picks up the mocks
+    if 'notifications' in sys.modules:
+        importlib.reload(sys.modules['notifications'])
+
+    yield mock_entities
+
+    # Restore
+    if orig_entities is not None:
+        _tg.send_message_with_entities = orig_entities
+    elif hasattr(_tg, 'send_message_with_entities'):
+        delattr(_tg, 'send_message_with_entities')
+
+
 class TestTelegramCallbackHandlers:
     """Telegram callback handlers 測試"""
     
@@ -850,7 +881,7 @@ class TestOrphanApprovalCleanup:
         assert ddb_item is not None, "DDB record should exist when Telegram succeeds"
         assert ddb_item['status'] == 'pending_approval'
 
-    @patch('telegram.send_telegram_message')
+    @patch('telegram.send_message_with_entities')
     def test_execute_telegram_failure_ddb_no_record_returns_error(self, mock_telegram, mock_dynamodb, app_module):
         """Telegram 失敗（empty response）→ DDB 無 record，回 error ✅"""
         mock_telegram.return_value = {}  # Telegram failure returns empty dict
@@ -894,7 +925,7 @@ class TestOrphanApprovalCleanup:
                         if i.get('reason') == 'P1-1 regression failure test']
         assert len(orphan_items) == 0, f"Orphan DDB records found: {orphan_items}"
 
-    @patch('telegram.send_telegram_message')
+    @patch('telegram.send_message_with_entities')
     def test_execute_telegram_exception_ddb_no_record_returns_error(self, mock_telegram, mock_dynamodb, app_module):
         """Telegram 失敗（exception）→ DDB 無 record，回 error ✅"""
         mock_telegram.side_effect = Exception("Telegram connection refused")

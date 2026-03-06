@@ -29,8 +29,12 @@ def extract_buttons(keyboard):
 def get_keyboard(mock_send):
     if not mock_send.call_args:
         return None
+    kwargs = mock_send.call_args[1] if mock_send.call_args[1] else {}
+    # send_message_with_entities uses reply_markup kwarg
+    if 'reply_markup' in kwargs:
+        return kwargs['reply_markup']
     args = mock_send.call_args[0]
-    return args[1] if len(args) >= 2 else mock_send.call_args[1].get('keyboard')
+    return args[1] if len(args) >= 2 else kwargs.get('keyboard')
 
 def check_buttons(buttons):
     assert buttons, "No buttons found"
@@ -39,16 +43,47 @@ def check_buttons(buttons):
         assert btn['style'] in VALID_STYLES, f"Invalid style '{btn['style']}': {btn}"
         assert not CHINESE.search(btn.get('text', '')), f"Chinese in button: {btn['text']}"
 
+
+@pytest.fixture(autouse=True)
+def _mock_entities_send():
+    """Ensure send_message_with_entities is mocked for pre-entities tests."""
+    import sys, importlib
+    import telegram as _tg
+    from unittest.mock import MagicMock
+
+    mock_msg_id = 99999
+    mock_response = {'ok': True, 'result': {'message_id': mock_msg_id}}
+
+    # Save originals
+    orig_entities = getattr(_tg, 'send_message_with_entities', None)
+
+    # Replace only send_message_with_entities (entities Phase 2 migration)
+    mock_entities = MagicMock(return_value=mock_response)
+    _tg.send_message_with_entities = mock_entities
+
+    # Reload notifications so it picks up the mocks
+    if 'notifications' in sys.modules:
+        importlib.reload(sys.modules['notifications'])
+
+    yield mock_entities
+
+    # Restore
+    if orig_entities is not None:
+        _tg.send_message_with_entities = orig_entities
+    elif hasattr(_tg, 'send_message_with_entities'):
+        delattr(_tg, 'send_message_with_entities')
+
+
 class TestApprovalRequestButtons:
     def test_normal_approve_buttons(self, fresh_notifications):
-        with patch.object(fresh_notifications, '_send_message') as m:
+        with patch('telegram.send_message_with_entities') as m:
             m.return_value = {'ok': True, 'result': {'message_id': 1}}
             fresh_notifications.send_approval_request('req-001', 'aws s3 ls', 'test', source='test')
             kb = get_keyboard(m)
             check_buttons(extract_buttons(kb))
 
     def test_approve_button_style_success(self, fresh_notifications):
-        with patch.object(fresh_notifications, '_send_message') as m:
+        with patch('telegram.send_message_with_entities') as m:
             m.return_value = {'ok': True, 'result': {'message_id': 1}}
             fresh_notifications.send_approval_request('req-002', 'aws s3 ls', 'test', source='test')
             kb = get_keyboard(m)
@@ -58,7 +93,7 @@ class TestApprovalRequestButtons:
             assert all(b['style'] == 'success' for b in approve)
 
     def test_reject_button_style_danger(self, fresh_notifications):
-        with patch.object(fresh_notifications, '_send_message') as m:
+        with patch('telegram.send_message_with_entities') as m:
             m.return_value = {'ok': True, 'result': {'message_id': 1}}
             fresh_notifications.send_approval_request('req-003', 'aws s3 ls', 'test', source='test')
             kb = get_keyboard(m)
@@ -68,7 +103,7 @@ class TestApprovalRequestButtons:
             assert all(b['style'] == 'danger' for b in reject)
 
     def test_callback_data_contains_request_id(self, fresh_notifications):
-        with patch.object(fresh_notifications, '_send_message') as m:
+        with patch('telegram.send_message_with_entities') as m:
             m.return_value = {'ok': True, 'result': {'message_id': 1}}
             fresh_notifications.send_approval_request('req-abc-123', 'aws s3 ls', 'test', source='test')
             kb = get_keyboard(m)

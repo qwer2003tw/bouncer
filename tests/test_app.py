@@ -9,6 +9,37 @@ from moto import mock_aws
 import boto3
 
 
+
+@pytest.fixture(autouse=True)
+def _mock_entities_send():
+    """Ensure send_message_with_entities is mocked for pre-entities tests."""
+    import sys, importlib
+    import telegram as _tg
+    from unittest.mock import MagicMock
+
+    mock_msg_id = 99999
+    mock_response = {'ok': True, 'result': {'message_id': mock_msg_id}}
+
+    # Save originals
+    orig_entities = getattr(_tg, 'send_message_with_entities', None)
+
+    # Replace only send_message_with_entities (entities Phase 2 migration)
+    mock_entities = MagicMock(return_value=mock_response)
+    _tg.send_message_with_entities = mock_entities
+
+    # Reload notifications so it picks up the mocks
+    if 'notifications' in sys.modules:
+        importlib.reload(sys.modules['notifications'])
+
+    yield mock_entities
+
+    # Restore
+    if orig_entities is not None:
+        _tg.send_message_with_entities = orig_entities
+    elif hasattr(_tg, 'send_message_with_entities'):
+        delattr(_tg, 'send_message_with_entities')
+
+
 class TestRESTSafelist:
     """REST API SAFELIST 測試"""
     
@@ -36,9 +67,10 @@ class TestRESTSafelist:
 class TestRESTApproval:
     """REST API APPROVAL 測試"""
     
-    @patch('telegram.send_telegram_message')
+    @patch('telegram.send_message_with_entities')
     def test_approval_pending(self, mock_telegram, app_module):
         """測試 REST API 待審批（非等待模式）"""
+        mock_telegram.return_value = {'ok': True, 'result': {'message_id': 1}}
         event = {
             'rawPath': '/',
             'headers': {'x-approval-secret': 'test-secret'},
@@ -234,15 +266,17 @@ class TestSendApprovalRequest:
     
     def test_send_approval_request_blocked(self, app_module):
         """被封鎖的命令"""
-        with patch.object(app_module.table, 'put_item'):
-            result = app_module.send_approval_request(
-                request_id='test-123',
-                command='aws iam create-access-key',
-                reason='test'
-            )
-            # 封鎖的命令不會成功：send_approval_request 回傳 NotificationResult，Telegram 失敗時 ok=False
-            from notifications import NotificationResult
-            assert isinstance(result, NotificationResult) and not result.ok
+        # Override mock to simulate Telegram failure (tests that ok=False is propagated)
+        with patch('telegram.send_message_with_entities', return_value={'ok': False}):
+            with patch.object(app_module.table, 'put_item'):
+                result = app_module.send_approval_request(
+                    request_id='test-123',
+                    command='aws iam create-access-key',
+                    reason='test'
+                )
+                # send_approval_request 回傳 NotificationResult，Telegram 失敗時 ok=False
+                from notifications import NotificationResult
+                assert isinstance(result, NotificationResult) and not result.ok
 
 
 # ============================================================================
@@ -674,9 +708,10 @@ class TestCoverage80Sprint:
             assert content['status'] == 'auto_approved'
             assert content['account'] == '555555555555'
     
-    @patch('telegram.send_telegram_message')
+    @patch('telegram.send_message_with_entities')
     def test_send_approval_request_with_assume_role(self, mock_telegram, app_module):
         """發送審批請求帶 assume_role"""
+        mock_telegram.return_value = {'ok': True, 'result': {'message_id': 1}}
         app_module.send_approval_request(
             'test-req-789',
             'aws ec2 start-instances',

@@ -123,6 +123,37 @@ def _req(req_id, status='approved', action='execute', source='test-bot',
 # Task 2: bouncer_stats enhanced (bouncer_feat_004)
 # ===========================================================================
 
+
+@pytest.fixture(autouse=True)
+def _mock_entities_send():
+    """Ensure send_message_with_entities is mocked for pre-entities tests."""
+    import sys, importlib
+    import telegram as _tg
+    from unittest.mock import MagicMock
+
+    mock_msg_id = 99999
+    mock_response = {'ok': True, 'result': {'message_id': mock_msg_id}}
+
+    # Save originals
+    orig_entities = getattr(_tg, 'send_message_with_entities', None)
+
+    # Replace only send_message_with_entities (entities Phase 2 migration)
+    mock_entities = MagicMock(return_value=mock_response)
+    _tg.send_message_with_entities = mock_entities
+
+    # Reload notifications so it picks up the mocks
+    if 'notifications' in sys.modules:
+        importlib.reload(sys.modules['notifications'])
+
+    yield mock_entities
+
+    # Restore
+    if orig_entities is not None:
+        _tg.send_message_with_entities = orig_entities
+    elif hasattr(_tg, 'send_message_with_entities'):
+        delattr(_tg, 'send_message_with_entities')
+
+
 class TestBouncerStatsEnhanced:
     """Tests for enhanced bouncer_stats with top_sources, top_commands,
     approval_rate, avg_execution_time_seconds."""
@@ -583,8 +614,8 @@ class TestTemplateScanEscalation:
         """send_approval_request should pass template_scan_result to notification."""
         from notifications import send_approval_request
 
-        with patch('notifications._send_message') as mock_send:
-            mock_send.return_value = {'ok': True}
+        with patch('telegram.send_message_with_entities') as mock_send:
+            mock_send.return_value = {'ok': True, 'result': {'message_id': 1}}
 
             send_approval_request(
                 request_id='r-test',
@@ -605,6 +636,7 @@ class TestTemplateScanEscalation:
             )
 
         mock_send.assert_called_once()
+        # Get the text argument (first positional arg to send_message_with_entities)
         text_sent = mock_send.call_args[0][0]
         # Notification should mention the template scan findings
         assert 'Template Scan' in text_sent or 'TEMPLATE' in text_sent.upper() or 'TP-005' in text_sent or 'HIGH' in text_sent.upper() or 'hits' in text_sent

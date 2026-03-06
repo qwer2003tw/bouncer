@@ -9,6 +9,37 @@ from moto import mock_aws
 import boto3
 
 
+
+@pytest.fixture(autouse=True)
+def _mock_entities_send():
+    """Ensure send_message_with_entities is mocked for pre-entities tests."""
+    import sys, importlib
+    import telegram as _tg
+    from unittest.mock import MagicMock
+
+    mock_msg_id = 99999
+    mock_response = {'ok': True, 'result': {'message_id': mock_msg_id}}
+
+    # Save originals
+    orig_entities = getattr(_tg, 'send_message_with_entities', None)
+
+    # Replace only send_message_with_entities (entities Phase 2 migration)
+    mock_entities = MagicMock(return_value=mock_response)
+    _tg.send_message_with_entities = mock_entities
+
+    # Reload notifications so it picks up the mocks
+    if 'notifications' in sys.modules:
+        importlib.reload(sys.modules['notifications'])
+
+    yield mock_entities
+
+    # Restore
+    if orig_entities is not None:
+        _tg.send_message_with_entities = orig_entities
+    elif hasattr(_tg, 'send_message_with_entities'):
+        delattr(_tg, 'send_message_with_entities')
+
+
 class TestMCPInitialize:
     """MCP initialize 方法測試"""
     
@@ -105,9 +136,10 @@ class TestMCPExecuteSafelist:
 class TestMCPExecuteApproval:
     """MCP bouncer_execute APPROVAL 測試"""
     
-    @patch('telegram.send_telegram_message')
+    @patch('telegram.send_message_with_entities')
     def test_execute_needs_approval_async(self, mock_telegram, app_module):
         """測試需要審批的命令（預設異步，立即返回 pending_approval）"""
+        mock_telegram.return_value = {'ok': True, 'result': {'message_id': 1}}
         event = {
             'rawPath': '/mcp',
             'headers': {'x-approval-secret': 'test-secret'},

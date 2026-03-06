@@ -18,6 +18,37 @@ import boto3
 # Telegram Webhook 測試
 # ============================================================================
 
+
+@pytest.fixture(autouse=True)
+def _mock_entities_send():
+    """Ensure send_message_with_entities is mocked for pre-entities tests."""
+    import sys, importlib
+    import telegram as _tg
+    from unittest.mock import MagicMock
+
+    mock_msg_id = 99999
+    mock_response = {'ok': True, 'result': {'message_id': mock_msg_id}}
+
+    # Save originals
+    orig_entities = getattr(_tg, 'send_message_with_entities', None)
+
+    # Replace only send_message_with_entities (entities Phase 2 migration)
+    mock_entities = MagicMock(return_value=mock_response)
+    _tg.send_message_with_entities = mock_entities
+
+    # Reload notifications so it picks up the mocks
+    if 'notifications' in sys.modules:
+        importlib.reload(sys.modules['notifications'])
+
+    yield mock_entities
+
+    # Restore
+    if orig_entities is not None:
+        _tg.send_message_with_entities = orig_entities
+    elif hasattr(_tg, 'send_message_with_entities'):
+        delattr(_tg, 'send_message_with_entities')
+
+
 class TestTelegramWebhook:
     """Telegram Webhook 測試"""
     
@@ -325,7 +356,8 @@ class TestTelegramMessageFunctions:
     
     def test_send_approval_request(self, app_module):
         """發送審批請求"""
-        with patch('telegram.send_telegram_message') as mock_send:
+        with patch('telegram.send_message_with_entities') as mock_send:
+            mock_send.return_value = {'ok': True, 'result': {'message_id': 1}}
             app_module.send_approval_request(
                 'test-req-123',
                 'aws ec2 start-instances --instance-ids i-123',
@@ -339,7 +371,8 @@ class TestTelegramMessageFunctions:
     
     def test_send_approval_request_dangerous(self, app_module):
         """發送高危命令審批請求"""
-        with patch('telegram.send_telegram_message') as mock_send:
+        with patch('telegram.send_message_with_entities') as mock_send:
+            mock_send.return_value = {'ok': True, 'result': {'message_id': 1}}
             app_module.send_approval_request(
                 'test-req-456',
                 'aws ec2 terminate-instances --instance-ids i-123',  # 高危

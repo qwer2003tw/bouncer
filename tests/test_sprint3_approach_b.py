@@ -35,6 +35,37 @@ ACCOUNTS_TABLE = 'bouncer-accounts'
 # Task 1: lambda update-function-configuration --environment guard (bouncer-bug-017)
 # ===========================================================================
 
+
+@pytest.fixture(autouse=True)
+def _mock_entities_send():
+    """Ensure send_message_with_entities is mocked for pre-entities tests."""
+    import sys, importlib
+    import telegram as _tg
+    from unittest.mock import MagicMock
+
+    mock_msg_id = 99999
+    mock_response = {'ok': True, 'result': {'message_id': mock_msg_id}}
+
+    # Save originals
+    orig_entities = getattr(_tg, 'send_message_with_entities', None)
+
+    # Replace only send_message_with_entities (entities Phase 2 migration)
+    mock_entities = MagicMock(return_value=mock_response)
+    _tg.send_message_with_entities = mock_entities
+
+    # Reload notifications so it picks up the mocks
+    if 'notifications' in sys.modules:
+        importlib.reload(sys.modules['notifications'])
+
+    yield mock_entities
+
+    # Restore
+    if orig_entities is not None:
+        _tg.send_message_with_entities = orig_entities
+    elif hasattr(_tg, 'send_message_with_entities'):
+        delattr(_tg, 'send_message_with_entities')
+
+
 class TestLambdaEnvGuard:
     """Regression tests for lambda update-function-configuration --environment"""
 
@@ -127,8 +158,8 @@ class TestLambdaEnvGuard:
 
         from notifications import send_approval_request
 
-        with patch('notifications._send_message') as mock_send:
-            mock_send.return_value = {'ok': True}
+        with patch('telegram.send_message_with_entities') as mock_send:
+            mock_send.return_value = {'ok': True, 'result': {'message_id': 1}}
             send_approval_request(
                 request_id='r-test-lambda-env',
                 command='aws lambda update-function-configuration --function-name fn --environment Variables={KEY=VAL}',
@@ -139,6 +170,7 @@ class TestLambdaEnvGuard:
             )
 
         mock_send.assert_called_once()
+        # Get the text argument (first positional arg to send_message_with_entities)
         text_sent = mock_send.call_args[0][0]
         # Should contain the lambda env warning message
         assert '環境變數' in text_sent or '⚠️' in text_sent

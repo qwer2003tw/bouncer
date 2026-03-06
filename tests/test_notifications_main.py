@@ -18,6 +18,42 @@ import boto3
 # Generate Display Summary 測試
 # ============================================================================
 
+
+@pytest.fixture(autouse=True)
+def _mock_entities_send():
+    """Ensure send_message_with_entities is mocked for pre-entities tests."""
+    import sys, importlib
+    import telegram as _tg
+    from unittest.mock import MagicMock
+
+    mock_msg_id = 99999
+    mock_response = {'ok': True, 'result': {'message_id': mock_msg_id}}
+
+    # Save originals
+    orig_entities = getattr(_tg, 'send_message_with_entities', None)
+    orig_send = getattr(_tg, 'send_telegram_message', None)
+
+    # Replace both so assertions on either work
+    mock_entities = MagicMock(return_value=mock_response)
+    mock_send = MagicMock(return_value=mock_response)
+    _tg.send_message_with_entities = mock_entities
+    _tg.send_telegram_message = mock_send
+
+    # Reload notifications so it picks up the mocks
+    if 'notifications' in sys.modules:
+        importlib.reload(sys.modules['notifications'])
+
+    yield mock_entities
+
+    # Restore
+    if orig_entities is not None:
+        _tg.send_message_with_entities = orig_entities
+    elif hasattr(_tg, 'send_message_with_entities'):
+        delattr(_tg, 'send_message_with_entities')
+    if orig_send is not None:
+        _tg.send_telegram_message = orig_send
+
+
 class TestGenerateDisplaySummary:
     """Tests for generate_display_summary() helper function in utils.py"""
 
@@ -291,6 +327,7 @@ if _SRC_DIR not in sys.path:
 
 def _make_notifications_module():
     """Reload notifications and its dependencies with mocked env."""
+    from unittest.mock import MagicMock
     os.environ.setdefault('TELEGRAM_BOT_TOKEN', 'test-token')
     os.environ.setdefault('APPROVED_CHAT_ID', '99999')
     os.environ.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
@@ -303,6 +340,12 @@ def _make_notifications_module():
         sys.modules.pop(f'src.{mod}', None)
 
     import notifications as _n
+
+    # Mock send_message_with_entities (entities Phase 2, Sprint 13)
+    _n._telegram.send_message_with_entities = MagicMock(
+        return_value={'ok': True, 'result': {'message_id': 99999}}
+    )
+
     return _n
 
 
@@ -334,6 +377,20 @@ class TestNotificationsCoverage:
         )
         return ctx, send_mock, silent_mock
 
+    def _patch_entities_send(self, ok: bool = True):
+        """Return a context manager that patches _telegram.send_message_with_entities.
+
+        Use this for tests of functions migrated to entities mode:
+        send_approval_request, send_account_approval_request, send_blocked_notification.
+        Call signature: send_mock(text, entities, reply_markup=keyboard) or
+                        send_mock(text, entities, silent=True)
+        Extract: text = call_args[0][0], keyboard = call_args[1].get('reply_markup')
+        """
+        send_ret = {'ok': ok, 'result': {'message_id': 1}}
+        send_mock = MagicMock(return_value=send_ret)
+        ctx = patch.object(self.notif._telegram, 'send_message_with_entities', send_mock)
+        return ctx, send_mock
+
     # ------------------------------------------------------------------
     # _escape_markdown
     # ------------------------------------------------------------------
@@ -358,7 +415,7 @@ class TestNotificationsCoverage:
 
     def test_send_approval_request_happy_path(self):
         """Normal (non-dangerous) command → sends message, returns NotificationResult(ok=True)."""
-        ctx, send_mock, _ = self._patch_send(ok=True)
+        ctx, send_mock = self._patch_entities_send(ok=True)
         with ctx:
             result = self.notif.send_approval_request(
                 request_id='req-001',
@@ -370,13 +427,14 @@ class TestNotificationsCoverage:
             )
         assert result.ok is True
         send_mock.assert_called_once()
-        text, keyboard = send_mock.call_args[0]
+        text = send_mock.call_args[0][0]
+        keyboard = send_mock.call_args[1].get('reply_markup')
         assert 'req-001' in text
         assert 'list buckets' in text
 
     def test_send_approval_request_returns_false_on_api_failure(self):
         """Returns NotificationResult(ok=False) when telegram API returns ok=False."""
-        ctx, send_mock, _ = self._patch_send(ok=False)
+        ctx, send_mock = self._patch_entities_send(ok=False)
         with ctx:
             result = self.notif.send_approval_request(
                 request_id='req-002',
@@ -387,7 +445,7 @@ class TestNotificationsCoverage:
 
     def test_send_approval_request_dangerous_command(self):
         """Dangerous command (e.g. delete) → different keyboard (⚠️ 確認執行)."""
-        ctx, send_mock, _ = self._patch_send(ok=True)
+        ctx, send_mock = self._patch_entities_send(ok=True)
         with patch('commands.is_dangerous', return_value=True):
             with ctx:
                 result = self.notif.send_approval_request(
@@ -396,7 +454,8 @@ class TestNotificationsCoverage:
                     reason='cleanup',
                 )
         assert result.ok is True
-        text, keyboard = send_mock.call_args[0]
+        text = send_mock.call_args[0][0]
+        keyboard = send_mock.call_args[1].get('reply_markup')
         # Dangerous path shows "高危操作"
         assert '高危' in text or '⚠️' in text
         # keyboard should have "Confirm" (English button)
@@ -406,38 +465,38 @@ class TestNotificationsCoverage:
     def test_send_approval_request_long_command_truncated(self):
         """Commands longer than 500 chars are truncated in the message."""
         long_cmd = 'aws s3 cp ' + 'x' * 600
-        ctx, send_mock, _ = self._patch_send(ok=True)
+        ctx, send_mock = self._patch_entities_send(ok=True)
         with ctx:
             self.notif.send_approval_request(
                 request_id='req-004',
                 command=long_cmd,
                 reason='big copy',
             )
-        text, _ = send_mock.call_args[0]
+        text = send_mock.call_args[0][0]
         # The preview should be truncated — original 600+10 chars would show in full
         assert '...' in text
 
     def test_send_approval_request_timeout_formats(self):
         """Timeout value is formatted correctly (secs / mins / hours)."""
-        ctx, send_mock, _ = self._patch_send(ok=True)
+        ctx, send_mock = self._patch_entities_send(ok=True)
         with ctx:
             self.notif.send_approval_request('r1', 'aws s3 ls', 'r', timeout=30)
-        text, _ = send_mock.call_args[0]
+        text = send_mock.call_args[0][0]
         assert '秒' in text
 
         with ctx:
             self.notif.send_approval_request('r2', 'aws s3 ls', 'r', timeout=120)
-        text, _ = send_mock.call_args[0]
+        text = send_mock.call_args[0][0]
         assert '分鐘' in text
 
         with ctx:
             self.notif.send_approval_request('r3', 'aws s3 ls', 'r', timeout=7200)
-        text, _ = send_mock.call_args[0]
+        text = send_mock.call_args[0][0]
         assert '小時' in text
 
     def test_send_approval_request_with_assume_role(self):
         """assume_role is parsed for account_id and role name."""
-        ctx, send_mock, _ = self._patch_send(ok=True)
+        ctx, send_mock = self._patch_entities_send(ok=True)
         with ctx:
             self.notif.send_approval_request(
                 request_id='req-005',
@@ -445,12 +504,12 @@ class TestNotificationsCoverage:
                 reason='check role',
                 assume_role='arn:aws:iam::999888777666:role/BouncerRole',
             )
-        text, _ = send_mock.call_args[0]
+        text = send_mock.call_args[0][0]
         assert '999888777666' in text
 
     def test_send_approval_request_with_template_scan_hit(self):
         """template_scan_result with hits is included in message."""
-        ctx, send_mock, _ = self._patch_send(ok=True)
+        ctx, send_mock = self._patch_entities_send(ok=True)
         scan_result = {
             'hit_count': 2,
             'severity': 'high',
@@ -468,12 +527,12 @@ class TestNotificationsCoverage:
                 reason='cleanup',
                 template_scan_result=scan_result,
             )
-        text, _ = send_mock.call_args[0]
+        text = send_mock.call_args[0][0]
         assert 'Template Scan' in text or 'HIGH' in text
 
     def test_send_approval_request_template_scan_many_factors(self):
         """template_scan_result with >3 factors shows truncation note."""
-        ctx, send_mock, _ = self._patch_send(ok=True)
+        ctx, send_mock = self._patch_entities_send(ok=True)
         scan_result = {
             'hit_count': 5,
             'severity': 'critical',
@@ -490,7 +549,7 @@ class TestNotificationsCoverage:
                 reason='remove user',
                 template_scan_result=scan_result,
             )
-        text, _ = send_mock.call_args[0]
+        text = send_mock.call_args[0][0]
         # Should show truncation for >3 factors
         assert '及其他' in text or '...' in text
 
@@ -500,7 +559,7 @@ class TestNotificationsCoverage:
 
     def test_send_account_approval_request_add(self):
         """add action sends appropriate text with account info."""
-        ctx, send_mock, _ = self._patch_send(ok=True)
+        ctx, send_mock = self._patch_entities_send(ok=True)
         with ctx:
             self.notif.send_account_approval_request(
                 request_id='acc-001',
@@ -511,7 +570,8 @@ class TestNotificationsCoverage:
                 source='AdminBot',
             )
         send_mock.assert_called_once()
-        text, keyboard = send_mock.call_args[0]
+        text = send_mock.call_args[0][0]
+        keyboard = send_mock.call_args[1].get('reply_markup')
         assert '新增' in text
         assert '111222333444' in text
         assert 'NewAccount' in text
@@ -519,7 +579,7 @@ class TestNotificationsCoverage:
 
     def test_send_account_approval_request_remove(self):
         """remove action sends appropriate text."""
-        ctx, send_mock, _ = self._patch_send(ok=True)
+        ctx, send_mock = self._patch_entities_send(ok=True)
         with ctx:
             self.notif.send_account_approval_request(
                 request_id='acc-002',
@@ -530,13 +590,13 @@ class TestNotificationsCoverage:
                 source='AdminBot',
             )
         send_mock.assert_called_once()
-        text, keyboard = send_mock.call_args[0]
+        text = send_mock.call_args[0][0]
         assert '移除' in text
         assert '555666777888' in text
 
     def test_send_account_approval_request_with_context(self):
         """context is included in the message when provided."""
-        ctx, send_mock, _ = self._patch_send(ok=True)
+        ctx, send_mock = self._patch_entities_send(ok=True)
         with ctx:
             self.notif.send_account_approval_request(
                 request_id='acc-003',
@@ -822,21 +882,21 @@ class TestNotificationsCoverage:
 
     def test_send_blocked_notification_basic(self):
         """Basic blocked notification is sent silently."""
-        ctx, _, silent_mock = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         with ctx:
             self.notif.send_blocked_notification(
                 command='aws iam delete-account',
                 block_reason='Blocked: dangerous operation',
                 source='TestBot',
             )
-        silent_mock.assert_called_once()
-        text = silent_mock.call_args[0][0]
+        entities_mock.assert_called_once()
+        text = entities_mock.call_args[0][0]
         assert '封鎖' in text
         assert 'aws iam delete-account' in text
 
     def test_send_blocked_notification_long_command(self):
         """Long command is truncated to 100 chars."""
-        ctx, _, silent_mock = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         long_cmd = 'aws s3 cp ' + 'x' * 200
         with ctx:
             self.notif.send_blocked_notification(
@@ -844,23 +904,23 @@ class TestNotificationsCoverage:
                 block_reason='too long',
                 source='Bot',
             )
-        text = silent_mock.call_args[0][0]
+        text = entities_mock.call_args[0][0]
         assert '...' in text
 
     def test_send_blocked_notification_no_source(self):
         """No source defaults to 'Unknown'."""
-        ctx, _, silent_mock = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         with ctx:
             self.notif.send_blocked_notification(
                 command='aws s3 ls',
                 block_reason='rate limit',
             )
-        text = silent_mock.call_args[0][0]
+        text = entities_mock.call_args[0][0]
         assert 'Unknown' in text
 
     def test_send_blocked_notification_error_handling(self):
         """Exception is caught — does not raise."""
-        with patch.object(self.notif, '_send_message_silent', side_effect=RuntimeError('fail')):
+        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=RuntimeError('fail')):
             # Should not raise
             self.notif.send_blocked_notification(
                 command='aws s3 ls',
@@ -1076,7 +1136,7 @@ class TestNotificationsCoverage:
 
     def test_send_approval_request_lambda_env_dangerous(self):
         """lambda update-function-configuration --environment triggers warning block."""
-        ctx, send_mock, _ = self._patch_send(ok=True)
+        ctx, send_mock = self._patch_entities_send(ok=True)
         with patch('commands.check_lambda_env_update', return_value=('DANGEROUS', 'Risky env update')), \
              patch('commands.is_dangerous', return_value=False):
             with ctx:
@@ -1085,12 +1145,12 @@ class TestNotificationsCoverage:
                     command='aws lambda update-function-configuration --function-name fn --environment Variables={K=V}',
                     reason='update env',
                 )
-        text, _ = send_mock.call_args[0]
+        text = send_mock.call_args[0][0]
         assert 'Risky env update' in text or '🔴' in text
 
     def test_send_approval_request_bad_assume_role_format(self):
         """Invalid assume_role ARN falls back to raw display without crashing."""
-        ctx, send_mock, _ = self._patch_send(ok=True)
+        ctx, send_mock = self._patch_entities_send(ok=True)
         with ctx:
             self.notif.send_approval_request(
                 request_id='req-bad-arn',
@@ -1203,11 +1263,25 @@ class TestSchedulerIntegration:
     # ------------------------------------------------------------------
 
     def _patch_send_with_message_id(self, message_id: int = 42):
-        """Patch _send_message to return ok=True with given message_id."""
-        return patch.object(
+        """Patch both _send_message (legacy) and send_message_with_entities (entities Phase 2).
+
+        Some functions (send_approval_request) use entities mode; others (_send_message) use legacy.
+        This patches both so any function works correctly.
+        """
+        from contextlib import ExitStack
+        stack = ExitStack()
+        mock_resp = {'ok': True, 'result': {'message_id': message_id}}
+        # Patch entities path (Sprint 13 Phase 2 migration)
+        stack.enter_context(patch.object(
+            self.notif._telegram, 'send_message_with_entities',
+            return_value=mock_resp,
+        ))
+        # Patch legacy path (still used by upload/grant notifications)
+        stack.enter_context(patch.object(
             self.notif, '_send_message',
-            return_value={'ok': True, 'result': {'message_id': message_id}},
-        )
+            return_value=mock_resp,
+        ))
+        return stack
 
     # ------------------------------------------------------------------
     # test_message_id_returned_from_send_command_request
@@ -1311,7 +1385,8 @@ class TestSchedulerIntegration:
     def test_scheduler_not_called_if_send_fails(self):
         """If Telegram send fails, result.ok is False, so post_notification_setup
         should not be invoked by the caller (tested via NotificationResult)."""
-        with patch.object(self.notif, '_send_message', return_value={'ok': False}):
+        fail_resp = {'ok': False}
+        with patch.object(self.notif, '_send_message', return_value=fail_resp),              patch.object(self.notif._telegram, 'send_message_with_entities', return_value=fail_resp):
             result = self.notif.send_approval_request(
                 request_id='fail-req-001',
                 command='aws s3 ls',

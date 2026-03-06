@@ -144,7 +144,20 @@ def app_module(mock_dynamodb):
     
     # Skip real Telegram API calls in tests
     accounts._bot_commands_initialized = True
-    
+
+    # Mock send_message_with_entities (added in entities Phase 2, Sprint 13)
+    # so that tests predating this change still pass
+    import telegram as _tg
+    from unittest.mock import MagicMock
+    if not hasattr(_tg, 'send_message_with_entities'):
+        _tg.send_message_with_entities = MagicMock(
+            return_value={'ok': True, 'result': {'message_id': 99999}}
+        )
+    elif not isinstance(_tg.send_message_with_entities, MagicMock):
+        _tg.send_message_with_entities = MagicMock(
+            return_value={'ok': True, 'result': {'message_id': 99999}}
+        )
+
     yield app
 
 
