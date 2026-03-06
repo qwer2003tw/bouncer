@@ -644,6 +644,17 @@ def get_deploy_status(deploy_id: str) -> dict:
                 'Check error_summary for details.'
             )
 
+    # Sprint14 (#53): deprecate unreliable 'phase' field.
+    # The DDB item may carry a 'phase' attribute written by the state machine but
+    # it is always 'INITIALIZING' because the SFN task never updates it.
+    # Agents must use status + elapsed_seconds + progress_hint instead.
+    if 'phase' in record:
+        record['phase_deprecated'] = record.pop('phase')
+        record['phase_note'] = (
+            "phase field is unreliable (always INITIALIZING). "
+            "Use status + elapsed_seconds + progress_hint instead."
+        )
+
     return record
 
 
