@@ -311,3 +311,26 @@ class TestBackwardCompat:
         assert result['branch'] == 'master'
         assert result['status'] == 'SUCCESS'
         assert result['duration_seconds'] == 100
+
+
+class TestPhaseDeprecated:
+    """Tests for phase field deprecation (Sprint 14, #53)."""
+
+    def test_phase_renamed_to_phase_deprecated(self):
+        """Record with phase → phase_deprecated in response."""
+        import deployer
+        record = {'status': 'RUNNING', 'deploy_id': 'test', 'phase': 'INITIALIZING', 'started_at': 1000}
+        with patch('deployer.get_deploy_record', return_value=record),              patch('deployer._get_sfn_client'):
+            result = deployer.get_deploy_status('test')
+        assert 'phase' not in result
+        assert result.get('phase_deprecated') == 'INITIALIZING'
+        assert 'phase_note' in result
+
+    def test_no_phase_unaffected(self):
+        """Record without phase → not affected."""
+        import deployer
+        record = {'status': 'SUCCESS', 'deploy_id': 'test', 'started_at': 1000, 'finished_at': 1200}
+        with patch('deployer.get_deploy_record', return_value=record),              patch('deployer._get_sfn_client'):
+            result = deployer.get_deploy_status('test')
+        assert 'phase' not in result
+        assert 'phase_deprecated' not in result

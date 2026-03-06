@@ -159,8 +159,12 @@ case "$STATUS" in
       echo "$RESPONSE" >&2
       exit 1
     fi
-    if [[ "$STATUS" == "auto_approved" || "$STATUS" == "trust_auto_approved" || "$STATUS" == "approved" ]]; then
+    if [[ "$STATUS" == "auto_approved" || "$STATUS" == "trust_auto_approved" || "$STATUS" == "grant_auto_approved" || "$STATUS" == "approved" ]]; then
       extract_result "$RESPONSE"
+    elif [[ "$STATUS" == "pending_approval" ]]; then
+      REQUEST_ID=$(echo "$RESPONSE" | jq -r '.request_id // empty' 2>/dev/null)
+      echo "⏳ 請求需要審批 (request: $REQUEST_ID)" >&2
+      STATUS="pending_approval"
     elif [[ "$STATUS" == "rate_limited" ]]; then
       echo "Error: still rate limited after retry" >&2
       echo "$RESPONSE" >&2

@@ -147,9 +147,9 @@ def escape_markdown(text: str) -> str:
 
 KNOWN_BUTTON_FIELDS = {
     'text', 'callback_data', 'url', 'style',
-    'login_url', 'switch_inline_query',
-    'switch_inline_query_current_chat', 'pay',
-    'icon_custom_emoji_id',
+    'login_url', 'switch_inline_query', 'switch_inline_query_current_chat',
+    'switch_inline_query_chosen_chat', 'pay', 'icon_custom_emoji_id',
+    'web_app', 'callback_game', 'copy_text', 'icon_color',
 }
 
 

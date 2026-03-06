@@ -12,6 +12,23 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 
+def _make_urlopen_ctx_mock(body: bytes):
+    """Create a urlopen mock that properly implements the context manager protocol.
+
+    telegram._telegram_request uses: with urllib.request.urlopen(req, timeout=...) as resp:
+    So mock_urlopen.return_value must support __enter__ / __exit__.
+    """
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = body
+
+    cm = MagicMock()
+    cm.__enter__ = MagicMock(return_value=mock_resp)
+    cm.__exit__ = MagicMock(return_value=False)
+
+    mock_urlopen = MagicMock(return_value=cm)
+    return mock_urlopen, mock_resp
+
+
 @pytest.fixture()
 def app_module(tmp_path, monkeypatch):
     monkeypatch.setenv('TELEGRAM_BOT_TOKEN', 'test-token')
@@ -59,12 +76,12 @@ class TestDeployExpiryScheduleRegression:
         post_notification_setup() must be called with the correct arguments."""
         from deployer import send_deploy_approval_request
 
-        with patch('urllib.request.urlopen') as mock_urlopen, \
-             patch('notifications.post_notification_setup') as mock_pns:
+        mock_urlopen, _ = _make_urlopen_ctx_mock(
+            b'{"ok":true,"result":{"message_id":42}}'
+        )
 
-            mock_resp = MagicMock()
-            mock_resp.read.return_value = b'{"ok":true,"result":{"message_id":42}}'
-            mock_urlopen.return_value = mock_resp
+        with patch('urllib.request.urlopen', mock_urlopen), \
+             patch('notifications.post_notification_setup') as mock_pns:
 
             send_deploy_approval_request(
                 request_id='req-test-001',
@@ -85,12 +102,12 @@ class TestDeployExpiryScheduleRegression:
         """Backward compat: if expires_at is None, post_notification_setup is skipped."""
         from deployer import send_deploy_approval_request
 
-        with patch('urllib.request.urlopen') as mock_urlopen, \
-             patch('notifications.post_notification_setup') as mock_pns:
+        mock_urlopen, _ = _make_urlopen_ctx_mock(
+            b'{"ok":true,"result":{"message_id":99}}'
+        )
 
-            mock_resp = MagicMock()
-            mock_resp.read.return_value = b'{"ok":true,"result":{"message_id":99}}'
-            mock_urlopen.return_value = mock_resp
+        with patch('urllib.request.urlopen', mock_urlopen), \
+             patch('notifications.post_notification_setup') as mock_pns:
 
             send_deploy_approval_request(
                 request_id='req-test-002',
@@ -107,12 +124,10 @@ class TestDeployExpiryScheduleRegression:
         """If Telegram API returns no message_id, skip scheduler call."""
         from deployer import send_deploy_approval_request
 
-        with patch('urllib.request.urlopen') as mock_urlopen, \
-             patch('notifications.post_notification_setup') as mock_pns:
+        mock_urlopen, _ = _make_urlopen_ctx_mock(b'{"ok":false}')
 
-            mock_resp = MagicMock()
-            mock_resp.read.return_value = b'{"ok":false}'
-            mock_urlopen.return_value = mock_resp
+        with patch('urllib.request.urlopen', mock_urlopen), \
+             patch('notifications.post_notification_setup') as mock_pns:
 
             send_deploy_approval_request(
                 request_id='req-test-003',
@@ -129,13 +144,13 @@ class TestDeployExpiryScheduleRegression:
         """If post_notification_setup raises, the error must not propagate."""
         from deployer import send_deploy_approval_request
 
-        with patch('urllib.request.urlopen') as mock_urlopen, \
+        mock_urlopen, _ = _make_urlopen_ctx_mock(
+            b'{"ok":true,"result":{"message_id":77}}'
+        )
+
+        with patch('urllib.request.urlopen', mock_urlopen), \
              patch('notifications.post_notification_setup',
                    side_effect=RuntimeError('DDB down')) as mock_pns:
-
-            mock_resp = MagicMock()
-            mock_resp.read.return_value = b'{"ok":true,"result":{"message_id":77}}'
-            mock_urlopen.return_value = mock_resp
 
             # Must not raise
             send_deploy_approval_request(

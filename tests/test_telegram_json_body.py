@@ -2,7 +2,9 @@
 Tests for sprint11-008: telegram.py json_body=True + style field strip
 
 Verifies:
-1. _strip_unsupported_button_fields removes 'style' from inline_keyboard buttons
+1. _strip_unsupported_button_fields removes unknown fields while preserving known fields
+   NOTE: 'style' was intentionally added to KNOWN_BUTTON_FIELDS in Sprint 14 (#060)
+   because Telegram Bot API 9.4 supports it natively. Tests updated accordingly.
 2. send_telegram_message uses json_body=True (no double-encode of reply_markup)
 3. send_telegram_message_silent uses json_body=True
 4. update_message uses json_body=True
@@ -39,6 +41,7 @@ class TestStripUnsupportedButtonFields(unittest.TestCase):
         _telegram_module = sys.modules['telegram']
 
     def test_removes_style_field(self):
+        """Sprint 14 #060: 'style' is now preserved (Telegram Bot API 9.4 supports it)."""
         strip = _get_telegram()._strip_unsupported_button_fields
         keyboard = {
             'inline_keyboard': [
@@ -51,12 +54,14 @@ class TestStripUnsupportedButtonFields(unittest.TestCase):
         result = strip(keyboard)
         btn1 = result['inline_keyboard'][0][0]
         btn2 = result['inline_keyboard'][0][1]
-        self.assertNotIn('style', btn1)
-        self.assertNotIn('style', btn2)
+        # style is preserved per Sprint 14 #060 (Telegram Bot API 9.4 support)
+        self.assertIn('style', btn1)
+        self.assertIn('style', btn2)
         self.assertEqual(btn1['text'], 'Approve')
         self.assertEqual(btn1['callback_data'], 'approve:1')
 
     def test_preserves_other_fields(self):
+        """Known fields including url and style are preserved."""
         strip = _get_telegram()._strip_unsupported_button_fields
         keyboard = {
             'inline_keyboard': [
@@ -65,7 +70,8 @@ class TestStripUnsupportedButtonFields(unittest.TestCase):
         }
         result = strip(keyboard)
         btn = result['inline_keyboard'][0][0]
-        self.assertNotIn('style', btn)
+        # style is preserved per Sprint 14 #060
+        self.assertIn('style', btn)
         self.assertEqual(btn['url'], 'https://x.com')
         self.assertEqual(btn['callback_data'], 'foo')
 
@@ -95,6 +101,7 @@ class TestStripUnsupportedButtonFields(unittest.TestCase):
         self.assertEqual(result, {'force_reply': True})
 
     def test_multiple_rows(self):
+        """Sprint 14 #060: style is preserved in multi-row keyboards."""
         strip = _get_telegram()._strip_unsupported_button_fields
         keyboard = {
             'inline_keyboard': [
@@ -104,9 +111,11 @@ class TestStripUnsupportedButtonFields(unittest.TestCase):
             ]
         }
         result = strip(keyboard)
-        for row in result['inline_keyboard']:
-            for btn in row:
-                self.assertNotIn('style', btn)
+        # style is preserved per Sprint 14 #060
+        self.assertIn('style', result['inline_keyboard'][0][0])
+        self.assertIn('style', result['inline_keyboard'][1][0])
+        # Button without style should not have it added
+        self.assertNotIn('style', result['inline_keyboard'][1][1])
 
     def test_does_not_mutate_original(self):
         strip = _get_telegram()._strip_unsupported_button_fields
@@ -118,6 +127,22 @@ class TestStripUnsupportedButtonFields(unittest.TestCase):
         strip(keyboard)
         # Original should be unchanged
         self.assertEqual(keyboard['inline_keyboard'][0][0]['style'], 'primary')
+
+    def test_unknown_fields_are_stripped(self):
+        """Unknown fields (not in KNOWN_BUTTON_FIELDS) should be removed."""
+        strip = _get_telegram()._strip_unsupported_button_fields
+        keyboard = {
+            'inline_keyboard': [
+                [{'text': 'X', 'callback_data': 'x', 'style': 'primary',
+                  'unknown_field': 'should_be_removed', 'another_bad': 42}]
+            ]
+        }
+        result = strip(keyboard)
+        btn = result['inline_keyboard'][0][0]
+        self.assertNotIn('unknown_field', btn)
+        self.assertNotIn('another_bad', btn)
+        self.assertIn('style', btn)
+        self.assertEqual(btn['text'], 'X')
 
 
 class TestSendTelegramMessageJsonBody(unittest.TestCase):
@@ -143,7 +168,8 @@ class TestSendTelegramMessageJsonBody(unittest.TestCase):
                 self.assertTrue(kwargs.get('json_body', False), "json_body should be True")
 
     def test_send_telegram_message_reply_markup_not_json_string(self):
-        """reply_markup should be dict, not a JSON string."""
+        """reply_markup should be dict, not a JSON string.
+        Sprint 14 #060: style is preserved in KNOWN_BUTTON_FIELDS."""
         tg = _get_telegram()
         with patch.object(tg, '_telegram_request', return_value={'ok': True}) as mock_req:
             keyboard = {
@@ -156,9 +182,9 @@ class TestSendTelegramMessageJsonBody(unittest.TestCase):
             self.assertIn('reply_markup', data)
             self.assertIsInstance(data['reply_markup'], dict,
                                   "reply_markup should be dict, not JSON string")
-            # style should be stripped
+            # Sprint 14 #060: style is preserved (Telegram Bot API 9.4 support)
             btn = data['reply_markup']['inline_keyboard'][0][0]
-            self.assertNotIn('style', btn)
+            self.assertIn('style', btn)
 
     def test_send_telegram_message_silent_uses_json_body(self):
         tg = _get_telegram()
@@ -172,6 +198,7 @@ class TestSendTelegramMessageJsonBody(unittest.TestCase):
                 self.assertTrue(kwargs.get('json_body', False), "json_body should be True")
 
     def test_send_telegram_message_silent_reply_markup_is_dict(self):
+        """reply_markup is dict with style preserved (Sprint 14 #060)."""
         tg = _get_telegram()
         with patch.object(tg, '_telegram_request', return_value={'ok': True}) as mock_req:
             keyboard = {
@@ -182,7 +209,10 @@ class TestSendTelegramMessageJsonBody(unittest.TestCase):
             args, kwargs = mock_req.call_args
             data = args[1]
             self.assertIsInstance(data['reply_markup'], dict)
-            self.assertNotIn('style', data['reply_markup']['inline_keyboard'][0][0])
+            # Sprint 14 #060: style is preserved
+            btn = data['reply_markup']['inline_keyboard'][0][0]
+            self.assertIn('style', btn)
+            self.assertEqual(btn['style'], 'danger')
 
     def test_update_message_uses_json_body(self):
         tg = _get_telegram()
@@ -219,7 +249,8 @@ class TestNoDoubleEncode(unittest.TestCase):
         _telegram_module = sys.modules['telegram']
 
     def test_reply_markup_not_double_encoded(self):
-        """If reply_markup were json.dumps'd, it would be a string. It must be dict."""
+        """If reply_markup were json.dumps'd, it would be a string. It must be dict.
+        Sprint 14 #060: style field is now preserved (Telegram Bot API 9.4)."""
         tg = _get_telegram()
         with patch.object(tg, '_telegram_request', return_value={'ok': True}) as mock_req:
             keyboard = {
@@ -234,9 +265,10 @@ class TestNoDoubleEncode(unittest.TestCase):
 
             # Must be dict, not str
             self.assertIsInstance(data['reply_markup'], dict)
-            # Must not contain 'style'
+            # Sprint 14 #060: style is preserved (not stripped)
             btn = data['reply_markup']['inline_keyboard'][0][0]
-            self.assertNotIn('style', btn)
+            self.assertIn('style', btn)
+            self.assertEqual(btn['style'], 'success')
             self.assertEqual(btn['callback_data'], 'approve:abc')
 
 
