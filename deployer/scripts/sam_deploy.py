@@ -469,9 +469,46 @@ def _run_deploy(cmd: Sequence[str]) -> DeployResult:
 # ---------------------------------------------------------------------------
 
 
+
+def _check_github_pat() -> None:
+    """Validate GitHub PAT before attempting git clone.
+    
+    Exits with clear error message if PAT is expired/invalid (HTTP 401).
+    Gracefully skips validation on API errors (network, rate limit, etc.).
+    """
+    token = os.environ.get("GITHUB_PAT", "").strip()
+    if not token:
+        return  # No PAT in env, skip check
+
+    import urllib.request
+    import urllib.error
+
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/user",
+            headers={"Authorization": f"token {token}", "User-Agent": "Bouncer/1.0"},
+        )
+        urllib.request.urlopen(req, timeout=5)
+        print("[PAT] GitHub PAT is valid.")
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            print(
+                "[PAT] ERROR: GitHub PAT is expired or invalid (HTTP 401).\n"
+                "Update the secret at: sam-deployer/github-pat (Secrets Manager, us-east-1)\n"
+                "Then retry the deploy.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        # Other HTTP errors (403 rate limit, 5xx) → graceful degradation
+        print(f"[PAT] GitHub API returned {e.code}, skipping PAT validation.")
+    except Exception as exc:
+        print(f"[PAT] Could not reach GitHub API ({exc}), skipping PAT validation.")
+
 def main(argv: Optional[List[str]] = None) -> None:
     if argv is None:
         argv = sys.argv[1:]
+
+    _check_github_pat()  # Validate PAT before git clone
 
     dry_run_import = "--dry-run-import" in argv
     suggest_import = "--suggest-import" in argv
