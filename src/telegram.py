@@ -145,14 +145,26 @@ def escape_markdown(text: str) -> str:
     return text
 
 
+KNOWN_BUTTON_FIELDS = {
+    'text', 'callback_data', 'url', 'style',
+    'login_url', 'switch_inline_query',
+    'switch_inline_query_current_chat', 'pay',
+    'icon_custom_emoji_id',
+}
+
+
 def _strip_unsupported_button_fields(keyboard: dict) -> dict:
-    """Remove fields not supported by Telegram API (e.g. style)."""
+    """Remove fields not supported by Telegram API using a whitelist.
+
+    Note: 'style' is intentionally preserved — supported since Telegram Bot API 9.4.
+    See: https://core.telegram.org/bots/api#inlinekeyboardbutton
+    """
     if not keyboard:
         return keyboard
     result = dict(keyboard)
     if 'inline_keyboard' in result:
         result['inline_keyboard'] = [
-            [{k: v for k, v in btn.items() if k != 'style'} for btn in row]
+            [{k: v for k, v in btn.items() if k in KNOWN_BUTTON_FIELDS} for btn in row]
             for row in result['inline_keyboard']
         ]
     return result
