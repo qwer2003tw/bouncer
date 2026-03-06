@@ -147,6 +147,30 @@ case "$STATUS" in
     echo "❌ 請求被拒絕" >&2
     exit 1
     ;;
+  rate_limited)
+    echo "⏳ 請求被 rate limited，等待後重試..." >&2
+    echo "   等待 15 秒後再試..." >&2
+    sleep 15
+    # retry once
+    RESPONSE=$(mcporter "${MCPORTER_ARGS[@]}" 2>&1)
+    STATUS=$(echo "$RESPONSE" | jq -r '.status // empty' 2>/dev/null)
+    if [[ -z "$STATUS" ]]; then
+      echo "Error: unexpected response from bouncer (retry)" >&2
+      echo "$RESPONSE" >&2
+      exit 1
+    fi
+    if [[ "$STATUS" == "auto_approved" || "$STATUS" == "trust_auto_approved" || "$STATUS" == "approved" ]]; then
+      extract_result "$RESPONSE"
+    elif [[ "$STATUS" == "rate_limited" ]]; then
+      echo "Error: still rate limited after retry" >&2
+      echo "$RESPONSE" >&2
+      exit 1
+    else
+      echo "Error: unexpected status after retry: ${STATUS}" >&2
+      echo "$RESPONSE" >&2
+      exit 1
+    fi
+    ;;
   *)
     echo "Error: unexpected status: ${STATUS}" >&2
     echo "$RESPONSE" >&2
