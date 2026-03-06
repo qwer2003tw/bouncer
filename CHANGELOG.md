@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.13.1] - 2026-03-06
+
+### Fixed
+- 32 tests updated to work with entities Phase 2 migration (mock target updated from `_send_message` to `send_message_with_entities`)
+- Test isolation fixes for `TestTelegramCommandsGSI`
+
 ## [3.13.0] - 2026-03-06
 
 ### Added
