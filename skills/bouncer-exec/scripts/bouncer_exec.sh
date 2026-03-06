@@ -1,17 +1,35 @@
 #!/usr/bin/env bash
 # bouncer_exec.sh — Execute AWS CLI commands via Bouncer with clean output
-# Usage: bouncer_exec.sh [--reason "..."] [--account <id>] <aws command...>
+# Usage: bouncer_exec.sh [--reason "..."] [--account <id>] [--source "Custom Source"] <aws command...>
 set -euo pipefail
 
 # ── Config ──
 POLL_INTERVAL=10
 MAX_POLL_TIME=600  # 10 minutes
-SOURCE_PREFIX="Agent"
 TRUST_SCOPE="agent-bouncer-exec"
+
+# ── Validate reason ──
+_validate_reason() {
+  local reason="$1"
+  if [[ -z "$reason" ]]; then
+    echo "❌ --reason 必填，請說明為什麼執行這個命令" >&2
+    echo "   Usage: bouncer_exec.sh --reason \"<原因>\" [--account <id>] [--source \"<來源>\"] <aws command...>" >&2
+    exit 1
+  fi
+  if [[ ${#reason} -lt 15 ]]; then
+    echo "❌ --reason 太短（需至少 15 字），請說明執行目的" >&2
+    exit 1
+  fi
+  if [[ "$reason" == aws\ * ]]; then
+    echo "❌ --reason 不能是命令字串本身，請說明執行目的" >&2
+    exit 1
+  fi
+}
 
 # ── Parse optional flags ──
 REASON=""
 ACCOUNT=""
+CUSTOM_SOURCE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -23,6 +41,10 @@ while [[ $# -gt 0 ]]; do
       ACCOUNT="$2"
       shift 2
       ;;
+    --source)
+      CUSTOM_SOURCE="$2"
+      shift 2
+      ;;
     *)
       break
       ;;
@@ -31,30 +53,23 @@ done
 
 # ── Validate ──
 if [[ $# -eq 0 ]]; then
-  echo "Usage: bouncer_exec.sh [--reason \"...\"] [--account <id>] <aws command...>" >&2
+  echo "Usage: bouncer_exec.sh --reason \"<原因>\" [--account <id>] [--source \"<來源>\"] <aws command...>" >&2
   exit 1
 fi
 
-# Build COMMAND with proper quoting for args containing spaces or special chars
-COMMAND_PARTS=()
-for arg in "$@"; do
-    if [[ "$arg" == *" "* || "$arg" == *"|"* || "$arg" == *"'"* || "$arg" == *">"* || "$arg" == *"<"* ]]; then
-        # Wrap in double-quotes, escape internal double-quotes
-        COMMAND_PARTS+=("\"${arg//\"/\\\"}\"")
-    else
-        COMMAND_PARTS+=("$arg")
-    fi
-done
-COMMAND="${COMMAND_PARTS[*]}"
-REASON="${REASON:-$COMMAND}"
-SOURCE="${SOURCE_PREFIX} (${COMMAND})"
+_validate_reason "$REASON"
+
+# ── Build COMMAND display string ──
+COMMAND_DISPLAY="$*"
+
+# Source: use custom if provided, else default "Agent (command)"
+SOURCE="${CUSTOM_SOURCE:-Agent (${COMMAND_DISPLAY})}"
 
 # ── Helper: extract and clean result ──
 extract_result() {
   local json="$1"
   local result
 
-  # Extract .result from JSON
   result=$(echo "$json" | jq -r '.result // empty' 2>/dev/null)
 
   if [[ -z "$result" ]]; then
@@ -62,36 +77,39 @@ extract_result() {
     return
   fi
 
-  # Try to pretty-print if result is valid JSON
   if echo "$result" | jq . >/dev/null 2>&1; then
     echo "$result" | jq .
   else
-    # Unescape \n to real newlines
     printf '%b\n' "$result"
   fi
 }
 
-# ── Build mcporter args ──
-MCPORTER_ARGS=(
-  call bouncer bouncer_execute
-  "command=${COMMAND}"
-  "reason=${REASON}"
-  "source=${SOURCE}"
-  "trust_scope=${TRUST_SCOPE}"
-)
-
+# ── Build JSON args via jq (safe: handles all special characters) ──
+# jq --arg properly escapes quotes, pipes, backslashes, unicode, etc.
 if [[ -n "$ACCOUNT" ]]; then
-  MCPORTER_ARGS+=("account=${ACCOUNT}")
+  MCPORTER_JSON=$(jq -n \
+    --arg command "$COMMAND_DISPLAY" \
+    --arg reason "$REASON" \
+    --arg source "$SOURCE" \
+    --arg trust_scope "$TRUST_SCOPE" \
+    --arg account "$ACCOUNT" \
+    '{command: $command, reason: $reason, source: $source, trust_scope: $trust_scope, account: $account}')
+else
+  MCPORTER_JSON=$(jq -n \
+    --arg command "$COMMAND_DISPLAY" \
+    --arg reason "$REASON" \
+    --arg source "$SOURCE" \
+    --arg trust_scope "$TRUST_SCOPE" \
+    '{command: $command, reason: $reason, source: $source, trust_scope: $trust_scope}')
 fi
 
 # ── Execute ──
-RESPONSE=$(mcporter "${MCPORTER_ARGS[@]}" 2>&1)
+RESPONSE=$(mcporter call bouncer bouncer_execute --args "$MCPORTER_JSON" 2>&1)
 
 # Extract status
 STATUS=$(echo "$RESPONSE" | jq -r '.status // empty' 2>/dev/null)
 
 if [[ -z "$STATUS" ]]; then
-  # Not valid JSON or no status field — dump raw output
   echo "Error: unexpected response from bouncer" >&2
   echo "$RESPONSE" >&2
   exit 1
@@ -99,7 +117,7 @@ fi
 
 # ── Handle response ──
 case "$STATUS" in
-  auto_approved|trust_auto_approved|approved)
+  auto_approved|trust_auto_approved|grant_auto_approved|approved)
     extract_result "$RESPONSE"
     ;;
   pending_approval)
@@ -130,7 +148,6 @@ case "$STATUS" in
           exit 1
           ;;
         pending_approval)
-          # Still waiting, continue polling
           ;;
         *)
           echo "Error: unexpected poll status: ${POLL_STATUS}" >&2
@@ -148,30 +165,20 @@ case "$STATUS" in
     exit 1
     ;;
   rate_limited)
-    echo "⏳ 請求被 rate limited，等待後重試..." >&2
-    echo "   等待 15 秒後再試..." >&2
+    echo "⏳ 請求被 rate limited，等待 15 秒後重試..." >&2
     sleep 15
-    # retry once
-    RESPONSE=$(mcporter "${MCPORTER_ARGS[@]}" 2>&1)
+    RESPONSE=$(mcporter call bouncer bouncer_execute --args "$MCPORTER_JSON" 2>&1)
     STATUS=$(echo "$RESPONSE" | jq -r '.status // empty' 2>/dev/null)
-    if [[ -z "$STATUS" ]]; then
-      echo "Error: unexpected response from bouncer (retry)" >&2
-      echo "$RESPONSE" >&2
-      exit 1
-    fi
     if [[ "$STATUS" == "auto_approved" || "$STATUS" == "trust_auto_approved" || "$STATUS" == "grant_auto_approved" || "$STATUS" == "approved" ]]; then
       extract_result "$RESPONSE"
     elif [[ "$STATUS" == "pending_approval" ]]; then
       REQUEST_ID=$(echo "$RESPONSE" | jq -r '.request_id // empty' 2>/dev/null)
       echo "⏳ 請求需要審批 (request: $REQUEST_ID)" >&2
-      STATUS="pending_approval"
     elif [[ "$STATUS" == "rate_limited" ]]; then
       echo "Error: still rate limited after retry" >&2
-      echo "$RESPONSE" >&2
       exit 1
     else
       echo "Error: unexpected status after retry: ${STATUS}" >&2
-      echo "$RESPONSE" >&2
       exit 1
     fi
     ;;
