@@ -485,8 +485,8 @@ class TestDeployerModule:
         deployer.history_table = deployer_tables.Table('bouncer-deploy-history')
         
         result = deployer.get_deploy_status('nonexistent')
-        # Sprint10-001: record not found now returns {status: pending} instead of {error: ...}
-        assert result.get('status') == 'pending'
+        # Sprint12: record not found now returns {status: not_found} instead of {status: pending}
+        assert result.get('status') == 'not_found'
         assert 'error' not in result
         
         sys.path.pop(0)

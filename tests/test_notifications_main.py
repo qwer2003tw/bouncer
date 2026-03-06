@@ -1301,6 +1301,7 @@ class TestSchedulerIntegration:
         mock_service.create_expiry_schedule.assert_called_once_with(
             request_id='sched-req-001',
             expires_at=expires_at,
+            telegram_message_id=101,
         )
 
     # ------------------------------------------------------------------

@@ -39,12 +39,12 @@ class TestGetDeployStatusRecordNotFound:
     """R1: Record 不存在時回傳 pending，不回傳 error"""
 
     def test_returns_pending_status(self):
-        """Record 不存在 → status=pending"""
+        """Record 不存在 → status=not_found (Sprint 12 changed from pending)"""
         dep = _load_deployer()
         with patch.object(dep, 'get_deploy_record', return_value=None):
             result = dep.get_deploy_status('deploy-nonexistent')
 
-        assert result['status'] == 'pending'
+        assert result['status'] == 'not_found'
         assert 'error' not in result
 
     def test_returns_deploy_id(self):
@@ -56,13 +56,15 @@ class TestGetDeployStatusRecordNotFound:
         assert result['deploy_id'] == 'deploy-abc123'
 
     def test_returns_retry_message(self):
-        """回傳包含 retry 提示訊息"""
+        """回傳包含 retry 提示訊息 (Sprint 12: hint 欄位而非 message)"""
         dep = _load_deployer()
         with patch.object(dep, 'get_deploy_record', return_value=None):
             result = dep.get_deploy_status('deploy-xyz')
 
-        assert 'message' in result
-        assert 'retry' in result['message'].lower()
+        assert 'message' in result or 'hint' in result
+        # Sprint 12: retry hint is in the 'hint' field (or message field)
+        hint_or_msg = result.get('hint', '') + result.get('message', '')
+        assert 'retry' in hint_or_msg.lower()
 
     def test_no_error_key(self):
         """回傳不含 error key（不能誤判為 error）"""
@@ -93,7 +95,7 @@ class TestMCPToolDeployStatusIsError:
         """status=pending → isError=False"""
         dep = _load_deployer()
         record = {
-            'status': 'pending',
+            'status': 'not_found',
             'deploy_id': 'deploy-abc',
             'message': 'Deploy record not found yet, please retry',
         }
@@ -141,13 +143,13 @@ class TestMCPToolDeployStatusIsError:
         assert result.get('isError', False) is False
 
     def test_content_json_parseable(self):
-        """MCP response content[0].text is valid JSON with status=pending"""
+        """MCP response content[0].text is valid JSON with status=not_found (Sprint 12)"""
         dep = _load_deployer()
-        record = {'status': 'pending', 'deploy_id': 'deploy-x', 'message': 'retry'}
+        record = {'status': 'not_found', 'deploy_id': 'deploy-x', 'message': 'retry'}
         result = self._call_mcp_status(dep, 'deploy-x', record)
         content_text = result['content'][0]['text']
         data = json.loads(content_text)
-        assert data['status'] == 'pending'
+        assert data['status'] == 'not_found'
 
 
 # ===========================================================================

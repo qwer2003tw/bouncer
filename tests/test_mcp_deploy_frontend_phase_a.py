@@ -213,6 +213,7 @@ class TestHappyPath:
 
         with patch("mcp_deploy_frontend.boto3") as mock_boto3, \
              patch("mcp_deploy_frontend.table", mock_table), \
+             patch("mcp_deploy_frontend._get_frontend_config", return_value=None), \
              patch("mcp_deploy_frontend.send_deploy_frontend_notification", return_value=mock_notif_result) as mock_notif, \
              patch("notifications.post_notification_setup") as mock_pns:
             mock_boto3.client.return_value = mock_s3
@@ -417,6 +418,7 @@ class TestDeployRoleArnPhaseA:
 
         with patch("mcp_deploy_frontend.boto3") as mock_boto3, \
              patch("mcp_deploy_frontend.table", mock_table), \
+             patch("mcp_deploy_frontend._get_frontend_config", return_value=None), \
              patch("mcp_deploy_frontend.send_deploy_frontend_notification", return_value=mock_notif_result), \
              patch("notifications.post_notification_setup"):
             mock_boto3.client.return_value = mock_s3
@@ -457,6 +459,7 @@ class TestDeployRoleArnPhaseA:
 
             with patch("mcp_deploy_frontend.boto3") as mock_boto3, \
                  patch("mcp_deploy_frontend.table", mock_table), \
+                 patch("mcp_deploy_frontend._get_frontend_config", return_value=None), \
                  patch("mcp_deploy_frontend.send_deploy_frontend_notification", return_value=mock_notif_result), \
                  patch("notifications.post_notification_setup"):
                 mock_boto3.client.return_value = mock_s3

@@ -1,11 +1,13 @@
 """
 Tests for sprint11-012: deploy_frontend Phase B integration tests
-Verifies exact execute_command call arguments for S3 copy and CF invalidation,
+Updated for Sprint 12: implementation now uses boto3 directly (not execute_command).
+
+Verifies boto3 call arguments for S3 put_object and CF create_invalidation,
 as well as _is_execute_failed detection for AWS CLI error format.
 
 Gap-filling tests not present in test_mcp_deploy_frontend_phase_b.py:
- - Full command string format (all flags together per file)
- - CF invalidation command format (distribution-id + paths)
+ - Full boto3 put_object call args (Bucket, Key, ContentType, CacheControl)
+ - CF create_invalidation call args (DistributionId, Paths)
  - _is_execute_failed with AWS CLI error format (An error occurred...)
  - 7+ files: progress update at file 5 and at final
 """
@@ -85,131 +87,214 @@ def _call_callback(action='approve', item=None, message_id=999, callback_id='cb-
     )
 
 
-def _patch_all(s3_side_effect=None, cf_side_effect=None):
-    """Build mock_execute with side effects to simulate S3 + CF calls."""
+def _make_mock_boto3(get_object_side_effect=None, put_object_side_effect=None, cf_side_effect=None):
+    """Build a mock boto3 module that returns appropriate S3/CF clients.
+
+    The implementation uses:
+      s3_staging = _boto3.client('s3')  -> for get_object
+      s3_target  = _boto3.client('s3')  -> for put_object (no deploy_role_arn in test item)
+      cf         = _boto3.client('cloudfront') -> for create_invalidation
+
+    Since both s3 clients are created by the same _boto3.client('s3') call,
+    we return a single mock_s3 for all 's3' calls.
+    """
+    mock_boto3 = MagicMock()
+
+    mock_s3 = MagicMock()
+    mock_cf = MagicMock()
+
+    # Default: get_object returns a mock Body with some bytes
+    default_body = MagicMock()
+    default_body.read.return_value = b'file content'
+    mock_s3.get_object.return_value = {'Body': default_body}
+
+    if get_object_side_effect is not None:
+        mock_s3.get_object.side_effect = get_object_side_effect
+
+    if put_object_side_effect is not None:
+        mock_s3.put_object.side_effect = put_object_side_effect
+
+    if cf_side_effect is not None:
+        mock_cf.create_invalidation.side_effect = cf_side_effect
+
+    def _client_factory(service, **kwargs):
+        if service == 's3':
+            return mock_s3
+        if service == 'cloudfront':
+            return mock_cf
+        return MagicMock()
+
+    mock_boto3.client.side_effect = _client_factory
+
+    return mock_boto3, mock_s3, mock_cf
+
+
+def _run_approve(item=None, get_object_side_effect=None, put_object_side_effect=None, cf_side_effect=None):
+    """Run the approve callback with mocked boto3 and helpers."""
+    mock_boto3, mock_s3, mock_cf = _make_mock_boto3(
+        get_object_side_effect=get_object_side_effect,
+        put_object_side_effect=put_object_side_effect,
+        cf_side_effect=cf_side_effect,
+    )
     mock_table = MagicMock()
-    call_state = {'s3_call_index': 0}
 
-    def _execute_side_effect(cmd, **kwargs):
-        if 'cloudfront create-invalidation' in cmd:
-            if cf_side_effect is not None:
-                return cf_side_effect
-            return '{}'
-        # S3 cp call
-        idx = call_state['s3_call_index']
-        call_state['s3_call_index'] += 1
-        if s3_side_effect is not None:
-            if callable(s3_side_effect):
-                return s3_side_effect(cmd)
-            elif isinstance(s3_side_effect, list):
-                return s3_side_effect[idx] if idx < len(s3_side_effect) else 'upload: s3://...'
-            return str(s3_side_effect)
-        return 'upload: s3://...'
+    import callbacks
+    with patch.object(callbacks, '_boto3', mock_boto3), \
+         patch('callbacks._get_table', return_value=mock_table), \
+         patch('callbacks.answer_callback'), \
+         patch('callbacks.update_message') as mock_update, \
+         patch('callbacks._update_request_status') as mock_update_status, \
+         patch('callbacks.emit_metric'), \
+         patch('notifications._send_message_silent'):
+        result = _call_callback(action='approve', item=item)
 
-    mock_execute = MagicMock(side_effect=_execute_side_effect)
-    return mock_execute, mock_table
+    return result, mock_s3, mock_cf, mock_update, mock_update_status, mock_table
 
 
 # ---------------------------------------------------------------------------
-# S3 Copy Command Format — Integration Tests
+# S3 put_object Call Format — Integration Tests
+# (Updated from s3 cp command format; implementation now uses boto3 directly)
 # ---------------------------------------------------------------------------
 
 class TestS3CopyCmdFormat:
-    """Verify that every flag in the s3 cp command is present and correct."""
+    """Verify that boto3 put_object is called with correct args for each file."""
 
-    def _get_s3_calls(self, item=None):
-        mock_execute, mock_table = _patch_all()
-        with patch('callbacks.execute_command', mock_execute), \
+    def _get_put_object_calls(self, item=None):
+        _, mock_s3, *_ = _run_approve(item=item)
+        return mock_s3.put_object.call_args_list
+
+    def test_s3_cp_command_starts_with_aws_s3_cp(self):
+        """put_object called for each file in the manifest (replaces s3 cp command check)"""
+        calls = self._get_put_object_calls()
+        assert len(calls) == len(_FILES_MANIFEST), \
+            f"Expected {len(_FILES_MANIFEST)} put_object calls, got {len(calls)}"
+
+    def test_s3_cp_includes_correct_staging_source(self):
+        """get_object called with correct staging bucket and key"""
+        _, mock_s3, *_ = _run_approve()
+        get_calls = mock_s3.get_object.call_args_list
+        for c, fm in zip(get_calls, _FILES_MANIFEST):
+            kwargs = c[1] if c[1] else {}
+            bucket = kwargs.get('Bucket')
+            key = kwargs.get('Key')
+            assert bucket == _STAGING_BUCKET, \
+                f"Expected staging bucket '{_STAGING_BUCKET}', got '{bucket}'"
+            assert key == fm['s3_key'], \
+                f"Expected key '{fm['s3_key']}', got '{key}'"
+
+    def test_s3_cp_includes_correct_target_bucket(self):
+        """put_object called with correct frontend bucket and filename as Key"""
+        calls = self._get_put_object_calls()
+        for c, fm in zip(calls, _FILES_MANIFEST):
+            kwargs = c[1] if c[1] else {}
+            bucket = kwargs.get('Bucket')
+            key = kwargs.get('Key')
+            assert bucket == _FRONTEND_BUCKET, \
+                f"Expected frontend bucket '{_FRONTEND_BUCKET}', got '{bucket}'"
+            assert key == fm['filename'], \
+                f"Expected key '{fm['filename']}', got '{key}'"
+
+    def test_s3_cp_includes_content_type_flag(self):
+        """put_object called with correct ContentType for each file"""
+        calls = self._get_put_object_calls()
+        for c, fm in zip(calls, _FILES_MANIFEST):
+            kwargs = c[1] if c[1] else {}
+            ct = kwargs.get('ContentType')
+            assert ct == fm['content_type'], \
+                f"Expected ContentType '{fm['content_type']}', got '{ct}'"
+
+    def test_s3_cp_includes_cache_control_flag(self):
+        """put_object called with correct CacheControl for each file"""
+        calls = self._get_put_object_calls()
+        for c, fm in zip(calls, _FILES_MANIFEST):
+            kwargs = c[1] if c[1] else {}
+            cc = kwargs.get('CacheControl')
+            assert cc == fm['cache_control'], \
+                f"Expected CacheControl '{fm['cache_control']}', got '{cc}'"
+
+    def test_s3_cp_includes_metadata_directive_replace(self):
+        """put_object is used (replaces s3 cp --metadata-directive REPLACE)"""
+        calls = self._get_put_object_calls()
+        # Verify put_object is called the right number of times
+        assert len(calls) == len(_FILES_MANIFEST)
+
+    def test_s3_cp_includes_region_flag(self):
+        """boto3 s3 client is created (replaces --region flag check)"""
+        import callbacks
+        mock_boto3, mock_s3, mock_cf = _make_mock_boto3()
+        mock_table = MagicMock()
+        with patch.object(callbacks, '_boto3', mock_boto3), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status'), \
              patch('callbacks.emit_metric'), \
              patch('notifications._send_message_silent'):
-            _call_callback(action='approve', item=item)
-        return [c for c in mock_execute.call_args_list if 's3 cp' in c[0][0]]
-
-    def test_s3_cp_command_starts_with_aws_s3_cp(self):
-        """Each s3 command starts with 'aws s3 cp'"""
-        s3_calls = self._get_s3_calls()
-        for c in s3_calls:
-            assert c[0][0].startswith('aws s3 cp'), \
-                f"Expected 'aws s3 cp', got: {c[0][0][:30]}"
-
-    def test_s3_cp_includes_correct_staging_source(self):
-        """Source path = s3://{staging_bucket}/{staged_key}"""
-        s3_calls = self._get_s3_calls()
-        for c, fm in zip(s3_calls, _FILES_MANIFEST):
-            cmd = c[0][0]
-            expected_src = f"s3://{_STAGING_BUCKET}/{fm['s3_key']}"
-            assert expected_src in cmd, \
-                f"Expected source '{expected_src}' in cmd: {cmd}"
-
-    def test_s3_cp_includes_correct_target_bucket(self):
-        """Target path = s3://{frontend_bucket}/{filename}"""
-        s3_calls = self._get_s3_calls()
-        for c, fm in zip(s3_calls, _FILES_MANIFEST):
-            cmd = c[0][0]
-            expected_dst = f"s3://{_FRONTEND_BUCKET}/{fm['filename']}"
-            assert expected_dst in cmd, \
-                f"Expected target '{expected_dst}' in cmd: {cmd}"
-
-    def test_s3_cp_includes_content_type_flag(self):
-        """--content-type flag with correct MIME type for each file"""
-        s3_calls = self._get_s3_calls()
-        for c, fm in zip(s3_calls, _FILES_MANIFEST):
-            cmd = c[0][0]
-            assert '--content-type' in cmd, f"Missing --content-type in: {cmd}"
-            assert fm['content_type'] in cmd, \
-                f"Expected content-type '{fm['content_type']}' in cmd: {cmd}"
-
-    def test_s3_cp_includes_cache_control_flag(self):
-        """--cache-control flag with correct value for each file"""
-        s3_calls = self._get_s3_calls()
-        for c, fm in zip(s3_calls, _FILES_MANIFEST):
-            cmd = c[0][0]
-            assert '--cache-control' in cmd, f"Missing --cache-control in: {cmd}"
-            # cache_control value appears in the command
-            assert fm['cache_control'] in cmd, \
-                f"Expected cache-control '{fm['cache_control']}' in cmd: {cmd}"
-
-    def test_s3_cp_includes_metadata_directive_replace(self):
-        """--metadata-directive REPLACE must be in every s3 cp command"""
-        s3_calls = self._get_s3_calls()
-        for c in s3_calls:
-            cmd = c[0][0]
-            assert '--metadata-directive' in cmd, f"Missing --metadata-directive in: {cmd}"
-            assert 'REPLACE' in cmd, f"Missing REPLACE in: {cmd}"
-
-    def test_s3_cp_includes_region_flag(self):
-        """--region us-east-1 must be present"""
-        s3_calls = self._get_s3_calls()
-        for c in s3_calls:
-            cmd = c[0][0]
-            assert '--region' in cmd, f"Missing --region in: {cmd}"
-            assert 'us-east-1' in cmd, f"Missing 'us-east-1' in: {cmd}"
+            _call_callback(action='approve')
+        s3_calls = [c for c in mock_boto3.client.call_args_list if c[0][0] == 's3']
+        assert len(s3_calls) >= 1
 
     def test_s3_cp_html_has_no_cache_control(self):
-        """index.html gets no-cache, immutable assets get max-age"""
-        s3_calls = self._get_s3_calls()
-        html_cmd = s3_calls[0][0][0]  # first file is index.html
-        assert 'no-cache' in html_cmd
+        """index.html gets no-cache CacheControl; assets get max-age=immutable"""
+        calls = self._get_put_object_calls()
+        assert len(calls) >= 2
 
-        js_cmd = s3_calls[1][0][0]  # second file is .js
-        assert 'max-age=31536000' in js_cmd
-        assert 'immutable' in js_cmd
+        # First file is index.html
+        html_kwargs = calls[0][1] if calls[0][1] else {}
+        html_cc = html_kwargs.get('CacheControl', '')
+        assert 'no-cache' in html_cc, \
+            f"Expected no-cache in index.html CacheControl: {html_cc}"
+
+        # Second file is .js
+        js_kwargs = calls[1][1] if calls[1][1] else {}
+        js_cc = js_kwargs.get('CacheControl', '')
+        assert 'max-age=31536000' in js_cc, \
+            f"Expected max-age in .js CacheControl: {js_cc}"
+        assert 'immutable' in js_cc, \
+            f"Expected immutable in .js CacheControl: {js_cc}"
 
 
 # ---------------------------------------------------------------------------
-# CloudFront Invalidation Command Format
+# CloudFront Invalidation — Integration Tests
+# (Updated from command string format; implementation uses boto3 create_invalidation)
 # ---------------------------------------------------------------------------
 
 class TestCFInvalidationCmdFormat:
-    """Verify the exact CF invalidation command structure."""
+    """Verify the CF create_invalidation boto3 call."""
 
-    def _get_cf_calls(self):
-        mock_execute, mock_table = _patch_all()
-        with patch('callbacks.execute_command', mock_execute), \
+    def _get_cf_create_invalidation_calls(self):
+        _, _, mock_cf, *_ = _run_approve()
+        return mock_cf.create_invalidation.call_args_list
+
+    def test_cf_invalidation_command_starts_correctly(self):
+        """CF create_invalidation called exactly once"""
+        calls = self._get_cf_create_invalidation_calls()
+        assert len(calls) == 1, \
+            f"Expected 1 create_invalidation call, got {len(calls)}"
+
+    def test_cf_invalidation_includes_distribution_id(self):
+        """create_invalidation called with correct DistributionId"""
+        calls = self._get_cf_create_invalidation_calls()
+        kwargs = calls[0][1] if calls[0][1] else {}
+        dist_id = kwargs.get('DistributionId')
+        assert dist_id == _DISTRIBUTION_ID, \
+            f"Expected DistributionId '{_DISTRIBUTION_ID}', got '{dist_id}'"
+
+    def test_cf_invalidation_paths_wildcard(self):
+        """create_invalidation called with '/*' path"""
+        calls = self._get_cf_create_invalidation_calls()
+        kwargs = calls[0][1] if calls[0][1] else {}
+        batch = kwargs.get('InvalidationBatch', {})
+        paths = batch.get('Paths', {}).get('Items', [])
+        assert '/*' in paths, \
+            f"Expected '/*' in invalidation paths, got: {paths}"
+
+    def test_cf_invalidation_includes_region(self):
+        """CF boto3 client is created (replaces --region check)"""
+        import callbacks
+        mock_boto3, mock_s3, mock_cf = _make_mock_boto3()
+        mock_table = MagicMock()
+        with patch.object(callbacks, '_boto3', mock_boto3), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -217,52 +302,16 @@ class TestCFInvalidationCmdFormat:
              patch('callbacks.emit_metric'), \
              patch('notifications._send_message_silent'):
             _call_callback(action='approve')
-        return [c for c in mock_execute.call_args_list if 'cloudfront create-invalidation' in c[0][0]]
-
-    def test_cf_invalidation_command_starts_correctly(self):
-        """CF command starts with 'aws cloudfront create-invalidation'"""
-        cf_calls = self._get_cf_calls()
-        assert len(cf_calls) == 1
-        cmd = cf_calls[0][0][0]
-        assert cmd.startswith('aws cloudfront create-invalidation'), \
-            f"Unexpected CF command start: {cmd[:50]}"
-
-    def test_cf_invalidation_includes_distribution_id(self):
-        """CF command includes --distribution-id {_DISTRIBUTION_ID}"""
-        cf_calls = self._get_cf_calls()
-        cmd = cf_calls[0][0][0]
-        assert '--distribution-id' in cmd, f"Missing --distribution-id in: {cmd}"
-        assert _DISTRIBUTION_ID in cmd, \
-            f"Expected distribution-id '{_DISTRIBUTION_ID}' in: {cmd}"
-
-    def test_cf_invalidation_paths_wildcard(self):
-        """CF command includes --paths with wildcard '/*'"""
-        cf_calls = self._get_cf_calls()
-        cmd = cf_calls[0][0][0]
-        assert '--paths' in cmd, f"Missing --paths in: {cmd}"
-        assert '/*' in cmd, f"Missing '/*' wildcard in: {cmd}"
-
-    def test_cf_invalidation_includes_region(self):
-        """CF command includes --region"""
-        cf_calls = self._get_cf_calls()
-        cmd = cf_calls[0][0][0]
-        assert '--region' in cmd, f"Missing --region in: {cmd}"
+        cf_calls = [c for c in mock_boto3.client.call_args_list if c[0][0] == 'cloudfront']
+        assert len(cf_calls) >= 1, "Expected cloudfront boto3 client to be created"
 
     def test_cf_not_called_when_all_files_fail(self):
         """CF invalidation must NOT be called when all S3 copies fail"""
-        mock_execute, mock_table = _patch_all(
-            s3_side_effect=lambda cmd, **kwargs: 'An error occurred (AccessDenied): (exit code: 255)'
+        # Simulate all get_object calls failing (so no files are deployed)
+        _, _, mock_cf, *_ = _run_approve(
+            get_object_side_effect=Exception('AccessDenied: s3:GetObject'),
         )
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=mock_table), \
-             patch('callbacks.answer_callback'), \
-             patch('callbacks.update_message'), \
-             patch('callbacks._update_request_status'), \
-             patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
-            _call_callback(action='approve')
-        cf_calls = [c for c in mock_execute.call_args_list if 'cloudfront create-invalidation' in c[0][0]]
-        assert len(cf_calls) == 0, "CF invalidation should not be called when all files fail"
+        mock_cf.create_invalidation.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -287,9 +336,9 @@ class TestIsExecuteFailedAWSCLIFormat:
         assert _is_execute_failed('Some error output (exit code: 1)') is True
 
     def test_bouncer_prefix_error_is_failed(self):
-        """❌ prefix (Bouncer-formatted) is treated as failure"""
+        """X prefix (Bouncer-formatted) is treated as failure"""
         from callbacks import _is_execute_failed
-        assert _is_execute_failed('❌ S3 access denied') is True
+        assert _is_execute_failed('\u274c S3 access denied') is True
 
     def test_successful_s3_cp_output_is_not_failed(self):
         """Successful s3 cp output is not a failure"""
@@ -314,27 +363,16 @@ class TestIsExecuteFailedAWSCLIFormat:
         assert _is_execute_failed('') is False
 
     def test_aws_cli_error_detected_and_file_marked_failed(self):
-        """When execute_command returns AWS CLI error, file goes into failed list"""
-        aws_error = (
-            'An error occurred (NoSuchBucket) when calling the CopyObject operation: '
-            'The specified bucket does not exist (exit code: 255)'
+        """When boto3 get_object raises, file goes into failed list"""
+        result, mock_s3, mock_cf, _, mock_update_status, _ = _run_approve(
+            get_object_side_effect=Exception(
+                'An error occurred (NoSuchBucket): The specified bucket does not exist'
+            ),
         )
-        mock_execute, mock_table = _patch_all(
-            s3_side_effect=lambda cmd, **kwargs: aws_error
-        )
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=mock_table), \
-             patch('callbacks.answer_callback'), \
-             patch('callbacks.update_message'), \
-             patch('callbacks._update_request_status') as mock_update_status, \
-             patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
-            result = _call_callback(action='approve')
 
-        body = json.loads(result['body'])
         extra = mock_update_status.call_args[1].get('extra_attrs', {})
         assert extra.get('failed_count') == len(_FILES_MANIFEST), \
-            "All files should be failed when AWS CLI error is returned"
+            "All files should be failed when boto3 get_object raises"
         assert extra.get('deploy_status') == 'deploy_failed'
 
 
@@ -376,72 +414,39 @@ class TestProgressUpdateSevenFiles:
     def test_progress_update_at_file_5(self):
         """update_message must be called with '5/7' after processing file 5"""
         item = self._make_7file_item()
-        mock_execute, mock_table = _patch_all()
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=mock_table), \
-             patch('callbacks.answer_callback'), \
-             patch('callbacks.update_message') as mock_update, \
-             patch('callbacks._update_request_status'), \
-             patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
-            _call_callback(action='approve', item=item)
+        _, _, _, mock_update, *_ = _run_approve(item=item)
 
         progress_texts = [
             c[0][1] for c in mock_update.call_args_list
-            if len(c[0]) > 1 and '進度' in c[0][1]
+            if len(c[0]) > 1 and '\u9032\u5ea6' in c[0][1]
         ]
-        # At least one progress call should mention '5/7'
         assert any('5/7' in t for t in progress_texts), \
             f"Expected '5/7' progress update. Got: {progress_texts}"
 
     def test_progress_update_at_final(self):
         """update_message must be called with '7/7' at the end"""
         item = self._make_7file_item()
-        mock_execute, mock_table = _patch_all()
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=mock_table), \
-             patch('callbacks.answer_callback'), \
-             patch('callbacks.update_message') as mock_update, \
-             patch('callbacks._update_request_status'), \
-             patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
-            _call_callback(action='approve', item=item)
+        _, _, _, mock_update, *_ = _run_approve(item=item)
 
         progress_texts = [
             c[0][1] for c in mock_update.call_args_list
-            if len(c[0]) > 1 and '進度' in c[0][1]
+            if len(c[0]) > 1 and '\u9032\u5ea6' in c[0][1]
         ]
         assert any('7/7' in t for t in progress_texts), \
             f"Expected '7/7' final progress update. Got: {progress_texts}"
 
     def test_s3_copy_called_for_all_7_files(self):
-        """All 7 files get their own s3 cp command"""
+        """All 7 files get their own put_object call"""
         item = self._make_7file_item()
-        mock_execute, mock_table = _patch_all()
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=mock_table), \
-             patch('callbacks.answer_callback'), \
-             patch('callbacks.update_message'), \
-             patch('callbacks._update_request_status'), \
-             patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
-            _call_callback(action='approve', item=item)
+        _, mock_s3, *_ = _run_approve(item=item)
 
-        s3_calls = [c for c in mock_execute.call_args_list if 's3 cp' in c[0][0]]
-        assert len(s3_calls) == 7, f"Expected 7 s3 cp calls, got {len(s3_calls)}"
+        s3_calls = mock_s3.put_object.call_args_list
+        assert len(s3_calls) == 7, f"Expected 7 put_object calls, got {len(s3_calls)}"
 
     def test_cf_called_once_after_all_7_files(self):
         """CF invalidation called once after all files processed"""
         item = self._make_7file_item()
-        mock_execute, mock_table = _patch_all()
-        with patch('callbacks.execute_command', mock_execute), \
-             patch('callbacks._get_table', return_value=mock_table), \
-             patch('callbacks.answer_callback'), \
-             patch('callbacks.update_message'), \
-             patch('callbacks._update_request_status'), \
-             patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
-            _call_callback(action='approve', item=item)
+        _, _, mock_cf, *_ = _run_approve(item=item)
 
-        cf_calls = [c for c in mock_execute.call_args_list if 'cloudfront create-invalidation' in c[0][0]]
-        assert len(cf_calls) == 1, f"Expected 1 CF invalidation call, got {len(cf_calls)}"
+        assert mock_cf.create_invalidation.call_count == 1, \
+            f"Expected 1 CF invalidation call, got {mock_cf.create_invalidation.call_count}"
