@@ -146,19 +146,23 @@ def app_module(mock_dynamodb):
     accounts._bot_commands_initialized = True
 
     # Mock send_message_with_entities (added in entities Phase 2, Sprint 13)
-    # so that tests predating this change still pass
+    # so that tests predating this change still pass.
+    # Save + restore to avoid polluting test_entities_phase1.py.
     import telegram as _tg
     from unittest.mock import MagicMock
-    if not hasattr(_tg, 'send_message_with_entities'):
-        _tg.send_message_with_entities = MagicMock(
-            return_value={'ok': True, 'result': {'message_id': 99999}}
-        )
-    elif not isinstance(_tg.send_message_with_entities, MagicMock):
+    _orig_smwe = getattr(_tg, 'send_message_with_entities', None)
+    if not hasattr(_tg, 'send_message_with_entities') or not isinstance(_tg.send_message_with_entities, MagicMock):
         _tg.send_message_with_entities = MagicMock(
             return_value={'ok': True, 'result': {'message_id': 99999}}
         )
 
     yield app
+
+    # Restore so subsequent test modules can patch _telegram_request normally.
+    if _orig_smwe is not None:
+        _tg.send_message_with_entities = _orig_smwe
+    elif hasattr(_tg, 'send_message_with_entities'):
+        del _tg.send_message_with_entities
 
 
 _ALL_TABLE_KEYS = {
