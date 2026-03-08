@@ -244,7 +244,7 @@ class TestApproveFullSuccess:
              patch('callbacks.update_message') as mock_update, \
              patch('callbacks._update_request_status') as mock_update_status, \
              patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
+             patch('telegram.send_message_with_entities'):
             result = _call_callback(action='approve')
         return result, mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table, mock_update, mock_update_status
 
@@ -356,7 +356,7 @@ class TestApprovePartialFailure:
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status') as mock_update_status, \
              patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
+             patch('telegram.send_message_with_entities'):
             result = _call_callback(action='approve')
         return result, mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table, mock_update_status
 
@@ -407,7 +407,7 @@ class TestApproveFullFailure:
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status') as mock_update_status, \
              patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
+             patch('telegram.send_message_with_entities'):
             result = _call_callback(action='approve')
         return result, mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table, mock_update_status
 
@@ -442,7 +442,7 @@ class TestCFInvalidationFailure:
              patch('callbacks.update_message') as mock_update, \
              patch('callbacks._update_request_status') as mock_update_status, \
              patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
+             patch('telegram.send_message_with_entities'):
             result = _call_callback(action='approve')
         return result, mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table, mock_update, mock_update_status
 
@@ -503,7 +503,7 @@ class TestDDBFields:
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status') as mock_update_status, \
              patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
+             patch('telegram.send_message_with_entities'):
             _call_callback(action='approve')
         extra = mock_update_status.call_args[1].get('extra_attrs', {})
         details = json.loads(extra['deployed_details'])
@@ -522,7 +522,7 @@ class TestDDBFields:
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status') as mock_update_status, \
              patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
+             patch('telegram.send_message_with_entities'):
             _call_callback(action='approve')
         extra = mock_update_status.call_args[1].get('extra_attrs', {})
         failed = json.loads(extra['failed_details'])
@@ -577,7 +577,7 @@ class TestApproveProgressUpdate:
              patch('callbacks.update_message') as mock_update, \
              patch('callbacks._update_request_status'), \
              patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
+             patch('telegram.send_message_with_entities'):
             _call_callback(action='approve', item=self._make_large_item())
 
         progress_calls = [
@@ -643,7 +643,7 @@ class TestDeployRoleArnPhaseB:
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status'), \
              patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
+             patch('telegram.send_message_with_entities'):
             _call_callback(action='approve', item=self._make_item_with_role())
 
         sts_mock.assume_role.assert_called()  # called for both S3 and CF clients
@@ -660,7 +660,7 @@ class TestDeployRoleArnPhaseB:
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status'), \
              patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
+             patch('telegram.send_message_with_entities'):
             _call_callback(action='approve', item=self._make_item_with_role())
 
         # s3 client created with aws_access_key_id = assumed-role credentials
@@ -681,7 +681,7 @@ class TestDeployRoleArnPhaseB:
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status'), \
              patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
+             patch('telegram.send_message_with_entities'):
             _call_callback(action='approve', item=self._make_item_with_role())
 
         cf_cred_calls = [
@@ -701,7 +701,7 @@ class TestDeployRoleArnPhaseB:
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status'), \
              patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
+             patch('telegram.send_message_with_entities'):
             _call_callback(action='approve', item=self._make_item_without_role())
 
         # Files are deployed successfully
@@ -723,7 +723,7 @@ class TestDeployRoleArnPhaseB:
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status'), \
              patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
+             patch('telegram.send_message_with_entities'):
             _call_callback(action='approve', item=self._make_item_without_role())
 
         mock_cf.create_invalidation.assert_called_once()
@@ -743,7 +743,7 @@ class TestDeployRoleArnPhaseB:
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status'), \
              patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
+             patch('telegram.send_message_with_entities'):
             _call_callback(action='approve', item=self._make_item_none_role())
 
         assert mock_s3_target.put_object.call_count == len(_FILES_MANIFEST)

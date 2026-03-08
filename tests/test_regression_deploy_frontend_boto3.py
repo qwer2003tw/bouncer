@@ -188,7 +188,7 @@ def _run(item, mocks, dispatcher):
          patch('callbacks.update_message') as mock_update, \
          patch('callbacks._update_request_status') as mock_update_status, \
          patch('callbacks.emit_metric'), \
-         patch('notifications._send_message_silent'):
+         patch('telegram.send_message_with_entities'):
         mock_boto3_mod.client.side_effect = dispatcher
         result = _call_callback(item)
     return result, mock_update_status, mock_update
@@ -372,7 +372,7 @@ class TestR5NoExecuteCommand:
              patch('callbacks._update_request_status'), \
              patch('callbacks.emit_metric'), \
              patch('callbacks.execute_command') as mock_exec_cmd, \
-             patch('notifications._send_message_silent'):
+             patch('telegram.send_message_with_entities'):
             mock_boto3_mod.client.side_effect = dispatcher
             _call_callback(item)
         mock_exec_cmd.assert_not_called()
@@ -388,7 +388,7 @@ class TestR5NoExecuteCommand:
              patch('callbacks._update_request_status'), \
              patch('callbacks.emit_metric'), \
              patch('callbacks.execute_command') as mock_exec_cmd, \
-             patch('notifications._send_message_silent'):
+             patch('telegram.send_message_with_entities'):
             mock_boto3_mod.client.side_effect = dispatcher
             _call_callback(item)
         mock_exec_cmd.assert_not_called()
@@ -436,7 +436,7 @@ class TestR7CFWithAssumedRole:
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status'), \
              patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
+             patch('telegram.send_message_with_entities'):
             mock_boto3_mod.client.side_effect = _dispatcher
             _call_callback(item)
 
@@ -481,7 +481,7 @@ class TestR8CFWithLambdaRole:
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status'), \
              patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
+             patch('telegram.send_message_with_entities'):
             mock_boto3_mod.client.side_effect = _dispatcher
             _call_callback(item)
 

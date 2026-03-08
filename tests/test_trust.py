@@ -1102,8 +1102,9 @@ class TestHandleTrustExpiry:
 
     # ── Scenario 2+3: queries pending and sends notification ─────────────────
 
+    @patch('telegram.send_message_with_entities')
     @patch('telegram.send_telegram_message_silent')
-    def test_handle_trust_expiry_with_pending_requests(self, mock_silent, app_module):
+    def test_handle_trust_expiry_with_pending_requests(self, mock_silent, mock_entities, app_module):
         """handler finds pending requests and sends a notification with correct count."""
         import time
 
@@ -1155,8 +1156,8 @@ class TestHandleTrustExpiry:
         assert body['pending_count'] == 2
         assert body['trust_id'] == trust_id
 
-        # Telegram notification should have been sent
-        assert mock_silent.called
+        # Telegram notification should have been sent (trust_session_summary uses send_message_with_entities)
+        assert mock_entities.called or mock_silent.called
 
     @patch('telegram.send_telegram_message_silent')
     def test_handle_trust_expiry_no_pending_requests(self, mock_silent, app_module):

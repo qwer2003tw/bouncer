@@ -858,26 +858,26 @@ class TestNotificationsCoverage:
 
     def test_send_grant_complete_notification(self):
         """Grant complete notification is sent silently."""
-        ctx, _, silent_mock = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         with ctx:
             self.notif.send_grant_complete_notification(
                 grant_id='grant-done-001',
                 reason='all commands executed',
             )
-        silent_mock.assert_called_once()
-        text = silent_mock.call_args[0][0]
+        entities_mock.assert_called_once()
+        text = entities_mock.call_args[0][0]
         assert 'Grant' in text
         assert '已結束' in text
 
     def test_send_grant_complete_notification_long_id(self):
         """Long grant_id is truncated in notification."""
-        ctx, _, silent_mock = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         with ctx:
             self.notif.send_grant_complete_notification(
                 grant_id='g' * 30,
                 reason='expired',
             )
-        text = silent_mock.call_args[0][0]
+        text = entities_mock.call_args[0][0]
         assert '...' in text
 
     # ------------------------------------------------------------------
@@ -938,7 +938,7 @@ class TestNotificationsCoverage:
 
     def test_send_trust_upload_notification_basic(self):
         """Trust upload notification is sent silently."""
-        ctx, _, silent_mock = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         with ctx:
             self.notif.send_trust_upload_notification(
                 filename='index.html',
@@ -949,14 +949,14 @@ class TestNotificationsCoverage:
                 max_uploads=5,
                 source='UploadBot',
             )
-        silent_mock.assert_called_once()
-        text, keyboard = silent_mock.call_args[0]
+        entities_mock.assert_called_once()
+        text = entities_mock.call_args[0][0]
         assert 'index.html' in text
         assert '信任上傳' in text
 
     def test_send_trust_upload_notification_batch_hash(self):
         """batch sha256 is handled (not truncated)."""
-        ctx, _, silent_mock = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         with ctx:
             self.notif.send_trust_upload_notification(
                 filename='batch-upload',
@@ -966,12 +966,12 @@ class TestNotificationsCoverage:
                 upload_count=3,
                 max_uploads=10,
             )
-        text, _ = silent_mock.call_args[0]
+        text = entities_mock.call_args[0][0]
         assert 'batch' in text
 
     def test_send_trust_upload_notification_error_handling(self):
         """Exception is caught — does not raise."""
-        with patch.object(self.notif, '_send_message_silent', side_effect=RuntimeError('fail')):
+        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=RuntimeError('fail')):
             self.notif.send_trust_upload_notification(
                 filename='file.txt',
                 content_size=100,
@@ -1023,7 +1023,7 @@ class TestNotificationsCoverage:
 
     def test_send_presigned_notification_basic(self):
         """Presigned notification is sent silently with correct fields."""
-        ctx, _, silent_mock = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         with ctx:
             self.notif.send_presigned_notification(
                 filename='report.pdf',
@@ -1031,8 +1031,8 @@ class TestNotificationsCoverage:
                 account_id='190825685292',
                 expires_at='2024-01-01T00:00:00Z',
             )
-        silent_mock.assert_called_once()
-        text = silent_mock.call_args[0][0]
+        entities_mock.assert_called_once()
+        text = entities_mock.call_args[0][0]
         assert 'report.pdf' in text
         assert 'PrivateBot' in text
         assert '190825685292' in text
@@ -1040,7 +1040,7 @@ class TestNotificationsCoverage:
 
     def test_send_presigned_notification_no_presigned_url_in_message(self):
         """Presigned URL itself must NOT appear in the notification text."""
-        ctx, _, silent_mock = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         with ctx:
             self.notif.send_presigned_notification(
                 filename='secret.pdf',
@@ -1048,14 +1048,14 @@ class TestNotificationsCoverage:
                 account_id='111',
                 expires_at='2024-01-01T00:00:00Z',
             )
-        text = silent_mock.call_args[0][0]
+        text = entities_mock.call_args[0][0]
         # No URL with X-Amz-Signature in the notification
         assert 'X-Amz-Signature' not in text
         assert 'https://s3.amazonaws.com' not in text
 
     def test_send_presigned_notification_none_fields(self):
         """None fields default gracefully (no crash)."""
-        ctx, _, silent_mock = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         with ctx:
             self.notif.send_presigned_notification(
                 filename=None,
@@ -1063,11 +1063,11 @@ class TestNotificationsCoverage:
                 account_id=None,
                 expires_at=None,
             )
-        silent_mock.assert_called_once()
+        entities_mock.assert_called_once()
 
     def test_send_presigned_notification_error_handling(self):
-        """Exception in _send_message_silent is caught — no crash."""
-        with patch.object(self.notif, '_send_message_silent', side_effect=RuntimeError('fail')):
+        """Exception in send_message_with_entities is caught — no crash."""
+        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=RuntimeError('fail')):
             self.notif.send_presigned_notification(
                 filename='file.pdf',
                 source='Bot',
@@ -1081,7 +1081,7 @@ class TestNotificationsCoverage:
 
     def test_send_presigned_batch_notification_basic(self):
         """Presigned batch notification is sent silently with correct fields."""
-        ctx, _, silent_mock = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         with ctx:
             self.notif.send_presigned_batch_notification(
                 source='BatchBot',
@@ -1089,15 +1089,15 @@ class TestNotificationsCoverage:
                 account_id='190825685292',
                 expires_at='2024-06-01T12:00:00Z',
             )
-        silent_mock.assert_called_once()
-        text = silent_mock.call_args[0][0]
+        entities_mock.assert_called_once()
+        text = entities_mock.call_args[0][0]
         assert '7' in text
         assert 'BatchBot' in text
         assert '190825685292' in text
 
     def test_send_presigned_batch_notification_none_fields(self):
         """None fields default gracefully (no crash)."""
-        ctx, _, silent_mock = self._patch_send()
+        ctx, entities_mock = self._patch_entities_send()
         with ctx:
             self.notif.send_presigned_batch_notification(
                 source=None,
@@ -1105,11 +1105,11 @@ class TestNotificationsCoverage:
                 account_id=None,
                 expires_at=None,
             )
-        silent_mock.assert_called_once()
+        entities_mock.assert_called_once()
 
     def test_send_presigned_batch_notification_error_handling(self):
         """Exception is caught — no crash."""
-        with patch.object(self.notif, '_send_message_silent', side_effect=RuntimeError('fail')):
+        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=RuntimeError('fail')):
             self.notif.send_presigned_batch_notification(
                 source='Bot',
                 count=3,
@@ -1215,7 +1215,7 @@ class TestNotificationsCoverage:
 
     def test_send_grant_complete_notification_error_handling(self):
         """Exception in send_grant_complete_notification is caught — no crash."""
-        with patch.object(self.notif, '_send_message_silent', side_effect=RuntimeError('tg fail')):
+        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=RuntimeError('tg fail')):
             self.notif.send_grant_complete_notification(
                 grant_id='grant-complete-err',
                 reason='expired',

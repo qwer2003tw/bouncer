@@ -486,17 +486,17 @@ def send_grant_execute_notification(
 
 
 def send_grant_complete_notification(grant_id: str, reason: str) -> None:
-    """發送 Grant Session 完成/過期通知"""
+    """發送 Grant Session 完成/過期通知（entities 模式，無 parse_mode）"""
     try:
         grant_short = grant_id[:20] + '...' if len(grant_id) > 20 else grant_id
 
-        text = (
-            f"🔑 *Grant 已結束*\n\n"
-            f"🆔 `{grant_short}`\n"
-            f"💬 *原因：* {_escape_markdown(reason or '')}"
-        )
+        mb = MessageBuilder()
+        mb.text("🔑 ").bold("Grant 已結束").newline(2)
+        mb.text("🆔 ").code(grant_short).newline()
+        mb.text("💬 ").bold("原因：").text(f" {reason or ''}")
 
-        _send_message_silent(text)
+        text, entities = mb.build()
+        _telegram.send_message_with_entities(text, entities, silent=True)
 
     except Exception as e:
         logger.error(f"[GRANT] send_grant_complete_notification error: {e}")
@@ -536,21 +536,21 @@ def send_trust_upload_notification(
     max_uploads: int,
     source: str = '',
 ) -> None:
-    """發送 Trust Upload 自動批准的靜默通知"""
+    """發送 Trust Upload 自動批准的靜默通知（entities 模式，無 parse_mode）"""
     try:
         size_str = format_size_human(content_size)
-
-        source_line = f"🤖 {_escape_markdown(source)}\n" if source else ""
         hash_short = sha256_hash[:16] if sha256_hash != 'batch' else 'batch'
 
-        text = (
-            f"📤 *信任上傳* (自動)\n"
-            f"📁 `{filename}`\n"
-            f"📊 {size_str} | SHA256: `{hash_short}`\n"
-            f"📈 上傳: {upload_count}/{max_uploads}\n"
-            f"{source_line}"
-            f"🔑 `{trust_id}`"
-        )
+        mb = MessageBuilder()
+        mb.text("📤 ").bold("信任上傳").text(" (自動)").newline()
+        mb.text("📁 ").code(filename or '').newline()
+        mb.text(f"📊 {size_str} | SHA256: ").code(hash_short).newline()
+        mb.text(f"📈 上傳: {upload_count}/{max_uploads}")
+        if source:
+            mb.newline().text(f"🤖 {source}")
+        mb.newline().text("🔑 ").code(trust_id)
+
+        text, entities = mb.build()
 
         keyboard = {
             'inline_keyboard': [[
@@ -558,7 +558,7 @@ def send_trust_upload_notification(
             ]]
         }
 
-        _send_message_silent(text, keyboard)
+        _telegram.send_message_with_entities(text, entities, reply_markup=keyboard, silent=True)
 
     except Exception as e:
         logger.error(f"[TRUST UPLOAD] send_trust_upload_notification error: {e}")
@@ -646,25 +646,20 @@ def send_presigned_notification(
     account_id: str,
     expires_at: str,
 ) -> None:
-    """發送 Presigned URL 生成的靜默通知（單檔）。
+    """發送 Presigned URL 生成的靜默通知（單檔）。（entities 模式，無 parse_mode）
 
     ❌ 絕對不含 presigned URL 本身。
     """
     try:
-        safe_filename = _escape_markdown(filename or '')
-        safe_source = _escape_markdown(source or 'Unknown')
-        safe_account_id = _escape_markdown(account_id or '')
-        safe_expires_at = _escape_markdown(expires_at or '')
+        mb = MessageBuilder()
+        mb.text("📎 ").bold("Presigned URL 已生成").newline()
+        mb.text("來源：").text(source or 'Unknown').newline()
+        mb.text("檔案：").code(filename or '').newline()
+        mb.text("帳號：").code(account_id or '').newline()
+        mb.text("過期：").code(expires_at or '')
 
-        text = (
-            f"📎 *Presigned URL 已生成*\n"
-            f"來源：{safe_source}\n"
-            f"檔案：`{safe_filename}`\n"
-            f"帳號：`{safe_account_id}`\n"
-            f"過期：`{safe_expires_at}`"
-        )
-
-        _send_message_silent(text)
+        text, entities = mb.build()
+        _telegram.send_message_with_entities(text, entities, silent=True)
 
     except Exception as e:
         logger.error(f"[PRESIGNED] send_presigned_notification error: {e}")
@@ -676,24 +671,20 @@ def send_presigned_batch_notification(
     account_id: str,
     expires_at: str,
 ) -> None:
-    """發送 Presigned URL Batch 生成的靜默通知。
+    """發送 Presigned URL Batch 生成的靜默通知。（entities 模式，無 parse_mode）
 
     ❌ 絕對不含任何 presigned URL。
     """
     try:
-        safe_source = _escape_markdown(source or 'Unknown')
-        safe_account_id = _escape_markdown(account_id or '')
-        safe_expires_at = _escape_markdown(expires_at or '')
+        mb = MessageBuilder()
+        mb.text("📎 ").bold("Presigned URL Batch 已生成").newline()
+        mb.text("來源：").text(source or 'Unknown').newline()
+        mb.text(f"檔案數：{count} 個").newline()
+        mb.text("帳號：").code(account_id or '').newline()
+        mb.text("過期：").code(expires_at or '')
 
-        text = (
-            f"📎 *Presigned URL Batch 已生成*\n"
-            f"來源：{safe_source}\n"
-            f"檔案數：{count} 個\n"
-            f"帳號：`{safe_account_id}`\n"
-            f"過期：`{safe_expires_at}`"
-        )
-
-        _send_message_silent(text)
+        text, entities = mb.build()
+        _telegram.send_message_with_entities(text, entities, silent=True)
 
     except Exception as e:
         logger.error(f"[PRESIGNED] send_presigned_batch_notification error: {e}")
@@ -704,7 +695,7 @@ def send_presigned_batch_notification(
 # =====================================================================
 
 def send_trust_session_summary(trust_item: dict, end_reason: str = 'revoke') -> None:
-    """Send a Telegram summary when a trust session ends (revoke or expiry).
+    """Send a Telegram summary when a trust session ends (revoke or expiry).（entities 模式，無 parse_mode）
 
     Formats a message listing all commands executed during the trust session,
     with success/failure counts and truncation for large sessions.
@@ -717,22 +708,20 @@ def send_trust_session_summary(trust_item: dict, end_reason: str = 'revoke') -> 
         commands_executed = trust_item.get('commands_executed', [])
         trust_id_short = str(trust_item.get('request_id', ''))[-12:]
 
-        # Header differs by end reason
         if end_reason == 'expiry':
-            # 🔓 信任時段結束（自動到期）
-            header = "\U0001f513 *\u4fe1\u4efb\u6642\u6bb5\u7d50\u675f\uff08\u81ea\u52d5\u5230\u671f\uff09*"
+            header_text = "信任時段結束（自動到期）"
         else:
-            # 🔓 信任時段結束（手動撒銷）
-            header = "\U0001f513 *\u4fe1\u4efb\u6642\u6bb5\u7d50\u675f\uff08\u624b\u52d5\u6492\u92b7\uff09*"
+            header_text = "信任時段結束（手動撤銷）"
+
+        mb = MessageBuilder()
 
         # No commands — send brief notification
         if not commands_executed:
-            text = (
-                header + "\n\n"
-                "\U0001f194 `" + trust_id_short + "`\n"
-                "\U0001f4cb \u7121\u547d\u4ee4\u57f7\u884c"
-            )
-            _send_message_silent(text)
+            mb.text("🔓 ").bold(header_text).newline(2)
+            mb.text("🆔 ").code(trust_id_short).newline()
+            mb.text("📋 無命令執行")
+            text, entities = mb.build()
+            _telegram.send_message_with_entities(text, entities, silent=True)
             return
 
         # Calculate duration
@@ -741,7 +730,7 @@ def send_trust_session_summary(trust_item: dict, end_reason: str = 'revoke') -> 
         duration_secs = int(_t.time()) - created_at if created_at else 0
         duration_mins = duration_secs // 60
         duration_sec_part = duration_secs % 60
-        duration_str = str(duration_mins) + " \u5206 " + str(duration_sec_part) + " \u79d2"
+        duration_str = f"{duration_mins} 分 {duration_sec_part} 秒"
 
         # Count failures
         total = len(commands_executed)
@@ -752,34 +741,27 @@ def send_trust_session_summary(trust_item: dict, end_reason: str = 'revoke') -> 
         display_cmds = commands_executed[:display_limit]
         truncated = total > display_limit
 
-        cmd_lines = []
+        mb.text("🔓 ").bold(header_text).newline(2)
+        mb.text("🆔 ").code(trust_id_short).newline()
+        mb.text(f"⏱ 時長：{duration_str}").newline()
+        mb.text(f"📋 執行了 {total} 個命令：").newline()
+
         for i, entry in enumerate(display_cmds, start=1):
             cmd = entry.get('cmd', '')[:80]
-            ok_icon = "\u2705" if entry.get('success', True) else "\u274c"
-            cmd_lines.append("  " + str(i) + "\\. " + ok_icon + " `" + _escape_markdown(cmd) + "`")
+            ok_icon = "✅" if entry.get('success', True) else "❌"
+            mb.text(f"  {i}. {ok_icon} ").code(cmd).newline()
+
         if truncated:
-            cmd_lines.append("  _...\u9084\u6709 " + str(total - display_limit) + " \u500b\u547d\u4ee4_")
+            mb.text(f"  ...還有 {total - display_limit} 個命令").newline()
 
-        cmd_block = "\n".join(cmd_lines)
-
-        # Result line
+        mb.newline()
         if fail_count == 0:
-            result_line = "\u2705 \u5168\u90e8\u6210\u529f"
+            mb.text("✅ 全部成功")
         else:
-            result_line = "\u26a0\ufe0f " + str(fail_count) + " \u500b\u5931\u6557\uff08\u8acb\u67e5\u770b CloudWatch Logs\uff09"
+            mb.text(f"⚠️ {fail_count} 個失敗（請查看 CloudWatch Logs）")
 
-        executed_label = "\u57f7\u884c\u4e86 " + str(total) + " \u500b\u547d\u4ee4\uff1a"
-
-        text = (
-            header + "\n\n"
-            "\U0001f194 `" + trust_id_short + "`\n"
-            "\u23f1 \u6642\u9577\uff1a" + duration_str + "\n"
-            "\U0001f4cb " + executed_label + "\n"
-            + cmd_block + "\n\n"
-            + result_line
-        )
-
-        _send_message_silent(text)
+        text, entities = mb.build()
+        _telegram.send_message_with_entities(text, entities, silent=True)
 
     except Exception as exc:
         logger.error('[TRUST SUMMARY] send_trust_session_summary error: %s', exc)
@@ -794,7 +776,7 @@ def send_deploy_frontend_notification(
     reason: str = "",
     source: str = "",
 ) -> "NotificationResult":
-    """Send a Telegram approval request for a frontend deployment.
+    """Send a Telegram approval request for a frontend deployment.（entities 模式，無 parse_mode）
 
     Args:
         request_id:     Bouncer request ID.
@@ -808,15 +790,18 @@ def send_deploy_frontend_notification(
         NotificationResult(ok, message_id)
     """
     try:
-        from utils import format_size_human
-
         total_size = sum(int(f.get("size", 0)) for f in files_summary)
         total_size_str = format_size_human(total_size)
         file_count = len(files_summary)
 
-        # Build per-file list (max 10 displayed)
-        file_lines = []
-        for i, f in enumerate(files_summary[:10]):
+        mb = MessageBuilder()
+        mb.text("🚀 ").bold("Frontend Deploy Request").newline(2)
+        mb.text("📦 ").bold("Project:").text(f" {project or 'unknown'}").newline()
+        mb.text("🗂 ").bold("Target Bucket:").text(" ").code(target_info.get("frontend_bucket", "")).newline()
+        mb.text("☁️ ").bold("CloudFront:").text(" ").code(target_info.get("distribution_id", "")).newline()
+        mb.text("📁 ").bold(f"Files ({file_count}, {total_size_str}):").newline()
+
+        for f in files_summary[:10]:
             fname = f.get("filename", "?")
             fsize = format_size_human(int(f.get("size", 0)))
             cc = f.get("cache_control", "")
@@ -826,30 +811,18 @@ def send_deploy_frontend_notification(
                 cc_short = "no-cache"
             else:
                 cc_short = "no-cache"
-            file_lines.append(f"  \u2022 `{fname}` ({fsize}) \u2192 {cc_short}")
+            mb.text("  • ").code(fname).text(f" ({fsize}) → {cc_short}").newline()
+
         if file_count > 10:
-            file_lines.append(f"  _...and {file_count - 10} more files_")
+            mb.text(f"  ...and {file_count - 10} more files").newline()
 
-        files_text = "\n".join(file_lines)
+        mb.newline()
+        mb.text("🤖 ").bold("Source:").text(f" {source or 'Unknown'}").newline()
+        mb.text("💬 ").bold("Reason:").text(f" {reason or 'No reason provided'}").newline(2)
+        mb.text("🆔 ").bold("ID:").text(" ").code(request_id).newline()
+        mb.text("⏰ ").bold(f"Expires in {UPLOAD_TIMEOUT // 60} min")
 
-        safe_project = _escape_markdown(project or "unknown")
-        safe_source = _escape_markdown(source or "Unknown")
-        safe_reason = _escape_markdown(reason or "No reason provided")
-        safe_bucket = _escape_markdown(target_info.get("frontend_bucket", ""))
-        safe_dist = _escape_markdown(target_info.get("distribution_id", ""))
-
-        text = (
-            f"\U0001f680 *Frontend Deploy Request*\n\n"
-            f"\U0001f4e6 *Project:* `{safe_project}`\n"
-            f"\U0001f5c2 *Target Bucket:* `{safe_bucket}`\n"
-            f"\u2601\ufe0f *CloudFront:* `{safe_dist}`\n"
-            f"\U0001f4c1 *Files ({file_count}, {total_size_str}):*\n"
-            f"{files_text}\n\n"
-            f"\U0001f916 *Source:* {safe_source}\n"
-            f"\U0001f4ac *Reason:* {safe_reason}\n\n"
-            f"\U0001f194 *ID:* `{request_id}`\n"
-            f"\u23f0 *Expires in {UPLOAD_TIMEOUT // 60} min*"
-        )
+        text, entities = mb.build()
 
         keyboard = {
             "inline_keyboard": [
@@ -860,7 +833,7 @@ def send_deploy_frontend_notification(
             ]
         }
 
-        result = _send_message(text, keyboard)
+        result = _telegram.send_message_with_entities(text, entities, reply_markup=keyboard)
         ok = bool(result and result.get("ok"))
         message_id = None
         if ok:

@@ -450,7 +450,7 @@ class TestCreateTrustSessionUploads:
 
 class TestUploadNotifications:
 
-    @patch('notifications._send_message_silent')
+    @patch('telegram.send_message_with_entities')
     def test_trust_upload_notification(self, mock_send, app_module):
         from notifications import send_trust_upload_notification
         send_trust_upload_notification(
@@ -464,7 +464,7 @@ class TestUploadNotifications:
         assert 'config.json' in text
         assert '2/5' in text
 
-    @patch('notifications._send_message_silent')
+    @patch('telegram.send_message_with_entities')
     def test_trust_upload_notification_large_file(self, mock_send, app_module):
         from notifications import send_trust_upload_notification
         send_trust_upload_notification(
@@ -497,7 +497,7 @@ class TestUploadNotifications:
             if orig is not None:
                 _tg.send_message_with_entities = orig
 
-    @patch('notifications._send_message_silent')
+    @patch('telegram.send_message_with_entities')
     def test_trust_upload_notification_no_source(self, mock_send, app_module):
         from notifications import send_trust_upload_notification
         send_trust_upload_notification(

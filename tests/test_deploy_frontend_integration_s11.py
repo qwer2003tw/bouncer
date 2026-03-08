@@ -148,7 +148,7 @@ def _run_approve(item=None, get_object_side_effect=None, put_object_side_effect=
          patch('callbacks.update_message') as mock_update, \
          patch('callbacks._update_request_status') as mock_update_status, \
          patch('callbacks.emit_metric'), \
-         patch('notifications._send_message_silent'):
+         patch('telegram.send_message_with_entities'):
         result = _call_callback(action='approve', item=item)
 
     return result, mock_s3, mock_cf, mock_update, mock_update_status, mock_table
@@ -246,7 +246,7 @@ class TestS3CopyCmdFormat:
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status'), \
              patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
+             patch('telegram.send_message_with_entities'):
             _call_callback(action='approve')
         s3_calls = [c for c in mock_boto3.client.call_args_list if c[0][0] == 's3']
         assert len(s3_calls) >= 1
@@ -318,7 +318,7 @@ class TestCFInvalidationCmdFormat:
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status'), \
              patch('callbacks.emit_metric'), \
-             patch('notifications._send_message_silent'):
+             patch('telegram.send_message_with_entities'):
             _call_callback(action='approve')
         cf_calls = [c for c in mock_boto3.client.call_args_list if c[0][0] == 'cloudfront']
         assert len(cf_calls) >= 1, "Expected cloudfront boto3 client to be created"
