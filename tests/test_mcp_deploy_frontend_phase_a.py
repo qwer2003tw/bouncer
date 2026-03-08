@@ -68,7 +68,25 @@ def _is_error(result: dict) -> bool:
 # Validation tests
 # ---------------------------------------------------------------------------
 
+# ZTP Files config for tests (was hardcoded; now needs DDB mock)
+_ZTP_FRONTEND_CONFIG = {
+    'frontend_bucket': 'ztp-files-dev-frontendbucket-nvvimv31xp3v',
+    'distribution_id': 'E176PW0SA5JF29',
+    'region': 'us-east-1',
+    'deploy_role_arn': 'arn:aws:iam::190825685292:role/ztp-files-dev-frontend-deploy-role',
+}
+
+
 class TestValidation:
+    @pytest.fixture(autouse=True)
+    def mock_ztp_config(self):
+        """Sprint 18: _PROJECT_CONFIG removed; patch DDB lookup for validation tests.
+        Returns config only for 'ztp-files'; None for all others."""
+        def _ddb_side_effect(project_id):
+            return _ZTP_FRONTEND_CONFIG if project_id == 'ztp-files' else None
+        with patch("mcp_deploy_frontend._get_frontend_config", side_effect=_ddb_side_effect):
+            yield
+
     def test_missing_project(self):
         r = _call({"files": _make_files(), "source": "bot", "trust_scope": "ts"})
         body = _parse(r)
@@ -213,7 +231,7 @@ class TestHappyPath:
 
         with patch("mcp_deploy_frontend.boto3") as mock_boto3, \
              patch("mcp_deploy_frontend.table", mock_table), \
-             patch("mcp_deploy_frontend._get_frontend_config", return_value=None), \
+             patch("mcp_deploy_frontend._get_frontend_config", return_value=_ZTP_FRONTEND_CONFIG), \
              patch("mcp_deploy_frontend.send_deploy_frontend_notification", return_value=mock_notif_result) as mock_notif, \
              patch("notifications.post_notification_setup") as mock_pns:
             mock_boto3.client.return_value = mock_s3
@@ -418,7 +436,7 @@ class TestDeployRoleArnPhaseA:
 
         with patch("mcp_deploy_frontend.boto3") as mock_boto3, \
              patch("mcp_deploy_frontend.table", mock_table), \
-             patch("mcp_deploy_frontend._get_frontend_config", return_value=None), \
+             patch("mcp_deploy_frontend._get_frontend_config", return_value=_ZTP_FRONTEND_CONFIG), \
              patch("mcp_deploy_frontend.send_deploy_frontend_notification", return_value=mock_notif_result), \
              patch("notifications.post_notification_setup"):
             mock_boto3.client.return_value = mock_s3
@@ -439,42 +457,36 @@ class TestDeployRoleArnPhaseA:
         assert item["deploy_role_arn"] == "arn:aws:iam::190825685292:role/ztp-files-dev-frontend-deploy-role"
 
     def test_ddb_item_deploy_role_arn_is_none_when_not_configured(self):
-        """When a project has no deploy_role_arn in config, DDB item must have None (not absent)."""
-        import mcp_deploy_frontend as mdf
-        original_config = dict(mdf._PROJECT_CONFIG)
-        # Temporarily add a project without deploy_role_arn
-        mdf._PROJECT_CONFIG["test-project"] = {
+        """When a project has no deploy_role_arn in DDB config, DDB item must have None (not absent)."""
+        # Sprint 18: _PROJECT_CONFIG removed; use DDB mock with missing deploy_role_arn
+        config_without_role = {
             "frontend_bucket": "test-bucket",
             "distribution_id": "TESTDIST123",
             "region": "us-east-1",
-            # No deploy_role_arn key
+            "deploy_role_arn": None,  # explicitly None
         }
-        try:
-            files = _make_files()
-            mock_s3 = MagicMock()
-            mock_table = MagicMock()
-            mock_notif_result = MagicMock()
-            mock_notif_result.ok = True
-            mock_notif_result.message_id = 42
+        files = _make_files()
+        mock_s3 = MagicMock()
+        mock_table = MagicMock()
+        mock_notif_result = MagicMock()
+        mock_notif_result.ok = True
+        mock_notif_result.message_id = 42
 
-            with patch("mcp_deploy_frontend.boto3") as mock_boto3, \
-                 patch("mcp_deploy_frontend.table", mock_table), \
-                 patch("mcp_deploy_frontend._get_frontend_config", return_value=None), \
-                 patch("mcp_deploy_frontend.send_deploy_frontend_notification", return_value=mock_notif_result), \
-                 patch("notifications.post_notification_setup"):
-                mock_boto3.client.return_value = mock_s3
-                _call({
-                    "project": "test-project",
-                    "files": files,
-                    "reason": "Backward compat test",
-                    "source": "Bot",
-                    "trust_scope": "ts",
-                })
+        with patch("mcp_deploy_frontend.boto3") as mock_boto3, \
+             patch("mcp_deploy_frontend.table", mock_table), \
+             patch("mcp_deploy_frontend._get_frontend_config", return_value=config_without_role), \
+             patch("mcp_deploy_frontend.send_deploy_frontend_notification", return_value=mock_notif_result), \
+             patch("notifications.post_notification_setup"):
+            mock_boto3.client.return_value = mock_s3
+            _call({
+                "project": "test-project",
+                "files": files,
+                "reason": "Backward compat test",
+                "source": "Bot",
+                "trust_scope": "ts",
+            })
 
-            item = mock_table.put_item.call_args[1]["Item"]
-            # Key must be present; value must be None (backward compat)
-            assert "deploy_role_arn" in item
-            assert item["deploy_role_arn"] is None
-        finally:
-            mdf._PROJECT_CONFIG.clear()
-            mdf._PROJECT_CONFIG.update(original_config)
+        item = mock_table.put_item.call_args[1]["Item"]
+        # Key must be present; value must be None (backward compat)
+        assert "deploy_role_arn" in item
+        assert item["deploy_role_arn"] is None

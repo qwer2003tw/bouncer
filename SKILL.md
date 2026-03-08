@@ -591,29 +591,47 @@ mcporter call bouncer bouncer_deploy_frontend \
 |---------|----------------|-----------------|-----------------|
 | `ztp-files` | `ztp-files-dev-frontendbucket-nvvimv31xp3v` | `E176PW0SA5JF29` | `arn:aws:iam::190825685292:role/ztp-files-dev-frontend-deploy-role` |
 
-> **✅ v3.12.0：PROJECT_CONFIGS 從 DynamoDB 讀取（#68）**
-> 新增前端專案不需要 redeploy Bouncer！設定存在 DynamoDB，Lambda 啟動時自動載入。
+> **✅ v3.18.0：PROJECT_CONFIGS 改為純 DynamoDB（hardcoded fallback 已移除）**
+> 新增前端專案不需要 redeploy Bouncer！設定存在 DynamoDB `bouncer-projects` table，Lambda 直接查詢。
+> ⚠️ hardcoded fallback dict `_PROJECT_CONFIG` 已在 Sprint 18 移除。未在 DDB 的專案會收到清楚的 "Unknown project" 錯誤。
 >
-> **新增專案流程：** 用 seed script 寫入 DynamoDB：
-> ```bash
-> cd /home/ec2-user/projects/bouncer
-> python3 scripts/seed_project_config.py \
->   --project my-new-project \
->   --frontend-bucket my-bucket-name \
->   --distribution-id EXXXXXXXXX \
->   --deploy-role-arn arn:aws:iam::190825685292:role/my-deploy-role
-> ```
-> 寫入後立即生效（Lambda 下次 cold start 或 cache 失效後載入），無需 redeploy。
+> ### Adding a New Frontend Project（新增前端專案）
 >
-> **DynamoDB 格式（參考）：**
-> ```json
-> {
->   "pk": "PROJECT_CONFIG#my-new-project",
->   "frontend_bucket": "my-bucket-name",
->   "distribution_id": "EXXXXXXXXX",
->   "deploy_role_arn": "arn:aws:iam::190825685292:role/my-deploy-role"
+> **Step 1：** 在 `scripts/seed_frontend_configs.py` 的 `FRONTEND_CONFIGS` dict 加入新專案：
+> ```python
+> FRONTEND_CONFIGS = {
+>     'my-new-project': {
+>         'frontend_bucket': 'my-new-project-bucket-name',
+>         'frontend_distribution_id': 'EXXXXXXXXX',
+>         'frontend_region': 'us-east-1',
+>         'frontend_deploy_role_arn': 'arn:aws:iam::190825685292:role/my-deploy-role',
+>     },
+>     # ... existing entries
 > }
 > ```
+>
+> **Step 2：** 執行 seed script（透過 Bouncer grant）：
+> ```bash
+> python3 scripts/seed_frontend_configs.py --dry-run  # 先確認
+> python3 scripts/seed_frontend_configs.py            # 實際寫入
+> ```
+>
+> **Step 3：** 驗證 DDB 有記錄：
+> ```bash
+> aws dynamodb get-item --table-name bouncer-projects \
+>   --key '{"project_id": {"S": "my-new-project"}}' --region us-east-1
+> ```
+>
+> **Step 4：** 在 `test_project_configs_ddb_s12_001.py` 加入新專案的 smoke test。
+>
+> **DynamoDB bouncer-projects schema（frontend 欄位）：**
+> | 欄位 | 說明 |
+> |------|------|
+> | `project_id` (PK) | 專案 ID（如 `ztp-files`）|
+> | `frontend_bucket` | S3 前端 bucket 名稱 |
+> | `frontend_distribution_id` | CloudFront distribution ID |
+> | `frontend_region` | 部署 region（default: `us-east-1`）|
+> | `frontend_deploy_role_arn` | IAM role for S3 put + CF invalidation |
 
 ---
 
