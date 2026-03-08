@@ -132,6 +132,20 @@ jobs:
           fi
           echo "✅ Entities mock patterns consistent"
 
+      - name: Check module refactor mock path consistency
+        run: |
+          # After aws_clients refactor, patches of callbacks._boto3 should have
+          # corresponding aws_clients.boto3 patches in the same context
+          STALE=$(grep -rn "patch('callbacks._boto3')\|patch(\"callbacks._boto3\")" tests/ 2>/dev/null | \
+                  grep -v "aws_clients.boto3" || true)
+          if [ -n "$STALE" ]; then
+            echo "❌ Found callbacks._boto3 patches without aws_clients.boto3 companion:"
+            echo "$STALE"
+            echo "Add: patch('aws_clients.boto3', mock_boto3) alongside each callbacks._boto3 patch"
+            exit 1
+          fi
+          echo "✅ Module refactor mock paths consistent"
+
       - name: Run pytest (src tests)
         run: pytest tests/ -v --tb=short --cov=src --cov-report=term-missing --cov-fail-under=75
 
