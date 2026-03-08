@@ -142,6 +142,7 @@ def _run_approve(item=None, get_object_side_effect=None, put_object_side_effect=
 
     import callbacks
     with patch.object(callbacks, '_boto3', mock_boto3), \
+         patch('aws_clients.boto3', mock_boto3), \
          patch('callbacks._get_table', return_value=mock_table), \
          patch('callbacks.answer_callback'), \
          patch('callbacks.update_message') as mock_update, \
@@ -239,6 +240,7 @@ class TestS3CopyCmdFormat:
         mock_boto3, mock_s3, mock_cf = _make_mock_boto3()
         mock_table = MagicMock()
         with patch.object(callbacks, '_boto3', mock_boto3), \
+         patch('aws_clients.boto3', mock_boto3), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -310,6 +312,7 @@ class TestCFInvalidationCmdFormat:
         mock_boto3, mock_s3, mock_cf = _make_mock_boto3()
         mock_table = MagicMock()
         with patch.object(callbacks, '_boto3', mock_boto3), \
+         patch('aws_clients.boto3', mock_boto3), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
