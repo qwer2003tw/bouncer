@@ -21,6 +21,16 @@ bash ~/.openclaw/workspace/skills/bouncer-exec/scripts/bouncer_exec.sh aws sts g
 bash bouncer_exec.sh aws s3 ls --query "Contents[?Size > \`1000\`]"
 ```
 
+**✅ v3.16.0 `--json-args` 模式（#85）：**
+當命令含有 `|`、`$`、`>` 等被 OS/shell 截斷的字元時，用 `--json-args` 傳入 pre-built JSON 繞過 shell pipe 截斷問題。
+```bash
+# 一般模式（適合大多數命令）
+bash bouncer_exec.sh aws s3 ls
+
+# --json-args 模式（含特殊字元 / DynamoDB expression 等）
+bash bouncer_exec.sh --json-args '{"command":"aws dynamodb query ...","reason":"查詢 items","source":"Private Bot (db check)","trust_scope":"private-bot-main"}'
+```
+
 **只有以下 MCP-only tools 才用 `mcporter` 直接呼叫：**
 `bouncer_deploy`, `bouncer_deploy_frontend`, `bouncer_upload`, `bouncer_upload_batch`, `bouncer_request_grant`, `bouncer_trust_status` 等
 
@@ -672,6 +682,11 @@ mcporter call bouncer bouncer_project_list
 - `phase` 欄位**已標記為 deprecated**，回傳中仍存在但**絕對不要使用**
 - 使用 `progress_hint` 取代（人類可讀的階段描述，準確反映實際進度）
 - `phase_note` 欄位說明棄用原因：「phase 欄位已 deprecated，請改用 progress_hint」
+
+**✅ v3.16.0 deploy_status 新增 FAILED 詳情（#55）：**
+- FAILED 狀態時，response 新增 `failed_resources` — CloudFormation events 中失敗的資源列表
+- FAILED 狀態時，response 新增 `error_summary` — 人類可讀的失敗摘要（取自 CloudFormation status reason）
+- 可直接看到是哪個 CFN resource 失敗，不需要再手動去查 CloudFormation events
 
 ---
 
