@@ -123,35 +123,35 @@ class TestSendTrustSessionSummaryEndReason:
         }
 
     def test_expiry_header_no_commands(self, notifications_mod):
-        with patch('telegram.send_telegram_message_silent') as mock_silent:
+        with patch('telegram.send_message_with_entities') as mock_silent:
             trust_item = self._make_trust_item(commands=[])
             notifications_mod.send_trust_session_summary(trust_item, end_reason='expiry')
             mock_silent.assert_called_once()
             msg = mock_silent.call_args[0][0]
             assert '\u81ea\u52d5\u5230\u671f' in msg  # 自動到期
-            assert '\u624b\u52d5\u6492\u92b7' not in msg  # not 手動撤銷
+            assert '\u624b\u52d5\u64a4\u92b7' not in msg  # not 手動撤銷
 
     def test_revoke_header_no_commands(self, notifications_mod):
-        with patch('telegram.send_telegram_message_silent') as mock_silent:
+        with patch('telegram.send_message_with_entities') as mock_silent:
             trust_item = self._make_trust_item(commands=[])
             notifications_mod.send_trust_session_summary(trust_item, end_reason='revoke')
             mock_silent.assert_called_once()
             msg = mock_silent.call_args[0][0]
-            assert '\u624b\u52d5\u6492\u92b7' in msg  # 手動撤銷
+            assert '\u624b\u52d5\u64a4\u92b7' in msg  # 手動撤銷
             assert '\u81ea\u52d5\u5230\u671f' not in msg  # not 自動到期
 
     def test_default_end_reason_is_revoke(self, notifications_mod):
-        with patch('telegram.send_telegram_message_silent') as mock_silent:
+        with patch('telegram.send_message_with_entities') as mock_silent:
             trust_item = self._make_trust_item(commands=[])
             notifications_mod.send_trust_session_summary(trust_item)
             mock_silent.assert_called_once()
             msg = mock_silent.call_args[0][0]
-            assert '\u624b\u52d5\u6492\u92b7' in msg  # 手動撤銷 (default)
+            assert '\u624b\u52d5\u64a4\u92b7' in msg  # 手動撤銷 (default)
 
     def test_expiry_header_with_commands(self, notifications_mod):
         now = int(time.time())
         cmds = [{'cmd': 'aws s3 ls', 'ts': now - 100, 'success': True}]
-        with patch('telegram.send_telegram_message_silent') as mock_silent:
+        with patch('telegram.send_message_with_entities') as mock_silent:
             trust_item = self._make_trust_item(commands=cmds)
             notifications_mod.send_trust_session_summary(trust_item, end_reason='expiry')
             mock_silent.assert_called_once()
@@ -162,12 +162,12 @@ class TestSendTrustSessionSummaryEndReason:
     def test_revoke_header_with_commands(self, notifications_mod):
         now = int(time.time())
         cmds = [{'cmd': 'aws ec2 describe-instances', 'ts': now - 50, 'success': False}]
-        with patch('telegram.send_telegram_message_silent') as mock_silent:
+        with patch('telegram.send_message_with_entities') as mock_silent:
             trust_item = self._make_trust_item(commands=cmds)
             notifications_mod.send_trust_session_summary(trust_item, end_reason='revoke')
             mock_silent.assert_called_once()
             msg = mock_silent.call_args[0][0]
-            assert '\u624b\u52d5\u6492\u92b7' in msg  # 手動撤銷
+            assert '\u624b\u52d5\u64a4\u92b7' in msg  # 手動撤銷
             assert '1 \u500b\u5931\u6557' in msg  # 1 個失敗
 
 
@@ -212,7 +212,7 @@ class TestHandleTrustExpiry:
             {'cmd': 'aws ec2 describe-instances', 'ts': now - 100, 'success': True},
         ])
 
-        with patch('telegram.send_telegram_message_silent') as mock_silent, \
+        with patch('telegram.send_message_with_entities') as mock_silent, \
              patch('telegram.send_telegram_message'), \
              patch('metrics.emit_metric'):
             result = app_mod.lambda_handler(self._make_expiry_event(trust_id), {})
@@ -229,7 +229,7 @@ class TestHandleTrustExpiry:
         trust_id = 'trust-expiry-mark-001'
         self._seed_trust(dynamodb_table, trust_id)
 
-        with patch('telegram.send_telegram_message_silent'), \
+        with patch('telegram.send_message_with_entities'), \
              patch('telegram.send_telegram_message'), \
              patch('metrics.emit_metric'):
             app_mod.lambda_handler(self._make_expiry_event(trust_id), {})
@@ -242,7 +242,7 @@ class TestHandleTrustExpiry:
         trust_id = 'trust-expiry-skip-001'
         self._seed_trust(dynamodb_table, trust_id, summary_sent=True)
 
-        with patch('telegram.send_telegram_message_silent') as mock_silent, \
+        with patch('telegram.send_message_with_entities') as mock_silent, \
              patch('telegram.send_telegram_message'), \
              patch('metrics.emit_metric'):
             result = app_mod.lambda_handler(self._make_expiry_event(trust_id), {})
@@ -257,7 +257,7 @@ class TestHandleTrustExpiry:
         trust_id = 'trust-expiry-empty-001'
         self._seed_trust(dynamodb_table, trust_id, commands=[])
 
-        with patch('telegram.send_telegram_message_silent') as mock_silent, \
+        with patch('telegram.send_message_with_entities') as mock_silent, \
              patch('telegram.send_telegram_message'), \
              patch('metrics.emit_metric'):
             result = app_mod.lambda_handler(self._make_expiry_event(trust_id), {})
@@ -328,7 +328,7 @@ class TestRevokeTrustSummaryDedup:
         })
 
         with patch('telegram.send_telegram_message'), \
-             patch('telegram.send_telegram_message_silent') as mock_silent, \
+             patch('telegram.send_message_with_entities') as mock_silent, \
              patch('telegram.update_message'), \
              patch('telegram.answer_callback'), \
              patch('scheduler_service.get_trust_expiry_notifier') as mock_notifier:
@@ -359,7 +359,7 @@ class TestRevokeTrustSummaryDedup:
         })
 
         with patch('telegram.send_telegram_message'), \
-             patch('telegram.send_telegram_message_silent') as mock_silent, \
+             patch('telegram.send_message_with_entities') as mock_silent, \
              patch('telegram.update_message'), \
              patch('telegram.answer_callback'), \
              patch('scheduler_service.get_trust_expiry_notifier') as mock_notifier:
@@ -369,5 +369,5 @@ class TestRevokeTrustSummaryDedup:
         assert result['statusCode'] == 200
         mock_silent.assert_called_once()
         msg = mock_silent.call_args[0][0]
-        assert '\u624b\u52d5\u6492\u92b7' in msg  # 手動撤銷
+        assert '\u624b\u52d5\u64a4\u92b7' in msg  # 手動撤銷
         assert '\u57f7\u884c\u4e86 1 \u500b\u547d\u4ee4' in msg  # 執行了 1 個命令

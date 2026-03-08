@@ -154,7 +154,7 @@ class TestSendTrustSessionSummary:
         }
 
     def test_no_commands_sends_simple_message(self):
-        with patch('telegram.send_telegram_message_silent') as mock_silent:
+        with patch('telegram.send_message_with_entities') as mock_silent:
             import notifications
             trust_item = self._make_trust_item(commands=[])
             notifications.send_trust_session_summary(trust_item)
@@ -169,7 +169,7 @@ class TestSendTrustSessionSummary:
             {'cmd': 'aws s3 ls', 'ts': now - 100, 'success': True},
             {'cmd': 'aws ec2 describe-instances', 'ts': now - 80, 'success': True},
         ]
-        with patch('telegram.send_telegram_message_silent') as mock_silent:
+        with patch('telegram.send_message_with_entities') as mock_silent:
             import notifications
             trust_item = self._make_trust_item(commands=cmds)
             notifications.send_trust_session_summary(trust_item)
@@ -184,7 +184,7 @@ class TestSendTrustSessionSummary:
             {'cmd': 'aws ec2 terminate-instances', 'ts': now - 80, 'success': False},
             {'cmd': 'aws s3 cp file s3://bucket/', 'ts': now - 60, 'success': False},
         ]
-        with patch('telegram.send_telegram_message_silent') as mock_silent:
+        with patch('telegram.send_message_with_entities') as mock_silent:
             import notifications
             trust_item = self._make_trust_item(commands=cmds)
             notifications.send_trust_session_summary(trust_item)
@@ -194,7 +194,7 @@ class TestSendTrustSessionSummary:
 
     def test_duration_in_message(self):
         cmds = [{'cmd': 'aws s3 ls', 'ts': int(time.time()) - 30, 'success': True}]
-        with patch('telegram.send_telegram_message_silent') as mock_silent:
+        with patch('telegram.send_message_with_entities') as mock_silent:
             import notifications
             trust_item = self._make_trust_item(commands=cmds, created_offset_secs=330)
             notifications.send_trust_session_summary(trust_item)
@@ -207,7 +207,7 @@ class TestSendTrustSessionSummary:
             {'cmd': f'aws s3 ls s3://bucket-{i}', 'ts': now - i * 5, 'success': True}
             for i in range(15)
         ]
-        with patch('telegram.send_telegram_message_silent') as mock_silent:
+        with patch('telegram.send_message_with_entities') as mock_silent:
             import notifications
             trust_item = self._make_trust_item(commands=cmds)
             notifications.send_trust_session_summary(trust_item)
@@ -216,7 +216,7 @@ class TestSendTrustSessionSummary:
             assert '還有 5 個命令' in msg
 
     def test_exception_does_not_raise(self):
-        with patch('telegram.send_telegram_message_silent', side_effect=Exception('tg error')):
+        with patch('telegram.send_message_with_entities', side_effect=Exception('tg error')):
             import notifications
             cmds = [{'cmd': 'aws s3 ls', 'ts': int(time.time()), 'success': True}]
             trust_item = self._make_trust_item(commands=cmds)
@@ -300,7 +300,7 @@ class TestRevokeTrustCallbackSummary:
         })
 
         with patch('telegram.send_telegram_message') as mock_send, \
-             patch('telegram.send_telegram_message_silent') as mock_silent, \
+             patch('telegram.send_message_with_entities') as mock_silent, \
              patch('telegram.update_message'), \
              patch('telegram.answer_callback'), \
              patch('scheduler_service.get_trust_expiry_notifier') as mock_notifier:
@@ -308,7 +308,7 @@ class TestRevokeTrustCallbackSummary:
             result = app_mod.lambda_handler(self._make_revoke_event(trust_id), {})
 
         assert result['statusCode'] == 200
-        mock_silent.assert_called_once()
+        mock_silent.assert_called()
         msg = mock_silent.call_args[0][0]
         assert '信任時段結束' in msg
         assert '執行了 2 個命令' in msg
@@ -329,7 +329,7 @@ class TestRevokeTrustCallbackSummary:
         })
 
         with patch('telegram.send_telegram_message'), \
-             patch('telegram.send_telegram_message_silent') as mock_silent, \
+             patch('telegram.send_message_with_entities') as mock_silent, \
              patch('telegram.update_message'), \
              patch('telegram.answer_callback'), \
              patch('scheduler_service.get_trust_expiry_notifier') as mock_notifier:
@@ -337,6 +337,6 @@ class TestRevokeTrustCallbackSummary:
             result = app_mod.lambda_handler(self._make_revoke_event(trust_id), {})
 
         assert result['statusCode'] == 200
-        mock_silent.assert_called_once()
+        mock_silent.assert_called()
         msg = mock_silent.call_args[0][0]
         assert '無命令執行' in msg

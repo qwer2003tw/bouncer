@@ -359,7 +359,7 @@ class TestSendDeployFrontendNotification:
         }
 
         mock_result = {"ok": True, "result": {"message_id": 999}}
-        with patch("notifications._send_message", return_value=mock_result) as mock_send:
+        with patch("telegram.send_message_with_entities", return_value=mock_result) as mock_send:
             result = send_deploy_frontend_notification(
                 request_id="req-abc",
                 files_summary=files_summary,
@@ -383,7 +383,7 @@ class TestSendDeployFrontendNotification:
         files_summary = [{"filename": "index.html", "size": 100, "cache_control": "no-cache", "content_type": "text/html"}]
         target_info = {"frontend_bucket": "bucket", "distribution_id": "dist", "region": "us-east-1"}
 
-        with patch("notifications._send_message", return_value={"ok": False}):
+        with patch("telegram.send_message_with_entities", return_value={"ok": False}):
             result = send_deploy_frontend_notification("req-x", files_summary, target_info)
 
         assert result.ok is False
@@ -395,7 +395,7 @@ class TestSendDeployFrontendNotification:
         files_summary = [{"filename": "index.html", "size": 100, "cache_control": "no-cache", "content_type": "text/html"}]
         target_info = {"frontend_bucket": "b", "distribution_id": "d", "region": "us-east-1"}
 
-        with patch("notifications._send_message", side_effect=RuntimeError("boom")):
+        with patch("telegram.send_message_with_entities", side_effect=RuntimeError("boom")):
             result = send_deploy_frontend_notification("req-y", files_summary, target_info)
 
         assert result.ok is False
