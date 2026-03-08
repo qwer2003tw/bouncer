@@ -798,6 +798,15 @@ def handle_telegram_webhook(event: dict) -> dict:
     """處理 Telegram callback"""
     headers = event.get('headers', {})
 
+    # Extract source_ip from API Gateway event for audit trail (#74)
+    # Note: in webhook mode this is Telegram server IP, not the end-user IP.
+    # Used to verify requests originate from Telegram, not a forged source.
+    source_ip = (
+        event.get('requestContext', {}).get('identity', {}).get('sourceIp', '')
+        or event.get('requestContext', {}).get('http', {}).get('sourceIp', '')
+        or ''
+    )
+
     if TELEGRAM_WEBHOOK_SECRET:
         received_secret = get_header(headers, 'x-telegram-bot-api-secret-token') or ''
         if received_secret != TELEGRAM_WEBHOOK_SECRET:
@@ -970,7 +979,7 @@ def handle_telegram_webhook(event: dict) -> dict:
     elif request_action == 'deploy_frontend':
         return handle_deploy_frontend_callback(action, request_id, item, message_id, callback['id'], user_id)
     else:
-        return handle_command_callback(action, request_id, item, message_id, callback['id'], user_id)
+        return handle_command_callback(action, request_id, item, message_id, callback['id'], user_id, source_ip=source_ip)
 
 
 # ============================================================================

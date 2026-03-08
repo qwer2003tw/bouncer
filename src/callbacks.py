@@ -205,8 +205,13 @@ def _send_status_update(message_id: int, status_emoji: str, title: str, item: di
 # Command Callback
 # ============================================================================
 
-def handle_command_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str) -> dict:
-    """處理命令執行的審批 callback"""
+def handle_command_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str, *, source_ip: str = '') -> dict:
+    """處理命令執行的審批 callback
+
+    Args:
+        source_ip: Telegram server IP from API GW event (for audit trail #74).
+                   This is NOT the end-user IP — Lambda runs as a webhook.
+    """
     table = _get_table()
 
     command = item.get('command', '')
@@ -245,14 +250,21 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
 
         decision_type = 'manual_approved_trust' if action == 'approve_trust' else 'manual_approved'
 
-        # 存入 DynamoDB（包含分頁資訊）
-        update_expr = 'SET #s = :s, #r = :r, approved_at = :t, approver = :a, decision_type = :dt, decided_at = :da, decision_latency_ms = :dl, #ttl = :ttl'
+        # 存入 DynamoDB（包含分頁資訊 + audit trail #74）
+        update_expr = (
+            'SET #s = :s, #r = :r, approved_at = :t, approver = :a, '
+            'approved_by = :aby, duration_ms = :dms, source_ip = :sip, '
+            'decision_type = :dt, decided_at = :da, decision_latency_ms = :dl, #ttl = :ttl'
+        )
         expr_names = {'#s': 'status', '#r': 'result', '#ttl': 'ttl'}
         expr_values = {
             ':s': 'approved',
             ':r': paged['result'],
             ':t': now,
             ':a': user_id,
+            ':aby': user_id,                         # audit trail: who approved (Telegram user_id)
+            ':dms': decision_latency_ms,             # audit trail: approval duration in ms
+            ':sip': source_ip,                       # audit trail: Telegram server IP (#74)
             ':dt': decision_type,
             ':da': now,
             ':dl': decision_latency_ms,
