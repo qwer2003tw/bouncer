@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.16.0] - 2026-03-08
+
+### Added
+- `bouncer_exec.sh` — `--json-args JSON` mode: pass pre-built JSON to bypass shell pipe truncation (#85)
+- `src/aws_clients.py` — `get_s3_client()` + `get_cloudfront_client()` factory functions, replacing 6 duplicate STS/S3 patterns (#79)
+- `deployer.py` — `deploy_status` response includes `failed_resources` + `error_summary` from CloudFormation events on FAILED status (#55)
+- `app.py` + `callbacks.py` — Complete audit trail: `approved_by`, `approved_at`, `source_ip`, `duration_ms` written to DDB on approval (#74)
+- `template.yaml` — API Gateway access log enabled with JSON format, 30-day CloudWatch retention (#76)
+
+### Tests
+- Backend: 1912 tests, coverage 89%
+
 ## [3.15.0] - 2026-03-06
 > **Hotfix patches**: CI entities mock check added; deployer tests run separately to avoid import conflict; stale `_send_message` mocks updated for entities Phase 3 migration.
 
