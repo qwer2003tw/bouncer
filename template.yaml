@@ -405,11 +405,66 @@ Resources:
   # ============================================================
   # API Gateway
   # ============================================================
+  # ============================================================
+  # CloudWatch Logs - API Gateway Access Log Group (#76)
+  # Stores per-request access logs: ip, method, path, status, latency
+  # Retention: 30 days
+  # ============================================================
+  BounceApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/apigateway/bouncer-${Environment}"
+      RetentionInDays: 30
+      Tags:
+        - Key: Project
+          Value: Bouncer
+        - Key: auto-delete
+          Value: "no"
+
+  # IAM Role - allows API Gateway to write execution/access logs to CloudWatch
+  # This is an account-level setting (AWS::ApiGateway::Account).
+  # Only one such role per account is needed; this resource is idempotent.
+  ApiGatewayCloudWatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "bouncer-${Environment}-apigw-cloudwatch-logs"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+      Tags:
+        - Key: Project
+          Value: Bouncer
+        - Key: auto-delete
+          Value: "no"
+
+  # Account-level setting: tells API GW which role to use for CloudWatch Logs.
+  # Only one per account; safe to deploy multiple times (updates in place).
+  ApiGatewayAccount:
+    Type: AWS::ApiGateway::Account
+    Properties:
+      CloudWatchRoleArn: !GetAtt ApiGatewayCloudWatchRole.Arn
+
   BouncerApi:
     Type: AWS::Serverless::Api
+    DependsOn: BounceApiAccessLogGroup
     Properties:
       Name: !Sub "bouncer-${Environment}-api"
       StageName: prod
+      AccessLogSetting:
+        DestinationArn: !GetAtt BounceApiAccessLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","caller":"$context.identity.caller","user":"$context.identity.user","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","integrationLatency":"$context.integrationLatency"}'
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          LoggingLevel: ERROR
+          DataTraceEnabled: false
+          MetricsEnabled: true
       Tags:
         Project: Bouncer
         auto-delete: "no"
