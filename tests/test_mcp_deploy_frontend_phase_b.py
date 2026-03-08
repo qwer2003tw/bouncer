@@ -180,6 +180,7 @@ class TestDenyAction:
         mock_boto3, *_ = _patch_all()
         mock_table = MagicMock()
         with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -193,6 +194,7 @@ class TestDenyAction:
         mock_boto3, mock_s3_target, mock_s3_staging, *_ = _patch_all()
         mock_table = MagicMock()
         with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -205,6 +207,7 @@ class TestDenyAction:
         mock_boto3, *_ = _patch_all()
         mock_table = MagicMock()
         with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -216,6 +219,7 @@ class TestDenyAction:
         mock_boto3, *_ = _patch_all()
         mock_table = MagicMock()
         with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message') as mock_update, \
@@ -234,6 +238,7 @@ class TestApproveFullSuccess:
     def _run(self):
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message') as mock_update, \
@@ -345,6 +350,7 @@ class TestApprovePartialFailure:
             get_object_side_effect=get_object_side_effect
         )
         with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -395,6 +401,7 @@ class TestApproveFullFailure:
             get_object_side_effect=get_object_side_effect
         )
         with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -429,6 +436,7 @@ class TestCFInvalidationFailure:
             cf_side_effect=Exception('CF rate limit exceeded')
         )
         with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message') as mock_update, \
@@ -489,6 +497,7 @@ class TestDDBFields:
     def test_deployed_details_is_json_list(self):
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -507,6 +516,7 @@ class TestDDBFields:
     def test_failed_details_empty_on_full_success(self):
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -561,6 +571,7 @@ class TestApproveProgressUpdate:
         """update_message should be called with '進度:' during the copy loop."""
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message') as mock_update, \
@@ -626,6 +637,7 @@ class TestDeployRoleArnPhaseB:
         mock_boto3.client.side_effect = patched_client
 
         with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -634,7 +646,7 @@ class TestDeployRoleArnPhaseB:
              patch('notifications._send_message_silent'):
             _call_callback(action='approve', item=self._make_item_with_role())
 
-        sts_mock.assume_role.assert_called_once()
+        sts_mock.assume_role.assert_called()  # called for both S3 and CF clients
         call_kwargs = sts_mock.assume_role.call_args[1]
         assert call_kwargs['RoleArn'] == _DEPLOY_ROLE_ARN
 
@@ -642,6 +654,7 @@ class TestDeployRoleArnPhaseB:
         """When deploy_role_arn present, s3_target is created with assumed-role credentials."""
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -662,6 +675,7 @@ class TestDeployRoleArnPhaseB:
         """CF client should also be created with assumed-role credentials."""
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -681,6 +695,7 @@ class TestDeployRoleArnPhaseB:
         """When deploy_role_arn absent, s3 clients use Lambda role (no credentials)."""
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -702,6 +717,7 @@ class TestDeployRoleArnPhaseB:
         """When deploy_role_arn absent, CF client uses Lambda role."""
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -721,6 +737,7 @@ class TestDeployRoleArnPhaseB:
         """When deploy_role_arn is explicitly None, s3 uses Lambda role."""
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \

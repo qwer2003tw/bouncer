@@ -182,6 +182,7 @@ def _build_mocks(
 
 def _run(item, mocks, dispatcher):
     with patch('callbacks._boto3') as mock_boto3_mod, \
+         patch('aws_clients.boto3', mock_boto3_mod), \
          patch('callbacks._get_table', return_value=MagicMock()), \
          patch('callbacks.answer_callback'), \
          patch('callbacks.update_message') as mock_update, \
@@ -214,16 +215,19 @@ class TestR1AssumeRoleSuccess:
         item = _make_item()
         mocks, dispatcher = _build_mocks(has_deploy_role=True)
         result, _, _ = _run(item, mocks, dispatcher)
-        mocks['sts'].assume_role.assert_called_once()
-        call_kwargs = mocks['sts'].assume_role.call_args[1]
-        assert call_kwargs['RoleArn'] == _DEPLOY_ROLE_ARN
+        mocks['sts'].assume_role.assert_called()  # called for S3 and CF
+        # Check first call uses the correct role ARN
+        first_call_kwargs = mocks['sts'].assume_role.call_args_list[0][1]
+        assert first_call_kwargs['RoleArn'] == _DEPLOY_ROLE_ARN
 
     def test_assume_role_session_name_contains_request_id_prefix(self):
         item = _make_item()
         mocks, dispatcher = _build_mocks(has_deploy_role=True)
         result, _, _ = _run(item, mocks, dispatcher)
-        call_kwargs = mocks['sts'].assume_role.call_args[1]
-        session_name = call_kwargs['RoleSessionName']
+        # First assume_role call is for S3 client (contains request_id prefix)
+        # Second is for CloudFront client (session='bouncer-cf')
+        first_call_kwargs = mocks['sts'].assume_role.call_args_list[0][1]
+        session_name = first_call_kwargs['RoleSessionName']
         assert _REQUEST_ID[:16] in session_name
 
     def test_deployed_count_correct(self):
@@ -361,6 +365,7 @@ class TestR5NoExecuteCommand:
         item = _make_item()
         mocks, dispatcher = _build_mocks(has_deploy_role=True)
         with patch('callbacks._boto3') as mock_boto3_mod, \
+         patch('aws_clients.boto3', mock_boto3_mod), \
              patch('callbacks._get_table', return_value=MagicMock()), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -376,6 +381,7 @@ class TestR5NoExecuteCommand:
         item = _make_item()
         mocks, dispatcher = _build_mocks(assume_role_fail=True, has_deploy_role=True)
         with patch('callbacks._boto3') as mock_boto3_mod, \
+         patch('aws_clients.boto3', mock_boto3_mod), \
              patch('callbacks._get_table', return_value=MagicMock()), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -424,6 +430,7 @@ class TestR7CFWithAssumedRole:
             return MagicMock()
 
         with patch('callbacks._boto3') as mock_boto3_mod, \
+         patch('aws_clients.boto3', mock_boto3_mod), \
              patch('callbacks._get_table', return_value=MagicMock()), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -468,6 +475,7 @@ class TestR8CFWithLambdaRole:
             return MagicMock()
 
         with patch('callbacks._boto3') as mock_boto3_mod, \
+         patch('aws_clients.boto3', mock_boto3_mod), \
              patch('callbacks._get_table', return_value=MagicMock()), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
