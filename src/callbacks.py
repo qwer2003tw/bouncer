@@ -656,7 +656,6 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
 def handle_upload_batch_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str) -> dict:
     """處理批量上傳的審批 callback"""
     import json as _json
-    import boto3
 
     table = _get_table()
 
@@ -700,20 +699,8 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
 
         # Get S3 client
         try:
-            if assume_role:
-                sts = boto3.client('sts')
-                creds = sts.assume_role(
-                    RoleArn=assume_role,
-                    RoleSessionName='bouncer-batch-upload',
-                )['Credentials']
-                s3 = boto3.client(
-                    's3',
-                    aws_access_key_id=creds['AccessKeyId'],
-                    aws_secret_access_key=creds['SecretAccessKey'],
-                    aws_session_token=creds['SessionToken'],
-                )
-            else:
-                s3 = boto3.client('s3')
+            from aws_clients import get_s3_client
+            s3 = get_s3_client(role_arn=assume_role, session_name='bouncer-batch-upload')
         except Exception as e:
             _update_request_status(table, request_id, 'error', user_id, extra_attrs={'error_message': str(e)})
             update_message(
@@ -927,20 +914,10 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
     failed = []
 
     # 1. Assume deploy role (if provided) — assumed role writes to frontend bucket
-    creds = None
     if deploy_role_arn:
-        sts = _boto3.client('sts')
         try:
-            creds = sts.assume_role(
-                RoleArn=deploy_role_arn,
-                RoleSessionName=f"bouncer-deploy-{request_id[:16]}",
-            )['Credentials']
-            s3_target = _boto3.client(
-                's3',
-                aws_access_key_id=creds['AccessKeyId'],
-                aws_secret_access_key=creds['SecretAccessKey'],
-                aws_session_token=creds['SessionToken'],
-            )
+            from aws_clients import get_s3_client
+            s3_target = get_s3_client(role_arn=deploy_role_arn, session_name=f"bouncer-deploy-{request_id[:16]}")
         except Exception as e:
             logger.error("[DEPLOY-FRONTEND] AssumeRole failed for %s: %s", deploy_role_arn, e)
             failed = [
@@ -1046,15 +1023,8 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
     cf_invalidation_failed = False
     if success_count > 0:
         try:
-            if creds:
-                cf = _boto3.client(
-                    'cloudfront',
-                    aws_access_key_id=creds['AccessKeyId'],
-                    aws_secret_access_key=creds['SecretAccessKey'],
-                    aws_session_token=creds['SessionToken'],
-                )
-            else:
-                cf = _boto3.client('cloudfront')
+            from aws_clients import get_cloudfront_client
+            cf = get_cloudfront_client(role_arn=deploy_role_arn)
             cf.create_invalidation(
                 DistributionId=distribution_id,
                 InvalidationBatch={

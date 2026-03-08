@@ -310,21 +310,8 @@ def _check_upload_trust(ctx: UploadContext) -> Optional[dict]:
         sha256_hash = _hashlib.sha256(content_bytes).hexdigest()
 
         # Upload to S3
-        import boto3 as _boto3
-        if ctx.assume_role:
-            sts = _boto3.client('sts')
-            creds = sts.assume_role(
-                RoleArn=ctx.assume_role,
-                RoleSessionName='bouncer-trust-upload',
-            )['Credentials']
-            s3 = _boto3.client(
-                's3',
-                aws_access_key_id=creds['AccessKeyId'],
-                aws_secret_access_key=creds['SecretAccessKey'],
-                aws_session_token=creds['SessionToken'],
-            )
-        else:
-            s3 = _boto3.client('s3')
+        from aws_clients import get_s3_client
+        s3 = get_s3_client(role_arn=ctx.assume_role, session_name='bouncer-trust-upload')
 
         s3.put_object(
             Bucket=ctx.bucket,
@@ -397,21 +384,8 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
         content_bytes = _base64.b64decode(ctx.content_b64)
         # Use assume_role credentials if available (e.g. BouncerRole has S3 access)
         # The Lambda execution role may not have direct S3 PutObject permissions.
-        if ctx.assume_role:
-            _sts = boto3.client('sts')
-            _creds = _sts.assume_role(
-                RoleArn=ctx.assume_role,
-                RoleSessionName='bouncer-upload-staging',
-                DurationSeconds=900,
-            )['Credentials']
-            _s3 = boto3.client(
-                's3',
-                aws_access_key_id=_creds['AccessKeyId'],
-                aws_secret_access_key=_creds['SecretAccessKey'],
-                aws_session_token=_creds['SessionToken'],
-            )
-        else:
-            _s3 = boto3.client('s3')
+        from aws_clients import get_s3_client
+        _s3 = get_s3_client(role_arn=ctx.assume_role, session_name='bouncer-upload-staging')
         _s3.put_object(
             Bucket=staging_bucket,
             Key=content_s3_key,
@@ -803,21 +777,8 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
                     # Execute all uploads under trust
                     uploaded = []
                     try:
-                        import boto3 as _boto3
-                        if assume_role:
-                            sts = _boto3.client('sts')
-                            creds = sts.assume_role(
-                                RoleArn=assume_role,
-                                RoleSessionName='bouncer-batch-trust-upload',
-                            )['Credentials']
-                            s3 = _boto3.client(
-                                's3',
-                                aws_access_key_id=creds['AccessKeyId'],
-                                aws_secret_access_key=creds['SecretAccessKey'],
-                                aws_session_token=creds['SessionToken'],
-                            )
-                        else:
-                            s3 = _boto3.client('s3')
+                        from aws_clients import get_s3_client
+                        s3 = get_s3_client(role_arn=assume_role, session_name='bouncer-batch-trust-upload')
 
                         for pf in processed_files:
                             # Atomic increment per file
@@ -1016,22 +977,8 @@ def execute_upload(request_id: str, approver: str) -> dict:
         content_b64_legacy = item.get('content')  # backward compat for old items
 
         # 建立 S3 client（跨帳號時用 assume role）
-        if assume_role_arn:
-            sts = boto3.client('sts')
-            assumed = sts.assume_role(
-                RoleArn=assume_role_arn,
-                RoleSessionName='bouncer-upload'
-            )
-            creds = assumed['Credentials']
-            s3 = boto3.client(
-                's3',
-                aws_access_key_id=creds['AccessKeyId'],
-                aws_secret_access_key=creds['SecretAccessKey'],
-                aws_session_token=creds['SessionToken']
-            )
-        else:
-            # 使用 Lambda 本身的權限上傳
-            s3 = boto3.client('s3')
+        from aws_clients import get_s3_client
+        s3 = get_s3_client(role_arn=assume_role_arn, session_name='bouncer-upload')
 
         if content_s3_key:
             # New path: S3-to-S3 copy (no download needed)
