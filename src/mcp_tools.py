@@ -148,5 +148,4 @@ from mcp_deploy_frontend import (  # noqa: F401
     _get_content_type,
     _has_blocked_extension,
     _validate_files,
-    _PROJECT_CONFIG,
 )

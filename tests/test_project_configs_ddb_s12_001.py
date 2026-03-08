@@ -6,11 +6,13 @@ Covers:
   - _get_frontend_config(): DDB has record without frontend fields -> returns None
   - _get_frontend_config(): DDB has no record -> returns None
   - _get_frontend_config(): DDB unavailable -> returns None (graceful)
-  - _get_project_config(): DDB config present -> returns DDB config (not hardcoded)
-  - _get_project_config(): DDB returns None, hardcoded exists -> returns hardcoded fallback
-  - _get_project_config(): DDB returns None, no hardcoded -> returns None
+  - _get_project_config(): DDB config present -> returns DDB config
+  - _get_project_config(): DDB returns None -> returns None (no hardcoded fallback)
   - deploy_frontend full flow: project config from DDB -> success
-  - deploy_frontend: project has no frontend config in DDB or hardcoded -> isError
+  - deploy_frontend: project has no frontend config in DDB -> isError
+
+Sprint 18 change: hardcoded fallback dict removed from _get_project_config().
+All project configs must be seeded into DynamoDB bouncer-projects table.
 """
 import base64
 import json
@@ -184,19 +186,18 @@ class TestGetProjectConfig:
         assert result == ddb_config
         assert result['frontend_bucket'] == 'ddb-bucket'  # NOT the hardcoded value
 
-    def test_falls_back_to_hardcoded_when_ddb_returns_none(self):
-        """DDB returns None, hardcoded config exists -> use hardcoded."""
+    def test_returns_none_when_ddb_returns_none(self):
+        """DDB returns None -> _get_project_config returns None (no hardcoded fallback).
+        Sprint 18: hardcoded fallback removed; all configs must be seeded in DDB."""
         from mcp_deploy_frontend import _get_project_config
 
         with patch('mcp_deploy_frontend._get_frontend_config', return_value=None):
             result = _get_project_config('ztp-files')
 
-        assert result is not None
-        assert result['frontend_bucket'] == 'ztp-files-dev-frontendbucket-nvvimv31xp3v'
-        assert result['distribution_id'] == 'E176PW0SA5JF29'
+        assert result is None  # No fallback; DDB is the only source
 
-    def test_returns_none_when_neither_ddb_nor_hardcoded(self):
-        """DDB returns None, no hardcoded config for project -> returns None."""
+    def test_returns_none_for_unknown_project(self):
+        """DDB returns None for unknown project -> _get_project_config returns None."""
         from mcp_deploy_frontend import _get_project_config
 
         with patch('mcp_deploy_frontend._get_frontend_config', return_value=None):
@@ -204,16 +205,22 @@ class TestGetProjectConfig:
 
         assert result is None
 
-    def test_ddb_config_shapes_match_hardcoded(self):
-        """DDB config from _get_project_config has same keys as hardcoded."""
+    def test_ddb_config_has_required_keys(self):
+        """DDB config from _get_project_config has the expected canonical keys."""
         from mcp_deploy_frontend import _get_project_config
 
-        # Test hardcoded path
-        with patch('mcp_deploy_frontend._get_frontend_config', return_value=None):
-            hardcoded_result = _get_project_config('ztp-files')
+        ddb_config = {
+            'frontend_bucket': 'test-bucket',
+            'distribution_id': 'ETEST123',
+            'region': 'us-east-1',
+            'deploy_role_arn': 'arn:aws:iam::999:role/test-role',
+        }
+
+        with patch('mcp_deploy_frontend._get_frontend_config', return_value=ddb_config):
+            result = _get_project_config('test-app')
 
         required_keys = {'frontend_bucket', 'distribution_id', 'region', 'deploy_role_arn'}
-        assert required_keys.issubset(hardcoded_result.keys())
+        assert required_keys.issubset(result.keys())
 
 
 # ---------------------------------------------------------------------------

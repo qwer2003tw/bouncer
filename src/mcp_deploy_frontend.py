@@ -28,17 +28,13 @@ from utils import generate_request_id, mcp_result
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Project Config (hardcoded fallback; primary source is DynamoDB bouncer-projects)
+# Project Config (DynamoDB-only; no hardcoded fallback)
 # ---------------------------------------------------------------------------
-
-_PROJECT_CONFIG = {
-    "ztp-files": {
-        "frontend_bucket": "ztp-files-dev-frontendbucket-nvvimv31xp3v",
-        "distribution_id": "E176PW0SA5JF29",
-        "region": "us-east-1",
-        "deploy_role_arn": "arn:aws:iam::190825685292:role/ztp-files-dev-frontend-deploy-role",
-    }
-}
+# All project configs must be stored in the DynamoDB 'bouncer-projects' table.
+# To add a new frontend project, run:
+#   python3 scripts/seed_frontend_configs.py
+# See SKILL.md > "Adding a New Frontend Project" for full instructions.
+# ---------------------------------------------------------------------------
 
 # Environment variable for projects table (same as deployer.py)
 _PROJECTS_TABLE = os.environ.get('PROJECTS_TABLE', 'bouncer-projects')
@@ -76,7 +72,7 @@ def _get_frontend_config(project_id: str) -> Optional[dict]:
       - frontend_region            (optional, defaults to us-east-1)
       - frontend_deploy_role_arn   (IAM role for S3/CF deploy)
 
-    Returns a normalised config dict (same shape as _PROJECT_CONFIG values),
+    Returns a normalised config dict with keys: frontend_bucket, distribution_id, region, deploy_role_arn;
     or None if the project record does not exist or has no frontend fields.
     """
     try:
@@ -106,38 +102,27 @@ def _get_frontend_config(project_id: str) -> Optional[dict]:
         }
     except Exception as exc:
         logger.warning(
-            "[deploy-frontend] DDB config lookup failed for %s: %s -- using hardcoded fallback",
+            "[deploy-frontend] DDB config lookup failed for %s: %s",
             project_id, exc,
         )
         return None
 
 
 def _get_project_config(project_id: str) -> Optional[dict]:
-    """Return frontend project config, preferring DynamoDB with hardcoded fallback.
+    """Return frontend project config from DynamoDB bouncer-projects table.
 
-    Resolution order:
-    1. DynamoDB bouncer-projects table (primary)
-    2. Hardcoded _PROJECT_CONFIG dict (backward-compatible fallback)
+    If the project is not found in DynamoDB, returns None.
+    The caller is responsible for returning a meaningful error to the user.
+
+    To add a new frontend project, seed the DynamoDB table:
+        python3 scripts/seed_frontend_configs.py
     """
-    ddb_config = _get_frontend_config(project_id)
-    if ddb_config is not None:
-        return ddb_config
-
-    # Fallback to hardcoded config for backward compatibility
-    hardcoded = _PROJECT_CONFIG.get(project_id)
-    if hardcoded:
-        logger.info(
-            "[deploy-frontend] Using hardcoded fallback config for project '%s'",
-            project_id,
-        )
-        return hardcoded
-
-    return None
+    return _get_frontend_config(project_id)
 
 
 def _list_known_projects() -> list:
-    """Return list of known project IDs (DDB + hardcoded union)."""
-    known = set(_PROJECT_CONFIG.keys())
+    """Return list of known frontend project IDs from DynamoDB."""
+    known = set()
     try:
         dynamodb = boto3.resource('dynamodb', region_name=_REGION)
         projects_table = dynamodb.Table(_PROJECTS_TABLE)
