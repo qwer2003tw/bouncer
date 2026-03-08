@@ -34,6 +34,9 @@ locks_table = None
 # Tests may patch this: patch.object(deployer, 'sfn_client')
 sfn_client = None
 
+# CloudFormation — lazy init
+cfn_client = None
+
 
 def _get_dynamodb():
     global _dynamodb
@@ -70,6 +73,14 @@ def _get_sfn_client():
         region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
         sfn_client = boto3.client('stepfunctions', region_name=region)
     return sfn_client
+
+
+def _get_cfn_client():
+    global cfn_client
+    if cfn_client is None:
+        region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+        cfn_client = boto3.client('cloudformation', region_name=region)
+    return cfn_client
 
 
 # ============================================================================
@@ -591,10 +602,40 @@ def get_deploy_status(deploy_id: str) -> dict:
 
                     ddb_update['error_lines'] = error_lines
 
+                # --- Sprint17-#55: CloudFormation failed resources ---
+                stack_name = record.get('stack_name', '')
+                if sfn_status in ('FAILED', 'TIMED_OUT', 'ABORTED') and stack_name:
+                    try:
+                        events = _get_cfn_client().describe_stack_events(
+                            StackName=stack_name
+                        )['StackEvents']
+                        failed_events = [
+                            e for e in events
+                            if 'FAILED' in e.get('ResourceStatus', '')
+                        ][:5]
+                        ddb_update['failed_resources'] = [
+                            {
+                                'resource': e['LogicalResourceId'],
+                                'status': e['ResourceStatus'],
+                                'reason': e.get('ResourceStatusReason', '')[:200],
+                            }
+                            for e in failed_events
+                        ]
+                        ddb_update['error_summary'] = (
+                            failed_events[0].get('ResourceStatusReason', '')[:300]
+                            if failed_events else ''
+                        )
+                    except Exception as exc:
+                        logger.warning('[deployer] describe_stack_events failed: %s', exc)
+
                 update_deploy_record(deploy_id, ddb_update)
                 record['status'] = new_status
                 if error_lines:
                     record['error_lines'] = error_lines
+                if 'failed_resources' in ddb_update:
+                    record['failed_resources'] = ddb_update['failed_resources']
+                if 'error_summary' in ddb_update:
+                    record['error_summary'] = ddb_update['error_summary']
 
                 project_id = record.get('project_id', '')
                 deploy_status = 'success' if new_status == 'SUCCESS' else 'failed'
