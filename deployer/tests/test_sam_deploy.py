@@ -414,35 +414,62 @@ class TestDeployResult:
 
 
 class TestRunDeploy:
-    def test_success_returns_success_status(self):
+    """_run_deploy uses subprocess.Popen with streaming output (#88)."""
+
+    def _make_popen(self, lines, returncode=0):
+        """Build a mock Popen whose .stdout iterates over *lines*."""
         proc = MagicMock()
-        proc.returncode = 0
-        proc.stdout = "Deploy succeeded\n"
-        proc.stderr = ""
-        with patch("sam_deploy.subprocess.run", return_value=proc):
+        proc.returncode = returncode
+        proc.stdout = iter(line + "\n" for line in lines)
+        proc.wait.return_value = None
+        return proc
+
+    def test_success_returns_success_status(self):
+        proc = self._make_popen(["Deploy succeeded"], returncode=0)
+        with patch("sam_deploy.subprocess.Popen", return_value=proc):
             result = _run_deploy(["sam", "deploy"])
         assert result.succeeded is True
         assert result.returncode == 0
 
     def test_failure_returns_failed_status(self):
-        proc = MagicMock()
-        proc.returncode = 1
-        proc.stdout = "Error output\n"
-        proc.stderr = "Some error"
-        with patch("sam_deploy.subprocess.run", return_value=proc):
+        proc = self._make_popen(["Error: deploy failed"], returncode=1)
+        with patch("sam_deploy.subprocess.Popen", return_value=proc):
             result = _run_deploy(["sam", "deploy"])
         assert result.status == DeployStatus.FAILED
         assert result.returncode == 1
 
-    def test_captures_stdout_and_stderr(self):
-        proc = MagicMock()
-        proc.returncode = 0
-        proc.stdout = "stdout content"
-        proc.stderr = "stderr content"
-        with patch("sam_deploy.subprocess.run", return_value=proc):
+    def test_streaming_lines_collected_in_stdout(self):
+        """All streamed lines are joined into result.stdout."""
+        lines = ["line one", "line two", "line three"]
+        proc = self._make_popen(lines, returncode=0)
+        with patch("sam_deploy.subprocess.Popen", return_value=proc):
             result = _run_deploy(["sam", "deploy"])
-        assert result.stdout == "stdout content"
-        assert result.stderr == "stderr content"
+        assert result.stdout == "line one\nline two\nline three"
+
+    def test_popen_called_with_streaming_args(self):
+        """Popen is called with PIPE stdout, merged stderr, text=True."""
+        proc = self._make_popen([], returncode=0)
+        with patch("sam_deploy.subprocess.Popen", return_value=proc) as mock_popen:
+            _run_deploy(["sam", "deploy", "--stack-name", "my-stack"])
+        call_kwargs = mock_popen.call_args
+        args, kwargs = call_kwargs
+        assert kwargs.get("stdout") == subprocess.PIPE
+        assert kwargs.get("stderr") == subprocess.STDOUT
+        assert kwargs.get("text") is True
+
+    def test_stderr_field_empty_in_streaming_mode(self):
+        """stderr field is empty string since stderr is merged into stdout."""
+        proc = self._make_popen(["some output"], returncode=0)
+        with patch("sam_deploy.subprocess.Popen", return_value=proc):
+            result = _run_deploy(["sam", "deploy"])
+        assert result.stderr == ""
+
+    def test_wait_called_after_stdout_exhausted(self):
+        """process.wait() is called to collect returncode."""
+        proc = self._make_popen(["output"], returncode=0)
+        with patch("sam_deploy.subprocess.Popen", return_value=proc):
+            _run_deploy(["sam", "deploy"])
+        proc.wait.assert_called_once()
 
 
 # ===========================================================================
@@ -546,10 +573,13 @@ class TestMainNormalDeploy:
     """No conflicts → normal deploy path."""
 
     def _make_proc(self, rc: int, stdout: str = "", stderr: str = "") -> MagicMock:
+        """Build a Popen-compatible mock (stdout+stderr merged as iterable)."""
         p = MagicMock()
         p.returncode = rc
-        p.stdout = stdout
-        p.stderr = stderr
+        # Merge stdout+stderr as Popen does with stderr=STDOUT
+        combined = stdout + stderr
+        p.stdout = iter(combined.splitlines(keepends=True)) if combined else iter([])
+        p.wait.return_value = None
         return p
 
     def test_success_exits_zero(self, monkeypatch):
@@ -558,7 +588,7 @@ class TestMainNormalDeploy:
         monkeypatch.delenv("CFN_ROLE_ARN", raising=False)
         monkeypatch.delenv("TARGET_ROLE_ARN", raising=False)
 
-        with patch("sam_deploy.subprocess.run", return_value=self._make_proc(0, "ok\n")):
+        with patch("sam_deploy.subprocess.Popen", return_value=self._make_proc(0, "ok\n")):
             with pytest.raises(SystemExit) as exc:
                 main([])
         assert exc.value.code == 0
@@ -570,7 +600,7 @@ class TestMainNormalDeploy:
         monkeypatch.delenv("TARGET_ROLE_ARN", raising=False)
 
         with patch(
-            "sam_deploy.subprocess.run",
+            "sam_deploy.subprocess.Popen",
             return_value=self._make_proc(1, stderr="Access Denied\n"),
         ), patch.object(CloudFormationImporter, "import_resources") as mock_import:
             with pytest.raises(SystemExit) as exc:
@@ -595,10 +625,13 @@ class TestMainConflictPath:
     """Conflict → import → retry."""
 
     def _make_proc(self, rc: int, stdout: str = "", stderr: str = "") -> MagicMock:
+        """Build a Popen-compatible mock (stdout+stderr merged as iterable)."""
         p = MagicMock()
         p.returncode = rc
-        p.stdout = stdout
-        p.stderr = stderr
+        # Merge stdout+stderr as Popen does with stderr=STDOUT
+        combined = stdout + stderr
+        p.stdout = iter(combined.splitlines(keepends=True)) if combined else iter([])
+        p.wait.return_value = None
         return p
 
     def test_conflict_triggers_import_and_retry(self, monkeypatch, mock_cfn_client):
@@ -611,7 +644,7 @@ class TestMainConflictPath:
         second_call = self._make_proc(0, stdout="Retry succeeded\n")
 
         with patch(
-            "sam_deploy.subprocess.run", side_effect=[first_call, second_call]
+            "sam_deploy.subprocess.Popen", side_effect=[first_call, second_call]
         ), patch("sam_deploy.boto3.client", return_value=mock_cfn_client):
             with pytest.raises(SystemExit) as exc:
                 main([])
@@ -629,7 +662,7 @@ class TestMainConflictPath:
         second_call = self._make_proc(0, stdout="ok\n")
 
         with patch(
-            "sam_deploy.subprocess.run", side_effect=[first_call, second_call]
+            "sam_deploy.subprocess.Popen", side_effect=[first_call, second_call]
         ), patch("sam_deploy.boto3.client", return_value=mock_cfn_client):
             with pytest.raises(SystemExit) as exc:
                 main([])
@@ -652,20 +685,20 @@ class TestMainConflictPath:
         )
         first_call = self._make_proc(1, stdout=CONFLICT_OUTPUT_SINGLE)
 
-        run_calls = []
+        popen_calls = []
 
         def side_effect_fn(*args, **kwargs):
-            run_calls.append(args)
+            popen_calls.append(args)
             return first_call
 
         with patch(
-            "sam_deploy.subprocess.run", side_effect=side_effect_fn
+            "sam_deploy.subprocess.Popen", side_effect=side_effect_fn
         ), patch("sam_deploy.boto3.client", return_value=mock_cfn_client):
             with pytest.raises(SystemExit) as exc:
                 main([])
 
         assert exc.value.code == 1
-        assert len(run_calls) == 1
+        assert len(popen_calls) == 1
 
     def test_unparseable_conflict_aborts(self, monkeypatch):
         """Output has 'already exists' but no structured resource info."""
@@ -677,11 +710,11 @@ class TestMainConflictPath:
         vague_conflict = "Error: something already exists but no details here"
         first_call = MagicMock()
         first_call.returncode = 1
-        first_call.stdout = vague_conflict
-        first_call.stderr = ""
+        first_call.stdout = iter([vague_conflict + "\n"])
+        first_call.wait.return_value = None
 
         with patch(
-            "sam_deploy.subprocess.run", return_value=first_call
+            "sam_deploy.subprocess.Popen", return_value=first_call
         ), patch.object(CloudFormationImporter, "import_resources") as mock_import:
             with pytest.raises(SystemExit) as exc:
                 main([])
@@ -690,17 +723,18 @@ class TestMainConflictPath:
         mock_import.assert_not_called()
 
     def test_conflict_in_stderr_also_detected(self, monkeypatch, mock_cfn_client):
-        """Conflict message in stderr (not stdout) should also trigger import."""
+        """Conflict message in stderr is merged into stdout via Popen stderr=STDOUT."""
         monkeypatch.setenv("STACK_NAME", STACK)
         monkeypatch.delenv("SAM_PARAMS", raising=False)
         monkeypatch.delenv("CFN_ROLE_ARN", raising=False)
         monkeypatch.delenv("TARGET_ROLE_ARN", raising=False)
 
-        first_call = self._make_proc(1, stdout="", stderr=CONFLICT_OUTPUT_SINGLE)
+        # With Popen stderr=STDOUT, stderr is merged into stdout stream
+        first_call = self._make_proc(1, stdout=CONFLICT_OUTPUT_SINGLE)
         second_call = self._make_proc(0, stdout="ok\n")
 
         with patch(
-            "sam_deploy.subprocess.run", side_effect=[first_call, second_call]
+            "sam_deploy.subprocess.Popen", side_effect=[first_call, second_call]
         ), patch("sam_deploy.boto3.client", return_value=mock_cfn_client):
             with pytest.raises(SystemExit) as exc:
                 main([])
@@ -718,10 +752,12 @@ class TestMainDryRunImport:
     """--dry-run-import flag tests."""
 
     def _make_proc(self, rc: int, stdout: str = "", stderr: str = "") -> MagicMock:
+        """Build a Popen-compatible mock (stdout+stderr merged as iterable)."""
         p = MagicMock()
         p.returncode = rc
-        p.stdout = stdout
-        p.stderr = stderr
+        combined = stdout + stderr
+        p.stdout = iter(combined.splitlines(keepends=True)) if combined else iter([])
+        p.wait.return_value = None
         return p
 
     def test_dry_run_no_conflict_deploys_normally(self, monkeypatch):
@@ -731,7 +767,7 @@ class TestMainDryRunImport:
         monkeypatch.delenv("TARGET_ROLE_ARN", raising=False)
 
         with patch(
-            "sam_deploy.subprocess.run", return_value=self._make_proc(0, "ok\n")
+            "sam_deploy.subprocess.Popen", return_value=self._make_proc(0, "ok\n")
         ):
             with pytest.raises(SystemExit) as exc:
                 main(["--dry-run-import"])
@@ -746,7 +782,7 @@ class TestMainDryRunImport:
         first_call = self._make_proc(1, stdout=CONFLICT_OUTPUT_SINGLE)
 
         with patch(
-            "sam_deploy.subprocess.run", return_value=first_call
+            "sam_deploy.subprocess.Popen", return_value=first_call
         ), patch("sam_deploy.boto3.client", return_value=mock_cfn_client):
             with pytest.raises(SystemExit) as exc:
                 main(["--dry-run-import"])
@@ -822,10 +858,12 @@ class TestWaitForChangeset:
 
 class TestMainWithParams:
     def _make_proc(self, rc: int, stdout: str = "", stderr: str = "") -> MagicMock:
+        """Build a Popen-compatible mock (stdout+stderr merged as iterable)."""
         p = MagicMock()
         p.returncode = rc
-        p.stdout = stdout
-        p.stderr = stderr
+        combined = stdout + stderr
+        p.stdout = iter(combined.splitlines(keepends=True)) if combined else iter([])
+        p.wait.return_value = None
         return p
 
     def test_json_params_passed_correctly(self, monkeypatch):
@@ -836,11 +874,11 @@ class TestMainWithParams:
 
         captured_cmd = []
 
-        def capture_run(cmd, **kwargs):
+        def capture_popen(cmd, **kwargs):
             captured_cmd.extend(cmd)
             return self._make_proc(0, "ok\n")
 
-        with patch("sam_deploy.subprocess.run", side_effect=capture_run):
+        with patch("sam_deploy.subprocess.Popen", side_effect=capture_popen):
             with pytest.raises(SystemExit) as exc:
                 main([])
 
@@ -856,11 +894,11 @@ class TestMainWithParams:
 
         captured_cmd = []
 
-        def capture_run(cmd, **kwargs):
+        def capture_popen(cmd, **kwargs):
             captured_cmd.extend(cmd)
             return self._make_proc(0, "ok\n")
 
-        with patch("sam_deploy.subprocess.run", side_effect=capture_run):
+        with patch("sam_deploy.subprocess.Popen", side_effect=capture_popen):
             with pytest.raises(SystemExit) as exc:
                 main([])
 
@@ -955,10 +993,10 @@ class TestEarlyValidationHintPrinted:
 
         proc = MagicMock()
         proc.returncode = 1
-        proc.stdout = EARLY_VALIDATION_OUTPUT
-        proc.stderr = ""
+        proc.stdout = iter(EARLY_VALIDATION_OUTPUT.splitlines(keepends=True))
+        proc.wait.return_value = None
 
-        with patch("sam_deploy.subprocess.run", return_value=proc):
+        with patch("sam_deploy.subprocess.Popen", return_value=proc):
             with pytest.raises(SystemExit) as exc:
                 main([])
 
@@ -975,10 +1013,10 @@ class TestEarlyValidationHintPrinted:
 
         proc = MagicMock()
         proc.returncode = 1
-        proc.stdout = NO_CONFLICT_OUTPUT
-        proc.stderr = ""
+        proc.stdout = iter(NO_CONFLICT_OUTPUT.splitlines(keepends=True))
+        proc.wait.return_value = None
 
-        with patch("sam_deploy.subprocess.run", return_value=proc):
+        with patch("sam_deploy.subprocess.Popen", return_value=proc):
             with pytest.raises(SystemExit):
                 main([])
 
@@ -1027,10 +1065,12 @@ class TestSuggestImportJsonOutput:
     """test_suggest_import_json_output — --suggest-import flag outputs valid JSON."""
 
     def _make_proc(self, rc: int, stdout: str = "", stderr: str = "") -> MagicMock:
+        """Build a Popen-compatible mock (stdout+stderr merged as iterable)."""
         p = MagicMock()
         p.returncode = rc
-        p.stdout = stdout
-        p.stderr = stderr
+        combined = stdout + stderr
+        p.stdout = iter(combined.splitlines(keepends=True)) if combined else iter([])
+        p.wait.return_value = None
         return p
 
     def test_build_suggest_import_json_returns_valid_json(self):
@@ -1066,7 +1106,7 @@ class TestSuggestImportJsonOutput:
 
         first_call = self._make_proc(1, stdout=CONFLICT_OUTPUT_SINGLE)
 
-        with patch("sam_deploy.subprocess.run", return_value=first_call):
+        with patch("sam_deploy.subprocess.Popen", return_value=first_call):
             with pytest.raises(SystemExit) as exc:
                 main(["--suggest-import"])
 
@@ -1095,7 +1135,7 @@ class TestSuggestImportJsonOutput:
 
         first_call = self._make_proc(1, stdout=EARLY_VALIDATION_WITH_RESOURCE_OUTPUT)
 
-        with patch("sam_deploy.subprocess.run", return_value=first_call), \
+        with patch("sam_deploy.subprocess.Popen", return_value=first_call), \
              patch("sam_deploy.boto3.client", return_value=mock_cfn_client):
             with pytest.raises(SystemExit) as exc:
                 main(["--suggest-import"])
@@ -1117,7 +1157,7 @@ class TestSuggestImportJsonOutput:
 
         first_call = self._make_proc(1, stdout=EARLY_VALIDATION_OUTPUT)
 
-        with patch("sam_deploy.subprocess.run", return_value=first_call):
+        with patch("sam_deploy.subprocess.Popen", return_value=first_call):
             with pytest.raises(SystemExit) as exc:
                 main(["--suggest-import"])
 
