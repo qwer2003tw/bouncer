@@ -38,7 +38,7 @@ def mock_dynamodb():
         yield dynamodb
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="function")
 def paging_module(mock_dynamodb):
     """Load paging module with mocked DynamoDB."""
     os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'
@@ -54,6 +54,14 @@ def paging_module(mock_dynamodb):
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
     import paging
+    import importlib
+    import telegram as _telegram_module
+
+    # Force reload paging to refresh send_telegram_message_silent binding.
+    # Also reload telegram first to ensure it has the real function (not a mock).
+    importlib.reload(_telegram_module)
+    importlib.reload(paging)
+
     # Inject moto-backed table
     paging._table = mock_dynamodb.Table('clawdbot-approval-requests')
     yield paging
