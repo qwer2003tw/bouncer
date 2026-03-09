@@ -621,6 +621,20 @@ def get_deploy_status(deploy_id: str) -> dict:
                             }
                             for e in failed_events
                         ]
+                        # #87: cfn_failure_events with richer format (logical_resource_id, timestamp)
+                        ddb_update['cfn_failure_events'] = [
+                            {
+                                'logical_resource_id': e['LogicalResourceId'],
+                                'resource_status': e['ResourceStatus'],
+                                'reason': e.get('ResourceStatusReason', '')[:300],
+                                'timestamp': (
+                                    e['Timestamp'].strftime('%Y-%m-%dT%H:%M:%SZ')
+                                    if hasattr(e.get('Timestamp'), 'strftime')
+                                    else str(e.get('Timestamp', ''))
+                                ),
+                            }
+                            for e in failed_events
+                        ]
                         ddb_update['error_summary'] = (
                             failed_events[0].get('ResourceStatusReason', '')[:300]
                             if failed_events else ''
@@ -634,6 +648,8 @@ def get_deploy_status(deploy_id: str) -> dict:
                     record['error_lines'] = error_lines
                 if 'failed_resources' in ddb_update:
                     record['failed_resources'] = ddb_update['failed_resources']
+                if 'cfn_failure_events' in ddb_update:
+                    record['cfn_failure_events'] = ddb_update['cfn_failure_events']
                 if 'error_summary' in ddb_update:
                     record['error_summary'] = ddb_update['error_summary']
 
