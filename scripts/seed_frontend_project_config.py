@@ -58,7 +58,7 @@ def seed(dry_run: bool = False):
                 ExpressionAttributeNames=expr_attr_names,
                 ExpressionAttributeValues=expr_attr_values,
             )
-            print(f"  -> OK")
+            print("  -> OK")
 
     print("[seed] Done.")
 
