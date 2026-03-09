@@ -752,3 +752,307 @@ class TestDeployRoleArnPhaseB:
             if len(c[0]) > 0 and c[0][0] == 's3' and c[1].get('aws_access_key_id')
         ]
         assert len(s3_cred_calls) == 0, "No assumed-role s3 client expected when role is None"
+
+
+# ---------------------------------------------------------------------------
+# Sprint 21-002: Staging cleanup, deploy history, and staged key paths
+# ---------------------------------------------------------------------------
+
+class TestStagingCleanupAfterDeploy:
+    """Verify that staged objects in the staging bucket are deleted after a successful deploy.
+
+    Phase B reads each file from staging (get_object) then writes to frontend bucket
+    (put_object). After a successful put_object, the staged object should be cleaned up
+    from the staging bucket (delete_object on s3_staging).
+    """
+
+    def _run_with_staging_s3(self):
+        mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
+        # Track delete_object calls on s3_staging
+        deleted_keys = []
+
+        def delete_object_side_effect(**kwargs):
+            deleted_keys.append(kwargs.get('Key'))
+
+        mock_s3_staging.delete_object.side_effect = delete_object_side_effect
+
+        with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
+             patch('callbacks._get_table', return_value=mock_table), \
+             patch('callbacks.answer_callback'), \
+             patch('callbacks.update_message'), \
+             patch('callbacks._update_request_status'), \
+             patch('callbacks.emit_metric'), \
+             patch('telegram.send_message_with_entities'):
+            result = _call_callback(action='approve')
+        return result, mock_boto3, mock_s3_target, mock_s3_staging, deleted_keys
+
+    def test_get_object_uses_staged_s3_key(self):
+        """get_object must use the s3_key from the files manifest as the Key."""
+        _, _, _, mock_s3_staging, _ = self._run_with_staging_s3()
+        call_keys = [c[1].get('Key') for c in mock_s3_staging.get_object.call_args_list]
+        expected_keys = [fm['s3_key'] for fm in _FILES_MANIFEST]
+        assert call_keys == expected_keys, (
+            f"get_object keys {call_keys!r} != manifest keys {expected_keys!r}"
+        )
+
+    def test_get_object_uses_staging_bucket(self):
+        """get_object must read from the staging bucket, not the frontend bucket."""
+        _, _, _, mock_s3_staging, _ = self._run_with_staging_s3()
+        for c in mock_s3_staging.get_object.call_args_list:
+            assert c[1].get('Bucket') == _STAGING_BUCKET, (
+                f"Expected staging bucket {_STAGING_BUCKET!r}, got {c[1].get('Bucket')!r}"
+            )
+
+    def test_put_object_uses_filename_as_key(self):
+        """put_object must write to the frontend bucket using the original filename as key."""
+        _, _, mock_s3_target, _, _ = self._run_with_staging_s3()
+        call_keys = [c[1].get('Key') for c in mock_s3_target.put_object.call_args_list]
+        expected_keys = [fm['filename'] for fm in _FILES_MANIFEST]
+        assert call_keys == expected_keys, (
+            f"put_object keys {call_keys!r} != filenames {expected_keys!r}"
+        )
+
+    def test_put_object_uses_frontend_bucket(self):
+        """put_object must write to the frontend bucket."""
+        _, _, mock_s3_target, _, _ = self._run_with_staging_s3()
+        for c in mock_s3_target.put_object.call_args_list:
+            assert c[1].get('Bucket') == _FRONTEND_BUCKET
+
+    def test_index_html_has_no_cache_cache_control(self):
+        """index.html must have 'no-cache' in CacheControl (not immutable)."""
+        _, _, mock_s3_target, _, _ = self._run_with_staging_s3()
+        index_call = next(
+            c for c in mock_s3_target.put_object.call_args_list
+            if c[1].get('Key') == 'index.html'
+        )
+        cc = index_call[1].get('CacheControl', '')
+        assert 'no-cache' in cc, f"Expected no-cache CacheControl for index.html, got {cc!r}"
+        assert 'immutable' not in cc
+
+    def test_assets_have_immutable_cache_control(self):
+        """Files under assets/ must have immutable CacheControl."""
+        _, _, mock_s3_target, _, _ = self._run_with_staging_s3()
+        asset_calls = [
+            c for c in mock_s3_target.put_object.call_args_list
+            if c[1].get('Key', '').startswith('assets/')
+        ]
+        assert len(asset_calls) > 0, "Expected at least one assets/ file"
+        for c in asset_calls:
+            cc = c[1].get('CacheControl', '')
+            assert 'immutable' in cc, (
+                f"Expected immutable CacheControl for asset {c[1].get('Key')!r}, got {cc!r}"
+            )
+
+    def test_get_object_read_count_matches_file_count(self):
+        """get_object is called exactly once per file in the manifest."""
+        _, _, _, mock_s3_staging, _ = self._run_with_staging_s3()
+        assert mock_s3_staging.get_object.call_count == len(_FILES_MANIFEST)
+
+    def test_put_object_write_count_matches_file_count(self):
+        """put_object is called exactly once per file (full success)."""
+        _, _, mock_s3_target, _, _ = self._run_with_staging_s3()
+        assert mock_s3_target.put_object.call_count == len(_FILES_MANIFEST)
+
+    def test_cf_not_called_when_all_files_fail_get_object(self):
+        """CloudFront invalidation must NOT be called when all get_object calls fail."""
+        def get_fail(**kwargs):
+            raise Exception('Staging read error')
+
+        mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
+            get_object_side_effect=get_fail
+        )
+        with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
+             patch('callbacks._get_table', return_value=mock_table), \
+             patch('callbacks.answer_callback'), \
+             patch('callbacks.update_message'), \
+             patch('callbacks._update_request_status'), \
+             patch('callbacks.emit_metric'), \
+             patch('telegram.send_message_with_entities'):
+            _call_callback(action='approve')
+        mock_cf.create_invalidation.assert_not_called()
+
+    def test_full_failure_when_all_get_object_fail(self):
+        """deploy_status must be deploy_failed when all files fail at get_object."""
+        def get_fail(**kwargs):
+            raise Exception('Staging read error')
+
+        mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
+            get_object_side_effect=get_fail
+        )
+        with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
+             patch('callbacks._get_table', return_value=mock_table), \
+             patch('callbacks.answer_callback'), \
+             patch('callbacks.update_message'), \
+             patch('callbacks._update_request_status') as mock_update_status, \
+             patch('callbacks.emit_metric'), \
+             patch('telegram.send_message_with_entities'):
+            _call_callback(action='approve')
+        extra = mock_update_status.call_args[1].get('extra_attrs', {})
+        assert extra.get('deploy_status') == 'deploy_failed'
+
+    def test_put_object_error_does_not_call_cf_on_full_failure(self):
+        """When all put_object calls fail, CF invalidation must not be triggered."""
+        def put_fail(**kwargs):
+            raise Exception('Target S3 write error')
+
+        mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
+            put_object_side_effect=put_fail
+        )
+        with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
+             patch('callbacks._get_table', return_value=mock_table), \
+             patch('callbacks.answer_callback'), \
+             patch('callbacks.update_message'), \
+             patch('callbacks._update_request_status'), \
+             patch('callbacks.emit_metric'), \
+             patch('telegram.send_message_with_entities'):
+            _call_callback(action='approve')
+        mock_cf.create_invalidation.assert_not_called()
+
+    def test_cf_called_when_at_least_one_file_succeeds(self):
+        """CF invalidation is called if at least one file was deployed successfully."""
+        call_count = {'n': 0}
+
+        def put_fail_second(**kwargs):
+            call_count['n'] += 1
+            if call_count['n'] == 2:
+                raise Exception('Second file failed')
+
+        mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
+            put_object_side_effect=put_fail_second
+        )
+        with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
+             patch('callbacks._get_table', return_value=mock_table), \
+             patch('callbacks.answer_callback'), \
+             patch('callbacks.update_message'), \
+             patch('callbacks._update_request_status'), \
+             patch('callbacks.emit_metric'), \
+             patch('telegram.send_message_with_entities'):
+            _call_callback(action='approve')
+        mock_cf.create_invalidation.assert_called_once()
+
+
+class TestDeployHistoryWrite:
+    """Verify that _write_frontend_deploy_history is called after Phase B deploy."""
+
+    def test_deploy_history_called_on_full_success(self):
+        """_write_frontend_deploy_history must be called once on full success."""
+        mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
+        with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
+             patch('callbacks._get_table', return_value=mock_table), \
+             patch('callbacks.answer_callback'), \
+             patch('callbacks.update_message'), \
+             patch('callbacks._update_request_status'), \
+             patch('callbacks.emit_metric'), \
+             patch('telegram.send_message_with_entities'), \
+             patch('callbacks._write_frontend_deploy_history') as mock_history:
+            _call_callback(action='approve')
+        mock_history.assert_called_once()
+
+    def test_deploy_history_receives_correct_project(self):
+        """_write_frontend_deploy_history must receive the project name from DDB item."""
+        mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
+        with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
+             patch('callbacks._get_table', return_value=mock_table), \
+             patch('callbacks.answer_callback'), \
+             patch('callbacks.update_message'), \
+             patch('callbacks._update_request_status'), \
+             patch('callbacks.emit_metric'), \
+             patch('telegram.send_message_with_entities'), \
+             patch('callbacks._write_frontend_deploy_history') as mock_history:
+            _call_callback(action='approve')
+        kwargs = mock_history.call_args[1]
+        assert kwargs['project'] == 'ztp-files'
+
+    def test_deploy_history_status_deployed_on_full_success(self):
+        """_write_frontend_deploy_history receives deploy_status='deployed' on full success."""
+        mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
+        with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
+             patch('callbacks._get_table', return_value=mock_table), \
+             patch('callbacks.answer_callback'), \
+             patch('callbacks.update_message'), \
+             patch('callbacks._update_request_status'), \
+             patch('callbacks.emit_metric'), \
+             patch('telegram.send_message_with_entities'), \
+             patch('callbacks._write_frontend_deploy_history') as mock_history:
+            _call_callback(action='approve')
+        kwargs = mock_history.call_args[1]
+        assert kwargs['deploy_status'] == 'deployed'
+
+    def test_deploy_history_status_deploy_failed_on_full_failure(self):
+        """_write_frontend_deploy_history receives deploy_status='deploy_failed' on full failure."""
+        def get_fail(**kwargs):
+            raise Exception('S3 error')
+
+        mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
+            get_object_side_effect=get_fail
+        )
+        with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
+             patch('callbacks._get_table', return_value=mock_table), \
+             patch('callbacks.answer_callback'), \
+             patch('callbacks.update_message'), \
+             patch('callbacks._update_request_status'), \
+             patch('callbacks.emit_metric'), \
+             patch('telegram.send_message_with_entities'), \
+             patch('callbacks._write_frontend_deploy_history') as mock_history:
+            _call_callback(action='approve')
+        kwargs = mock_history.call_args[1]
+        assert kwargs['deploy_status'] == 'deploy_failed'
+
+    def test_deploy_history_not_called_on_deny(self):
+        """_write_frontend_deploy_history must NOT be called when action=deny."""
+        mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
+        with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
+             patch('callbacks._get_table', return_value=mock_table), \
+             patch('callbacks.answer_callback'), \
+             patch('callbacks.update_message'), \
+             patch('callbacks._update_request_status'), \
+             patch('callbacks.emit_metric'), \
+             patch('telegram.send_message_with_entities'), \
+             patch('callbacks._write_frontend_deploy_history') as mock_history:
+            _call_callback(action='deny')
+        mock_history.assert_not_called()
+
+    def test_deploy_history_success_count_correct(self):
+        """_write_frontend_deploy_history receives correct success_count and fail_count."""
+        mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
+        with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
+             patch('callbacks._get_table', return_value=mock_table), \
+             patch('callbacks.answer_callback'), \
+             patch('callbacks.update_message'), \
+             patch('callbacks._update_request_status'), \
+             patch('callbacks.emit_metric'), \
+             patch('telegram.send_message_with_entities'), \
+             patch('callbacks._write_frontend_deploy_history') as mock_history:
+            _call_callback(action='approve')
+        kwargs = mock_history.call_args[1]
+        assert kwargs['success_count'] == len(_FILES_MANIFEST)
+        assert kwargs['fail_count'] == 0
+
+    def test_deploy_history_cf_invalidation_failed_flag(self):
+        """_write_frontend_deploy_history receives cf_invalidation_failed=True when CF fails."""
+        mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
+            cf_side_effect=Exception('CF error')
+        )
+        with patch('callbacks._boto3', mock_boto3), \
+             patch('aws_clients.boto3', mock_boto3), \
+             patch('callbacks._get_table', return_value=mock_table), \
+             patch('callbacks.answer_callback'), \
+             patch('callbacks.update_message'), \
+             patch('callbacks._update_request_status'), \
+             patch('callbacks.emit_metric'), \
+             patch('telegram.send_message_with_entities'), \
+             patch('callbacks._write_frontend_deploy_history') as mock_history:
+            _call_callback(action='approve')
+        kwargs = mock_history.call_args[1]
+        assert kwargs['cf_invalidation_failed'] is True
