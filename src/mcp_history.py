@@ -77,7 +77,7 @@ def _compute_duration(item: dict) -> float | None:
         if approved_at and created_at:
             return round(float(Decimal(str(approved_at))) - float(Decimal(str(created_at))), 3)
     except Exception:
-        pass
+        logger.debug("[HISTORY] Failed to calculate decision_latency_ms (non-critical)", exc_info=True)
     return None
 
 
