@@ -709,10 +709,15 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
         )
         answer_callback(callback_id, '⏳ 上傳中...')
 
-        # Get S3 client
+        # Get S3 clients.
+        # s3_staging: Lambda execution role — reads from staging bucket (main account).
+        # s3_target:  Assumed role (if set) — writes to target bucket (may be cross-account).
+        # Using two separate clients avoids cross-account copy_object failures where the
+        # assumed role lacks s3:GetObject on the staging bucket (#39).
         try:
             from aws_clients import get_s3_client
-            s3 = get_s3_client(role_arn=assume_role, session_name='bouncer-batch-upload')
+            s3_staging = get_s3_client(role_arn=None, session_name='bouncer-batch-upload-staging')
+            s3_target = get_s3_client(role_arn=assume_role, session_name='bouncer-batch-upload')
         except Exception as e:
             _update_request_status(table, request_id, 'error', user_id, extra_attrs={'error_message': str(e)})
             update_message(
@@ -737,26 +742,29 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
                 from utils import generate_request_id as _gen_id
                 fkey = f"{date_str}/{_gen_id('batch')}/{fname}"
                 if s3_key:
-                    # New path: S3-to-S3 copy from staging bucket (主帳號) to target bucket
+                    # New path: read from staging (Lambda role), write to target (assumed role).
+                    # Previously used copy_object with the assumed-role client which fails
+                    # silently when the assumed role has no read access to staging bucket (#39).
                     from constants import DEFAULT_ACCOUNT_ID as _DEFAULT_ACCOUNT_ID
                     staging_bucket = f"bouncer-uploads-{_DEFAULT_ACCOUNT_ID}"
-                    s3.copy_object(
-                        CopySource={'Bucket': staging_bucket, 'Key': s3_key},
+                    obj = s3_staging.get_object(Bucket=staging_bucket, Key=s3_key)
+                    body = obj['Body'].read()
+                    s3_target.put_object(
                         Bucket=bucket,
                         Key=fkey,
+                        Body=body,
                         ContentType=fm.get('content_type', 'application/octet-stream'),
-                        MetadataDirective='REPLACE',
                     )
-                    # Cleanup staging object
+                    # Cleanup staging object (best effort, non-blocking)
                     try:
-                        s3.delete_object(Bucket=staging_bucket, Key=s3_key)
+                        s3_staging.delete_object(Bucket=staging_bucket, Key=s3_key)
                     except Exception:
                         logger.warning("[UPLOAD-BATCH] Staging cleanup failed for key=%s (non-critical)", s3_key, exc_info=True)
                 else:
-                    # Legacy path: decode base64 and upload
+                    # Legacy path: decode base64 and upload directly to target
                     import base64 as _b64
                     content_bytes = _b64.b64decode(content_b64_legacy or '')
-                    s3.put_object(
+                    s3_target.put_object(
                         Bucket=bucket,
                         Key=fkey,
                         Body=content_bytes,
@@ -764,7 +772,7 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
                     )
 
                 # Verify file exists after upload (non-blocking)
-                vr = _verify_upload(s3, bucket, fkey, fname)
+                vr = _verify_upload(s3_target, bucket, fkey, fname)
                 if not vr.verified:
                     verification_failed.append(fname)
                     # Non-blocking: record in verification_failed but still count as uploaded

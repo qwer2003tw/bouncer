@@ -1234,3 +1234,311 @@ class TestUploadBatchCallbackVerification:
         assert stored.get('status') == 'approved', "Upload must succeed despite verify failure"
         vf = _json.loads(stored.get('verification_failed', '[]'))
         assert 'perm.txt' in vf
+
+
+# =============================================================================
+# Regression tests: upload_batch silent S3 failure fix (#39)
+# =============================================================================
+
+class TestUploadBatchCrossAccountFix:
+    """Regression tests for #39: upload_batch S3 silent failure when assume_role is set.
+
+    Root cause: handle_upload_batch_callback was using a single S3 client obtained
+    with the assumed role (target account) to call copy_object FROM the staging bucket
+    (main account). Cross-account copy_object fails with AccessDenied if the assumed
+    role does not have s3:GetObject on the staging bucket — and the exception was
+    caught per-file, silently adding the file to the errors list.
+
+    Fix: Use two separate S3 clients:
+    - s3_staging: Lambda execution role (no assumed role) — reads from staging bucket
+    - s3_target:  Assumed role — writes to target bucket
+    """
+
+    @mock_aws
+    @patch('callbacks.answer_callback')
+    @patch('callbacks.update_message')
+    def test_cross_account_upload_uses_staging_client_for_get_object(
+        self, mock_update, mock_answer, app_module
+    ):
+        """With assume_role set, get_object must use Lambda-role client (staging bucket).
+
+        Verifies that the staging file is read successfully even when a cross-account
+        assumed role is in use (the Lambda role can always read its own staging bucket).
+        """
+        import callbacks
+        import json as _json
+
+        s3 = boto3.client('s3', region_name='us-east-1')
+        staging_bucket = 'bouncer-uploads-111111111111'
+        target_bucket = 'cross-account-target-bucket'
+
+        try:
+            s3.create_bucket(Bucket=staging_bucket)
+        except Exception:
+            pass
+        try:
+            s3.create_bucket(Bucket=target_bucket)
+        except Exception:
+            pass
+
+        # Stage the file
+        s3.put_object(Bucket=staging_bucket, Key='pending/batch-x001/report.csv', Body=b'csv-content')
+
+        files_manifest = _json.dumps([{
+            'filename': 'report.csv',
+            's3_key': 'pending/batch-x001/report.csv',
+            'content_type': 'text/csv',
+            'size': 11,
+            'sha256': 'abc',
+        }])
+
+        item = {
+            'request_id': 'batch-x001',
+            'action': 'upload_batch',
+            'bucket': target_bucket,
+            'files': files_manifest,
+            'file_count': 1,
+            'total_size': 11,
+            'source': 'test-bot',
+            'reason': 'cross-account regression test',
+            'account_id': '222222222222',
+            'account_name': 'CrossAccount',
+            'trust_scope': '',
+            'status': 'pending_approval',
+            'assume_role': 'arn:aws:iam::222222222222:role/BouncerRole',
+        }
+
+        # With @mock_aws, the assume_role call will use fake AWS creds.
+        # Patch get_s3_client to use the mocked boto3 clients instead of STS.
+        with patch('aws_clients.get_s3_client') as mock_get_s3:
+            s3_staging_mock = boto3.client('s3', region_name='us-east-1')
+            s3_target_mock = boto3.client('s3', region_name='us-east-1')
+
+            def get_s3_side_effect(role_arn=None, session_name='bouncer-s3', region=None):
+                if role_arn is None:
+                    return s3_staging_mock   # Lambda role -> staging reads
+                return s3_target_mock        # Assumed role -> target writes
+
+            mock_get_s3.side_effect = get_s3_side_effect
+
+            callbacks.handle_upload_batch_callback(
+                'approve', 'batch-x001', item, 123, 'cb-x001', 'user-1'
+            )
+
+        # Verify get_s3_client was called with role_arn=None for staging
+        staging_calls = [
+            c for c in mock_get_s3.call_args_list
+            if c[1].get('role_arn') is None or (len(c[0]) > 0 and c[0][0] is None)
+        ]
+        assert len(staging_calls) >= 1, (
+            "Expected get_s3_client(role_arn=None) call for staging bucket reads, "
+            f"got calls: {mock_get_s3.call_args_list}"
+        )
+
+        # Verify get_s3_client was called with the assume_role ARN for target
+        target_calls = [
+            c for c in mock_get_s3.call_args_list
+            if c[1].get('role_arn') == 'arn:aws:iam::222222222222:role/BouncerRole'
+        ]
+        assert len(target_calls) >= 1, (
+            "Expected get_s3_client(role_arn=<arn>) call for target bucket writes, "
+            f"got calls: {mock_get_s3.call_args_list}"
+        )
+
+    @mock_aws
+    @patch('callbacks.answer_callback')
+    @patch('callbacks.update_message')
+    def test_no_assume_role_uses_single_client_for_both(
+        self, mock_update, mock_answer, app_module
+    ):
+        """Without assume_role, both staging read and target write use Lambda-role client."""
+        import callbacks
+        import json as _json
+
+        s3 = boto3.client('s3', region_name='us-east-1')
+        staging_bucket = 'bouncer-uploads-111111111111'
+        target_bucket = 'same-account-target'
+
+        try:
+            s3.create_bucket(Bucket=staging_bucket)
+        except Exception:
+            pass
+        try:
+            s3.create_bucket(Bucket=target_bucket)
+        except Exception:
+            pass
+
+        s3.put_object(Bucket=staging_bucket, Key='pending/batch-x002/doc.txt', Body=b'hello')
+
+        files_manifest = _json.dumps([{
+            'filename': 'doc.txt',
+            's3_key': 'pending/batch-x002/doc.txt',
+            'content_type': 'text/plain',
+            'size': 5,
+            'sha256': 'def',
+        }])
+
+        item = {
+            'request_id': 'batch-x002',
+            'action': 'upload_batch',
+            'bucket': target_bucket,
+            'files': files_manifest,
+            'file_count': 1,
+            'total_size': 5,
+            'source': 'test-bot',
+            'reason': 'no assume_role regression test',
+            'account_id': '111111111111',
+            'account_name': 'Default',
+            'trust_scope': '',
+            'status': 'pending_approval',
+            # No assume_role key
+        }
+
+        with patch('aws_clients.get_s3_client') as mock_get_s3:
+            s3_client = boto3.client('s3', region_name='us-east-1')
+            mock_get_s3.return_value = s3_client
+
+            callbacks.handle_upload_batch_callback(
+                'approve', 'batch-x002', item, 124, 'cb-x002', 'user-1'
+            )
+
+        # get_s3_client called twice: once with role_arn=None (staging), once with role_arn=None (target)
+        for c in mock_get_s3.call_args_list[:2]:
+            role = c[1].get('role_arn')
+            assert role is None, f"Expected role_arn=None when no assume_role, got {role!r}"
+
+    @mock_aws
+    @patch('callbacks.answer_callback')
+    @patch('callbacks.update_message')
+    def test_file_is_actually_uploaded_to_target_bucket(
+        self, mock_update, mock_answer, app_module
+    ):
+        """Regression: file content must actually arrive in the target bucket after approval.
+
+        Previously (before #39 fix), copy_object from staging to target would silently fail
+        when the assumed role lacked read access to staging — the file would never appear
+        in the target bucket.
+        """
+        import callbacks
+        import json as _json
+
+        s3 = boto3.client('s3', region_name='us-east-1')
+        staging_bucket = 'bouncer-uploads-111111111111'
+        target_bucket = 'regression-target-bucket-39'
+        file_content = b'regression-test-content-for-issue-39'
+
+        try:
+            s3.create_bucket(Bucket=staging_bucket)
+        except Exception:
+            pass
+        try:
+            s3.create_bucket(Bucket=target_bucket)
+        except Exception:
+            pass
+
+        s3.put_object(Bucket=staging_bucket, Key='pending/batch-x003/upload.bin', Body=file_content)
+
+        files_manifest = _json.dumps([{
+            'filename': 'upload.bin',
+            's3_key': 'pending/batch-x003/upload.bin',
+            'content_type': 'application/octet-stream',
+            'size': len(file_content),
+            'sha256': 'ghi',
+        }])
+
+        item = {
+            'request_id': 'batch-x003',
+            'action': 'upload_batch',
+            'bucket': target_bucket,
+            'files': files_manifest,
+            'file_count': 1,
+            'total_size': len(file_content),
+            'source': 'test-bot',
+            'reason': 'regression test: file must land in target bucket',
+            'account_id': '111111111111',
+            'account_name': 'Default',
+            'trust_scope': '',
+            'status': 'pending_approval',
+        }
+
+        callbacks.handle_upload_batch_callback(
+            'approve', 'batch-x003', item, 125, 'cb-x003', 'user-1'
+        )
+
+        # Verify file actually exists in target bucket (regression check)
+        import db as _db
+        stored = _db.table.get_item(Key={'request_id': 'batch-x003'}).get('Item', {})
+        assert stored.get('upload_status') == 'completed', (
+            f"Expected upload_status='completed', got {stored.get('upload_status')!r}. "
+            "This is the regression check for #39 silent S3 failure."
+        )
+        uploaded_details = _json.loads(stored.get('uploaded_details', '[]'))
+        assert len(uploaded_details) == 1, (
+            f"Expected 1 uploaded file, got {len(uploaded_details)}. "
+            "File was not recorded as uploaded."
+        )
+        assert uploaded_details[0]['filename'] == 'upload.bin'
+
+    @mock_aws
+    @patch('callbacks.answer_callback')
+    @patch('callbacks.update_message')
+    def test_copy_object_not_called(self, mock_update, mock_answer, app_module):
+        """Regression: copy_object must NOT be called. Fix uses get_object+put_object instead.
+
+        This ensures the old copy_object pattern (which caused the silent failure) has
+        been fully replaced and cannot regress.
+        """
+        import callbacks
+        import json as _json
+
+        s3 = boto3.client('s3', region_name='us-east-1')
+        staging_bucket = 'bouncer-uploads-111111111111'
+        target_bucket = 'target-no-copy-object'
+
+        try:
+            s3.create_bucket(Bucket=staging_bucket)
+        except Exception:
+            pass
+        try:
+            s3.create_bucket(Bucket=target_bucket)
+        except Exception:
+            pass
+
+        s3.put_object(Bucket=staging_bucket, Key='pending/batch-x004/file.txt', Body=b'data')
+
+        files_manifest = _json.dumps([{
+            'filename': 'file.txt',
+            's3_key': 'pending/batch-x004/file.txt',
+            'content_type': 'text/plain',
+            'size': 4,
+            'sha256': 'jkl',
+        }])
+
+        item = {
+            'request_id': 'batch-x004',
+            'action': 'upload_batch',
+            'bucket': target_bucket,
+            'files': files_manifest,
+            'file_count': 1,
+            'total_size': 4,
+            'source': 'test-bot',
+            'reason': 'ensure copy_object not used',
+            'account_id': '111111111111',
+            'account_name': 'Default',
+            'trust_scope': '',
+            'status': 'pending_approval',
+        }
+
+        with patch('aws_clients.get_s3_client') as mock_get_s3:
+            mock_s3 = MagicMock()
+            mock_s3.get_object.return_value = {'Body': MagicMock(read=lambda: b'data')}
+            mock_get_s3.return_value = mock_s3
+
+            callbacks.handle_upload_batch_callback(
+                'approve', 'batch-x004', item, 126, 'cb-x004', 'user-1'
+            )
+
+        # copy_object must NOT be called
+        mock_s3.copy_object.assert_not_called()
+        # put_object must be called (the new approach)
+        mock_s3.put_object.assert_called()
