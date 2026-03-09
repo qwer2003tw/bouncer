@@ -55,42 +55,83 @@ run_pytest_safe() {
 }
 
 # --all mode: collect all test files and split into batches of MAX_FILES
+# Groups are run separately by rootdir to avoid conftest.py namespace conflicts:
+#   Group 1: tests/ + mcp_server/  → rootdir = REPO_ROOT
+#   Group 2: deployer/tests/       → rootdir = REPO_ROOT/deployer  (separate pytest run)
 if [[ "${1:-}" == "--all" ]]; then
     cd "$REPO_ROOT"
-    mapfile -t all_files < <(find tests/ deployer/tests/ mcp_server/ -name 'test_*.py' 2>/dev/null | sort -u)
 
-    echo -e "${GREEN}Found ${#all_files[@]} test files. Splitting into batches of ${MAX_FILES}...${NC}"
+    # Group 1: src tests (tests/ + mcp_server/) — run from REPO_ROOT
+    mapfile -t src_files < <(find tests/ mcp_server/ -name 'test_*.py' 2>/dev/null | sort -u)
+
+    # Group 2: deployer tests — collected as relative paths under deployer/
+    mapfile -t deployer_files < <(find deployer/tests/ -name 'test_*.py' 2>/dev/null | sort -u)
+
+    total=$(( ${#src_files[@]} + ${#deployer_files[@]} ))
+    echo -e "${GREEN}Found ${total} test files total: ${#src_files[@]} src, ${#deployer_files[@]} deployer. Batches of ${MAX_FILES}...${NC}"
+
+    # Helper: run a batch loop over an array of files using a given CWD
+    run_batch_group() {
+        local group_cwd="$1"
+        shift
+        local group_files=("$@")
+        local group_failed=0
+        local batch_num=0
+
+        # Convert absolute paths to relative for the given CWD when needed
+        local rel_files=()
+        for f in "${group_files[@]}"; do
+            rel_files+=("${f#${group_cwd}/}")
+        done
+
+        for ((i=0; i<${#rel_files[@]}; i+=MAX_FILES)); do
+            BATCH=("${rel_files[@]:i:MAX_FILES}")
+            batch_num=$(( batch_num + 1 ))
+            echo -e "\n${YELLOW}Batch ${batch_num} [$(basename $group_cwd)]: ${BATCH[*]}${NC}"
+            (
+                cd "$group_cwd"
+                EXIT_CODE=0
+                run_pytest_safe "${BATCH[@]}" || EXIT_CODE=$?
+                if [ $EXIT_CODE -eq 137 ]; then
+                    echo -e "${RED}⚠️  OOM detected (exit 137) in batch, retrying with half batch size...${NC}"
+                    HALF=$(( ${#BATCH[@]} / 2 ))
+                    if [ $HALF -eq 0 ]; then
+                        echo -e "${RED}❌ Single file OOM — cannot reduce further: ${BATCH[*]}${NC}"
+                        exit 1
+                    fi
+                    BATCH_A=("${BATCH[@]:0:$HALF}")
+                    BATCH_B=("${BATCH[@]:$HALF}")
+                    echo -e "${BLUE}  Sub-batch A: ${BATCH_A[*]}${NC}"
+                    run_pytest_safe "${BATCH_A[@]}" || { echo -e "${RED}❌ Sub-batch A failed${NC}"; exit 1; }
+                    echo -e "${BLUE}  Sub-batch B: ${BATCH_B[*]}${NC}"
+                    run_pytest_safe "${BATCH_B[@]}" || { echo -e "${RED}❌ Sub-batch B failed${NC}"; exit 1; }
+                elif [ $EXIT_CODE -ne 0 ]; then
+                    exit 1
+                fi
+            ) || group_failed=1
+        done
+        return $group_failed
+    }
 
     failed=0
-    for ((i=0; i<${#all_files[@]}; i+=MAX_FILES)); do
-        BATCH=("${all_files[@]:i:MAX_FILES}")
-        echo -e "\n${YELLOW}Batch $((i/MAX_FILES+1)): ${BATCH[*]}${NC}"
-        EXIT_CODE=0
-        run_pytest_safe "${BATCH[@]}" || EXIT_CODE=$?
-        if [ $EXIT_CODE -eq 137 ]; then
-            echo -e "${RED}⚠️  OOM detected (exit 137) in batch, retrying with half batch size...${NC}"
-            HALF=$(( ${#BATCH[@]} / 2 ))
-            if [ $HALF -eq 0 ]; then
-                echo -e "${RED}❌ Single file OOM — cannot reduce further: ${BATCH[*]}${NC}"
-                failed=1
-            else
-                BATCH_A=("${BATCH[@]:0:$HALF}")
-                BATCH_B=("${BATCH[@]:$HALF}")
-                echo -e "${BLUE}  Sub-batch A: ${BATCH_A[*]}${NC}"
-                # 重跑 A
-                if ! run_pytest_safe "${BATCH_A[@]}"; then
-                    failed=1
-                fi
-                echo -e "${BLUE}  Sub-batch B: ${BATCH_B[*]}${NC}"
-                # 重跑 B
-                if ! run_pytest_safe "${BATCH_B[@]}"; then
-                    failed=1
-                fi
-            fi
-        elif [ $EXIT_CODE -ne 0 ]; then
-            failed=1
-        fi
-    done
+
+    # --- Group 1: src tests (tests/ + mcp_server/) ---
+    if [[ ${#src_files[@]} -gt 0 ]]; then
+        echo -e "\n${BLUE}=== Group 1: src tests (${#src_files[@]} files) ===${NC}"
+        run_batch_group "$REPO_ROOT" "${src_files[@]}" || failed=1
+    fi
+
+    # --- Group 2: deployer tests (deployer/tests/) ---
+    # Run from deployer/ so rootdir is deployer/ — avoids tests/ package namespace conflict
+    if [[ ${#deployer_files[@]} -gt 0 ]]; then
+        echo -e "\n${BLUE}=== Group 2: deployer tests (${#deployer_files[@]} files) ===${NC}"
+        # Strip deployer/ prefix for relative paths under deployer/
+        local_deployer_files=()
+        for f in "${deployer_files[@]}"; do
+            local_deployer_files+=("${f#deployer/}")
+        done
+        run_batch_group "$REPO_ROOT/deployer" "${local_deployer_files[@]}" || failed=1
+    fi
 
     if [[ $failed -eq 0 ]]; then
         echo -e "\n${GREEN}✅ All batches passed!${NC}"
