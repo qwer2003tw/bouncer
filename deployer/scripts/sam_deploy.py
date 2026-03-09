@@ -26,6 +26,7 @@ CLI Flags (appended after ``--``):
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -37,6 +38,8 @@ from typing import Dict, List, Optional, Sequence
 
 import boto3
 from botocore.exceptions import ClientError
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Validation helpers
@@ -444,23 +447,29 @@ def _build_sam_cmd(
 
 
 def _run_deploy(cmd: Sequence[str]) -> DeployResult:
-    """Execute sam deploy and return a structured DeployResult."""
-    result = subprocess.run(
+    """Execute sam deploy and return a structured DeployResult (streaming output)."""
+    process = subprocess.Popen(
         list(cmd),
-        timeout=1800,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
+        bufsize=1,
     )
-    print(result.stdout, end="")
-    if result.stderr:
-        print(result.stderr, end="", file=sys.stderr)
+    output_lines: List[str] = []
+    for line in process.stdout:  # type: ignore[union-attr]
+        line = line.rstrip()
+        output_lines.append(line)
+        logger.info("[sam] %s", line)  # streaming log
+        print(line)
+    process.wait()
     sys.stdout.flush()
+    output = "\n".join(output_lines)
 
     return DeployResult(
-        status=DeployStatus.SUCCESS if result.returncode == 0 else DeployStatus.FAILED,
-        returncode=result.returncode,
-        stdout=result.stdout,
-        stderr=result.stderr,
+        status=DeployStatus.SUCCESS if process.returncode == 0 else DeployStatus.FAILED,
+        returncode=process.returncode,
+        stdout=output,
+        stderr="",
     )
 
 
