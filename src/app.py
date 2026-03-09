@@ -787,7 +787,7 @@ def _is_grant_expired(request_id: str, callback: dict) -> bool:
                     ExpressionAttributeValues={':s': 'timeout'},
                 )
             except Exception:
-                pass
+                logger.warning("[GRANT EXPIRY] Failed to update DDB status=timeout for request_id=%s", request_id, exc_info=True)
             return True
     except Exception as e:
         print(f"[GRANT EXPIRY] Error checking grant TTL: {e}")

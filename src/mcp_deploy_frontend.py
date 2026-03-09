@@ -133,7 +133,7 @@ def _list_known_projects() -> list:
             if item.get('frontend_bucket'):
                 known.add(item['project_id'])
     except Exception:
-        pass
+        logger.warning("[DEPLOY-FRONTEND] Failed to list known projects from DDB, returning empty list", exc_info=True)
     return sorted(known)
 
 
@@ -339,7 +339,7 @@ def mcp_tool_deploy_frontend(req_id: str, arguments: dict) -> dict:
                 try:
                     s3.delete_object(Bucket=staging_bucket, Key=rk)
                 except Exception:
-                    pass
+                    logger.warning("[DEPLOY-FRONTEND] Rollback cleanup failed for key=%s (non-critical)", rk, exc_info=True)
             return mcp_result(req_id, {
                 "content": [{"type": "text", "text": json.dumps({
                     "status": "error",
@@ -411,7 +411,7 @@ def mcp_tool_deploy_frontend(req_id: str, arguments: dict) -> dict:
             try:
                 s3.delete_object(Bucket=staging_bucket, Key=rk)
             except Exception:
-                pass
+                logger.warning("[DEPLOY-FRONTEND] Notification-failure cleanup skipped for key=%s (non-critical)", rk, exc_info=True)
         return mcp_result(req_id, {
             "content": [{"type": "text", "text": json.dumps({
                 "status": "error",

@@ -625,7 +625,7 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
         )
         send_telegram_message_silent(_notif_text)
     except Exception:
-        pass  # Notification failure must not break execution
+        logger.warning("[EXECUTE] Result notification failed (non-critical)", exc_info=True)
 
     log_decision(
         table=table,

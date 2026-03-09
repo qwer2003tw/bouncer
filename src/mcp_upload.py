@@ -876,7 +876,7 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
                 try:
                     s3_staging.delete_object(Bucket=staging_bucket, Key=rk)
                 except Exception:
-                    pass
+                    logger.warning("[UPLOAD-BATCH] Rollback cleanup failed for key=%s (non-critical)", rk, exc_info=True)
             return mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
                     'status': 'error',
@@ -995,7 +995,7 @@ def execute_upload(request_id: str, approver: str) -> dict:
             try:
                 s3.delete_object(Bucket=staging_bucket, Key=content_s3_key)
             except Exception:
-                pass  # Non-critical; TTL on the bucket lifecycle will handle it
+                logger.warning("[UPLOAD] Staging cleanup failed for key=%s (non-critical, TTL will handle it)", content_s3_key, exc_info=True)
         else:
             # Legacy path: base64-decode from DDB item then upload
             import base64

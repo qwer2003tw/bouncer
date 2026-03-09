@@ -318,7 +318,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
                 )
                 pending_items = pending_resp.get('Items', [])
             except Exception:
-                pass
+                logger.warning("[TRUST] Failed to query pending items for trust_scope=%s, skipping", trust_scope, exc_info=True)
 
             pending_count = len(pending_items)
             if pending_count > 0:
@@ -751,7 +751,7 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
                     try:
                         s3.delete_object(Bucket=staging_bucket, Key=s3_key)
                     except Exception:
-                        pass  # Non-critical
+                        logger.warning("[UPLOAD-BATCH] Staging cleanup failed for key=%s (non-critical)", s3_key, exc_info=True)
                 else:
                     # Legacy path: decode base64 and upload
                     import base64 as _b64
@@ -789,7 +789,7 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
                         f"進度: {i + 1}/{file_count}",
                     )
                 except Exception:
-                    pass  # Progress update failure is non-critical
+                    logger.warning("[UPLOAD-BATCH] Progress update failed at step %d (non-critical)", i + 1, exc_info=True)
 
         # Determine final status
         total_files = len(files_manifest)
@@ -1019,7 +1019,7 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
                     f"進度: {i + 1}/{file_count}",
                 )
             except Exception:
-                pass
+                logger.warning("[DEPLOY-FRONTEND] Progress update failed at step %d (non-critical)", i + 1, exc_info=True)
 
     success_count = len(deployed)
     fail_count = len(failed)
