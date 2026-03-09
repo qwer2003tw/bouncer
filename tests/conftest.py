@@ -8,6 +8,7 @@ import sys
 import os
 import time
 import pytest
+import importlib
 from unittest.mock import patch, MagicMock
 from decimal import Decimal
 
@@ -231,3 +232,24 @@ def _cleanup_tables(request):
         except Exception:
             pass
 
+
+
+# ============================================================================
+# Mock Pollution Prevention (Sprint 20 #92)
+# ============================================================================
+
+@pytest.fixture(autouse=True)
+def reset_paging_module_bindings():
+    """Reset paging module function bindings after each test.
+    
+    paging.py uses `from telegram import send_telegram_message_silent` which
+    creates a local binding. When tests patch `telegram.send_telegram_message_silent`
+    at module/class level, the binding may become stale. This fixture reloads
+    the paging module after each test to restore clean bindings.
+    """
+    yield
+    try:
+        import paging
+        importlib.reload(paging)
+    except Exception:
+        pass
