@@ -863,6 +863,71 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
 # Deploy Frontend Callback (sprint9-003 Phase B)
 # ============================================================================
 
+def _write_frontend_deploy_history(
+    request_id: str,
+    project: str,
+    deploy_status: str,
+    user_id: str,
+    file_count: int,
+    success_count: int,
+    fail_count: int,
+    reason: str,
+    source: str,
+    frontend_bucket: str,
+    distribution_id: str,
+    cf_invalidation_failed: bool,
+) -> None:
+    """Write frontend deploy outcome to the deploy_history DynamoDB table.
+
+    Uses the same table as SAM deploys (bouncer-deploy-history) so that
+    bouncer_deploy_history can surface frontend deploys alongside SAM deploys.
+    The project_id GSI (project-time-index) is keyed on project_id, so we
+    map the frontend project name to project_id for consistent querying.
+    """
+    try:
+        from deployer import _get_history_table
+        now = int(time.time())
+        # Map deploy_status -> uppercase STATUS used by SAM deploys
+        status_map = {
+            'deployed': 'SUCCEEDED',
+            'partial_deploy': 'PARTIAL',
+            'deploy_failed': 'FAILED',
+        }
+        history_status = status_map.get(deploy_status, deploy_status.upper())
+
+        history_item = {
+            'deploy_id': f'frontend-{request_id}',
+            'project_id': project,
+            'deploy_type': 'frontend',
+            'status': history_status,
+            'started_at': now,
+            'completed_at': now,
+            'triggered_by': user_id,
+            'reason': reason or '',
+            'source': source or '',
+            'files_count': file_count,
+            'files_deployed': success_count,
+            'files_failed': fail_count,
+            'frontend_bucket': frontend_bucket,
+            'distribution_id': distribution_id,
+            'cf_invalidation_failed': cf_invalidation_failed,
+            'request_id': request_id,
+            'ttl': now + 30 * 24 * 3600,  # 30 days
+        }
+        # DynamoDB does not allow None values
+        history_item = {k: v for k, v in history_item.items() if v is not None}
+        _get_history_table().put_item(Item=history_item)
+        logger.info(
+            "[DEPLOY-FRONTEND] deploy_history written deploy_id=frontend-%s project=%s status=%s",
+            request_id, project, history_status,
+        )
+    except Exception as exc:
+        logger.error(
+            "[DEPLOY-FRONTEND] Failed to write deploy_history for %s: %s",
+            request_id, exc,
+        )
+
+
 def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str) -> dict:
     """處理前端部署的審批 callback
 
@@ -949,6 +1014,20 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
             }
             _update_request_status(table, request_id, 'approved', user_id, extra_attrs=extra_attrs)
             emit_metric('Bouncer', 'DeployFrontend', 1, dimensions={'Status': deploy_status, 'Project': project})
+            _write_frontend_deploy_history(
+                request_id=request_id,
+                project=project,
+                deploy_status=deploy_status,
+                user_id=user_id,
+                file_count=file_count,
+                success_count=0,
+                fail_count=len(failed),
+                reason=item.get('reason', ''),
+                source=source,
+                frontend_bucket=frontend_bucket,
+                distribution_id=distribution_id,
+                cf_invalidation_failed=False,
+            )
             update_message(
                 message_id,
                 f"❌ *前端部署失敗*\n\n"
@@ -1062,6 +1141,22 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
     _update_request_status(table, request_id, 'approved', user_id, extra_attrs=extra_attrs)
 
     emit_metric('Bouncer', 'DeployFrontend', 1, dimensions={'Status': deploy_status, 'Project': project})
+
+    # Write to deploy_history table (mirrors SAM deploy format)
+    _write_frontend_deploy_history(
+        request_id=request_id,
+        project=project,
+        deploy_status=deploy_status,
+        user_id=user_id,
+        file_count=file_count,
+        success_count=success_count,
+        fail_count=fail_count,
+        reason=item.get('reason', ''),
+        source=source,
+        frontend_bucket=frontend_bucket,
+        distribution_id=distribution_id,
+        cf_invalidation_failed=cf_invalidation_failed,
+    )
 
     # Build result message
     cf_warn = "\n⚠️ *CloudFront Invalidation 失敗* (S3 已完成)" if cf_invalidation_failed else ""
