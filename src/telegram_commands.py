@@ -90,14 +90,11 @@ def handle_trust_command(chat_id: str) -> dict:
     now = int(time.time())
 
     try:
-        # trust_session items use 'type' field (not 'status'); no suitable GSI — Scan is correct.
-        resp = table.scan(
-            FilterExpression='#type = :type AND expires_at > :now',
-            ExpressionAttributeNames={'#type': 'type'},
-            ExpressionAttributeValues={
-                ':type': 'trust_session',
-                ':now': now
-            }
+        from boto3.dynamodb.conditions import Key
+        # Use type-expires-at-index GSI: PK=type, SK=expires_at
+        resp = table.query(
+            IndexName='type-expires-at-index',
+            KeyConditionExpression=Key('type').eq('trust_session') & Key('expires_at').gt(now)
         )
         items = resp.get('Items', [])
     except Exception as e:
