@@ -432,7 +432,24 @@ def send_grant_request_notification(
         ])
 
         keyboard = {'inline_keyboard': buttons}
-        _telegram.send_message_with_entities(text, entities, reply_markup=keyboard)
+        result = _telegram.send_message_with_entities(text, entities, reply_markup=keyboard)
+
+        # #75: schedule expiry cleanup so buttons are cleared when approval times out
+        telegram_message_id = (result or {}).get('result', {}).get('message_id')
+        if telegram_message_id:
+            import time
+            # Grant approval timeout is GRANT_APPROVAL_TIMEOUT (300 seconds)
+            expires_at = int(time.time()) + GRANT_APPROVAL_TIMEOUT
+            try:
+                post_notification_setup(
+                    request_id=grant_id,
+                    telegram_message_id=telegram_message_id,
+                    expires_at=expires_at,
+                )
+            except Exception as pns_exc:
+                logger.error(
+                    "[GRANT] post_notification_setup failed for %s: %s", grant_id, pns_exc
+                )
 
     except Exception as e:
         logger.error(f"[GRANT] send_grant_request_notification error: {e}")
