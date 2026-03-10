@@ -8,10 +8,14 @@ sprint7-002 (Approach B):
   - send_approval_request now returns (bool, Optional[int]) — success + message_id
   - post_notification_setup() stores telegram_message_id in DynamoDB and
     schedules EventBridge one-time expiry via SchedulerService
+
+sprint24-003:
+  - Deduplicate consecutive auto_approved notifications to reduce spam
 """
 
 import logging
 import os
+import time
 from typing import NamedTuple, Optional
 
 import telegram as _telegram
@@ -21,6 +25,11 @@ from telegram_entities import MessageBuilder
 from utils import format_size_human
 
 logger = logging.getLogger(__name__)
+
+# Notification throttling (sprint24-003)
+# Track last notification time to prevent spam from consecutive auto-approved commands
+_last_notification_time = {}
+NOTIFICATION_THROTTLE_SECONDS = 60
 
 
 class NotificationResult(NamedTuple):
@@ -41,6 +50,28 @@ class NotificationResult(NamedTuple):
     """
     ok: bool
     message_id: Optional[int]
+
+
+def _should_throttle_notification(notification_type: str) -> bool:
+    """Check if we should throttle a notification based on recent activity.
+
+    Args:
+        notification_type: Type of notification (e.g., 'auto_approve', 'trust_approve')
+
+    Returns:
+        True if notification should be skipped (throttled), False if it should be sent
+    """
+    global _last_notification_time
+
+    current_time = time.time()
+    last_time = _last_notification_time.get(notification_type, 0)
+
+    if current_time - last_time < NOTIFICATION_THROTTLE_SECONDS:
+        logger.info(f"[NOTIF] Throttling {notification_type} notification (last sent {current_time - last_time:.1f}s ago)")
+        return True
+
+    _last_notification_time[notification_type] = current_time
+    return False
 
 
 def _escape_markdown(text):
@@ -305,7 +336,15 @@ def send_account_approval_request(request_id: str, action: str, account_id: str,
 
 def send_trust_auto_approve_notification(command: str, trust_id: str, remaining: str, count: int,
                                          result: str = None, source: str = None, reason: str = None):
-    """發送 Trust Session 自動批准的靜默通知（entities 模式，無 parse_mode）"""
+    """發送 Trust Session 自動批准的靜默通知（entities 模式，無 parse_mode）
+
+    sprint24-003: Throttles notifications to reduce spam from consecutive commands.
+    """
+    # Throttle consecutive notifications (sprint24-003)
+    if _should_throttle_notification('trust_approve'):
+        logger.info(f"[NOTIF] Skipped trust auto-approve notification for command: {command[:50]}...")
+        return
+
     cmd_preview = command if len(command) <= 100 else command[:100] + '...'
 
     mb = MessageBuilder()

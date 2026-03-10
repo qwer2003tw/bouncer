@@ -34,6 +34,7 @@ from notifications import (
     send_grant_request_notification,
     send_grant_execute_notification,
     send_blocked_notification,
+    _should_throttle_notification,
 )
 from telegram import send_telegram_message_silent, escape_markdown
 from metrics import emit_metric
@@ -612,20 +613,23 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
     emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'auto_approve'})
     paged = store_paged_output(request_id, result)
 
-    # Silent Telegram notification for safelist auto-approve
-    try:
-        result_preview = (result[:300] if result else '(無輸出)').strip()
-        reason_line = f"\U0001f4ac *原因：* {escape_markdown(ctx.reason or '(未填寫)')}\n" if ctx.reason else ""
-        _notif_text = (
-            f"\u26a1 *自動執行*\n\n"
-            f"\U0001f916 *來源：* {escape_markdown(ctx.source or '(unknown)')}\n"
-            f"{reason_line}"
-            f"\U0001f4cb *命令：*\n```\n{ctx.command[:300]}\n```\n\n"
-            f"\u2705 *結果：*\n```\n{result_preview}\n```"
-        )
-        send_telegram_message_silent(_notif_text)
-    except Exception:
-        logger.warning("[EXECUTE] Result notification failed (non-critical)", exc_info=True)
+    # Silent Telegram notification for safelist auto-approve (sprint24-003: throttled)
+    if not _should_throttle_notification('auto_approve'):
+        try:
+            result_preview = (result[:300] if result else '(無輸出)').strip()
+            reason_line = f"\U0001f4ac *原因：* {escape_markdown(ctx.reason or '(未填寫)')}\n" if ctx.reason else ""
+            _notif_text = (
+                f"\u26a1 *自動執行*\n\n"
+                f"\U0001f916 *來源：* {escape_markdown(ctx.source or '(unknown)')}\n"
+                f"{reason_line}"
+                f"\U0001f4cb *命令：*\n```\n{ctx.command[:300]}\n```\n\n"
+                f"\u2705 *結果：*\n```\n{result_preview}\n```"
+            )
+            send_telegram_message_silent(_notif_text)
+        except Exception:
+            logger.warning("[EXECUTE] Result notification failed (non-critical)", exc_info=True)
+    else:
+        logger.info(f"[EXECUTE] Skipped auto-approve notification for command: {ctx.command[:50]}...")
 
     log_decision(
         table=table,
