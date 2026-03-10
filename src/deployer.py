@@ -665,7 +665,7 @@ def _get_progress_hint(elapsed: int) -> str:
     這只是 hint，不保證準確，但比永遠顯示 INITIALIZING 更有用。
     """
     if elapsed < 30:
-        return "正在初始化..."
+        return "🔄 正在初始化部署環境（通常需要 30-60 秒）"
     elif elapsed < 120:
         return "正在 build（SAM + Lambda layer）"
     else:
