@@ -529,21 +529,8 @@ def _format_size_human(size_bytes: int) -> str:
         return f"{size_bytes} bytes"
 
 
-def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
-    """MCP tool: bouncer_upload_batch — 批量上傳多個檔案到 S3"""
-    import base64
-    import hashlib as _hashlib
-    from trust import should_trust_approve_upload, increment_trust_upload_count, get_trust_session
-
-    files = arguments.get('files', [])
-    reason = str(arguments.get('reason', 'No reason provided'))
-    source = arguments.get('source', None)
-    trust_scope = str(arguments.get('trust_scope', '')).strip()
-    account_id = arguments.get('account', None)
-    if account_id:
-        account_id = str(account_id).strip()
-
-    # ---- Validate files array ----
+def _validate_upload_batch_request(req_id: str, files: list) -> Optional[dict]:
+    """Validate files array and payload sizes. Returns error response or None if valid."""
     if not files or not isinstance(files, list):
         return mcp_result(req_id, {
             'content': [{'type': 'text', 'text': json.dumps({
@@ -560,10 +547,7 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
             'isError': True,
         })
 
-    # ---- Early payload size validation (before any base64 decode) ----
-    # Per-file check runs first to give the most specific error message.
-    # Total check catches aggregate over-limit when no single file stands out.
-    # Both checks must happen before decode to prevent silent Lambda failures.
+    # Early payload size validation (before any base64 decode)
     for i, f in enumerate(files):
         file_b64_size = len(str(f.get('content', '')).strip())
         if file_b64_size > UPLOAD_BATCH_PER_FILE_B64_LIMIT:
@@ -605,8 +589,11 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
             })}],
             'isError': True,
         })
+    return None
 
-    # ---- Resolve account ----
+
+def _resolve_upload_account(req_id: str, account_id: Optional[str]) -> tuple:
+    """Resolve account details for upload. Returns (assume_role, account_name, target_account_id, error)."""
     init_default_account()
     assume_role = None
     account_name = 'Default'
@@ -621,20 +608,20 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
     if account_id:
         valid, error = validate_account_id(account_id)
         if not valid:
-            return mcp_result(req_id, {
+            return None, None, None, mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': error})}],
                 'isError': True,
             })
         account = get_account(account_id)
         if not account:
-            return mcp_result(req_id, {
+            return None, None, None, mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
                     'status': 'error', 'error': f'帳號 {account_id} 未配置',
                 })}],
                 'isError': True,
             })
         if not account.get('enabled', True):
-            return mcp_result(req_id, {
+            return None, None, None, mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
                     'status': 'error', 'error': f'帳號 {account_id} 已停用',
                 })}],
@@ -644,8 +631,15 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
         account_name = account.get('name', account_id)
         target_account_id = account_id
 
-    # ---- Validate and pre-process each file ----
+    return assume_role, account_name, target_account_id, None
+
+
+def _preprocess_upload_files(req_id: str, files: list) -> tuple:
+    """Validate and preprocess files. Returns (processed_files, total_size, error)."""
+    import base64
+    import hashlib as _hashlib
     from trust import _is_upload_extension_blocked, _is_upload_filename_safe
+
     processed_files = []
     total_size = 0
 
@@ -655,7 +649,7 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
         ct = str(f.get('content_type', 'application/octet-stream')).strip()
 
         if not fname:
-            return mcp_result(req_id, {
+            return None, None, mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
                     'status': 'error', 'error': f'File #{i+1}: filename is required',
                 })}],
@@ -663,26 +657,24 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
             })
 
         if not content_b64:
-            return mcp_result(req_id, {
+            return None, None, mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
                     'status': 'error', 'error': f'File #{i+1} ({fname}): content is required',
                 })}],
                 'isError': True,
             })
 
-        # Sanitize filename
         safe_name = sanitize_filename(fname)
         if not _is_upload_filename_safe(safe_name):
-            return mcp_result(req_id, {
+            return None, None, mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
                     'status': 'error', 'error': f'File #{i+1} ({fname}): unsafe filename',
                 })}],
                 'isError': True,
             })
 
-        # Extension check
         if _is_upload_extension_blocked(safe_name):
-            return mcp_result(req_id, {
+            return None, None, mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
                     'status': 'error',
                     'error': f'File #{i+1} ({safe_name}): blocked extension',
@@ -690,9 +682,8 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
                 'isError': True,
             })
 
-        # Decode base64 (validate padding first)
         if len(content_b64) % 4 != 0:
-            return mcp_result(req_id, {
+            return None, None, mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
                     'status': 'error',
                     'error': (
@@ -703,10 +694,11 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
                 })}],
                 'isError': True,
             })
+
         try:
             content_bytes = base64.b64decode(content_b64)
         except Exception:
-            return mcp_result(req_id, {
+            return None, None, mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
                     'status': 'error',
                     'error': f'File #{i+1} ({safe_name}): invalid base64',
@@ -716,7 +708,7 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
 
         fsize = len(content_bytes)
         if fsize > TRUST_UPLOAD_MAX_BYTES_PER_FILE:
-            return mcp_result(req_id, {
+            return None, None, mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
                     'status': 'error',
                     'error': f'File #{i+1} ({safe_name}): too large ({_format_size_human(fsize)}, max {_format_size_human(TRUST_UPLOAD_MAX_BYTES_PER_FILE)})',
@@ -735,9 +727,8 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
             'sha256': _hashlib.sha256(content_bytes).hexdigest(),
         })
 
-    # Total size check
     if total_size > TRUST_UPLOAD_MAX_BYTES_TOTAL:
-        return mcp_result(req_id, {
+        return None, None, mcp_result(req_id, {
             'content': [{'type': 'text', 'text': json.dumps({
                 'status': 'error',
                 'error': f'Total size {_format_size_human(total_size)} exceeds limit ({_format_size_human(TRUST_UPLOAD_MAX_BYTES_TOTAL)})',
@@ -745,105 +736,103 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
             'isError': True,
         })
 
-    bucket = f"bouncer-uploads-{target_account_id}"
-    date_str = time.strftime('%Y-%m-%d')
+    return processed_files, total_size, None
 
-    # ---- Try trust auto-approve ----
-    if trust_scope:
-        session = get_trust_session(trust_scope, target_account_id or DEFAULT_ACCOUNT_ID)
-        if session:
-            max_uploads = int(session.get('max_uploads', 0))
-            upload_count = int(session.get('upload_count', 0))
-            upload_bytes = int(session.get('upload_bytes_total', 0))
-            remaining_count = max_uploads - upload_count
-            remaining_bytes = TRUST_UPLOAD_MAX_BYTES_TOTAL - upload_bytes
 
-            # Check if all files can fit in trust quota
-            if (remaining_count >= len(processed_files)
-                    and remaining_bytes >= total_size
-                    and max_uploads > 0):
-                # Check each file against trust rules
-                all_ok = True
-                for pf in processed_files:
-                    ok, _, _ = should_trust_approve_upload(
-                        trust_scope, target_account_id or DEFAULT_ACCOUNT_ID,
-                        pf['filename'], pf['size'],
-                    )
-                    if not ok:
-                        all_ok = False
-                        break
+def _try_trust_auto_approve_batch(
+    req_id: str, trust_scope: str, target_account_id: str,
+    processed_files: list, total_size: int, bucket: str,
+    date_str: str, assume_role: Optional[str], source: Optional[str]
+) -> Optional[dict]:
+    """Try trust auto-approve for batch upload. Returns MCP result if approved, None otherwise."""
+    if not trust_scope:
+        return None
 
-                if all_ok:
-                    # Execute all uploads under trust
-                    uploaded = []
-                    try:
-                        from aws_clients import get_s3_client
-                        s3 = get_s3_client(role_arn=assume_role, session_name='bouncer-batch-trust-upload')
+    from trust import should_trust_approve_upload, increment_trust_upload_count, get_trust_session
 
-                        for pf in processed_files:
-                            # Atomic increment per file
-                            inc_ok = increment_trust_upload_count(
-                                session['request_id'], pf['size'],
-                            )
-                            if not inc_ok:
-                                break  # quota race, stop
+    session = get_trust_session(trust_scope, target_account_id or DEFAULT_ACCOUNT_ID)
+    if not session:
+        return None
 
-                            fkey = f"{date_str}/{generate_request_id('batch-upload')}/{pf['filename']}"
-                            s3.put_object(
-                                Bucket=bucket,
-                                Key=fkey,
-                                Body=pf['content_bytes'],
-                                ContentType=pf['content_type'],
-                            )
-                            vr = _verify_upload(s3, bucket, fkey, pf['filename'])
-                            file_entry = {
-                                'filename': pf['filename'],
-                                's3_uri': vr.s3_uri,
-                                'size': pf['size'],
-                                'sha256': pf['sha256'],
-                                'verified': vr.verified,
-                                's3_size': vr.s3_size,
-                            }
-                            uploaded.append(file_entry)
+    max_uploads = int(session.get('max_uploads', 0))
+    upload_count = int(session.get('upload_count', 0))
+    upload_bytes = int(session.get('upload_bytes_total', 0))
+    remaining_count = max_uploads - upload_count
+    remaining_bytes = TRUST_UPLOAD_MAX_BYTES_TOTAL - upload_bytes
 
-                        if uploaded:
-                            verification_failed = [
-                                u['filename'] for u in uploaded if not u['verified']
-                            ]
-                            new_count = upload_count + len(uploaded)
-                            send_trust_upload_notification(
-                                filename=f"[batch: {len(uploaded)} files]",
-                                content_size=sum(u['size'] for u in uploaded),
-                                sha256_hash='batch',
-                                trust_id=session['request_id'],
-                                upload_count=new_count,
-                                max_uploads=max_uploads,
-                                source=source,
-                            )
+    # Check if all files can fit in trust quota
+    if not (remaining_count >= len(processed_files)
+            and remaining_bytes >= total_size
+            and max_uploads > 0):
+        return None
 
-                            result_payload: dict = {
-                                'status': 'trust_auto_approved',
-                                'uploaded': uploaded,
-                                'total_files': len(uploaded),
-                                'total_size': sum(u['size'] for u in uploaded),
-                                'trust_session': session['request_id'],
-                                'upload_quota': f"{new_count}/{max_uploads}",
-                            }
-                            if verification_failed:
-                                result_payload['verification_failed'] = verification_failed
+    # Check each file against trust rules
+    for pf in processed_files:
+        ok, _, _ = should_trust_approve_upload(
+            trust_scope, target_account_id or DEFAULT_ACCOUNT_ID,
+            pf['filename'], pf['size'],
+        )
+        if not ok:
+            return None
 
-                            return mcp_result(req_id, {
-                                'content': [{
-                                    'type': 'text',
-                                    'text': json.dumps(result_payload),
-                                }],
-                            })
+    # Execute all uploads under trust
+    uploaded = []
+    try:
+        from aws_clients import get_s3_client
+        s3 = get_s3_client(role_arn=assume_role, session_name='bouncer-batch-trust-upload')
 
-                    except Exception as e:
-                        logger.error(f"[BATCH TRUST] Error: {e}")
-                        # Fall through to human approval
+        for pf in processed_files:
+            inc_ok = increment_trust_upload_count(session['request_id'], pf['size'])
+            if not inc_ok:
+                break  # quota race, stop
 
-    # ---- Submit batch for human approval ----
+            fkey = f"{date_str}/{generate_request_id('batch-upload')}/{pf['filename']}"
+            s3.put_object(
+                Bucket=bucket, Key=fkey,
+                Body=pf['content_bytes'], ContentType=pf['content_type'],
+            )
+            vr = _verify_upload(s3, bucket, fkey, pf['filename'])
+            uploaded.append({
+                'filename': pf['filename'], 's3_uri': vr.s3_uri,
+                'size': pf['size'], 'sha256': pf['sha256'],
+                'verified': vr.verified, 's3_size': vr.s3_size,
+            })
+
+        if uploaded:
+            verification_failed = [u['filename'] for u in uploaded if not u['verified']]
+            new_count = upload_count + len(uploaded)
+            send_trust_upload_notification(
+                filename=f"[batch: {len(uploaded)} files]",
+                content_size=sum(u['size'] for u in uploaded),
+                sha256_hash='batch', trust_id=session['request_id'],
+                upload_count=new_count, max_uploads=max_uploads, source=source,
+            )
+
+            result_payload = {
+                'status': 'trust_auto_approved', 'uploaded': uploaded,
+                'total_files': len(uploaded),
+                'total_size': sum(u['size'] for u in uploaded),
+                'trust_session': session['request_id'],
+                'upload_quota': f"{new_count}/{max_uploads}",
+            }
+            if verification_failed:
+                result_payload['verification_failed'] = verification_failed
+
+            return mcp_result(req_id, {
+                'content': [{'type': 'text', 'text': json.dumps(result_payload)}],
+            })
+    except Exception as e:
+        logger.error(f"[BATCH TRUST] Error: {e}")
+
+    return None
+
+
+def _submit_batch_for_approval(
+    req_id: str, processed_files: list, total_size: int, bucket: str,
+    reason: str, source: Optional[str], trust_scope: str,
+    target_account_id: str, account_name: str, assume_role: Optional[str]
+) -> dict:
+    """Stage files to S3 and submit batch for human approval."""
     batch_id = generate_request_id('upload_batch')
     ttl = int(time.time()) + UPLOAD_TIMEOUT + APPROVAL_TTL_BUFFER
 
@@ -853,30 +842,27 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
         ext = pf['filename'].rsplit('.', 1)[-1].upper() if '.' in pf['filename'] else 'OTHER'
         ext_counts[ext] = ext_counts.get(ext, 0) + 1
 
-    # Upload each file to S3 staging BEFORE writing to DDB.
-    # This avoids storing base64 content in DynamoDB items (400KB limit).
-    # Staging bucket 固定用主帳號 bucket（Lambda IAM policy 只允許此 bucket）
+    # Stage files to S3 (avoids 400KB DynamoDB item limit)
     staging_bucket = f"bouncer-uploads-{DEFAULT_ACCOUNT_ID}"
     s3_staging = boto3.client('s3')
     files_manifest = []
-    staged_keys = []  # track for rollback on failure
+    staged_keys = []
+
     for pf in processed_files:
         s3_key = f"pending/{batch_id}/{pf['filename']}"
         try:
             s3_staging.put_object(
-                Bucket=staging_bucket,
-                Key=s3_key,
-                Body=pf['content_bytes'],
-                ContentType=pf['content_type'],
+                Bucket=staging_bucket, Key=s3_key,
+                Body=pf['content_bytes'], ContentType=pf['content_type'],
             )
             staged_keys.append(s3_key)
         except Exception as e:
-            # Rollback: delete any already-staged objects
+            # Rollback staged objects
             for rk in staged_keys:
                 try:
                     s3_staging.delete_object(Bucket=staging_bucket, Key=rk)
                 except Exception:
-                    logger.warning("[UPLOAD-BATCH] Rollback cleanup failed for key=%s (non-critical)", rk, exc_info=True)
+                    logger.warning("[UPLOAD-BATCH] Rollback cleanup failed for key=%s", rk, exc_info=True)
             return mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
                     'status': 'error',
@@ -884,30 +870,23 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
                 })}],
                 'isError': True,
             })
+
         files_manifest.append({
-            'filename': pf['filename'],
-            's3_key': s3_key,           # S3 reference instead of content_b64
+            'filename': pf['filename'], 's3_key': s3_key,
             'content_type': pf['content_type'],
-            'size': pf['size'],
-            'sha256': pf['sha256'],
+            'size': pf['size'], 'sha256': pf['sha256'],
         })
 
+    # Create DynamoDB item
     item = {
-        'request_id': batch_id,
-        'action': 'upload_batch',
-        'bucket': bucket,
+        'request_id': batch_id, 'action': 'upload_batch', 'bucket': bucket,
         'files': json.dumps(files_manifest),
-        'file_count': len(processed_files),
-        'total_size': total_size,
-        'reason': reason,
-        'source': source or '__anonymous__',
+        'file_count': len(processed_files), 'total_size': total_size,
+        'reason': reason, 'source': source or '__anonymous__',
         'trust_scope': trust_scope,
-        'account_id': target_account_id,
-        'account_name': account_name,
-        'status': 'pending_approval',
-        'created_at': int(time.time()),
-        'ttl': ttl,
-        'mode': 'mcp',
+        'account_id': target_account_id, 'account_name': account_name,
+        'status': 'pending_approval', 'created_at': int(time.time()),
+        'ttl': ttl, 'mode': 'mcp',
         'display_summary': generate_display_summary('upload_batch', file_count=len(processed_files), total_size=total_size),
     }
     if assume_role:
@@ -916,17 +895,12 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
 
     # Send Telegram notification
     batch_notified = send_batch_upload_notification(
-        batch_id=batch_id,
-        file_count=len(processed_files),
-        total_size=total_size,
-        ext_counts=ext_counts,
-        reason=reason,
-        source=source,
-        account_name=account_name,
-        trust_scope=trust_scope,
+        batch_id=batch_id, file_count=len(processed_files),
+        total_size=total_size, ext_counts=ext_counts,
+        reason=reason, source=source,
+        account_name=account_name, trust_scope=trust_scope,
     )
 
-    # Post-notification: store telegram_message_id + schedule expiry cleanup
     if batch_notified.message_id:
         from notifications import post_notification_setup
         post_notification_setup(
@@ -939,8 +913,7 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
         'content': [{
             'type': 'text',
             'text': json.dumps({
-                'status': 'pending_approval',
-                'request_id': batch_id,
+                'status': 'pending_approval', 'request_id': batch_id,
                 'file_count': len(processed_files),
                 'total_size': _format_size_human(total_size),
                 'message': '批量上傳請求已發送，用 bouncer_status 查詢結果',
@@ -948,6 +921,50 @@ def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
             }),
         }],
     })
+
+
+def mcp_tool_upload_batch(req_id: str, arguments: dict) -> dict:
+    """MCP tool: bouncer_upload_batch — 批量上傳多個檔案到 S3"""
+    files = arguments.get('files', [])
+    reason = str(arguments.get('reason', 'No reason provided'))
+    source = arguments.get('source', None)
+    trust_scope = str(arguments.get('trust_scope', '')).strip()
+    account_id = arguments.get('account', None)
+    if account_id:
+        account_id = str(account_id).strip()
+
+    # Validate files array and payload sizes
+    validation_error = _validate_upload_batch_request(req_id, files)
+    if validation_error:
+        return validation_error
+
+    # Resolve account details
+    assume_role, account_name, target_account_id, account_error = _resolve_upload_account(req_id, account_id)
+    if account_error:
+        return account_error
+
+    # Preprocess and validate each file
+    processed_files, total_size, preprocess_error = _preprocess_upload_files(req_id, files)
+    if preprocess_error:
+        return preprocess_error
+
+    bucket = f"bouncer-uploads-{target_account_id}"
+    date_str = time.strftime('%Y-%m-%d')
+
+    # Try trust auto-approve
+    trust_result = _try_trust_auto_approve_batch(
+        req_id, trust_scope, target_account_id, processed_files,
+        total_size, bucket, date_str, assume_role, source
+    )
+    if trust_result:
+        return trust_result
+
+    # Submit batch for human approval
+    return _submit_batch_for_approval(
+        req_id, processed_files, total_size, bucket,
+        reason, source, trust_scope, target_account_id,
+        account_name, assume_role
+    )
 
 
 # ============================================================================
