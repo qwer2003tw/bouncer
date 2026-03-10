@@ -2203,3 +2203,34 @@ class TestChainRiskChecks:
             body = json.loads(result['body'])
             content = json.loads(body['result']['content'][0]['text'])
             assert content['status'] == 'blocked'
+
+    def test_chain_non_aws_command_rejected(self, app_module, mock_dynamodb):
+        """Regression test for #96: chain with non-AWS command rejected before execution."""
+        import mcp_execute
+
+        # Real case from issue #96: aws command && echo
+        chained = 'aws secretsmanager delete-secret --secret-id test --force-delete-without-recovery && echo DELETED'
+
+        with patch.object(mcp_execute, 'emit_metric'):
+            ctx = mcp_execute.ExecuteContext(
+                req_id='test-chain-non-aws',
+                command=chained,
+                reason='test',
+                source='test-bot',
+                trust_scope='test-session',
+                context=None,
+                account_id='123456789012',
+                account_name='Test',
+                assume_role=None,
+                timeout=30,
+                sync_mode=False,
+            )
+
+            result = mcp_execute._check_chain_risks(ctx)
+            assert result is not None
+            body = json.loads(result['body'])
+            content = json.loads(body['result']['content'][0]['text'])
+            assert content['status'] == 'validation_error'
+            assert 'echo' in content['error']
+            assert '只支援 aws 命令串接' in content['error']
+            assert content['failed_sub_command'] == 'echo DELETED'

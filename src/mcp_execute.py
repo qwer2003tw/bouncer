@@ -898,6 +898,28 @@ def _check_chain_risks(ctx: ExecuteContext) -> Optional[dict]:
         if not sub_cmd:
             continue
 
+        # Layer -1: validate that all sub-commands are AWS CLI commands
+        # This prevents misleading errors when first command succeeds but second fails
+        from commands import aws_cli_split
+        args = aws_cli_split(sub_cmd)
+        if not args or args[0] != 'aws':
+            non_aws_cmd = args[0] if args else '(empty)'
+            logger.warning(f"[CHAIN] Non-AWS command in chain: {non_aws_cmd}")
+            emit_metric('Bouncer', 'BlockedCommand', 1, dimensions={'Reason': 'chain_non_aws'})
+            return mcp_result(ctx.req_id, {
+                'content': [{
+                    'type': 'text',
+                    'text': json.dumps({
+                        'status': 'validation_error',
+                        'error': f'❌ 命令包含非 AWS CLI 指令 ({non_aws_cmd})，Bouncer 只支援 aws 命令串接。',
+                        'remediation': '請拆成獨立命令分別執行，確認第一個命令成功後再執行下一個。',
+                        'command': ctx.command[:200],
+                        'failed_sub_command': sub_cmd[:200],
+                    })
+                }],
+                'isError': True
+            })
+
         # Layer 0: compliance check per sub-command
         try:
             from compliance_checker import check_compliance
