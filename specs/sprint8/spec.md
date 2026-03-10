@@ -308,7 +308,7 @@ the error message format is different from the standard "already exists" pattern
   - The exact `aws cloudformation import` command to run
   - A link to the AWS documentation for CFN import
 
-**Scenario 2: Unparseable "already exists" with fallback hint**
+**Scenario 2: Unparsable "already exists" with fallback hint**
 - Given: The "already exists" text is detected but resource details can't be parsed
 - When: Error is reported
 - Then: The message suggests: "Run `sam_deploy.py --dry-run-import` to diagnose, or check the stack events in CloudFormation console"

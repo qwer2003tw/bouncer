@@ -16,7 +16,7 @@
    - SFN terminal → update DDB, release lock, send failure notification
    - Adds `elapsed_seconds` (RUNNING) / `duration_seconds` (terminal)
 
-3. **SFN State Machine**: Has states like GitClone → SAMBuild → SAMDeploy → Changeset. Each state name is inferrable from `get_execution_history()`.
+3. **SFN State Machine**: Has states like GitClone → SAMBuild → SAMDeploy → Changeset. Each state name is inferable from `get_execution_history()`.
 
 4. **Lock system**: `acquire_lock()` / `release_lock()` in `deployer.py`. Released on: SFN sync (poll), cancel, start failure. **NOT released** if nobody polls after SFN completes.
 

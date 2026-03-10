@@ -14,7 +14,7 @@ Covers:
   - _run_deploy (success + failure paths)
   - _physical_id_to_identifier for all known + unknown resource types
   - main() integration: normal deploy, conflict → import → retry, import failure,
-    unparseable conflict, --dry-run-import, multiple conflicts
+    unparsable conflict, --dry-run-import, multiple conflicts
   - Edge cases: empty strings, case insensitivity, deduplication, partial matches
 """
 
@@ -700,7 +700,7 @@ class TestMainConflictPath:
         assert exc.value.code == 1
         assert len(popen_calls) == 1
 
-    def test_unparseable_conflict_aborts(self, monkeypatch):
+    def test_unparsable_conflict_aborts(self, monkeypatch):
         """Output has 'already exists' but no structured resource info."""
         monkeypatch.setenv("STACK_NAME", STACK)
         monkeypatch.delenv("SAM_PARAMS", raising=False)
