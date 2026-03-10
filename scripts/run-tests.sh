@@ -11,7 +11,7 @@ MAX_FILES=5
 MEMORY_LIMIT="2G"
 MEMORY_HIGH="1600M"
 MEMORY_SWAP="512M"
-PYTEST_ARGS="-q --tb=short -p no:randomly"
+PYTEST_ARGS="-v --tb=short -p no:randomly"
 
 # 顏色
 RED='\033[0;31m'
