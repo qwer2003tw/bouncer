@@ -205,23 +205,42 @@ def _send_status_update(message_id: int, status_emoji: str, title: str, item: di
 # Command Callback
 # ============================================================================
 
-def handle_command_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str, *, source_ip: str = '') -> dict:
-    """處理命令執行的審批 callback
+def _parse_command_callback_request(item: dict) -> dict:
+    """解析 command callback 請求的資料
 
     Args:
-        source_ip: Telegram server IP from API GW event (for audit trail #74).
-                   This is NOT the end-user IP — Lambda runs as a webhook.
-    """
-    table = _get_table()
+        item: DynamoDB item
 
-    command = item.get('command', '')
-    assume_role = item.get('assume_role')
-    source = item.get('source', '')
-    trust_scope = item.get('trust_scope', '')
-    reason = item.get('reason', '')
-    context = item.get('context', '')
-    account_id = item.get('account_id', DEFAULT_ACCOUNT_ID)
-    account_name = item.get('account_name', 'Default')
+    Returns:
+        dict: 包含 command, assume_role, source, trust_scope, reason, context, account_id, account_name
+    """
+    return {
+        'command': item.get('command', ''),
+        'assume_role': item.get('assume_role'),
+        'source': item.get('source', ''),
+        'trust_scope': item.get('trust_scope', ''),
+        'reason': item.get('reason', ''),
+        'context': item.get('context', ''),
+        'account_id': item.get('account_id', DEFAULT_ACCOUNT_ID),
+        'account_name': item.get('account_name', 'Default'),
+    }
+
+
+def _format_command_info(parsed: dict) -> dict:
+    """格式化命令顯示資訊
+
+    Args:
+        parsed: _parse_command_callback_request 返回的 dict
+
+    Returns:
+        dict: 包含 source_line, account_line, safe_reason, cmd_preview
+    """
+    command = parsed['command']
+    source = parsed['source']
+    context = parsed['context']
+    reason = parsed['reason']
+    account_id = parsed['account_id']
+    account_name = parsed['account_name']
 
     # build_info_lines escapes internally; pass raw values from DB
     source_line = build_info_lines(source=source, context=context)
@@ -230,6 +249,282 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
     safe_reason = escape_markdown(reason)
     cmd_preview = command[:500] + '...' if len(command) > 500 else command
 
+    return {
+        'source_line': source_line,
+        'account_line': account_line,
+        'safe_reason': safe_reason,
+        'cmd_preview': cmd_preview,
+    }
+
+
+def _execute_and_store_result(
+    command: str,
+    assume_role: str,
+    request_id: str,
+    item: dict,
+    user_id: str,
+    source_ip: str,
+    action: str,
+) -> dict:
+    """執行命令並存入 DynamoDB
+
+    Args:
+        command: 要執行的命令
+        assume_role: IAM role
+        request_id: 請求 ID
+        item: DynamoDB item (需要 created_at)
+        user_id: 審批者 ID
+        source_ip: 來源 IP (audit trail #74)
+        action: approve 或 approve_trust
+
+    Returns:
+        dict: 包含 result, paged, decision_latency_ms
+    """
+    table = _get_table()
+
+    # 執行命令
+    result = execute_command(command, assume_role)
+    cmd_status = 'failed' if _is_execute_failed(result) else 'success'
+    emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'manual_approve'})
+    paged = store_paged_output(request_id, result)
+
+    # 計算決策延遲
+    now = int(time.time())
+    created_at = int(item.get('created_at', 0))
+    decision_latency_ms = (now - created_at) * 1000 if created_at else 0
+    if decision_latency_ms:
+        emit_metric('Bouncer', 'DecisionLatency', decision_latency_ms, unit='Milliseconds', dimensions={'Action': 'approve'})
+
+    decision_type = 'manual_approved_trust' if action == 'approve_trust' else 'manual_approved'
+
+    # 存入 DynamoDB（包含分頁資訊 + audit trail #74）
+    update_expr = (
+        'SET #s = :s, #r = :r, approved_at = :t, approver = :a, '
+        'approved_by = :aby, duration_ms = :dms, source_ip = :sip, '
+        'decision_type = :dt, decided_at = :da, decision_latency_ms = :dl, #ttl = :ttl'
+    )
+    expr_names = {'#s': 'status', '#r': 'result', '#ttl': 'ttl'}
+    expr_values = {
+        ':s': 'approved',
+        ':r': paged['result'],
+        ':t': now,
+        ':a': user_id,
+        ':aby': user_id,                         # audit trail: who approved (Telegram user_id)
+        ':dms': decision_latency_ms,             # audit trail: approval duration in ms
+        ':sip': source_ip,                       # audit trail: Telegram server IP (#74)
+        ':dt': decision_type,
+        ':da': now,
+        ':dl': decision_latency_ms,
+        ':ttl': now + RESULT_TTL
+    }
+
+    if paged.get('paged'):
+        update_expr += ', paged = :p, total_pages = :tp, output_length = :ol, next_page = :np'
+        expr_values[':p'] = True
+        expr_values[':tp'] = paged['total_pages']
+        expr_values[':ol'] = paged['output_length']
+        expr_values[':np'] = paged.get('next_page')
+
+    table.update_item(
+        Key={'request_id': request_id},
+        UpdateExpression=update_expr,
+        ExpressionAttributeNames=expr_names,
+        ExpressionAttributeValues=expr_values
+    )
+
+    return {
+        'result': result,
+        'paged': paged,
+        'decision_latency_ms': decision_latency_ms,
+    }
+
+
+def _handle_trust_session(
+    trust_scope: str,
+    account_id: str,
+    user_id: str,
+    source: str,
+    assume_role: str,
+) -> str:
+    """處理信任時段的建立與自動執行
+
+    Args:
+        trust_scope: 信任範圍
+        account_id: 帳號 ID
+        user_id: 使用者 ID
+        source: 來源
+        assume_role: IAM role
+
+    Returns:
+        str: 信任時段資訊字串 (trust_line)
+    """
+    trust_id = create_trust_session(
+        trust_scope, account_id, user_id, source=source,
+        max_uploads=TRUST_SESSION_MAX_UPLOADS,
+    )
+    emit_metric('Bouncer', 'TrustSession', 1, dimensions={'Event': 'created'})
+    trust_line = (
+        f"\n\n🔓 信任時段已啟動：`{trust_id}`"
+        f"\n📊 命令: 0/{TRUST_SESSION_MAX_COMMANDS} | 上傳: 0/{TRUST_SESSION_MAX_UPLOADS}"
+    )
+
+    # 查詢同 trust_scope 的 pending 請求（顯示 display_summary）
+    # bouncer-trust-batch-flow (Approach B): show each pending request's
+    # display_summary instead of just the count.
+    pending_items = []
+    try:
+        pending_resp = _db.table.query(
+            IndexName='status-created-index',
+            KeyConditionExpression='#status = :status',
+            FilterExpression='trust_scope = :scope AND account_id = :account',
+            ExpressionAttributeNames={'#status': 'status'},
+            ExpressionAttributeValues={
+                ':status': 'pending',
+                ':scope': trust_scope,
+                ':account': account_id,
+            },
+            ScanIndexForward=True,
+            Limit=20,
+        )
+        pending_items = pending_resp.get('Items', [])
+    except Exception:
+        logger.warning("[TRUST] Failed to query pending items for trust_scope=%s, skipping", trust_scope, exc_info=True)
+
+    pending_count = len(pending_items)
+    if pending_count > 0:
+        trust_line += f"\n⚡ 自動執行 {pending_count} 個排隊請求："
+        for pi in pending_items[:5]:
+            summary = pi.get('display_summary') or pi.get('command', '')[:60]
+            trust_line += f"\n  • {escape_markdown(str(summary))}"
+        if pending_count > 5:
+            trust_line += f"\n  _...及其他 {pending_count - 5} 個請求_"
+
+    # 自動執行同 trust_scope + account 的排隊中請求
+    try:
+        _auto_execute_pending_requests(trust_scope, account_id, assume_role, trust_id, source)
+    except Exception as e:
+        logger.error(f"[TRUST] Auto-execute pending error: {e}")
+
+    return trust_line
+
+
+def _format_approval_response(
+    action: str,
+    result: str,
+    paged: dict,
+    trust_line: str,
+    request_id: str,
+    info: dict,
+    message_id: int,
+) -> None:
+    """格式化並發送審批通過的回應訊息
+
+    Args:
+        action: approve 或 approve_trust
+        result: 執行結果
+        paged: 分頁資訊
+        trust_line: 信任時段資訊
+        request_id: 請求 ID
+        info: _format_command_info 返回的 dict
+        message_id: Telegram message ID
+    """
+    max_preview = 800 if action == 'approve_trust' else 1000
+    result_preview = result[:max_preview] if len(result) > max_preview else result
+
+    if paged.get('paged'):
+        truncate_notice = (
+            f"\n\n📄 *共 {paged['total_pages']} 頁* ({paged['output_length']} 字元)\n"
+            f"用 `bouncer_get_page` 查看更多，或點下方按鈕"
+        )
+        next_page_button = {
+            'inline_keyboard': [[{
+                'text': f'➡️ Next Page (2/{paged["total_pages"]})',
+                'callback_data': f'show_page:{request_id}:2',
+            }]]
+        }
+    else:
+        truncate_notice = ""
+        next_page_button = None
+
+    title = "✅ *已批准並執行* + 🔓 *信任 10 分鐘*" if action == 'approve_trust' else "✅ *已批准並執行*"
+
+    # Send result message; append inline Next Page button when paged
+    send_telegram_message_silent(
+        f"{title}\n\n"
+        f"🆔 *ID：* `{request_id}`\n"
+        f"{info['source_line']}"
+        f"{info['account_line']}"
+        f"📋 *命令：*\n`{info['cmd_preview']}`\n\n"
+        f"💬 *原因：* {info['safe_reason']}\n\n"
+        f"📤 *結果：*\n```\n{result_preview}\n```{truncate_notice}{trust_line}",
+        reply_markup=next_page_button,
+    )
+    # Overwrite the approval message (remove buttons from it)
+    update_message(message_id, "✅ *已執行* — 見下方結果", remove_buttons=True)
+
+
+def _handle_deny_callback(
+    request_id: str,
+    item: dict,
+    callback_id: str,
+    user_id: str,
+    message_id: int,
+    info: dict,
+) -> None:
+    """處理拒絕操作
+
+    Args:
+        request_id: 請求 ID
+        item: DynamoDB item (需要 created_at)
+        callback_id: Telegram callback ID
+        user_id: 拒絕者 ID
+        message_id: Telegram message ID
+        info: _format_command_info 返回的 dict
+    """
+    table = _get_table()
+
+    now = int(time.time())
+    created_at = int(item.get('created_at', 0))
+    decision_latency_ms = (now - created_at) * 1000 if created_at else 0
+    if decision_latency_ms:
+        emit_metric('Bouncer', 'DecisionLatency', decision_latency_ms, unit='Milliseconds', dimensions={'Action': 'deny'})
+
+    answer_callback(callback_id, '❌ 已拒絕')
+    _update_request_status(table, request_id, 'denied', user_id, extra_attrs={
+        'decision_type': 'manual_denied',
+        'decided_at': now,
+        'decision_latency_ms': decision_latency_ms,
+    })
+
+    update_message(
+        message_id,
+        f"❌ *已拒絕*\n\n"
+        f"🆔 *ID：* `{request_id}`\n"
+        f"{info['source_line']}"
+        f"{info['account_line']}"
+        f"📋 *命令：*\n`{info['cmd_preview']}`\n\n"
+        f"💬 *原因：* {info['safe_reason']}",
+    )
+
+
+def handle_command_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str, *, source_ip: str = '') -> dict:
+    """處理命令執行的審批 callback
+
+    Args:
+        source_ip: Telegram server IP from API GW event (for audit trail #74).
+                   This is NOT the end-user IP — Lambda runs as a webhook.
+    """
+    # 解析請求資料
+    parsed = _parse_command_callback_request(item)
+    command = parsed['command']
+    assume_role = parsed['assume_role']
+    source = parsed['source']
+    trust_scope = parsed['trust_scope']
+    account_id = parsed['account_id']
+
+    # 格式化顯示資訊
+    info = _format_command_info(parsed)
+
     if action in ('approve', 'approve_trust'):
         if is_dangerous(command):
             answer_callback(callback_id, '⚠️ 高危操作確認：正在執行...', show_alert=True)
@@ -237,160 +532,24 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             answer_callback(callback_id, '✅ 執行中 + 🔓 信任啟動')
         else:
             answer_callback(callback_id, '✅ 執行中...')
-        result = execute_command(command, assume_role)
-        cmd_status = 'failed' if _is_execute_failed(result) else 'success'
-        emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'manual_approve'})
-        paged = store_paged_output(request_id, result)
 
-        now = int(time.time())
-        created_at = int(item.get('created_at', 0))
-        decision_latency_ms = (now - created_at) * 1000 if created_at else 0
-        if decision_latency_ms:
-            emit_metric('Bouncer', 'DecisionLatency', decision_latency_ms, unit='Milliseconds', dimensions={'Action': 'approve'})
-
-        decision_type = 'manual_approved_trust' if action == 'approve_trust' else 'manual_approved'
-
-        # 存入 DynamoDB（包含分頁資訊 + audit trail #74）
-        update_expr = (
-            'SET #s = :s, #r = :r, approved_at = :t, approver = :a, '
-            'approved_by = :aby, duration_ms = :dms, source_ip = :sip, '
-            'decision_type = :dt, decided_at = :da, decision_latency_ms = :dl, #ttl = :ttl'
+        # 執行命令並存入結果
+        exec_result = _execute_and_store_result(
+            command, assume_role, request_id, item, user_id, source_ip, action
         )
-        expr_names = {'#s': 'status', '#r': 'result', '#ttl': 'ttl'}
-        expr_values = {
-            ':s': 'approved',
-            ':r': paged['result'],
-            ':t': now,
-            ':a': user_id,
-            ':aby': user_id,                         # audit trail: who approved (Telegram user_id)
-            ':dms': decision_latency_ms,             # audit trail: approval duration in ms
-            ':sip': source_ip,                       # audit trail: Telegram server IP (#74)
-            ':dt': decision_type,
-            ':da': now,
-            ':dl': decision_latency_ms,
-            ':ttl': now + RESULT_TTL
-        }
-
-        if paged.get('paged'):
-            update_expr += ', paged = :p, total_pages = :tp, output_length = :ol, next_page = :np'
-            expr_values[':p'] = True
-            expr_values[':tp'] = paged['total_pages']
-            expr_values[':ol'] = paged['output_length']
-            expr_values[':np'] = paged.get('next_page')
-
-        table.update_item(
-            Key={'request_id': request_id},
-            UpdateExpression=update_expr,
-            ExpressionAttributeNames=expr_names,
-            ExpressionAttributeValues=expr_values
-        )
+        result = exec_result['result']
+        paged = exec_result['paged']
 
         # 信任模式
         trust_line = ""
         if action == 'approve_trust':
-            trust_id = create_trust_session(
-                trust_scope, account_id, user_id, source=source,
-                max_uploads=TRUST_SESSION_MAX_UPLOADS,
-            )
-            emit_metric('Bouncer', 'TrustSession', 1, dimensions={'Event': 'created'})
-            trust_line = (
-                f"\n\n🔓 信任時段已啟動：`{trust_id}`"
-                f"\n📊 命令: 0/{TRUST_SESSION_MAX_COMMANDS} | 上傳: 0/{TRUST_SESSION_MAX_UPLOADS}"
-            )
+            trust_line = _handle_trust_session(trust_scope, account_id, user_id, source, assume_role)
 
-            # 查詢同 trust_scope 的 pending 請求（顯示 display_summary）
-            # bouncer-trust-batch-flow (Approach B): show each pending request's
-            # display_summary instead of just the count.
-            pending_items = []
-            try:
-                pending_resp = _db.table.query(
-                    IndexName='status-created-index',
-                    KeyConditionExpression='#status = :status',
-                    FilterExpression='trust_scope = :scope AND account_id = :account',
-                    ExpressionAttributeNames={'#status': 'status'},
-                    ExpressionAttributeValues={
-                        ':status': 'pending',
-                        ':scope': trust_scope,
-                        ':account': account_id,
-                    },
-                    ScanIndexForward=True,
-                    Limit=20,
-                )
-                pending_items = pending_resp.get('Items', [])
-            except Exception:
-                logger.warning("[TRUST] Failed to query pending items for trust_scope=%s, skipping", trust_scope, exc_info=True)
-
-            pending_count = len(pending_items)
-            if pending_count > 0:
-                trust_line += f"\n⚡ 自動執行 {pending_count} 個排隊請求："
-                for pi in pending_items[:5]:
-                    summary = pi.get('display_summary') or pi.get('command', '')[:60]
-                    trust_line += f"\n  • {escape_markdown(str(summary))}"
-                if pending_count > 5:
-                    trust_line += f"\n  _...及其他 {pending_count - 5} 個請求_"
-
-            # 自動執行同 trust_scope + account 的排隊中請求
-            try:
-                _auto_execute_pending_requests(trust_scope, account_id, assume_role, trust_id, source)
-            except Exception as e:
-                logger.error(f"[TRUST] Auto-execute pending error: {e}")
-
-        max_preview = 800 if action == 'approve_trust' else 1000
-        result_preview = result[:max_preview] if len(result) > max_preview else result
-        if paged.get('paged'):
-            truncate_notice = (
-                f"\n\n📄 *共 {paged['total_pages']} 頁* ({paged['output_length']} 字元)\n"
-                f"用 `bouncer_get_page` 查看更多，或點下方按鈕"
-            )
-            next_page_button = {
-                'inline_keyboard': [[{
-                    'text': f'➡️ Next Page (2/{paged["total_pages"]})',
-                    'callback_data': f'show_page:{request_id}:2',
-                }]]
-            }
-        else:
-            truncate_notice = ""
-            next_page_button = None
-
-        title = "✅ *已批准並執行* + 🔓 *信任 10 分鐘*" if action == 'approve_trust' else "✅ *已批准並執行*"
-
-        # Send result message; append inline Next Page button when paged
-        send_telegram_message_silent(
-            f"{title}\n\n"
-            f"🆔 *ID：* `{request_id}`\n"
-            f"{source_line}"
-            f"{account_line}"
-            f"📋 *命令：*\n`{cmd_preview}`\n\n"
-            f"💬 *原因：* {safe_reason}\n\n"
-            f"📤 *結果：*\n```\n{result_preview}\n```{truncate_notice}{trust_line}",
-            reply_markup=next_page_button,
-        )
-        # Overwrite the approval message (remove buttons from it)
-        update_message(message_id, "✅ *已執行* — 見下方結果", remove_buttons=True)
+        # 格式化並發送回應訊息
+        _format_approval_response(action, result, paged, trust_line, request_id, info, message_id)
 
     elif action == 'deny':
-        now = int(time.time())
-        created_at = int(item.get('created_at', 0))
-        decision_latency_ms = (now - created_at) * 1000 if created_at else 0
-        if decision_latency_ms:
-            emit_metric('Bouncer', 'DecisionLatency', decision_latency_ms, unit='Milliseconds', dimensions={'Action': 'deny'})
-
-        answer_callback(callback_id, '❌ 已拒絕')
-        _update_request_status(table, request_id, 'denied', user_id, extra_attrs={
-            'decision_type': 'manual_denied',
-            'decided_at': now,
-            'decision_latency_ms': decision_latency_ms,
-        })
-
-        update_message(
-            message_id,
-            f"❌ *已拒絕*\n\n"
-            f"🆔 *ID：* `{request_id}`\n"
-            f"{source_line}"
-            f"{account_line}"
-            f"📋 *命令：*\n`{cmd_preview}`\n\n"
-            f"💬 *原因：* {safe_reason}",
-        )
+        _handle_deny_callback(request_id, item, callback_id, user_id, message_id, info)
 
     return response(200, {'ok': True})
 
