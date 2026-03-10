@@ -936,16 +936,11 @@ def _write_frontend_deploy_history(
         )
 
 
-def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str) -> dict:
-    """處理前端部署的審批 callback
+def _parse_deploy_frontend_params(item: dict) -> dict:
+    """Parse and prepare parameters from deploy frontend request item.
 
-    action=approve: 從 DDB 讀 staged_files + target_info → S3 copy → CloudFront invalidation
-    action=deny:    更新 DDB status=rejected，不執行任何部署
+    Returns dict with all necessary fields for deploy frontend processing.
     """
-    import json as _json
-
-    table = _get_table()
-
     project = item.get('project', '')
     staging_bucket = item.get('staging_bucket', '')
     frontend_bucket = item.get('frontend_bucket', '')
@@ -961,104 +956,124 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
     size_str = format_size_human(total_size)
     source_line = build_info_lines(source=source)
 
-    if action == 'deny':
-        answer_callback(callback_id, '❌ 已拒絕')
-        _update_request_status(table, request_id, 'rejected', user_id)
-        update_message(
-            message_id,
-            f"❌ *已拒絕前端部署*\n\n"
-            f"📋 *請求 ID：* `{request_id}`\n"
-            f"{source_line}"
-            f"📦 *專案：* {escape_markdown(project)}\n"
-            f"📄 {file_count} 個檔案 ({size_str})\n"
-            f"💬 *原因：* {safe_reason}",
-        )
-        return response(200, {'ok': True})
+    return {
+        'project': project,
+        'staging_bucket': staging_bucket,
+        'frontend_bucket': frontend_bucket,
+        'distribution_id': distribution_id,
+        'source': source,
+        'reason': reason,
+        'files_json': files_json,
+        'file_count': file_count,
+        'total_size': total_size,
+        'deploy_role_arn': deploy_role_arn,
+        'safe_reason': safe_reason,
+        'size_str': size_str,
+        'source_line': source_line,
+    }
 
-    # action == 'approve'
-    try:
-        files_manifest = _json.loads(files_json)
-    except Exception:
-        answer_callback(callback_id, '❌ 檔案清單解析失敗')
-        return response(500, {'error': 'Failed to parse files manifest'})
 
-    answer_callback(callback_id, '🚀 部署中...')
+def _handle_deploy_frontend_deny(table, request_id: str, callback_id: str, message_id: int, user_id: str, params: dict) -> dict:
+    """Handle deny action for frontend deploy request.
+
+    Updates status to rejected and sends notification message.
+    Returns response dict.
+    """
+    answer_callback(callback_id, '❌ 已拒絕')
+    _update_request_status(table, request_id, 'rejected', user_id)
     update_message(
         message_id,
-        f"⏳ *前端部署中...*\n\n"
+        f"❌ *已拒絕前端部署*\n\n"
         f"📋 *請求 ID：* `{request_id}`\n"
-        f"{source_line}"
-        f"📦 *專案：* {escape_markdown(project)}\n"
-        f"📄 {file_count} 個檔案 ({size_str})\n"
-        f"💬 *原因：* {safe_reason}\n\n"
-        f"進度: 0/{file_count}",
-        remove_buttons=True,
+        f"{params['source_line']}"
+        f"📦 *專案：* {escape_markdown(params['project'])}\n"
+        f"📄 {params['file_count']} 個檔案 ({params['size_str']})\n"
+        f"💬 *原因：* {params['safe_reason']}",
     )
+    return response(200, {'ok': True})
 
+
+def _assume_deploy_role(deploy_role_arn: str, request_id: str, files_manifest: list, table, message_id: int, user_id: str, params: dict, item: dict):
+    """Assume deploy role for S3 operations.
+
+    Returns:
+        tuple: (s3_client, error_response_or_none)
+        - If successful: (s3_client, None)
+        - If failed: (None, response_dict)
+    """
+    import json as _json
+
+    if not deploy_role_arn:
+        return _boto3.client('s3'), None
+
+    try:
+        from aws_clients import get_s3_client
+        s3_target = get_s3_client(role_arn=deploy_role_arn, session_name=f"bouncer-deploy-{request_id[:16]}")
+        return s3_target, None
+    except Exception as e:
+        logger.error("[DEPLOY-FRONTEND] AssumeRole failed for %s: %s", deploy_role_arn, e)
+        failed = [
+            {'filename': fm.get('filename', 'unknown'), 'reason': f'AssumeRole failed: {e}'}
+            for fm in files_manifest
+        ]
+        deploy_status = 'deploy_failed'
+        extra_attrs = {
+            'deploy_status': deploy_status,
+            'deployed_count': 0,
+            'failed_count': len(failed),
+            'deployed_files': _json.dumps([]),
+            'failed_files': _json.dumps([f['filename'] for f in failed]),
+            'deployed_details': _json.dumps([]),
+            'failed_details': _json.dumps(failed),
+            'cf_invalidation_failed': False,
+        }
+        _update_request_status(table, request_id, 'approved', user_id, extra_attrs=extra_attrs)
+        emit_metric('Bouncer', 'DeployFrontend', 1, dimensions={'Status': deploy_status, 'Project': params['project']})
+        _write_frontend_deploy_history(
+            request_id=request_id,
+            project=params['project'],
+            deploy_status=deploy_status,
+            user_id=user_id,
+            file_count=params['file_count'],
+            success_count=0,
+            fail_count=len(failed),
+            reason=item.get('reason', ''),
+            source=params['source'],
+            frontend_bucket=params['frontend_bucket'],
+            distribution_id=params['distribution_id'],
+            cf_invalidation_failed=False,
+        )
+        update_message(
+            message_id,
+            f"❌ *前端部署失敗*\n\n"
+            f"📋 *請求 ID：* `{request_id}`\n"
+            f"{params['source_line']}"
+            f"📦 *專案：* {escape_markdown(params['project'])}\n"
+            f"❗ AssumeRole 失敗，全部 {params['file_count']} 個檔案無法部署\n"
+            f"💬 *原因：* {params['safe_reason']}",
+        )
+        return None, response(200, {
+            'ok': True,
+            'deploy_status': deploy_status,
+            'deployed_count': 0,
+            'failed_count': len(failed),
+            'cf_invalidation_failed': False,
+        })
+
+
+def _deploy_files_to_frontend(files_manifest: list, s3_staging, s3_target, request_id: str, message_id: int, params: dict, user_id: str) -> tuple:
+    """Deploy files from staging bucket to frontend bucket.
+
+    Returns:
+        tuple: (deployed_list, failed_list)
+    """
     deployed = []
     failed = []
+    staging_bucket = params['staging_bucket']
+    frontend_bucket = params['frontend_bucket']
+    file_count = params['file_count']
+    project = params['project']
 
-    # 1. Assume deploy role (if provided) — assumed role writes to frontend bucket
-    if deploy_role_arn:
-        try:
-            from aws_clients import get_s3_client
-            s3_target = get_s3_client(role_arn=deploy_role_arn, session_name=f"bouncer-deploy-{request_id[:16]}")
-        except Exception as e:
-            logger.error("[DEPLOY-FRONTEND] AssumeRole failed for %s: %s", deploy_role_arn, e)
-            failed = [
-                {'filename': fm.get('filename', 'unknown'), 'reason': f'AssumeRole failed: {e}'}
-                for fm in files_manifest
-            ]
-            deploy_status = 'deploy_failed'
-            extra_attrs = {
-                'deploy_status': deploy_status,
-                'deployed_count': 0,
-                'failed_count': len(failed),
-                'deployed_files': _json.dumps([]),
-                'failed_files': _json.dumps([f['filename'] for f in failed]),
-                'deployed_details': _json.dumps([]),
-                'failed_details': _json.dumps(failed),
-                'cf_invalidation_failed': False,
-            }
-            _update_request_status(table, request_id, 'approved', user_id, extra_attrs=extra_attrs)
-            emit_metric('Bouncer', 'DeployFrontend', 1, dimensions={'Status': deploy_status, 'Project': project})
-            _write_frontend_deploy_history(
-                request_id=request_id,
-                project=project,
-                deploy_status=deploy_status,
-                user_id=user_id,
-                file_count=file_count,
-                success_count=0,
-                fail_count=len(failed),
-                reason=item.get('reason', ''),
-                source=source,
-                frontend_bucket=frontend_bucket,
-                distribution_id=distribution_id,
-                cf_invalidation_failed=False,
-            )
-            update_message(
-                message_id,
-                f"❌ *前端部署失敗*\n\n"
-                f"📋 *請求 ID：* `{request_id}`\n"
-                f"{source_line}"
-                f"📦 *專案：* {escape_markdown(project)}\n"
-                f"❗ AssumeRole 失敗，全部 {file_count} 個檔案無法部署\n"
-                f"💬 *原因：* {safe_reason}",
-            )
-            return response(200, {
-                'ok': True,
-                'deploy_status': deploy_status,
-                'deployed_count': 0,
-                'failed_count': len(failed),
-                'cf_invalidation_failed': False,
-            })
-    else:
-        s3_target = _boto3.client('s3')  # Lambda role (fallback)
-
-    # s3_staging uses Lambda role (already has staging bucket read)
-    s3_staging = _boto3.client('s3')
-
-    # 2. For each file: read from staging bucket, write to frontend bucket
     for i, fm in enumerate(files_manifest):
         filename = fm.get('filename', 'unknown')
         staged_key = fm.get('s3_key', '')
@@ -1108,6 +1123,43 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
             except Exception:
                 logger.warning("[DEPLOY-FRONTEND] Progress update failed at step %d (non-critical)", i + 1, exc_info=True)
 
+    return deployed, failed
+
+
+def _invalidate_cloudfront(success_count: int, deploy_role_arn: str, distribution_id: str, request_id: str) -> bool:
+    """Invalidate CloudFront distribution if files were successfully deployed.
+
+    Returns:
+        bool: True if invalidation failed, False if succeeded or skipped (no files deployed)
+    """
+    if success_count == 0:
+        return False
+
+    try:
+        from aws_clients import get_cloudfront_client
+        cf = get_cloudfront_client(role_arn=deploy_role_arn)
+        cf.create_invalidation(
+            DistributionId=distribution_id,
+            InvalidationBatch={
+                'Paths': {'Quantity': 1, 'Items': ['/*']},
+                'CallerReference': request_id,
+            },
+        )
+        return False
+    except Exception as e:
+        logger.error("[DEPLOY-FRONTEND] CloudFront invalidation failed for dist=%s: %s", distribution_id, e)
+        return True
+
+
+def _finalize_deploy_frontend(deployed: list, failed: list, cf_invalidation_failed: bool, table, request_id: str,
+                               user_id: str, message_id: int, params: dict, item: dict) -> dict:
+    """Finalize deploy frontend: update DDB, emit metrics, write history, send notifications.
+
+    Returns:
+        dict: API Gateway response
+    """
+    import json as _json
+
     success_count = len(deployed)
     fail_count = len(failed)
 
@@ -1117,23 +1169,6 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
         deploy_status = 'deployed'
     else:
         deploy_status = 'partial_deploy'
-
-    # 3. CloudFront invalidation (assumed role or Lambda role)
-    cf_invalidation_failed = False
-    if success_count > 0:
-        try:
-            from aws_clients import get_cloudfront_client
-            cf = get_cloudfront_client(role_arn=deploy_role_arn)
-            cf.create_invalidation(
-                DistributionId=distribution_id,
-                InvalidationBatch={
-                    'Paths': {'Quantity': 1, 'Items': ['/*']},
-                    'CallerReference': request_id,
-                },
-            )
-        except Exception as e:
-            logger.error("[DEPLOY-FRONTEND] CloudFront invalidation failed for dist=%s: %s", distribution_id, e)
-            cf_invalidation_failed = True
 
     # Update DDB
     extra_attrs = {
@@ -1148,21 +1183,21 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
     }
     _update_request_status(table, request_id, 'approved', user_id, extra_attrs=extra_attrs)
 
-    emit_metric('Bouncer', 'DeployFrontend', 1, dimensions={'Status': deploy_status, 'Project': project})
+    emit_metric('Bouncer', 'DeployFrontend', 1, dimensions={'Status': deploy_status, 'Project': params['project']})
 
     # Write to deploy_history table (mirrors SAM deploy format)
     _write_frontend_deploy_history(
         request_id=request_id,
-        project=project,
+        project=params['project'],
         deploy_status=deploy_status,
         user_id=user_id,
-        file_count=file_count,
+        file_count=params['file_count'],
         success_count=success_count,
         fail_count=fail_count,
         reason=item.get('reason', ''),
-        source=source,
-        frontend_bucket=frontend_bucket,
-        distribution_id=distribution_id,
+        source=params['source'],
+        frontend_bucket=params['frontend_bucket'],
+        distribution_id=params['distribution_id'],
         cf_invalidation_failed=cf_invalidation_failed,
     )
 
@@ -1184,13 +1219,13 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
         message_id,
         f"{status_emoji} *{title}*\n\n"
         f"📋 *請求 ID：* `{request_id}`\n"
-        f"{source_line}"
-        f"📦 *專案：* {escape_markdown(project)}\n"
-        f"📄 成功: {success_count}/{file_count} 個檔案 ({size_str})"
+        f"{params['source_line']}"
+        f"📦 *專案：* {escape_markdown(params['project'])}\n"
+        f"📄 成功: {success_count}/{params['file_count']} 個檔案 ({params['size_str']})"
         f"{fail_line}\n"
-        f"🌐 *目標 Bucket：* `{escape_markdown(frontend_bucket)}`\n"
-        f"☁️ *CloudFront：* `{escape_markdown(distribution_id)}`\n"
-        f"💬 *原因：* {safe_reason}"
+        f"🌐 *目標 Bucket：* `{escape_markdown(params['frontend_bucket'])}`\n"
+        f"☁️ *CloudFront：* `{escape_markdown(params['distribution_id'])}`\n"
+        f"💬 *原因：* {params['safe_reason']}"
         f"{cf_warn}",
     )
 
@@ -1200,19 +1235,19 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
         if deploy_status == 'deployed':
             notif_text = (
                 f"✅ 前端部署成功\n"
-                f"📦 {project} — {success_count} 個檔案\n"
+                f"📦 {params['project']} — {success_count} 個檔案\n"
                 f"🆔 `{request_id}`"
             )
         elif deploy_status == 'partial_deploy':
             notif_text = (
                 f"⚠️ 前端部署部分成功\n"
-                f"📦 {project} — {success_count}/{file_count} 成功，{fail_count} 失敗\n"
+                f"📦 {params['project']} — {success_count}/{params['file_count']} 成功，{fail_count} 失敗\n"
                 f"🆔 `{request_id}`"
             )
         else:
             notif_text = (
                 f"❌ 前端部署失敗\n"
-                f"📦 {project} — 全部 {file_count} 個檔案失敗\n"
+                f"📦 {params['project']} — 全部 {params['file_count']} 個檔案失敗\n"
                 f"🆔 `{request_id}`"
             )
         if cf_invalidation_failed:
@@ -1228,6 +1263,64 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
         'failed_count': fail_count,
         'cf_invalidation_failed': cf_invalidation_failed,
     })
+
+
+def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str) -> dict:
+    """處理前端部署的審批 callback
+
+    action=approve: 從 DDB 讀 staged_files + target_info → S3 copy → CloudFront invalidation
+    action=deny:    更新 DDB status=rejected，不執行任何部署
+    """
+    import json as _json
+
+    table = _get_table()
+    params = _parse_deploy_frontend_params(item)
+
+    if action == 'deny':
+        return _handle_deploy_frontend_deny(table, request_id, callback_id, message_id, user_id, params)
+
+    # action == 'approve'
+    try:
+        files_manifest = _json.loads(params['files_json'])
+    except Exception:
+        answer_callback(callback_id, '❌ 檔案清單解析失敗')
+        return response(500, {'error': 'Failed to parse files manifest'})
+
+    answer_callback(callback_id, '🚀 部署中...')
+    update_message(
+        message_id,
+        f"⏳ *前端部署中...*\n\n"
+        f"📋 *請求 ID：* `{request_id}`\n"
+        f"{params['source_line']}"
+        f"📦 *專案：* {escape_markdown(params['project'])}\n"
+        f"📄 {params['file_count']} 個檔案 ({params['size_str']})\n"
+        f"💬 *原因：* {params['safe_reason']}\n\n"
+        f"進度: 0/{params['file_count']}",
+        remove_buttons=True,
+    )
+
+    # 1. Assume deploy role
+    s3_target, error_response = _assume_deploy_role(
+        params['deploy_role_arn'], request_id, files_manifest, table, message_id, user_id, params, item
+    )
+    if error_response:
+        return error_response
+
+    # 2. Deploy files to frontend bucket
+    s3_staging = _boto3.client('s3')
+    deployed, failed = _deploy_files_to_frontend(
+        files_manifest, s3_staging, s3_target, request_id, message_id, params, user_id
+    )
+
+    # 3. CloudFront invalidation
+    cf_invalidation_failed = _invalidate_cloudfront(
+        len(deployed), params['deploy_role_arn'], params['distribution_id'], request_id
+    )
+
+    # 4. Finalize: update DDB, metrics, history, and send notifications
+    return _finalize_deploy_frontend(
+        deployed, failed, cf_invalidation_failed, table, request_id, user_id, message_id, params, item
+    )
 
 
 
