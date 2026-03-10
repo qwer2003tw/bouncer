@@ -1,23 +1,15 @@
 #!/usr/bin/env bash
-# bouncer_exec.sh -- Execute AWS CLI commands via Bouncer with clean output
-# Usage: bouncer_exec.sh [--reason "..."] [--account <id>] [--source "Custom Source"] [--json-args '{...}'] <aws command...>
-#
-# --json-args: Pass the full command as a JSON object to bypass shell special-char issues.
-#   The JSON object must contain a "command" key. Other keys (reason/source/trust_scope/account)
-#   are overridden by the CLI flags. This is useful when the command contains | pipes, quotes,
-#   or other characters that would be mangled by shell expansion.
-#
-#   Example:
-#     bouncer_exec.sh --reason "Query Lambda log to investigate error" \
-#       --json-args '{"command": "aws logs start-query --query-string \"fields @timestamp | filter level = ERROR\""}'
+# bouncer_exec.sh — Execute AWS CLI commands via Bouncer with clean output
+# Usage: bouncer_exec.sh [--reason "..."] [--account <id>] [--source "Custom Source"] <aws command...>
+# Usage: bouncer_exec.sh [--reason "..."] [--account <id>] [--source "Custom Source"] --json-args '<JSON>'
 set -euo pipefail
 
-# Config
+# ── Config ──
 POLL_INTERVAL=10
 MAX_POLL_TIME=600  # 10 minutes
 TRUST_SCOPE="agent-bouncer-exec"
 
-# Validate reason
+# ── Validate reason ──
 _validate_reason() {
   local reason="$1"
   if [[ -z "$reason" ]]; then
@@ -35,12 +27,11 @@ _validate_reason() {
   fi
 }
 
-# Parse optional flags
+# ── Parse optional flags ──
 REASON=""
 ACCOUNT=""
 CUSTOM_SOURCE=""
-JSON_ARGS_MODE=false
-JSON_ARGS_VALUE=""
+JSON_ARGS=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -57,8 +48,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --json-args)
-      JSON_ARGS_MODE=true
-      JSON_ARGS_VALUE="$2"
+      JSON_ARGS="$2"
       shift 2
       ;;
     *)
@@ -67,17 +57,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Validate
-# In --json-args mode, no positional aws args required; otherwise at least one arg needed
-if [[ "$JSON_ARGS_MODE" == "false" && $# -eq 0 ]]; then
+# ── Validate ──
+if [[ -z "$JSON_ARGS" && $# -eq 0 ]]; then
   echo "Usage: bouncer_exec.sh --reason \"<原因>\" [--account <id>] [--source \"<來源>\"] <aws command...>" >&2
-  echo "   Or: bouncer_exec.sh --reason \"<原因>\" --json-args '{\"command\": \"aws ...\"}'" >&2
   exit 1
 fi
 
 _validate_reason "$REASON"
 
-# Helper: extract and clean result
+# ── Helper: extract and clean result ──
 extract_result() {
   local json="$1"
   local result
@@ -96,48 +84,38 @@ extract_result() {
   fi
 }
 
-# Build MCPORTER_JSON
-if [[ "$JSON_ARGS_MODE" == "true" ]]; then
-  # --json-args mode: use the JSON object from the user, override reason/source/trust_scope
-  # Validate the input is valid JSON first
-  if ! echo "$JSON_ARGS_VALUE" | jq . >/dev/null 2>&1; then
-    echo "❌ --json-args 的值不是合法 JSON" >&2
+# ── Build JSON args ──
+if [[ -n "$JSON_ARGS" ]]; then
+  # --json-args mode: validate JSON, then overlay reason/source/trust_scope/account
+  if ! echo "$JSON_ARGS" | jq . >/dev/null 2>&1; then
+    echo "❌ --json-args 的值不是合法 JSON，請傳入有效的 JSON object" >&2
     exit 1
   fi
 
-  # Determine source: use custom if provided, else derive from command field in JSON
-  if [[ -n "$CUSTOM_SOURCE" ]]; then
-    SOURCE="$CUSTOM_SOURCE"
-  else
-    COMMAND_FROM_JSON=$(echo "$JSON_ARGS_VALUE" | jq -r '.command // empty' 2>/dev/null)
-    SOURCE="Agent (${COMMAND_FROM_JSON})"
-  fi
+  COMMAND_DISPLAY=$(echo "$JSON_ARGS" | jq -r '.command // empty')
+  SOURCE="${CUSTOM_SOURCE:-Agent (${COMMAND_DISPLAY})}"
 
-  # Merge: start from user-supplied JSON, then overlay reason/source/trust_scope
-  # Also conditionally add account if provided
+  # Build final JSON: start from input, then overlay controlled fields
   if [[ -n "$ACCOUNT" ]]; then
-    MCPORTER_JSON=$(echo "$JSON_ARGS_VALUE" | jq \
+    MCPORTER_JSON=$(echo "$JSON_ARGS" | jq \
       --arg reason "$REASON" \
       --arg source "$SOURCE" \
       --arg trust_scope "$TRUST_SCOPE" \
       --arg account "$ACCOUNT" \
       '. + {reason: $reason, source: $source, trust_scope: $trust_scope, account: $account}')
   else
-    MCPORTER_JSON=$(echo "$JSON_ARGS_VALUE" | jq \
+    MCPORTER_JSON=$(echo "$JSON_ARGS" | jq \
       --arg reason "$REASON" \
       --arg source "$SOURCE" \
       --arg trust_scope "$TRUST_SCOPE" \
       '. + {reason: $reason, source: $source, trust_scope: $trust_scope}')
   fi
 else
-  # Normal mode: build command string from positional args
+  # Normal positional-args mode
   COMMAND_DISPLAY="$*"
-
-  # Source: use custom if provided, else default "Agent (command)"
   SOURCE="${CUSTOM_SOURCE:-Agent (${COMMAND_DISPLAY})}"
 
   # Build JSON args via jq (safe: handles all special characters)
-  # jq --arg properly escapes quotes, pipes, backslashes, unicode, etc.
   if [[ -n "$ACCOUNT" ]]; then
     MCPORTER_JSON=$(jq -n \
       --arg command "$COMMAND_DISPLAY" \
@@ -156,7 +134,7 @@ else
   fi
 fi
 
-# Execute
+# ── Execute ──
 RESPONSE=$(mcporter call bouncer bouncer_execute --args "$MCPORTER_JSON" 2>&1)
 
 # Extract status
@@ -168,7 +146,7 @@ if [[ -z "$STATUS" ]]; then
   exit 1
 fi
 
-# Handle response
+# ── Handle response ──
 case "$STATUS" in
   auto_approved|trust_auto_approved|grant_auto_approved|approved)
     extract_result "$RESPONSE"
