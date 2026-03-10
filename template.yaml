@@ -76,6 +76,10 @@ Resources:
           AttributeType: N
         - AttributeName: status
           AttributeType: S
+        - AttributeName: type
+          AttributeType: S
+        - AttributeName: expires_at
+          AttributeType: N
       KeySchema:
         - AttributeName: request_id
           KeyType: HASH
@@ -95,6 +99,14 @@ Resources:
             - AttributeName: status
               KeyType: HASH
             - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: type-expires-at-index
+          KeySchema:
+            - AttributeName: type
+              KeyType: HASH
+            - AttributeName: expires_at
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
