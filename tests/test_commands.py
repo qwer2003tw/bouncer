@@ -190,15 +190,28 @@ class TestSecurityWhitespaceBypass:
 class TestSecurityFileProtocol:
     """測試 file:// 協議阻擋"""
 
-    def test_file_protocol_blocked(self, app_module):
-        """file:// 被阻擋（防止讀取本地檔案）"""
-        assert app_module.is_blocked('aws ec2 run-instances --cli-input-json file:///etc/passwd')
+    def test_cli_input_json_file_protocol_allowed(self, app_module):
+        """--cli-input-json file:// 是 AWS CLI 官方 workaround，允許通過（#50）"""
+        # 這是 AWS CLI 的合法用法，用於讀取 JSON 參數檔案
+        assert not app_module.is_blocked('aws ec2 run-instances --cli-input-json file:///tmp/config.json')
+        assert not app_module.is_blocked('aws logs start-query --cli-input-json file:///tmp/query.json')
+        assert not app_module.is_blocked('aws lambda invoke --cli-input-json file://params.json output.json')
+
+    def test_cli_input_json_fileb_still_blocked(self, app_module):
+        """--cli-input-json fileb:// 仍然封鎖（fileb 是二進位讀取，不允許）"""
+        assert app_module.is_blocked('aws ec2 run-instances --cli-input-json fileb:///tmp/config.json')
+
+    def test_file_protocol_blocked_other_flags(self, app_module):
+        """file:// 在其他旗標仍被阻擋（防止讀取本地敏感檔案）"""
         assert app_module.is_blocked('aws lambda invoke --payload file:///etc/shadow output.json')
+        assert app_module.is_blocked('aws s3 cp file:///etc/passwd s3://bucket/passwd')
+        assert app_module.is_blocked('aws iam put-role-policy --policy-document file:///etc/shadow')
 
     def test_fileb_protocol_blocked(self, app_module):
         """fileb:// 被阻擋（防止上傳本地二進位檔案）"""
         assert app_module.is_blocked('aws s3api put-object --body fileb:///etc/shadow --bucket x --key y')
         assert app_module.is_blocked('aws lambda invoke --payload fileb:///proc/self/environ output.json')
+        assert app_module.is_blocked('aws s3 cp fileb:///tmp/file s3://bucket/file')
 
     def test_file_in_value_not_false_positive(self, app_module):
         """file 在普通值中不會誤判"""

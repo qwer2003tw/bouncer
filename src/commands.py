@@ -239,8 +239,16 @@ def _get_blocked_flag(cmd_lower: str) -> str | None:
 
 
 def _has_file_protocol(cmd_lower: str) -> bool:
-    """檢查命令是否使用 file:// 或 fileb:// 協議讀取本地檔案"""
-    return 'file://' in cmd_lower or 'fileb://' in cmd_lower
+    """檢查命令是否使用 file:// 或 fileb:// 協議讀取本地檔案
+
+    例外：--cli-input-json file:// 是 AWS CLI 的合法用法，允許通過。
+    """
+    if 'file://' not in cmd_lower and 'fileb://' not in cmd_lower:
+        return False
+    # --cli-input-json file:// 是 AWS CLI 官方 workaround，允許
+    if '--cli-input-json' in cmd_lower and 'file://' in cmd_lower:
+        return False
+    return True
 
 
 LAMBDA_ENV_WARN_MSG = "⚠️ 此命令會覆蓋所有環境變數！請確認已備份現有設定。"
