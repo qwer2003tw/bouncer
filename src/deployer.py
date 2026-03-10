@@ -14,6 +14,7 @@ from botocore.exceptions import ClientError
 from metrics import emit_metric
 from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native, generate_display_summary
 import db as _db
+import notifications
 
 logger = logging.getLogger(__name__)
 
@@ -1099,14 +1100,12 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
         telegram_message_id = (response or {}).get('result', {}).get('message_id')
         if telegram_message_id:
             try:
-                from notifications import post_notification_setup
-                post_notification_setup(
+                notifications.post_notification_setup(
                     request_id=request_id,
                     telegram_message_id=telegram_message_id,
                     expires_at=expires_at,
                 )
             except Exception as exc:
-                import logging as _logging
-                _logging.getLogger(__name__).error(
+                logger.error(
                     "[deployer] post_notification_setup failed for %s: %s", request_id, exc
                 )
