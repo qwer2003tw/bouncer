@@ -37,6 +37,9 @@ sfn_client = None
 # CloudFormation — lazy init
 cfn_client = None
 
+# Secrets Manager — lazy init
+secretsmanager_client = None
+
 
 def _get_dynamodb():
     global _dynamodb
@@ -83,6 +86,14 @@ def _get_cfn_client():
     return cfn_client
 
 
+def _get_secretsmanager_client():
+    global secretsmanager_client
+    if secretsmanager_client is None:
+        region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+        secretsmanager_client = boto3.client('secretsmanager', region_name=region)
+    return secretsmanager_client
+
+
 # ============================================================================
 # Git Utilities
 # ============================================================================
@@ -124,6 +135,110 @@ def get_git_commit_info(cwd: str = None) -> dict:
     except Exception as e:
         logger.warning(f"[deployer] get_git_commit_info failed (graceful fallback): {e}")
         return {'commit_sha': None, 'commit_short': None, 'commit_message': None}
+
+
+# ============================================================================
+# Pre-flight Checks
+# ============================================================================
+
+def preflight_check_secrets(project: dict, branch: str) -> list:
+    """
+    Pre-flight check: 驗證 template.yaml 引用的所有 Secrets Manager secrets 都有 AWSCURRENT
+
+    Args:
+        project: 專案配置
+        branch: 部署分支
+
+    Returns:
+        list[str]: 缺少 AWSCURRENT 的 secret 名稱列表（空列表表示全部通過）
+    """
+    import tempfile
+    import shutil
+
+    git_repo = project.get('git_repo', '')
+    if not git_repo:
+        return []
+
+    sam_template_path = project.get('sam_template_path', '.')
+    branch = branch or project.get('default_branch', 'master')
+
+    # 取得 GitHub PAT
+    try:
+        sm_client = _get_secretsmanager_client()
+        github_pat_response = sm_client.get_secret_value(SecretId='sam-deployer/github-pat')
+        github_pat = github_pat_response['SecretString']
+    except Exception as e:
+        logger.error(f"Failed to get GitHub PAT: {e}")
+        return []  # graceful degradation
+
+    # Clone repo to temp dir
+    tmpdir = None
+    try:
+        tmpdir = tempfile.mkdtemp(prefix='bouncer-preflight-')
+
+        # Inject PAT into clone URL
+        if git_repo.startswith('https://github.com/'):
+            clone_url = git_repo.replace('https://github.com/', f'https://{github_pat}@github.com/')
+        else:
+            clone_url = git_repo
+
+        # Clone (shallow, single branch)
+        clone_cmd = ['git', 'clone', '--depth', '1', '--branch', branch, clone_url, tmpdir]
+        result = subprocess.run(clone_cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            logger.error(f"Git clone failed: {result.stderr}")
+            return []  # graceful degradation
+
+        # Find template.yaml
+        template_path = os.path.join(tmpdir, sam_template_path, 'template.yaml')
+        if not os.path.exists(template_path):
+            template_path = os.path.join(tmpdir, sam_template_path, 'template.yml')
+
+        if not os.path.exists(template_path):
+            logger.warning(f"template.yaml not found in {sam_template_path}")
+            return []
+
+        # Read template and extract secret references
+        with open(template_path, 'r', encoding='utf-8') as f:
+            template_content = f.read()
+
+        # Match patterns like:
+        # !Sub '{{resolve:secretsmanager:secret-name:SecretString:key}}'
+        # !Sub '{{resolve:secretsmanager:secret-name}}'
+        # "{{resolve:secretsmanager:secret-name}}"
+        secret_pattern = r'\{\{resolve:secretsmanager:([^:}\s]+)'
+        secret_names = re.findall(secret_pattern, template_content)
+
+        if not secret_names:
+            return []  # No secrets referenced
+
+        # Validate each secret has AWSCURRENT
+        missing_secrets = []
+        for secret_name in set(secret_names):
+            try:
+                response = sm_client.describe_secret(SecretId=secret_name)
+                version_stages = response.get('VersionIdsToStages', {})
+
+                # Check if any version has AWSCURRENT
+                has_current = any('AWSCURRENT' in stages for stages in version_stages.values())
+
+                if not has_current:
+                    missing_secrets.append(secret_name)
+
+            except sm_client.exceptions.ResourceNotFoundException:
+                missing_secrets.append(secret_name)
+            except Exception as e:
+                logger.error(f"Error checking secret {secret_name}: {e}")
+                missing_secrets.append(secret_name)
+
+        return missing_secrets
+
+    except Exception as e:
+        logger.error(f"Preflight check error: {e}")
+        return []  # graceful degradation
+    finally:
+        if tmpdir and os.path.exists(tmpdir):
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 # ============================================================================
@@ -745,6 +860,28 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
                 'error': f'專案 {project_id} 不存在',
                 'available_projects': available
             })}],
+            'isError': True
+        })
+
+    # Pre-flight check: 驗證 external secrets 有 AWSCURRENT
+    deploy_branch = branch or project.get('default_branch', 'master')
+    missing_secrets = preflight_check_secrets(project, deploy_branch)
+    if missing_secrets:
+        error_msg = "❌ Deploy 前檢查失敗：以下 secrets 缺少 AWSCURRENT staging label\n\n"
+        for secret_name in missing_secrets:
+            error_msg += f"  • {secret_name}\n"
+        error_msg += "\n請先執行以下指令設定 secret 值：\n"
+        error_msg += "  aws secretsmanager put-secret-value \\\n"
+        error_msg += "    --secret-id <secret-name> \\\n"
+        error_msg += "    --secret-string \"<value>\" \\\n"
+        error_msg += "    --region us-east-1\n"
+        error_msg += "\nDeploy 已中止，請補值後重試。"
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'error',
+                'error': error_msg,
+                'missing_secrets': missing_secrets
+            }, ensure_ascii=False)}],
             'isError': True
         })
 
