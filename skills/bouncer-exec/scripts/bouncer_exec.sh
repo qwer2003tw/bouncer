@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # bouncer_exec.sh — Execute AWS CLI commands via Bouncer with clean output
 # Usage: bouncer_exec.sh [--reason "..."] [--account <id>] [--source "Custom Source"] <aws command...>
+# Usage: bouncer_exec.sh [--reason "..."] [--account <id>] [--source "Custom Source"] --json-args '<JSON>'
 set -euo pipefail
 
 # ── Config ──
@@ -30,6 +31,7 @@ _validate_reason() {
 REASON=""
 ACCOUNT=""
 CUSTOM_SOURCE=""
+JSON_ARGS=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -45,6 +47,10 @@ while [[ $# -gt 0 ]]; do
       CUSTOM_SOURCE="$2"
       shift 2
       ;;
+    --json-args)
+      JSON_ARGS="$2"
+      shift 2
+      ;;
     *)
       break
       ;;
@@ -52,18 +58,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Validate ──
-if [[ $# -eq 0 ]]; then
+if [[ -z "$JSON_ARGS" && $# -eq 0 ]]; then
   echo "Usage: bouncer_exec.sh --reason \"<原因>\" [--account <id>] [--source \"<來源>\"] <aws command...>" >&2
   exit 1
 fi
 
 _validate_reason "$REASON"
-
-# ── Build COMMAND display string ──
-COMMAND_DISPLAY="$*"
-
-# Source: use custom if provided, else default "Agent (command)"
-SOURCE="${CUSTOM_SOURCE:-Agent (${COMMAND_DISPLAY})}"
 
 # ── Helper: extract and clean result ──
 extract_result() {
@@ -84,23 +84,54 @@ extract_result() {
   fi
 }
 
-# ── Build JSON args via jq (safe: handles all special characters) ──
-# jq --arg properly escapes quotes, pipes, backslashes, unicode, etc.
-if [[ -n "$ACCOUNT" ]]; then
-  MCPORTER_JSON=$(jq -n \
-    --arg command "$COMMAND_DISPLAY" \
-    --arg reason "$REASON" \
-    --arg source "$SOURCE" \
-    --arg trust_scope "$TRUST_SCOPE" \
-    --arg account "$ACCOUNT" \
-    '{command: $command, reason: $reason, source: $source, trust_scope: $trust_scope, account: $account}')
+# ── Build JSON args ──
+if [[ -n "$JSON_ARGS" ]]; then
+  # --json-args mode: validate JSON, then overlay reason/source/trust_scope/account
+  if ! echo "$JSON_ARGS" | jq . >/dev/null 2>&1; then
+    echo "❌ --json-args 的值不是合法 JSON，請傳入有效的 JSON object" >&2
+    exit 1
+  fi
+
+  COMMAND_DISPLAY=$(echo "$JSON_ARGS" | jq -r '.command // empty')
+  SOURCE="${CUSTOM_SOURCE:-Agent (${COMMAND_DISPLAY})}"
+
+  # Build final JSON: start from input, then overlay controlled fields
+  if [[ -n "$ACCOUNT" ]]; then
+    MCPORTER_JSON=$(echo "$JSON_ARGS" | jq \
+      --arg reason "$REASON" \
+      --arg source "$SOURCE" \
+      --arg trust_scope "$TRUST_SCOPE" \
+      --arg account "$ACCOUNT" \
+      '. + {reason: $reason, source: $source, trust_scope: $trust_scope, account: $account}')
+  else
+    MCPORTER_JSON=$(echo "$JSON_ARGS" | jq \
+      --arg reason "$REASON" \
+      --arg source "$SOURCE" \
+      --arg trust_scope "$TRUST_SCOPE" \
+      '. + {reason: $reason, source: $source, trust_scope: $trust_scope}')
+  fi
 else
-  MCPORTER_JSON=$(jq -n \
-    --arg command "$COMMAND_DISPLAY" \
-    --arg reason "$REASON" \
-    --arg source "$SOURCE" \
-    --arg trust_scope "$TRUST_SCOPE" \
-    '{command: $command, reason: $reason, source: $source, trust_scope: $trust_scope}')
+  # Normal positional-args mode
+  COMMAND_DISPLAY="$*"
+  SOURCE="${CUSTOM_SOURCE:-Agent (${COMMAND_DISPLAY})}"
+
+  # Build JSON args via jq (safe: handles all special characters)
+  if [[ -n "$ACCOUNT" ]]; then
+    MCPORTER_JSON=$(jq -n \
+      --arg command "$COMMAND_DISPLAY" \
+      --arg reason "$REASON" \
+      --arg source "$SOURCE" \
+      --arg trust_scope "$TRUST_SCOPE" \
+      --arg account "$ACCOUNT" \
+      '{command: $command, reason: $reason, source: $source, trust_scope: $trust_scope, account: $account}')
+  else
+    MCPORTER_JSON=$(jq -n \
+      --arg command "$COMMAND_DISPLAY" \
+      --arg reason "$REASON" \
+      --arg source "$SOURCE" \
+      --arg trust_scope "$TRUST_SCOPE" \
+      '{command: $command, reason: $reason, source: $source, trust_scope: $trust_scope}')
+  fi
 fi
 
 # ── Execute ──
