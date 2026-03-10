@@ -25,12 +25,6 @@ jobs:
           
       - name: Run ruff
         run: ruff check src/ mcp_server/
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          reporter: github-pr-review
-          ruff_args: --ignore E501,E722
-          filter_mode: added
-          fail_on_error: true
 
   security:
     name: Security Scan
