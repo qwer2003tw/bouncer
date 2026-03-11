@@ -27,6 +27,8 @@ __all__ = [
     'send_message_with_entities',
     '_telegram_request',
     '_telegram_requests_parallel',
+    'pin_message',
+    'unpin_message',
 ]
 
 
@@ -307,3 +309,45 @@ def send_message_with_entities(text: str, entities: list, reply_markup: dict = N
     if reply_markup:
         data['reply_markup'] = _strip_unsupported_button_fields(reply_markup)
     return _telegram_request('sendMessage', data, json_body=True)
+
+
+def pin_message(message_id: int, disable_notification: bool = True) -> bool:
+    """Pin a message in the approved chat. Returns True on success, False on failure (best-effort).
+
+    Args:
+        message_id: Telegram message ID to pin
+        disable_notification: If True, pin silently without notifying users (default: True)
+
+    Returns:
+        True if successful, False on failure (best-effort)
+    """
+    try:
+        result = _telegram_request('pinChatMessage', {
+            'chat_id': APPROVED_CHAT_ID,
+            'message_id': message_id,
+            'disable_notification': disable_notification,
+        })
+        return result.get('ok', False)
+    except Exception as e:
+        logger.warning(f"[deployer] Failed to pin message {message_id} (ignored): {e}")
+        return False
+
+
+def unpin_message(message_id: int) -> bool:
+    """Unpin a message in the approved chat. Returns True on success, False on failure (best-effort).
+
+    Args:
+        message_id: Telegram message ID to unpin
+
+    Returns:
+        True if successful, False on failure (best-effort)
+    """
+    try:
+        result = _telegram_request('unpinChatMessage', {
+            'chat_id': APPROVED_CHAT_ID,
+            'message_id': message_id,
+        })
+        return result.get('ok', False)
+    except Exception as e:
+        logger.warning(f"[deployer] Failed to unpin message {message_id} (ignored): {e}")
+        return False

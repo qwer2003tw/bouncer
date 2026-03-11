@@ -786,6 +786,15 @@ def get_deploy_status(deploy_id: str) -> dict:
                 if sfn_status == 'FAILED':
                     send_deploy_failure_notification(deploy_id, project_id, error_lines)
 
+                # --- Unpin the deploy message (best-effort) ---
+                telegram_message_id = record.get('telegram_message_id')
+                if telegram_message_id:
+                    try:
+                        from telegram import unpin_message
+                        unpin_message(int(telegram_message_id))
+                    except Exception as e:
+                        logger.warning(f"[deployer] Failed to unpin message (ignored): {e}")
+
         except Exception as e:
             logger.error(f"Error getting execution status: {e}")
 

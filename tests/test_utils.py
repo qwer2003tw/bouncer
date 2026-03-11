@@ -12,17 +12,21 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 import pytest
 from unittest.mock import patch
 
-# Patch constants before importing utils
-with patch.dict(os.environ, {}):
-    import importlib
-    # Provide minimal stub for constants so utils imports cleanly
-    import types
-    constants_stub = types.ModuleType('constants')
-    constants_stub.AUDIT_TTL_SHORT = 86400 * 30
-    constants_stub.AUDIT_TTL_LONG = 86400 * 90
-    sys.modules.setdefault('constants', constants_stub)
+# Patch constants before importing utils, then remove stub to avoid polluting
+# other test modules that need the real constants (e.g. TELEGRAM_TOKEN).
+import types as _types
+_constants_already_present = 'constants' in sys.modules
+if not _constants_already_present:
+    _constants_stub = _types.ModuleType('constants')
+    _constants_stub.AUDIT_TTL_SHORT = 86400 * 30
+    _constants_stub.AUDIT_TTL_LONG = 86400 * 90
+    sys.modules['constants'] = _constants_stub
 
-from utils import sanitize_filename
+from utils import sanitize_filename  # noqa: E402
+
+# Remove stub immediately after import so later test modules get the real one.
+if not _constants_already_present:
+    del sys.modules['constants']
 
 
 class TestSanitizeFilenameBasename:
