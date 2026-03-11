@@ -23,3 +23,25 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+
+[tool.bandit]
+# Security scan skip rules (documented for Sprint 27-004)
+# CI command: bandit -r src/ deployer/notifier/ -ll --skip B101,B603,B310
+#
+# B101 (assert_used): Not applicable - no assert statements in production code
+#   - Searched src/ and deployer/notifier/ - no assert usage found
+#   - Skip retained for consistency but effectively unused
+#
+# B603 (subprocess_without_shell_equals_true): Safe usage - subprocess.run() with list args
+#   - Used in src/deployer.py for git commands (lines 115, 122, 188)
+#   - All calls use list arguments (e.g., ['git', 'rev-parse', 'HEAD'])
+#   - No shell=True used anywhere - default shell=False is safe
+#   - No user input in command construction
+#
+# B310 (urllib_urlopen): Safe usage - controlled URLs only
+#   - Used for Telegram Bot API calls (api.telegram.org)
+#   - URLs constructed from: TELEGRAM_BOT_TOKEN (env var) + hardcoded API endpoints
+#   - No user-controlled URLs - SSRF risk mitigated
+#   - All calls have timeouts (5-10 seconds)
+#   - Locations: src/accounts.py:63, src/telegram.py:96,123, deployer/notifier/app.py:241,268
+#   - Most already have '# nosec B310' inline comments
