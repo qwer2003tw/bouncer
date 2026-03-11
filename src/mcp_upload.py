@@ -8,7 +8,7 @@ Also includes _format_size_human().
 import json
 import logging
 import time
-import boto3
+from aws_clients import get_s3_client
 from dataclasses import dataclass
 from typing import Optional
 
@@ -844,7 +844,7 @@ def _submit_batch_for_approval(
 
     # Stage files to S3 (avoids 400KB DynamoDB item limit)
     staging_bucket = f"bouncer-uploads-{DEFAULT_ACCOUNT_ID}"
-    s3_staging = boto3.client('s3')
+    s3_staging = get_s3_client()
     files_manifest = []
     staged_keys = []
 
@@ -994,7 +994,6 @@ def execute_upload(request_id: str, approver: str) -> dict:
         content_b64_legacy = item.get('content')  # backward compat for old items
 
         # 建立 S3 client（跨帳號時用 assume role）
-        from aws_clients import get_s3_client
         s3 = get_s3_client(role_arn=assume_role_arn, session_name='bouncer-upload')
 
         if content_s3_key:

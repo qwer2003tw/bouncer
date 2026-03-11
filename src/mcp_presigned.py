@@ -12,7 +12,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import List
 
-import boto3
+from aws_clients import get_s3_client
 from botocore.exceptions import ClientError
 
 from constants import DEFAULT_ACCOUNT_ID
@@ -59,7 +59,7 @@ def _generate_presigned_url_for_file(
     Shared by both single-file and batch pipelines.
     """
     try:
-        s3_client = boto3.client("s3")
+        s3_client = get_s3_client()
         url = s3_client.generate_presigned_url(
             "put_object",
             Params={
@@ -461,7 +461,7 @@ def _generate_presigned_batch_urls(ctx: PresignedBatchContext) -> dict:
             },
         )
 
-    s3_client = boto3.client("s3")
+    s3_client = get_s3_client()
     now = int(time.time())
     expires_at_ts = now + ctx.expires_in
     expires_at_iso = time.strftime(

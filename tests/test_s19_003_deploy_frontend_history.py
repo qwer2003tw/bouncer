@@ -122,8 +122,11 @@ class TestDeployFrontendHistoryWrite:
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf = _make_boto3_mock()
         mock_table = MagicMock()
 
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        _s3_seq = [mock_s3_target, mock_s3_staging]
+        _s3_idx = {'n': 0}
+        def _s3_f(role_arn=None, **kw): i = _s3_idx['n']; _s3_idx['n'] += 1; return _s3_seq[i] if i < len(_s3_seq) else MagicMock()
+        with patch('callbacks.get_s3_client', side_effect=_s3_f), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -149,8 +152,11 @@ class TestDeployFrontendHistoryWrite:
         mock_table = MagicMock()
         mock_history_table = MagicMock()
 
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        _s3_seq = [mock_s3_target, mock_s3_staging]
+        _s3_idx = {'n': 0}
+        def _s3_f(role_arn=None, **kw): i = _s3_idx['n']; _s3_idx['n'] += 1; return _s3_seq[i] if i < len(_s3_seq) else MagicMock()
+        with patch('callbacks.get_s3_client', side_effect=_s3_f), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -181,14 +187,17 @@ class TestDeployFrontendHistoryWrite:
             {'Body': _make_body_mock()},
             Exception('S3 read error'),
         ]
-        mock_boto3, _, mock_s3_staging, mock_cf = _make_boto3_mock(
+        mock_boto3, mock_s3_target, mock_s3_staging, mock_cf = _make_boto3_mock(
             get_object_side_effect=side_effects
         )
         mock_table = MagicMock()
         mock_history_table = MagicMock()
 
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        _s3_seq = [mock_s3_target, mock_s3_staging]
+        _s3_idx = {'n': 0}
+        def _s3_f(role_arn=None, **kw): i = _s3_idx['n']; _s3_idx['n'] += 1; return _s3_seq[i] if i < len(_s3_seq) else MagicMock()
+        with patch('callbacks.get_s3_client', side_effect=_s3_f), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -207,14 +216,17 @@ class TestDeployFrontendHistoryWrite:
     def test_full_failure_writes_history_failed(self):
         """All files fail -> deploy_history with status=FAILED."""
         side_effects = [Exception('S3 error')] * len(_FILES_MANIFEST)
-        mock_boto3, _, mock_s3_staging, _ = _make_boto3_mock(
+        mock_boto3, mock_s3_target, mock_s3_staging, mock_cf = _make_boto3_mock(
             get_object_side_effect=side_effects
         )
         mock_table = MagicMock()
         mock_history_table = MagicMock()
 
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        _s3_seq = [mock_s3_target, mock_s3_staging]
+        _s3_idx = {'n': 0}
+        def _s3_f(role_arn=None, **kw): i = _s3_idx['n']; _s3_idx['n'] += 1; return _s3_seq[i] if i < len(_s3_seq) else MagicMock()
+        with patch('callbacks.get_s3_client', side_effect=_s3_f), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -237,8 +249,11 @@ class TestDeployFrontendHistoryWrite:
         mock_history_table = MagicMock()
         mock_history_table.put_item.side_effect = Exception('DDB write error')
 
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        _s3_seq = [mock_s3_target, mock_s3_staging]
+        _s3_idx = {'n': 0}
+        def _s3_f(role_arn=None, **kw): i = _s3_idx['n']; _s3_idx['n'] += 1; return _s3_seq[i] if i < len(_s3_seq) else MagicMock()
+        with patch('callbacks.get_s3_client', side_effect=_s3_f), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -274,8 +289,11 @@ class TestDeployFrontendHistoryWrite:
         mock_table = MagicMock()
         mock_history_table = MagicMock()
 
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        _s3_seq = [mock_s3_target, mock_s3_staging]
+        _s3_idx = {'n': 0}
+        def _s3_f(role_arn=None, **kw): i = _s3_idx['n']; _s3_idx['n'] += 1; return _s3_seq[i] if i < len(_s3_seq) else MagicMock()
+        with patch('callbacks.get_s3_client', side_effect=_s3_f), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -298,8 +316,11 @@ class TestDeployFrontendHistoryWrite:
         mock_table = MagicMock()
         mock_history_table = MagicMock()
 
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        _s3_seq = [mock_s3_target, mock_s3_staging]
+        _s3_idx = {'n': 0}
+        def _s3_f(role_arn=None, **kw): i = _s3_idx['n']; _s3_idx['n'] += 1; return _s3_seq[i] if i < len(_s3_seq) else MagicMock()
+        with patch('callbacks.get_s3_client', side_effect=_s3_f), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \

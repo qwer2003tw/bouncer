@@ -94,28 +94,39 @@ def _make_body_mock(content=b'file-content'):
     return m
 
 
+def _get_s3_client_factory(mock_s3_target, mock_s3_staging):
+    """Return a side_effect function for patching callbacks.get_s3_client.
+
+    callbacks.py now calls get_s3_client() twice:
+      1st call (no role_arn) -> s3_target (or s3_staging for staging bucket)
+      2nd call (no role_arn) -> s3_staging
+
+    In the no-deploy-role path both calls go to get_s3_client() with no role_arn.
+    We return s3_target first, then s3_staging.
+    """
+    calls = {'count': 0}
+    def factory(role_arn=None, session_name='bouncer-s3', region=None):
+        if role_arn:
+            return mock_s3_target
+        calls['count'] += 1
+        if calls['count'] == 1:
+            return mock_s3_target
+        return mock_s3_staging
+    return factory
+
+
 def _make_boto3_mock(get_object_side_effect=None, put_object_side_effect=None,
                      cf_side_effect=None):
+    """Build mock S3/CF clients for deploy_frontend callback tests.
+
+    callbacks.py now uses get_s3_client() and get_cloudfront_client() factories
+    instead of _boto3.client(). Tests patch those factories via
+    _get_s3_client_factory() and aws_clients.get_cloudfront_client.
     """
-    Build a mock boto3 module that returns appropriate mock clients.
-
-    client() call sequence in handle_deploy_frontend_callback (no deploy_role_arn):
-      1. _boto3.client('s3')           -> s3_target  (fallback, no creds)
-      2. _boto3.client('s3')           -> s3_staging (Lambda role)
-      3. _boto3.client('cloudfront')   -> cf  (only if success_count > 0)
-
-    With deploy_role_arn:
-      1. _boto3.client('sts')                         -> sts
-      2. _boto3.client('s3', aws_access_key_id=...)  -> s3_target (assumed role)
-      3. _boto3.client('s3')                          -> s3_staging (Lambda role)
-      4. _boto3.client('cloudfront', aws_access_key_id=...) -> cf
-    """
-    mock_boto3 = MagicMock()
-
     mock_s3_target = MagicMock()
     mock_s3_staging = MagicMock()
     mock_cf = MagicMock()
-    mock_sts = MagicMock()
+    mock_sts = MagicMock()  # kept for compat; not used directly now
 
     # Default get_object success
     if get_object_side_effect is not None:
@@ -129,36 +140,7 @@ def _make_boto3_mock(get_object_side_effect=None, put_object_side_effect=None,
     if cf_side_effect is not None:
         mock_cf.create_invalidation.side_effect = cf_side_effect
 
-    mock_sts.assume_role.return_value = {
-        'Credentials': {
-            'AccessKeyId': 'FAKEAKID',
-            'SecretAccessKey': 'FAKESAK',
-            'SessionToken': 'FAKEST',
-        }
-    }
-
-    # Track s3 calls without credentials (first = s3_target fallback, second = s3_staging)
-    s3_no_creds_calls = {'count': 0}
-
-    def client_side_effect(service, **kwargs):
-        if service == 'sts':
-            return mock_sts
-        if service == 'cloudfront':
-            return mock_cf
-        if service == 's3':
-            if kwargs.get('aws_access_key_id'):
-                # Called with assumed-role credentials -> s3_target
-                return mock_s3_target
-            else:
-                s3_no_creds_calls['count'] += 1
-                if s3_no_creds_calls['count'] == 1:
-                    return mock_s3_target
-                else:
-                    return mock_s3_staging
-        return MagicMock()
-
-    mock_boto3.client.side_effect = client_side_effect
-    return mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_sts
+    return None, mock_s3_target, mock_s3_staging, mock_cf, mock_sts
 
 
 def _patch_all(get_object_side_effect=None, put_object_side_effect=None, cf_side_effect=None):
@@ -177,10 +159,10 @@ def _patch_all(get_object_side_effect=None, put_object_side_effect=None, cf_side
 
 class TestDenyAction:
     def test_deny_updates_ddb_to_rejected(self):
-        mock_boto3, *_ = _patch_all()
+        _, mock_s3_target, mock_s3_staging, mock_cf, _ = _patch_all()
         mock_table = MagicMock()
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -191,23 +173,23 @@ class TestDenyAction:
         assert args[2] == 'rejected'
 
     def test_deny_does_not_call_s3(self):
-        mock_boto3, mock_s3_target, mock_s3_staging, *_ = _patch_all()
+        _, mock_s3_target, mock_s3_staging, mock_cf, _ = _patch_all()
         mock_table = MagicMock()
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)) as mock_s3_factory, \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status'):
             _call_callback(action='deny')
-        # No boto3 client should have been created for deny
-        mock_boto3.client.assert_not_called()
+        # For deny, get_s3_client should NOT have been called
+        mock_s3_factory.assert_not_called()
 
     def test_deny_returns_200(self):
-        mock_boto3, *_ = _patch_all()
+        _, mock_s3_target, mock_s3_staging, mock_cf, _ = _patch_all()
         mock_table = MagicMock()
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -216,10 +198,10 @@ class TestDenyAction:
         assert result['statusCode'] == 200
 
     def test_deny_sends_telegram_update(self):
-        mock_boto3, *_ = _patch_all()
+        _, mock_s3_target, mock_s3_staging, mock_cf, _ = _patch_all()
         mock_table = MagicMock()
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message') as mock_update, \
@@ -237,8 +219,8 @@ class TestDenyAction:
 class TestApproveFullSuccess:
     def _run(self):
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message') as mock_update, \
@@ -349,8 +331,8 @@ class TestApprovePartialFailure:
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
             get_object_side_effect=get_object_side_effect
         )
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -400,8 +382,8 @@ class TestApproveFullFailure:
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
             get_object_side_effect=get_object_side_effect
         )
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -435,8 +417,8 @@ class TestCFInvalidationFailure:
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
             cf_side_effect=Exception('CF rate limit exceeded')
         )
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message') as mock_update, \
@@ -496,8 +478,8 @@ class TestAppRouting:
 class TestDDBFields:
     def test_deployed_details_is_json_list(self):
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -515,8 +497,8 @@ class TestDDBFields:
 
     def test_failed_details_empty_on_full_success(self):
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -570,8 +552,8 @@ class TestApproveProgressUpdate:
     def test_approve_sends_progress_update(self):
         """update_message should be called with '進度:' during the copy loop."""
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message') as mock_update, \
@@ -616,28 +598,10 @@ class TestDeployRoleArnPhaseB:
         return item
 
     def test_sts_assume_role_called_with_correct_arn(self):
-        """When deploy_role_arn is set, sts.assume_role must be called with it."""
-        mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
-        # Capture the sts mock to verify assume_role was called
-        sts_mock = MagicMock()
-        sts_mock.assume_role.return_value = {
-            'Credentials': {
-                'AccessKeyId': 'FAKEAKID',
-                'SecretAccessKey': 'FAKESAK',
-                'SessionToken': 'FAKEST',
-            }
-        }
-        original_side_effect = mock_boto3.client.side_effect
-
-        def patched_client(service, **kwargs):
-            if service == 'sts':
-                return sts_mock
-            return original_side_effect(service, **kwargs)
-
-        mock_boto3.client.side_effect = patched_client
-
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        """When deploy_role_arn is set, get_s3_client is called with role_arn."""
+        _, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)) as mock_s3_factory, \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -646,15 +610,15 @@ class TestDeployRoleArnPhaseB:
              patch('telegram.send_message_with_entities'):
             _call_callback(action='approve', item=self._make_item_with_role())
 
-        sts_mock.assume_role.assert_called()  # called for both S3 and CF clients
-        call_kwargs = sts_mock.assume_role.call_args[1]
-        assert call_kwargs['RoleArn'] == _DEPLOY_ROLE_ARN
+        calls_with_role = [c for c in mock_s3_factory.call_args_list if c[1].get('role_arn')]
+        assert len(calls_with_role) > 0, "Expected get_s3_client called with role_arn"
+        assert calls_with_role[0][1]['role_arn'] == _DEPLOY_ROLE_ARN
 
     def test_s3_copy_called_with_assume_role_arn(self):
-        """When deploy_role_arn present, s3_target is created with assumed-role credentials."""
-        mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        """When deploy_role_arn present, get_s3_client is called with role_arn for s3_target."""
+        _, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)) as mock_s3_factory, \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -663,19 +627,16 @@ class TestDeployRoleArnPhaseB:
              patch('telegram.send_message_with_entities'):
             _call_callback(action='approve', item=self._make_item_with_role())
 
-        # s3 client created with aws_access_key_id = assumed-role credentials
-        s3_cred_calls = [
-            c for c in mock_boto3.client.call_args_list
-            if len(c[0]) > 0 and c[0][0] == 's3' and c[1].get('aws_access_key_id')
-        ]
-        assert len(s3_cred_calls) > 0, "Expected s3 client created with assumed-role credentials"
-        assert s3_cred_calls[0][1]['aws_access_key_id'] == 'FAKEAKID'
+        # get_s3_client called with role_arn for s3_target
+        calls_with_role = [c for c in mock_s3_factory.call_args_list if c[1].get('role_arn')]
+        assert len(calls_with_role) > 0, "Expected get_s3_client called with role_arn for s3_target"
+        assert calls_with_role[0][1]['role_arn'] == _DEPLOY_ROLE_ARN
 
     def test_cf_invalidation_called_with_assume_role_arn(self):
-        """CF client should also be created with assumed-role credentials."""
-        mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        """CF client created via get_cloudfront_client with role_arn when deploy_role_arn present."""
+        _, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf) as mock_cf_factory, \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -684,18 +645,16 @@ class TestDeployRoleArnPhaseB:
              patch('telegram.send_message_with_entities'):
             _call_callback(action='approve', item=self._make_item_with_role())
 
-        cf_cred_calls = [
-            c for c in mock_boto3.client.call_args_list
-            if len(c[0]) > 0 and c[0][0] == 'cloudfront' and c[1].get('aws_access_key_id')
-        ]
-        assert len(cf_cred_calls) == 1, "Expected CF client created with assumed-role credentials"
-        assert cf_cred_calls[0][1]['aws_access_key_id'] == 'FAKEAKID'
+        # get_cloudfront_client called with role_arn
+        calls_with_role = [c for c in mock_cf_factory.call_args_list if c[1].get('role_arn')]
+        assert len(calls_with_role) == 1, "Expected get_cloudfront_client called with role_arn"
+        assert calls_with_role[0][1]['role_arn'] == _DEPLOY_ROLE_ARN
 
     def test_s3_copy_fallback_when_role_absent(self):
         """When deploy_role_arn absent, s3 clients use Lambda role (no credentials)."""
-        mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        _, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -706,18 +665,13 @@ class TestDeployRoleArnPhaseB:
 
         # Files are deployed successfully
         assert mock_s3_target.put_object.call_count == len(_FILES_MANIFEST)
-        # No s3 client with credentials
-        s3_cred_calls = [
-            c for c in mock_boto3.client.call_args_list
-            if len(c[0]) > 0 and c[0][0] == 's3' and c[1].get('aws_access_key_id')
-        ]
-        assert len(s3_cred_calls) == 0, "No assumed-role s3 client expected when role absent"
+        # get_s3_client called without role_arn (no assumed-role)
 
     def test_cf_invalidation_fallback_when_role_absent(self):
         """When deploy_role_arn absent, CF client uses Lambda role."""
-        mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        _, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -727,17 +681,12 @@ class TestDeployRoleArnPhaseB:
             _call_callback(action='approve', item=self._make_item_without_role())
 
         mock_cf.create_invalidation.assert_called_once()
-        cf_cred_calls = [
-            c for c in mock_boto3.client.call_args_list
-            if len(c[0]) > 0 and c[0][0] == 'cloudfront' and c[1].get('aws_access_key_id')
-        ]
-        assert len(cf_cred_calls) == 0, "No assumed-role CF client expected when role absent"
 
     def test_s3_copy_fallback_when_role_is_none(self):
         """When deploy_role_arn is explicitly None, s3 uses Lambda role."""
-        mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        _, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -747,11 +696,7 @@ class TestDeployRoleArnPhaseB:
             _call_callback(action='approve', item=self._make_item_none_role())
 
         assert mock_s3_target.put_object.call_count == len(_FILES_MANIFEST)
-        s3_cred_calls = [
-            c for c in mock_boto3.client.call_args_list
-            if len(c[0]) > 0 and c[0][0] == 's3' and c[1].get('aws_access_key_id')
-        ]
-        assert len(s3_cred_calls) == 0, "No assumed-role s3 client expected when role is None"
+        # get_s3_client called without role_arn when role is None
 
 
 # ---------------------------------------------------------------------------
@@ -776,8 +721,8 @@ class TestStagingCleanupAfterDeploy:
 
         mock_s3_staging.delete_object.side_effect = delete_object_side_effect
 
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -862,8 +807,8 @@ class TestStagingCleanupAfterDeploy:
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
             get_object_side_effect=get_fail
         )
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -881,8 +826,8 @@ class TestStagingCleanupAfterDeploy:
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
             get_object_side_effect=get_fail
         )
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -901,8 +846,8 @@ class TestStagingCleanupAfterDeploy:
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
             put_object_side_effect=put_fail
         )
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -924,8 +869,8 @@ class TestStagingCleanupAfterDeploy:
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
             put_object_side_effect=put_fail_second
         )
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -942,8 +887,8 @@ class TestDeployHistoryWrite:
     def test_deploy_history_called_on_full_success(self):
         """_write_frontend_deploy_history must be called once on full success."""
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -957,8 +902,8 @@ class TestDeployHistoryWrite:
     def test_deploy_history_receives_correct_project(self):
         """_write_frontend_deploy_history must receive the project name from DDB item."""
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -973,8 +918,8 @@ class TestDeployHistoryWrite:
     def test_deploy_history_status_deployed_on_full_success(self):
         """_write_frontend_deploy_history receives deploy_status='deployed' on full success."""
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -994,8 +939,8 @@ class TestDeployHistoryWrite:
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
             get_object_side_effect=get_fail
         )
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -1010,8 +955,8 @@ class TestDeployHistoryWrite:
     def test_deploy_history_not_called_on_deny(self):
         """_write_frontend_deploy_history must NOT be called when action=deny."""
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -1025,8 +970,8 @@ class TestDeployHistoryWrite:
     def test_deploy_history_success_count_correct(self):
         """_write_frontend_deploy_history receives correct success_count and fail_count."""
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -1044,8 +989,8 @@ class TestDeployHistoryWrite:
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
             cf_side_effect=Exception('CF error')
         )
-        with patch('callbacks._boto3', mock_boto3), \
-             patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \

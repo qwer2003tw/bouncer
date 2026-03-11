@@ -186,7 +186,7 @@ def test_single_success_notify_called_once(mocked_aws):
     """Success path → send_presigned_notification called exactly once."""
     tbl, mcp_presigned = mocked_aws
 
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3()), \
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3()), \
          patch("mcp_presigned.send_presigned_notification") as mock_notify:
         result = mcp_presigned.mcp_tool_request_presigned("req-n1", _valid_args())
 
@@ -199,7 +199,7 @@ def test_single_s3_error_notify_not_called(mocked_aws):
     """S3 failure path → send_presigned_notification must NOT be called."""
     tbl, mcp_presigned = mocked_aws
 
-    with patch("mcp_presigned.boto3.client", return_value=_s3_client_error()), \
+    with patch("mcp_presigned.get_s3_client", return_value=_s3_client_error()), \
          patch("mcp_presigned.send_presigned_notification") as mock_notify:
         result = mcp_presigned.mcp_tool_request_presigned("req-n2", _valid_args())
 
@@ -216,7 +216,7 @@ def test_single_notify_args_no_presigned_url(mocked_aws):
     def capture_notify(**kwargs):
         captured_kwargs.update(kwargs)
 
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3()), \
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3()), \
          patch("mcp_presigned.send_presigned_notification", side_effect=capture_notify):
         mcp_presigned.mcp_tool_request_presigned("req-n3", _valid_args())
 
@@ -235,7 +235,7 @@ def test_single_notify_failure_does_not_break_flow(mocked_aws):
     """If send_presigned_notification raises, the tool must still return status=ready."""
     tbl, mcp_presigned = mocked_aws
 
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3()), \
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3()), \
          patch("mcp_presigned.send_presigned_notification",
                side_effect=RuntimeError("telegram down")):
         result = mcp_presigned.mcp_tool_request_presigned("req-n4", _valid_args())
@@ -252,7 +252,7 @@ def test_single_notify_receives_correct_fields(mocked_aws):
     def capture(**kwargs):
         captured.update(kwargs)
 
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3()), \
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3()), \
          patch("mcp_presigned.send_presigned_notification", side_effect=capture):
         mcp_presigned.mcp_tool_request_presigned(
             "req-n5",
@@ -275,7 +275,7 @@ def test_batch_success_notify_called_once(mocked_aws):
     """Batch success path → send_presigned_batch_notification called exactly once."""
     tbl, mcp_presigned = mocked_aws
 
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3(10)), \
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3(10)), \
          patch("mcp_presigned.send_presigned_batch_notification") as mock_notify:
         result = mcp_presigned.mcp_tool_request_presigned_batch(
             "req-bn1", _valid_batch_args()
@@ -290,7 +290,7 @@ def test_batch_s3_error_notify_not_called(mocked_aws):
     """Batch S3 error path → send_presigned_batch_notification must NOT be called."""
     tbl, mcp_presigned = mocked_aws
 
-    with patch("mcp_presigned.boto3.client", return_value=_s3_client_error()), \
+    with patch("mcp_presigned.get_s3_client", return_value=_s3_client_error()), \
          patch("mcp_presigned.send_presigned_batch_notification") as mock_notify:
         result = mcp_presigned.mcp_tool_request_presigned_batch(
             "req-bn2", _valid_batch_args()
@@ -309,7 +309,7 @@ def test_batch_notify_args_no_presigned_url(mocked_aws):
     def capture_notify(**kwargs):
         captured_kwargs.update(kwargs)
 
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3(10)), \
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3(10)), \
          patch("mcp_presigned.send_presigned_batch_notification", side_effect=capture_notify):
         mcp_presigned.mcp_tool_request_presigned_batch("req-bn3", _valid_batch_args())
 
@@ -325,7 +325,7 @@ def test_batch_notify_failure_does_not_break_flow(mocked_aws):
     """If send_presigned_batch_notification raises, batch tool still returns status=ready."""
     tbl, mcp_presigned = mocked_aws
 
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3(10)), \
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3(10)), \
          patch("mcp_presigned.send_presigned_batch_notification",
                side_effect=RuntimeError("telegram down")):
         result = mcp_presigned.mcp_tool_request_presigned_batch(
@@ -345,7 +345,7 @@ def test_batch_notify_receives_correct_count(mocked_aws):
         captured.update(kwargs)
 
     files = _make_files(7)
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3(10)), \
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3(10)), \
          patch("mcp_presigned.send_presigned_batch_notification", side_effect=capture):
         mcp_presigned.mcp_tool_request_presigned_batch(
             "req-bn5",

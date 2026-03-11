@@ -17,7 +17,7 @@ import logging
 import re
 import time
 
-import boto3
+from aws_clients import get_s3_client
 from botocore.exceptions import ClientError
 
 from constants import STAGING_BUCKET
@@ -64,7 +64,7 @@ def _list_batch_keys(bucket: str, prefix: str) -> "tuple[set[str], str | None]":
     Returns ``(key_set, error_message)``.  On success ``error_message`` is
     ``None``; on failure ``key_set`` is empty.
     """
-    s3_client = boto3.client("s3")
+    s3_client = get_s3_client()
     found_keys: set[str] = set()
     continuation_token = None
 

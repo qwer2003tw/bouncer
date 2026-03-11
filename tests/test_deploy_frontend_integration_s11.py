@@ -89,19 +89,12 @@ def _call_callback(action='approve', item=None, message_id=999, callback_id='cb-
     )
 
 
-def _make_mock_boto3(get_object_side_effect=None, put_object_side_effect=None, cf_side_effect=None):
-    """Build a mock boto3 module that returns appropriate S3/CF clients.
+def _make_mock_s3_cf(get_object_side_effect=None, put_object_side_effect=None, cf_side_effect=None):
+    """Build mock S3 and CloudFront clients.
 
-    The implementation uses:
-      s3_staging = _boto3.client('s3')  -> for get_object
-      s3_target  = _boto3.client('s3')  -> for put_object (no deploy_role_arn in test item)
-      cf         = _boto3.client('cloudfront') -> for create_invalidation
-
-    Since both s3 clients are created by the same _boto3.client('s3') call,
-    we return a single mock_s3 for all 's3' calls.
+    callbacks.py now uses get_s3_client() / get_cloudfront_client() factories
+    (aws_clients.py) instead of _boto3.client(). Tests patch those factories.
     """
-    mock_boto3 = MagicMock()
-
     mock_s3 = MagicMock()
     mock_cf = MagicMock()
 
@@ -119,21 +112,22 @@ def _make_mock_boto3(get_object_side_effect=None, put_object_side_effect=None, c
     if cf_side_effect is not None:
         mock_cf.create_invalidation.side_effect = cf_side_effect
 
-    def _client_factory(service, **kwargs):
-        if service == 's3':
-            return mock_s3
-        if service == 'cloudfront':
-            return mock_cf
-        return MagicMock()
+    return mock_s3, mock_cf
 
-    mock_boto3.client.side_effect = _client_factory
 
-    return mock_boto3, mock_s3, mock_cf
+# Keep backward-compatible name used by inline patches below
+def _make_mock_boto3(get_object_side_effect=None, put_object_side_effect=None, cf_side_effect=None):
+    mock_s3, mock_cf = _make_mock_s3_cf(
+        get_object_side_effect=get_object_side_effect,
+        put_object_side_effect=put_object_side_effect,
+        cf_side_effect=cf_side_effect,
+    )
+    return None, mock_s3, mock_cf
 
 
 def _run_approve(item=None, get_object_side_effect=None, put_object_side_effect=None, cf_side_effect=None):
-    """Run the approve callback with mocked boto3 and helpers."""
-    mock_boto3, mock_s3, mock_cf = _make_mock_boto3(
+    """Run the approve callback with mocked S3/CF factories and helpers."""
+    _, mock_s3, mock_cf = _make_mock_boto3(
         get_object_side_effect=get_object_side_effect,
         put_object_side_effect=put_object_side_effect,
         cf_side_effect=cf_side_effect,
@@ -141,8 +135,8 @@ def _run_approve(item=None, get_object_side_effect=None, put_object_side_effect=
     mock_table = MagicMock()
 
     import callbacks
-    with patch.object(callbacks, '_boto3', mock_boto3), \
-         patch('aws_clients.boto3', mock_boto3), \
+    with patch('callbacks.get_s3_client', return_value=mock_s3), \
+         patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
          patch('callbacks._get_table', return_value=mock_table), \
          patch('callbacks.answer_callback'), \
          patch('callbacks.update_message') as mock_update, \
@@ -235,12 +229,12 @@ class TestS3CopyCmdFormat:
         assert len(calls) == len(_FILES_MANIFEST)
 
     def test_s3_cp_includes_region_flag(self):
-        """boto3 s3 client is created (replaces --region flag check)"""
+        """get_s3_client() factory is called (replaces _boto3.client('s3') check)"""
         import callbacks
-        mock_boto3, mock_s3, mock_cf = _make_mock_boto3()
+        _, mock_s3, mock_cf = _make_mock_boto3()
         mock_table = MagicMock()
-        with patch.object(callbacks, '_boto3', mock_boto3), \
-         patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', return_value=mock_s3) as mock_factory, \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -248,8 +242,7 @@ class TestS3CopyCmdFormat:
              patch('callbacks.emit_metric'), \
              patch('telegram.send_message_with_entities'):
             _call_callback(action='approve')
-        s3_calls = [c for c in mock_boto3.client.call_args_list if c[0][0] == 's3']
-        assert len(s3_calls) >= 1
+        assert mock_factory.call_count >= 1
 
     def test_s3_cp_html_has_no_cache_control(self):
         """index.html gets no-cache CacheControl; assets get max-age=immutable"""
@@ -307,12 +300,12 @@ class TestCFInvalidationCmdFormat:
             f"Expected '/*' in invalidation paths, got: {paths}"
 
     def test_cf_invalidation_includes_region(self):
-        """CF boto3 client is created (replaces --region check)"""
+        """get_cloudfront_client() factory is called (replaces _boto3.client('cloudfront') check)"""
         import callbacks
-        mock_boto3, mock_s3, mock_cf = _make_mock_boto3()
+        _, mock_s3, mock_cf = _make_mock_boto3()
         mock_table = MagicMock()
-        with patch.object(callbacks, '_boto3', mock_boto3), \
-         patch('aws_clients.boto3', mock_boto3), \
+        with patch('callbacks.get_s3_client', return_value=mock_s3), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf) as mock_cf_factory, \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -320,8 +313,7 @@ class TestCFInvalidationCmdFormat:
              patch('callbacks.emit_metric'), \
              patch('telegram.send_message_with_entities'):
             _call_callback(action='approve')
-        cf_calls = [c for c in mock_boto3.client.call_args_list if c[0][0] == 'cloudfront']
-        assert len(cf_calls) >= 1, "Expected cloudfront boto3 client to be created"
+        assert mock_cf_factory.call_count >= 1, "Expected get_cloudfront_client factory to be called"
 
     def test_cf_not_called_when_all_files_fail(self):
         """CF invalidation must NOT be called when all S3 copies fail"""

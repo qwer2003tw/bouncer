@@ -167,7 +167,7 @@ def test_happy_path_returns_ready(mocked_aws):
     mock_s3 = MagicMock()
     mock_s3.generate_presigned_url.return_value = "https://s3.amazonaws.com/fake"
 
-    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+    with patch("mcp_presigned.get_s3_client", return_value=mock_s3):
         result = mcp_presigned.mcp_tool_request_presigned("req-1", _valid_args())
 
     body = _body(result)
@@ -186,7 +186,7 @@ def test_s3_key_contains_filename(mocked_aws):
     mock_s3 = MagicMock()
     mock_s3.generate_presigned_url.return_value = "https://presigned"
 
-    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+    with patch("mcp_presigned.get_s3_client", return_value=mock_s3):
         result = mcp_presigned.mcp_tool_request_presigned("req-2", _valid_args())
 
     body = _body(result)
@@ -198,7 +198,7 @@ def test_s3_uri_uses_correct_bucket(mocked_aws):
     mock_s3 = MagicMock()
     mock_s3.generate_presigned_url.return_value = "https://presigned"
 
-    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+    with patch("mcp_presigned.get_s3_client", return_value=mock_s3):
         result = mcp_presigned.mcp_tool_request_presigned("req-3", _valid_args())
 
     body = _body(result)
@@ -210,7 +210,7 @@ def test_custom_expires_in(mocked_aws):
     mock_s3 = MagicMock()
     mock_s3.generate_presigned_url.return_value = "https://presigned"
 
-    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+    with patch("mcp_presigned.get_s3_client", return_value=mock_s3):
         result = mcp_presigned.mcp_tool_request_presigned(
             "req-4", _valid_args(expires_in=1800)
         )
@@ -227,7 +227,7 @@ def test_custom_account(mocked_aws):
     mock_s3 = MagicMock()
     mock_s3.generate_presigned_url.return_value = "https://presigned"
 
-    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+    with patch("mcp_presigned.get_s3_client", return_value=mock_s3):
         result = mcp_presigned.mcp_tool_request_presigned(
             "req-5", _valid_args(account="992382394211")
         )
@@ -246,7 +246,7 @@ def test_dynamodb_audit_record_written(mocked_aws):
     mock_s3 = MagicMock()
     mock_s3.generate_presigned_url.return_value = "https://presigned"
 
-    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+    with patch("mcp_presigned.get_s3_client", return_value=mock_s3):
         result = mcp_presigned.mcp_tool_request_presigned("req-6", _valid_args())
 
     body = _body(result)
@@ -329,7 +329,7 @@ def test_expires_in_at_exact_max_is_ok(mocked_aws):
     mock_s3 = MagicMock()
     mock_s3.generate_presigned_url.return_value = "https://presigned"
 
-    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+    with patch("mcp_presigned.get_s3_client", return_value=mock_s3):
         result = mcp_presigned.mcp_tool_request_presigned(
             "req-12", _valid_args(expires_in=3600)
         )
@@ -366,7 +366,7 @@ def test_path_traversal_removed(mocked_aws):
     mock_s3 = MagicMock()
     mock_s3.generate_presigned_url.return_value = "https://presigned"
 
-    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+    with patch("mcp_presigned.get_s3_client", return_value=mock_s3):
         result = mcp_presigned.mcp_tool_request_presigned(
             "req-15", _valid_args(filename="../../etc/passwd")
         )
@@ -381,7 +381,7 @@ def test_null_byte_removed(mocked_aws):
     mock_s3 = MagicMock()
     mock_s3.generate_presigned_url.return_value = "https://presigned"
 
-    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+    with patch("mcp_presigned.get_s3_client", return_value=mock_s3):
         result = mcp_presigned.mcp_tool_request_presigned(
             "req-16", _valid_args(filename="file\x00name.txt")
         )
@@ -396,7 +396,7 @@ def test_windows_backslash_normalized(mocked_aws):
     mock_s3 = MagicMock()
     mock_s3.generate_presigned_url.return_value = "https://presigned"
 
-    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+    with patch("mcp_presigned.get_s3_client", return_value=mock_s3):
         result = mcp_presigned.mcp_tool_request_presigned(
             "req-17", _valid_args(filename=r"assets\foo.js")
         )
@@ -412,7 +412,7 @@ def test_subdir_path_preserved(mocked_aws):
     mock_s3 = MagicMock()
     mock_s3.generate_presigned_url.return_value = "https://presigned"
 
-    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+    with patch("mcp_presigned.get_s3_client", return_value=mock_s3):
         result = mcp_presigned.mcp_tool_request_presigned(
             "req-18", _valid_args(filename="assets/chunk-abc.js")
         )
@@ -431,7 +431,7 @@ def test_s3_generate_failure_returns_error(mocked_aws):
     mock_s3 = MagicMock()
     mock_s3.generate_presigned_url.side_effect = Exception("S3 credentials expired")
 
-    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+    with patch("mcp_presigned.get_s3_client", return_value=mock_s3):
         result = mcp_presigned.mcp_tool_request_presigned("req-19", _valid_args())
 
     body = _body(result)
@@ -499,7 +499,7 @@ def test_expires_in_at_minimum_is_ok(mocked_aws):
     mock_s3 = MagicMock()
     mock_s3.generate_presigned_url.return_value = "https://presigned"
 
-    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+    with patch("mcp_presigned.get_s3_client", return_value=mock_s3):
         result = mcp_presigned.mcp_tool_request_presigned(
             "req-21", _valid_args(expires_in=60)
         )
@@ -540,7 +540,7 @@ def test_s3_client_error_returns_detailed_message(mocked_aws):
         "GeneratePresignedUrl",
     )
 
-    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+    with patch("mcp_presigned.get_s3_client", return_value=mock_s3):
         result = mcp_presigned.mcp_tool_request_presigned("req-23", _valid_args())
 
     body = _body(result)

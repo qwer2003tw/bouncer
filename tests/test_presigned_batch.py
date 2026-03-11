@@ -194,7 +194,7 @@ def _body(result: dict) -> dict:
 
 def test_happy_path_single_file(mocked_aws):
     tbl, mp = mocked_aws
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3()):
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3()):
         result = mp.mcp_tool_request_presigned_batch(
             "req-b1",
             _valid_batch_args(files=[{"filename": "index.html", "content_type": "text/html"}]),
@@ -220,7 +220,7 @@ def test_happy_path_single_file(mocked_aws):
 def test_happy_path_10_files(mocked_aws):
     tbl, mp = mocked_aws
     files = _make_files(10)
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3(10)):
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3(10)):
         result = mp.mcp_tool_request_presigned_batch("req-b2", _valid_batch_args(files=files))
     body = _body(result)
     assert body["status"] == "ready"
@@ -236,7 +236,7 @@ def test_happy_path_10_files(mocked_aws):
 def test_happy_path_50_files(mocked_aws):
     tbl, mp = mocked_aws
     files = _make_files(50)
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3(50)):
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3(50)):
         result = mp.mcp_tool_request_presigned_batch("req-b3", _valid_batch_args(files=files))
     body = _body(result)
     assert body["status"] == "ready"
@@ -331,7 +331,7 @@ def test_expires_in_exceeds_max_returns_error(mocked_aws):
 
 def test_expires_in_at_minimum_is_ok(mocked_aws):
     tbl, mp = mocked_aws
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3()):
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3()):
         result = mp.mcp_tool_request_presigned_batch("req-b10", _valid_batch_args(expires_in=60))
     body = _body(result)
     assert body["status"] == "ready"
@@ -344,7 +344,7 @@ def test_expires_in_at_minimum_is_ok(mocked_aws):
 
 def test_expires_in_at_maximum_is_ok(mocked_aws):
     tbl, mp = mocked_aws
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3()):
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3()):
         result = mp.mcp_tool_request_presigned_batch("req-b11", _valid_batch_args(expires_in=3600))
     body = _body(result)
     assert body["status"] == "ready"
@@ -400,7 +400,7 @@ def test_missing_reason_returns_error(mocked_aws):
 def test_path_traversal_sanitized(mocked_aws):
     tbl, mp = mocked_aws
     files = [{"filename": "../../etc/passwd", "content_type": "text/plain"}]
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3()):
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3()):
         result = mp.mcp_tool_request_presigned_batch(
             "req-b15", _valid_batch_args(files=files)
         )
@@ -418,7 +418,7 @@ def test_path_traversal_sanitized(mocked_aws):
 def test_windows_backslash_normalized(mocked_aws):
     tbl, mp = mocked_aws
     files = [{"filename": r"assets\foo.js", "content_type": "application/javascript"}]
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3()):
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3()):
         result = mp.mcp_tool_request_presigned_batch(
             "req-b16", _valid_batch_args(files=files)
         )
@@ -436,7 +436,7 @@ def test_windows_backslash_normalized(mocked_aws):
 def test_null_byte_in_filename_sanitized(mocked_aws):
     tbl, mp = mocked_aws
     files = [{"filename": "file\x00name.txt", "content_type": "text/plain"}]
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3()):
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3()):
         result = mp.mcp_tool_request_presigned_batch(
             "req-b17", _valid_batch_args(files=files)
         )
@@ -454,7 +454,7 @@ def test_null_byte_in_filename_sanitized(mocked_aws):
 def test_all_s3_keys_share_batch_id_prefix(mocked_aws):
     tbl, mp = mocked_aws
     files = _make_files(5)
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3(5)):
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3(5)):
         result = mp.mcp_tool_request_presigned_batch(
             "req-b18", _valid_batch_args(files=files)
         )
@@ -473,7 +473,7 @@ def test_dynamodb_audit_record_contains_all_filenames(mocked_aws):
     tbl, mp = mocked_aws
     filenames = ["index.html", "main.js", "style.css"]
     files = [{"filename": fn, "content_type": "text/plain"} for fn in filenames]
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3(3)):
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3(3)):
         result = mp.mcp_tool_request_presigned_batch(
             "req-b19", _valid_batch_args(files=files)
         )
@@ -499,7 +499,7 @@ def test_s3_generate_failure_returns_error(mocked_aws):
     tbl, mp = mocked_aws
     mock_s3 = MagicMock()
     mock_s3.generate_presigned_url.side_effect = Exception("S3 credentials expired")
-    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+    with patch("mcp_presigned.get_s3_client", return_value=mock_s3):
         result = mp.mcp_tool_request_presigned_batch("req-b20", _valid_batch_args())
     body = _body(result)
     assert body["status"] == "error"
@@ -518,7 +518,7 @@ def test_s3_client_error_returns_detailed_message(mocked_aws):
         {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
         "GeneratePresignedUrl",
     )
-    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+    with patch("mcp_presigned.get_s3_client", return_value=mock_s3):
         result = mp.mcp_tool_request_presigned_batch("req-b21", _valid_batch_args())
     body = _body(result)
     assert body["status"] == "error"
@@ -552,7 +552,7 @@ def test_duplicate_filenames_deduped(mocked_aws):
         {"filename": "index.html", "content_type": "text/html"},
         {"filename": "index.html", "content_type": "text/html"},
     ]
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3(2)):
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3(2)):
         result = mp.mcp_tool_request_presigned_batch("req-b23", _valid_batch_args(files=files))
     body = _body(result)
     assert body["status"] == "ready"
@@ -570,7 +570,7 @@ def test_duplicate_filenames_deduped(mocked_aws):
 def test_default_expires_in_is_900(mocked_aws):
     tbl, mp = mocked_aws
     mock_s3 = _mock_s3()
-    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+    with patch("mcp_presigned.get_s3_client", return_value=mock_s3):
         mp.mcp_tool_request_presigned_batch("req-b24", _valid_batch_args())
     # Verify ExpiresIn passed to boto3
     call_kwargs = mock_s3.generate_presigned_url.call_args[1]
@@ -584,7 +584,7 @@ def test_default_expires_in_is_900(mocked_aws):
 
 def test_custom_account_in_bucket(mocked_aws):
     tbl, mp = mocked_aws
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3()):
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3()):
         result = mp.mcp_tool_request_presigned_batch(
             "req-b25", _valid_batch_args(account="992382394211")
         )
@@ -604,7 +604,7 @@ def test_source_optional_no_crash(mocked_aws):
     tbl, mp = mocked_aws
     args = _valid_batch_args()
     del args["source"]
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3()):
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3()):
         result = mp.mcp_tool_request_presigned_batch("req-b26", args)
     body = _body(result)
     assert body["status"] == "ready"
@@ -618,7 +618,7 @@ def test_source_optional_no_crash(mocked_aws):
 def test_file_count_matches_input(mocked_aws):
     tbl, mp = mocked_aws
     files = _make_files(7)
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3(7)):
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3(7)):
         result = mp.mcp_tool_request_presigned_batch("req-b27", _valid_batch_args(files=files))
     body = _body(result)
     assert body["file_count"] == 7
@@ -632,7 +632,7 @@ def test_file_count_matches_input(mocked_aws):
 
 def test_bucket_field_correct(mocked_aws):
     tbl, mp = mocked_aws
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3()):
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3()):
         result = mp.mcp_tool_request_presigned_batch("req-b28", _valid_batch_args())
     body = _body(result)
     assert body["bucket"] == "bouncer-uploads-190825685292"
@@ -645,7 +645,7 @@ def test_bucket_field_correct(mocked_aws):
 
 def test_expires_at_is_iso_string(mocked_aws):
     tbl, mp = mocked_aws
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3()):
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3()):
         result = mp.mcp_tool_request_presigned_batch("req-b29", _valid_batch_args())
     body = _body(result)
     assert "expires_at" in body
@@ -661,7 +661,7 @@ def test_expires_at_is_iso_string(mocked_aws):
 
 def test_batch_id_starts_with_batch_prefix(mocked_aws):
     tbl, mp = mocked_aws
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3()):
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3()):
         result = mp.mcp_tool_request_presigned_batch("req-b30", _valid_batch_args())
     body = _body(result)
     assert body["batch_id"].startswith("batch-"), f"batch_id = {body['batch_id']}"
@@ -707,7 +707,7 @@ def test_pending_limit_exceeded_returns_error(mocked_aws):
 
 def test_s3_uri_format(mocked_aws):
     tbl, mp = mocked_aws
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3()):
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3()):
         result = mp.mcp_tool_request_presigned_batch("req-b33", _valid_batch_args())
     body = _body(result)
     for f in body["files"]:
@@ -734,7 +734,7 @@ def test_expires_in_negative_returns_error(mocked_aws):
 def test_dynamodb_audit_file_count(mocked_aws):
     tbl, mp = mocked_aws
     files = _make_files(5)
-    with patch("mcp_presigned.boto3.client", return_value=_mock_s3(5)):
+    with patch("mcp_presigned.get_s3_client", return_value=_mock_s3(5)):
         result = mp.mcp_tool_request_presigned_batch("req-b35", _valid_batch_args(files=files))
     body = _body(result)
     batch_id = body["batch_id"]
@@ -756,7 +756,7 @@ def test_s3_failure_on_second_file(mocked_aws):
         Exception("Network timeout"),
     ]
     files = _make_files(2)
-    with patch("mcp_presigned.boto3.client", return_value=mock_s3):
+    with patch("mcp_presigned.get_s3_client", return_value=mock_s3):
         result = mp.mcp_tool_request_presigned_batch("req-b36", _valid_batch_args(files=files))
     body = _body(result)
     assert body["status"] == "error"
