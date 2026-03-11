@@ -358,6 +358,7 @@ def _handle_trust_session(
     user_id: str,
     source: str,
     assume_role: str,
+    source_ip: str = '',
 ) -> str:
     """處理信任時段的建立與自動執行
 
@@ -367,6 +368,7 @@ def _handle_trust_session(
         user_id: 使用者 ID
         source: 來源
         assume_role: IAM role
+        source_ip: Telegram server IP (for IP binding, best-effort)
 
     Returns:
         str: 信任時段資訊字串 (trust_line)
@@ -374,6 +376,7 @@ def _handle_trust_session(
     trust_id = create_trust_session(
         trust_scope, account_id, user_id, source=source,
         max_uploads=TRUST_SESSION_MAX_UPLOADS,
+        creator_ip=source_ip,
     )
     emit_metric('Bouncer', 'TrustSession', 1, dimensions={'Event': 'created'})
     trust_line = (
@@ -556,7 +559,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         # 信任模式
         trust_line = ""
         if action == 'approve_trust':
-            trust_line = _handle_trust_session(trust_scope, account_id, user_id, source, assume_role)
+            trust_line = _handle_trust_session(trust_scope, account_id, user_id, source, assume_role, source_ip=source_ip)
 
         # 格式化並發送回應訊息
         _format_approval_response(action, result, paged, trust_line, request_id, info, message_id)
@@ -1026,7 +1029,8 @@ def _create_callback_trust_session(
     trust_scope: str,
     account_id: str,
     user_id: str,
-    source: str
+    source: str,
+    source_ip: str = '',
 ) -> str:
     """Create trust session if action is approve_trust.
 
@@ -1038,6 +1042,7 @@ def _create_callback_trust_session(
         trust_id = create_trust_session(
             trust_scope, account_id, user_id, source=source,
             max_uploads=TRUST_SESSION_MAX_UPLOADS,
+            creator_ip=source_ip,
         )
         emit_metric('Bouncer', 'TrustSession', 1, dimensions={'Event': 'created'})
         trust_line = (

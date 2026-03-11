@@ -74,6 +74,7 @@ class TrustSession:
     upload_bytes_total: int = 0
     source: str = ''
     bound_source: str = ''          # security-critical: bound at creation time
+    creator_ip: str = ''            # IP of the approver at trust session creation time
     ttl: int = 0
     _raw: Dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
@@ -97,6 +98,7 @@ class TrustSession:
             upload_bytes_total=int(item.get('upload_bytes_total', 0)),
             source=str(item.get('source', '')),
             bound_source=str(item.get('bound_source', '')),
+            creator_ip=str(item.get('creator_ip', '')),
             ttl=int(item.get('ttl', 0)),
             _raw=item,
         )
@@ -213,6 +215,7 @@ def create_trust_session(
     approved_by: str,
     source: str = '',
     max_uploads: int = 0,
+    creator_ip: str = '',
 ) -> str:
     """Create a trust session and store ``bound_source`` for future validation.
 
@@ -227,6 +230,8 @@ def create_trust_session(
         source:       Caller source — bound to this session; future calls with a
                       different source will be rejected.
         max_uploads:  Maximum trusted uploads (0 = upload trust disabled)
+        creator_ip:   IP address of the approver (best-effort, may be empty or
+                      differ from caller IP due to NAT/Telegram routing).
 
     Returns:
         trust_id string
@@ -245,6 +250,7 @@ def create_trust_session(
         'trust_scope': trust_scope,
         'source': display_source,
         'bound_source': source,          # ← NEW: security binding
+        'creator_ip': creator_ip,        # ← record approver IP (best-effort)
         'account_id': account_id,
         'approved_by': approved_by,
         'created_at': now,
@@ -361,6 +367,7 @@ def should_trust_approve(
     trust_scope: str,
     account_id: str,
     source: str = '',
+    caller_ip: str = '',
 ) -> tuple:
     """Check whether a command should be auto-approved via trust session.
 
@@ -369,6 +376,12 @@ def should_trust_approve(
         trust_scope: Trust scope identifier
         account_id:  AWS account ID
         source:      Caller source — validated against ``bound_source``
+        caller_ip:   IP of the current caller (best-effort, may be empty).
+                     If both creator_ip and caller_ip are non-empty and differ,
+                     a warning is logged and a metric is emitted — but the
+                     session is NOT blocked (IP mismatch is informational only,
+                     because Telegram callbacks and MCP calls have different IPs
+                     by design).
 
     Returns:
         (should_approve: bool, trust_session: dict or None, reason: str)
@@ -389,6 +402,21 @@ def should_trust_approve(
     remaining = int(session.get('expires_at', 0)) - int(time.time())
     if remaining <= 0:
         return False, None, "Trust session expired"
+
+    # IP binding check (informational only — best-effort defence in depth)
+    creator_ip = session.get('creator_ip', '')
+    if creator_ip and caller_ip and creator_ip != caller_ip:
+        trust_id = session.get('request_id', trust_scope)
+        logger.warning(
+            "Trust session %s IP mismatch: creator_ip=%r caller_ip=%r "
+            "(note: Telegram callbacks and MCP calls intentionally use different IPs)",
+            trust_id, creator_ip, caller_ip,
+        )
+        try:
+            from metrics import emit_metric
+            emit_metric('Bouncer', 'TrustIPMismatch', 1, dimensions={'Event': 'mismatch'})
+        except Exception:
+            pass  # metrics are best-effort
 
     return True, session, f"Trust session active ({remaining}s remaining)"
 
