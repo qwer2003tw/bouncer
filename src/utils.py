@@ -326,6 +326,7 @@ def extract_exit_code(output: str) -> Optional[int]:
     """從命令輸出解析 exit code。
 
     - 匹配 `(exit code: N)` → return N
+    - 以 `usage:` 或 `Usage:` 開頭 → return 2（AWS CLI 語法錯誤）
     - 以 `❌` 開頭且無 exit code marker → return -1（Bouncer-formatted error）
     - 成功（無 error marker）→ return None
 
@@ -338,6 +339,9 @@ def extract_exit_code(output: str) -> Optional[int]:
     m = re.search(r'\(exit code:\s*(\d+)\)', output)
     if m:
         return int(m.group(1))
+    # AWS CLI prints usage on syntax errors (exit code 2)
+    if output.startswith('usage:') or output.startswith('Usage:'):
+        return 2
     if output.startswith('❌'):
         return -1  # Bouncer-formatted error, unknown exit code
     return None

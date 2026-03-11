@@ -22,7 +22,7 @@ import telegram as _telegram
 from commands import is_dangerous, check_lambda_env_update
 from constants import COMMAND_APPROVAL_TIMEOUT, TRUST_SESSION_MAX_COMMANDS, UPLOAD_TIMEOUT, GRANT_APPROVAL_TIMEOUT
 from telegram_entities import MessageBuilder
-from utils import format_size_human
+from utils import format_size_human, extract_exit_code
 
 logger = logging.getLogger(__name__)
 
@@ -365,10 +365,8 @@ def send_trust_auto_approve_notification(command: str, trust_id: str, remaining:
         mb.newline().text("💬 ").text(reason)
 
     if result:
-        if result.startswith('❌') or 'error' in result.lower()[:100]:
-            result_status = "❌"
-        else:
-            result_status = "✅"
+        _exit_code = extract_exit_code(result)
+        result_status = "❌" if (_exit_code is not None and _exit_code != 0) else "✅"
         result_text = result[:500] + '...' if len(result) > 500 else result
         mb.newline().text(f"{result_status} ").bold("結果：").newline()
         mb.pre(result_text)
