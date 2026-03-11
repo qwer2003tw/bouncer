@@ -249,14 +249,40 @@ def _validate_files(files: list) -> Optional[str]:
 # Helper: Trust session check
 # ---------------------------------------------------------------------------
 
-def _check_deploy_trust(trust_scope: str, project: str) -> bool:
+def _check_deploy_trust(trust_scope: str, project: str, account_id: str, source: str) -> tuple:
     """Check if trust_scope allows auto-approval for frontend deployment.
 
-    Returns True if deployment can proceed without manual approval.
-    Currently always returns False (trust sessions not yet implemented).
+    Returns (should_trust: bool, trust_session: dict or None, reason: str)
     """
-    # TODO: Implement trust session logic when ready
-    return False
+    from trust import should_trust_approve
+    from db import deployer_projects_table
+
+    # 1. Check trust session
+    synthetic_command = f"bouncer_deploy_frontend project={project}"
+    should_trust, trust_session, reason = should_trust_approve(
+        command=synthetic_command,
+        trust_scope=trust_scope,
+        account_id=account_id,
+        source=source,
+    )
+
+    if not should_trust:
+        logger.info(f"[deploy-frontend] trust denied: {reason}")
+        return False, None, reason
+
+    # 2. Validate project has deploy_role_arn (frontend projects only)
+    try:
+        resp = deployer_projects_table.get_item(Key={"project_id": project})
+        item = resp.get("Item")
+        if not item or not item.get("frontend_deploy_role_arn"):
+            logger.warning(f"[deploy-frontend] trust denied: no deploy_role_arn, project={project}")
+            return False, None, "project not configured for frontend deploy"
+    except Exception:
+        logger.warning("[deploy-frontend] trust denied: project verification failed", exc_info=True)
+        return False, None, "project verification failed"
+
+    logger.info(f"[deploy-frontend] trust approved, project={project}, scope={trust_scope}")
+    return True, trust_session, reason
 
 
 # ---------------------------------------------------------------------------
@@ -433,19 +459,223 @@ def _execute_deploy_frontend_approved(
     project_config: dict,
     reason: str,
     source: Optional[str],
+    trust_session: dict,
+    account_id: str,
+    trust_scope: str,
 ) -> dict:
     """Execute frontend deployment directly (for trusted sessions).
 
-    This is a placeholder for future trust session auto-approval logic.
-    Currently not used as trust sessions are not yet implemented.
+    Mirrors the callback approval flow but executes immediately without manual approval.
     """
-    # TODO: Implement direct deployment execution when trust sessions are ready
+    from trust import increment_trust_command_count
+    from notifications import send_trust_auto_approve_notification
+    from utils import log_decision
+    from aws_clients import get_cloudfront_client
+    from db import deployer_history_table
+
+    # 1. Pre-process files (decode + compute metadata)
+    request_id = generate_request_id(f"deploy_frontend:{project}")
+    staging_bucket = f"bouncer-uploads-{DEFAULT_ACCOUNT_ID}"
+
+    processed_files = []
+    total_size = 0
+
+    for f in files:
+        fname = str(f["filename"]).strip()
+        content_b64 = str(f["content"]).strip()
+        content_bytes = base64.b64decode(content_b64)
+        file_size = len(content_bytes)
+        ct = _get_content_type(fname, f.get("content_type"))
+        cc = _get_cache_control(fname)
+        s3_key = f"pending/{request_id}/{fname}"
+
+        processed_files.append({
+            "filename": fname,
+            "content_bytes": content_bytes,
+            "content_type": ct,
+            "cache_control": cc,
+            "size": file_size,
+            "s3_key": s3_key,
+        })
+        total_size += file_size
+
+    # 2. Stage files to S3
+    s3_staging = get_s3_client()
+    staged_keys = []
+
+    for pf in processed_files:
+        try:
+            s3_staging.put_object(
+                Bucket=staging_bucket,
+                Key=pf["s3_key"],
+                Body=pf["content_bytes"],
+                ContentType=pf["content_type"],
+            )
+            staged_keys.append(pf["s3_key"])
+        except Exception as exc:
+            # Rollback: delete already-staged objects
+            for rk in staged_keys:
+                try:
+                    s3_staging.delete_object(Bucket=staging_bucket, Key=rk)
+                except Exception:  # noqa: BLE001 — best-effort cleanup
+                    logger.warning("[DEPLOY-FRONTEND] Trust deploy rollback cleanup failed for key=%s", rk, exc_info=True)
+            return mcp_result(req_id, {
+                "content": [{"type": "text", "text": json.dumps({
+                    "status": "error",
+                    "error": f"Failed to stage {pf['filename']} to S3: {exc}",
+                })}],
+                "isError": True,
+            })
+
+    # 3. Assume deploy role
+    deploy_role_arn = project_config.get("deploy_role_arn")
+    try:
+        if deploy_role_arn:
+            s3_target = get_s3_client(role_arn=deploy_role_arn, session_name=f"bouncer-deploy-{request_id[:16]}")
+        else:
+            s3_target = get_s3_client()
+    except Exception as exc:
+        logger.error("[DEPLOY-FRONTEND] Trust deploy AssumeRole failed for %s: %s", deploy_role_arn, exc)
+        return mcp_result(req_id, {
+            "content": [{"type": "text", "text": json.dumps({
+                "status": "error",
+                "error": f"AssumeRole failed: {exc}",
+            })}],
+            "isError": True,
+        })
+
+    # 4. Deploy files to frontend bucket
+    frontend_bucket = project_config["frontend_bucket"]
+    deployed = []
+    failed = []
+
+    for pf in processed_files:
+        filename = pf["filename"]
+        staged_key = pf["s3_key"]
+        content_type = pf["content_type"]
+        cache_control = pf["cache_control"]
+
+        try:
+            # Copy from staging to frontend
+            s3_target.copy_object(
+                Bucket=frontend_bucket,
+                Key=filename,
+                CopySource={"Bucket": staging_bucket, "Key": staged_key},
+                ContentType=content_type,
+                CacheControl=cache_control,
+                MetadataDirective="REPLACE",
+            )
+            deployed.append(filename)
+            logger.info("[DEPLOY-FRONTEND] Trust deploy file %s -> %s", filename, frontend_bucket)
+        except Exception as exc:
+            logger.error("[DEPLOY-FRONTEND] Trust deploy failed for %s: %s", filename, exc)
+            failed.append({"filename": filename, "reason": str(exc)})
+
+    # 5. CloudFront invalidation
+    cf_invalidation_failed = False
+    distribution_id = project_config["distribution_id"]
+    if deployed:
+        try:
+            cf = get_cloudfront_client(role_arn=deploy_role_arn)
+            cf.create_invalidation(
+                DistributionId=distribution_id,
+                InvalidationBatch={
+                    "Paths": {"Quantity": 1, "Items": ["/*"]},
+                    "CallerReference": request_id,
+                },
+            )
+            logger.info("[DEPLOY-FRONTEND] Trust deploy CloudFront invalidation created for %s", distribution_id)
+        except Exception as exc:
+            logger.error("[DEPLOY-FRONTEND] Trust deploy CloudFront invalidation failed: %s", exc)
+            cf_invalidation_failed = True
+
+    # 6. Increment trust command count
+    trust_id = trust_session.get("request_id", "")
+    new_count = increment_trust_command_count(trust_id)
+
+    # 7. Log decision to DDB
+    synthetic_command = f"bouncer_deploy_frontend project={project}"
+    log_decision(
+        table=table,
+        request_id=request_id,
+        command=synthetic_command,
+        reason=reason,
+        source=source or "__anonymous__",
+        account_id=account_id,
+        decision_type="trust_approved",
+        trust_bypass=True,
+        trust_scope=trust_scope,
+        project=project,
+    )
+
+    # 8. Write deploy history
+    now = int(time.time())
+    history_status = "failed" if failed or cf_invalidation_failed else "completed"
+    try:
+        history_item = {
+            "deploy_id": f"frontend-{request_id}",
+            "project": project,
+            "source": source or "__anonymous__",
+            "reason": reason,
+            "deployed_files": deployed,
+            "failed_files": [f["filename"] for f in failed],
+            "status": history_status,
+            "deployed_at": now,
+            "frontend_bucket": frontend_bucket,
+            "distribution_id": distribution_id,
+            "cf_invalidation_failed": cf_invalidation_failed,
+            "request_id": request_id,
+            "trust_bypass": True,
+            "trust_scope": trust_scope,
+            "ttl": now + 30 * 24 * 3600,  # 30 days
+        }
+        deployer_history_table.put_item(Item=history_item)
+    except Exception as exc:
+        logger.error("[DEPLOY-FRONTEND] Trust deploy history write failed for %s: %s", request_id, exc)
+
+    # 9. Send silent trust notification
+    remaining = int(trust_session.get("expires_at", 0)) - now
+    remaining_str = f"{remaining // 60}:{remaining % 60:02d}" if remaining > 0 else "0:00"
+
+    result_summary = (
+        f"✅ Deployed {len(deployed)} files to {frontend_bucket}\n"
+        f"CloudFront: {'✅' if not cf_invalidation_failed else '⚠️ invalidation failed'}\n"
+        + (f"⚠️ Failed: {len(failed)} files" if failed else "")
+    )
+
+    send_trust_auto_approve_notification(
+        command=synthetic_command,
+        trust_id=trust_id,
+        remaining=remaining_str,
+        count=new_count,
+        result=result_summary,
+        source=source,
+        reason=reason,
+    )
+
+    # 10. Cleanup staging files
+    for staged_key in staged_keys:
+        try:
+            s3_staging.delete_object(Bucket=staging_bucket, Key=staged_key)
+        except Exception:  # noqa: BLE001 — best-effort cleanup
+            logger.warning("[DEPLOY-FRONTEND] Trust deploy cleanup skipped for key=%s", staged_key, exc_info=True)
+
+    # 11. Return result
+    status = "success" if not failed and not cf_invalidation_failed else "partial_success" if deployed else "error"
+
     return mcp_result(req_id, {
         "content": [{"type": "text", "text": json.dumps({
-            "status": "error",
-            "error": "Trust session auto-approval not yet implemented",
+            "status": status,
+            "request_id": request_id,
+            "deployed": len(deployed),
+            "failed": len(failed),
+            "frontend_bucket": frontend_bucket,
+            "distribution_id": distribution_id,
+            "cloudfront_invalidation": "success" if not cf_invalidation_failed else "failed",
+            "trust_session": trust_id,
+            "message": f"Trust session: deployed {len(deployed)}/{len(processed_files)} files",
         })}],
-        "isError": True,
+        "isError": bool(failed and not deployed),
     })
 
 
@@ -465,6 +695,7 @@ def mcp_tool_deploy_frontend(req_id: str, arguments: dict) -> dict:
     reason = str(arguments.get("reason", "No reason provided")).strip()
     source = arguments.get("source", None)
     trust_scope = str(arguments.get("trust_scope", "")).strip()
+    account_id = str(arguments.get("account_id", DEFAULT_ACCOUNT_ID)).strip()
 
     # 2. Validate project
     if not project:
@@ -500,10 +731,14 @@ def mcp_tool_deploy_frontend(req_id: str, arguments: dict) -> dict:
         })
 
     # 4. Check trust session
-    if _check_deploy_trust(trust_scope, project):
+    trust_ok, trust_session, trust_reason = _check_deploy_trust(
+        trust_scope, project, account_id, source or ""
+    )
+    if trust_ok:
         # Trust allows auto-approval: execute directly
         return _execute_deploy_frontend_approved(
-            req_id, files, project, project_config, reason, source
+            req_id, files, project, project_config, reason, source,
+            trust_session, account_id, trust_scope
         )
 
     # 5. No trust: submit for manual approval
