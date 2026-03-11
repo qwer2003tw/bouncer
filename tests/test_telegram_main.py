@@ -676,3 +676,148 @@ class TestHandleCommandCallbackShowAlert:
             call[1].get('show_alert') is True or (len(call[0]) > 2 and call[0][2] is True)
             for call in calls
         ), f"Expected no show_alert=True, but got: {calls}"
+
+
+class TestHandleGrantApproveShowAlert:
+    """Tests for handle_grant_approve_all DANGEROUS show_alert (sprint26-062)"""
+
+    @patch('risk_scorer.calculate_risk')
+    @patch('trust.is_trust_excluded')
+    @patch('commands.is_blocked', return_value=False)
+    @patch('compliance_checker.check_compliance', return_value=(True, None))
+    def test_grant_approve_all_with_dangerous_commands_uses_show_alert(
+        self, mock_compliance, mock_blocked, mock_excluded, mock_risk, mock_dynamodb, app_module
+    ):
+        """Grant approve_all with requires_individual commands → show_alert=True"""
+        # Setup: one safe command (grantable), one dangerous command (requires_individual)
+        mock_risk_safe = MagicMock()
+        mock_risk_safe.score = 20
+        mock_risk_dangerous = MagicMock()
+        mock_risk_dangerous.score = 80  # >= 66 → requires_individual
+        mock_risk.side_effect = [mock_risk_safe, mock_risk_dangerous]
+        mock_excluded.return_value = False
+
+        from grant import create_grant_request
+        result = create_grant_request(
+            commands=['aws s3 ls', 'aws iam delete-role --role-name TestRole'],
+            reason='testing dangerous grant',
+            source='Bot',
+            account_id='123456789012',
+        )
+        grant_id = result['grant_id']
+
+        # Verify grant has requires_individual commands
+        from grant import get_grant_session
+        grant_check = get_grant_session(grant_id)
+        commands_detail = grant_check.get('commands_detail', [])
+        assert any(d.get('category') == 'requires_individual' for d in commands_detail), \
+            "Expected grant to contain requires_individual commands"
+
+        # Approve with mode='all'
+        query = {
+            'id': 'cb-grant-001',
+            'from': {'id': 999999999},
+            'message': {'message_id': 123}
+        }
+
+        with patch('callbacks.answer_callback') as mock_answer, \
+             patch('callbacks.update_message') as mock_update:
+            from callbacks import handle_grant_approve
+            handle_grant_approve(query, grant_id, mode='all')
+
+        # answer_callback should have been called with show_alert=True
+        calls = mock_answer.call_args_list
+        assert any(
+            call[1].get('show_alert') is True or (len(call[0]) > 2 and call[0][2] is True)
+            for call in calls
+        ), f"Expected show_alert=True for dangerous grant, but got: {calls}"
+
+    @patch('risk_scorer.calculate_risk')
+    @patch('trust.is_trust_excluded', return_value=False)
+    @patch('commands.is_blocked', return_value=False)
+    @patch('compliance_checker.check_compliance', return_value=(True, None))
+    def test_grant_approve_all_safe_only_no_show_alert(
+        self, mock_compliance, mock_blocked, mock_excluded, mock_risk, mock_dynamodb, app_module
+    ):
+        """Grant approve_all with only grantable commands → no show_alert"""
+        mock_risk_result = MagicMock()
+        mock_risk_result.score = 20  # < 66 → grantable
+        mock_risk.return_value = mock_risk_result
+
+        from grant import create_grant_request
+        result = create_grant_request(
+            commands=['aws s3 ls', 'aws ec2 describe-instances'],
+            reason='testing safe grant',
+            source='Bot',
+            account_id='123456789012',
+        )
+        grant_id = result['grant_id']
+
+        # Verify grant has only grantable commands
+        from grant import get_grant_session
+        grant_check = get_grant_session(grant_id)
+        commands_detail = grant_check.get('commands_detail', [])
+        assert all(d.get('category') == 'grantable' for d in commands_detail), \
+            "Expected grant to contain only grantable commands"
+
+        # Approve with mode='all'
+        query = {
+            'id': 'cb-grant-002',
+            'from': {'id': 999999999},
+            'message': {'message_id': 124}
+        }
+
+        with patch('callbacks.answer_callback') as mock_answer, \
+             patch('callbacks.update_message') as mock_update:
+            from callbacks import handle_grant_approve
+            handle_grant_approve(query, grant_id, mode='all')
+
+        # answer_callback should NOT have show_alert=True
+        calls = mock_answer.call_args_list
+        assert not any(
+            call[1].get('show_alert') is True or (len(call[0]) > 2 and call[0][2] is True)
+            for call in calls
+        ), f"Expected no show_alert=True for safe grant, but got: {calls}"
+
+    @patch('risk_scorer.calculate_risk')
+    @patch('trust.is_trust_excluded', return_value=False)
+    @patch('commands.is_blocked', return_value=False)
+    @patch('compliance_checker.check_compliance', return_value=(True, None))
+    def test_grant_approve_safe_only_mode_no_show_alert(
+        self, mock_compliance, mock_blocked, mock_excluded, mock_risk, mock_dynamodb, app_module
+    ):
+        """Grant approve with mode='safe_only' → no show_alert even if grant has dangerous commands"""
+        # Setup: mixed grant with safe and dangerous commands
+        mock_risk_safe = MagicMock()
+        mock_risk_safe.score = 20
+        mock_risk_dangerous = MagicMock()
+        mock_risk_dangerous.score = 80
+        mock_risk.side_effect = [mock_risk_safe, mock_risk_dangerous]
+
+        from grant import create_grant_request
+        result = create_grant_request(
+            commands=['aws s3 ls', 'aws iam delete-role --role-name TestRole'],
+            reason='testing safe_only mode',
+            source='Bot',
+            account_id='123456789012',
+        )
+        grant_id = result['grant_id']
+
+        # Approve with mode='safe_only'
+        query = {
+            'id': 'cb-grant-003',
+            'from': {'id': 999999999},
+            'message': {'message_id': 125}
+        }
+
+        with patch('callbacks.answer_callback') as mock_answer, \
+             patch('callbacks.update_message') as mock_update:
+            from callbacks import handle_grant_approve
+            handle_grant_approve(query, grant_id, mode='safe_only')
+
+        # answer_callback should NOT have show_alert=True (only approving safe commands)
+        calls = mock_answer.call_args_list
+        assert not any(
+            call[1].get('show_alert') is True or (len(call[0]) > 2 and call[0][2] is True)
+            for call in calls
+        ), f"Expected no show_alert=True for safe_only mode, but got: {calls}"

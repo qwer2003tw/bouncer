@@ -58,7 +58,7 @@ def handle_grant_approve(query: dict, grant_id: str, mode: str = 'all') -> dict:
         grant_id: Grant session ID
         mode: 'all' 全部批准 | 'safe_only' 只批准安全命令
     """
-    from grant import approve_grant
+    from grant import approve_grant, get_grant_session
 
     callback_id = query.get('id', '')
     user_id = str(query.get('from', {}).get('id', ''))
@@ -67,6 +67,16 @@ def handle_grant_approve(query: dict, grant_id: str, mode: str = 'all') -> dict:
     mode_label = '全部' if mode == 'all' else '僅安全'
 
     try:
+        # Check if grant contains dangerous commands before approving
+        show_alert = False
+        if mode == 'all':
+            grant_check = get_grant_session(grant_id)
+            if grant_check:
+                commands_detail = grant_check.get('commands_detail', [])
+                has_dangerous = any(d.get('category') == 'requires_individual' for d in commands_detail)
+                if has_dangerous:
+                    show_alert = True
+
         grant = approve_grant(grant_id, user_id, mode=mode)
         if not grant:
             answer_callback(callback_id, '❌ Grant 不存在或已處理')
@@ -77,7 +87,10 @@ def handle_grant_approve(query: dict, grant_id: str, mode: str = 'all') -> dict:
 
         cb_suffix = '命令' if mode == 'all' else '安全命令'
 
-        answer_callback(callback_id, f'✅ 已批准 {len(granted)} 個{cb_suffix}')
+        if show_alert:
+            answer_callback(callback_id, f'⚠️ 高危 Grant 確認：已批准 {len(granted)} 個{cb_suffix}', show_alert=True)
+        else:
+            answer_callback(callback_id, f'✅ 已批准 {len(granted)} 個{cb_suffix}')
         update_message(
             message_id,
             f"✅ *Grant 已批准（{mode_label}）*\n\n"
