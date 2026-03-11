@@ -204,7 +204,7 @@ jobs:
       - name: Run pytest (mcp_server tests)
         run: python3 -m pytest mcp_server/test_mcp_server.py -v --tb=short
 
-      - name: Run pytest (deployer tests)
+      - name: Run pytest (deployer tests)  # Verified Sprint 27-005: deployer/ and mcp_server/ tests included
         run: cd deployer && python3 -m pytest tests/ -v --tb=short
         env:
           AWS_DEFAULT_REGION: us-east-1
