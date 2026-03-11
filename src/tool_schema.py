@@ -350,6 +350,36 @@ MCP_TOOLS = {
             'required': ['grant_id']
         }
     },
+    'bouncer_grant_execute': {
+        'description': '在已核准的 Grant Session 內執行命令。命令必須在 grant 授權清單中。不在清單的命令會被拒絕（不 fallthrough 到一般審批流程）。',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'grant_id': {
+                    'type': 'string',
+                    'description': 'Grant Session ID'
+                },
+                'command': {
+                    'type': 'string',
+                    'description': 'AWS CLI 命令（必須精確匹配 grant 已授權的命令之一）'
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '請求來源標識（必須與 grant 建立時的 source 一致）'
+                },
+                'account': {
+                    'type': 'string',
+                    'description': '目標 AWS 帳號 ID（不填則使用預設帳號，必須與 grant 一致）'
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': '執行原因（用於 audit log）',
+                    'default': 'Grant execute'
+                }
+            },
+            'required': ['grant_id', 'command', 'source']
+        }
+    },
     # ========== Upload Tool ==========
     'bouncer_upload': {
         'description': '上傳檔案到 S3 桶（需要 Telegram 審批）。支援跨帳號上傳，檔案會上傳到 bouncer-uploads-{account_id} 桶，30 天後自動刪除。如果有活躍的 Trust Session 且 trust_scope 匹配，可自動上傳（不需審批）。',

@@ -1197,3 +1197,247 @@ def mcp_tool_revoke_grant(req_id: str, arguments: dict) -> dict:
     except Exception as e:  # noqa: BLE001 — MCP tool entry point
         logger.exception(f"[MCP] revoke_grant error: {e}")
         return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
+
+
+def mcp_tool_grant_execute(req_id: str, arguments: dict) -> dict:
+    """MCP tool: bouncer_grant_execute — 在 Grant Session 內執行命令（fail-fast）"""
+    try:
+        # 1. 解析必填參數
+        grant_id = str(arguments.get('grant_id', '')).strip()
+        command = str(arguments.get('command', '')).strip()
+        source = str(arguments.get('source', '')).strip()
+        reason = str(arguments.get('reason', 'Grant execute')).strip()
+        account_param = str(arguments.get('account', '')).strip() if arguments.get('account') else None
+
+        if not grant_id or not command or not source:
+            return mcp_error(req_id, -32602, 'Missing required parameter: grant_id, command, source')
+
+        # 2. 命令正規化（SEC-003: unicode normalize）
+        normalized_cmd = _normalize_command(command)
+
+        # 3. 帳號解析
+        init_default_account()
+        if account_param:
+            valid, error = validate_account_id(account_param)
+            if not valid:
+                return mcp_result(req_id, {
+                    'content': [{
+                        'type': 'text',
+                        'text': json.dumps({
+                            'status': 'account_not_found',
+                            'message': f'Invalid account: {error}'
+                        })
+                    }],
+                    'isError': True
+                })
+
+            account = get_account(account_param)
+            if not account:
+                return mcp_result(req_id, {
+                    'content': [{
+                        'type': 'text',
+                        'text': json.dumps({
+                            'status': 'account_not_found',
+                            'message': f'Account {account_param} not found'
+                        })
+                    }],
+                    'isError': True
+                })
+            account_id = account_param
+        else:
+            account_id = DEFAULT_ACCOUNT_ID
+            account = get_account(account_id) if account_id else None
+
+        if not account_id:
+            return mcp_result(req_id, {
+                'content': [{
+                    'type': 'text',
+                    'text': json.dumps({
+                        'status': 'account_not_found',
+                        'message': 'Default account not configured'
+                    })
+                }],
+                'isError': True
+            })
+
+        # 4. 取 grant session（不存在 → grant_not_found）
+        from grant import get_grant_session, is_command_in_grant, try_use_grant_command, normalize_command
+
+        grant = get_grant_session(grant_id)
+        if not grant:
+            return mcp_result(req_id, {
+                'content': [{
+                    'type': 'text',
+                    'text': json.dumps({
+                        'status': 'grant_not_found',
+                        'message': 'Grant not found or expired'
+                    })
+                }],
+                'isError': True
+            })
+
+        # 5. source 匹配（失敗也回 grant_not_found，不洩漏 grant 是否存在）
+        if grant.get('source') != source:
+            return mcp_result(req_id, {
+                'content': [{
+                    'type': 'text',
+                    'text': json.dumps({
+                        'status': 'grant_not_found',
+                        'message': 'Grant not found or expired'
+                    })
+                }],
+                'isError': True
+            })
+
+        # 6. status 檢查
+        if grant.get('status') != 'active':
+            return mcp_result(req_id, {
+                'content': [{
+                    'type': 'text',
+                    'text': json.dumps({
+                        'status': 'grant_not_active',
+                        'message': f'Grant is not active (status: {grant.get("status")})'
+                    })
+                }],
+                'isError': True
+            })
+
+        # 7. TTL 檢查
+        if time.time() > grant.get('expires_at', 0):
+            return mcp_result(req_id, {
+                'content': [{
+                    'type': 'text',
+                    'text': json.dumps({
+                        'status': 'grant_expired',
+                        'message': 'Grant has expired'
+                    })
+                }],
+                'isError': True
+            })
+
+        # 8. account 匹配（grant 建立時指定的帳號）
+        if grant.get('account_id') and grant['account_id'] != account_id:
+            return mcp_result(req_id, {
+                'content': [{
+                    'type': 'text',
+                    'text': json.dumps({
+                        'status': 'account_mismatch',
+                        'message': 'Account does not match grant'
+                    })
+                }],
+                'isError': True
+            })
+
+        # 9. compliance_checker（安全優先，即使是 grant 核准的命令也要通過）
+        from compliance_checker import check_compliance
+
+        is_compliant, violation = check_compliance(normalized_cmd)
+        if not is_compliant:
+            return mcp_result(req_id, {
+                'content': [{
+                    'type': 'text',
+                    'text': json.dumps({
+                        'status': 'compliance_violation',
+                        'rule_id': violation.rule_id,
+                        'message': violation.message
+                    })
+                }],
+                'isError': True
+            })
+
+        # 10. 命令在白名單？
+        if not is_command_in_grant(normalize_command(normalized_cmd), grant):
+            return mcp_result(req_id, {
+                'content': [{
+                    'type': 'text',
+                    'text': json.dumps({
+                        'status': 'command_not_in_grant',
+                        'message': 'Command is not in the approved grant list'
+                    })
+                }],
+                'isError': True
+            })
+
+        # 11. allow_repeat 檢查（pre-check 以提供具體錯誤訊息）
+        allow_repeat = grant.get('allow_repeat', False)
+        used_commands = grant.get('used_commands', {})
+        cmd_key = normalize_command(normalized_cmd)
+
+        if not allow_repeat and cmd_key in used_commands:
+            return mcp_result(req_id, {
+                'content': [{
+                    'type': 'text',
+                    'text': json.dumps({
+                        'status': 'command_already_used',
+                        'message': 'Command already used (allow_repeat=False)'
+                    })
+                }],
+                'isError': True
+            })
+
+        # 12. 原子性標記使用（防並發）
+        if not try_use_grant_command(grant_id, cmd_key, allow_repeat):
+            return mcp_result(req_id, {
+                'content': [{
+                    'type': 'text',
+                    'text': json.dumps({
+                        'status': 'command_already_used',
+                        'message': 'Command already used or SEC-009 limit reached'
+                    })
+                }],
+                'isError': True
+            })
+
+        # 13. 執行命令
+        assume_role = account.get('role_arn') if account and account_id != DEFAULT_ACCOUNT_ID else None
+        result = execute_command(normalized_cmd, assume_role_arn=assume_role)
+
+        # 14. 分頁輸出（大輸出時）
+        result_text, page_id = store_paged_output(req_id, result)
+
+        # 15. Telegram 通知（best-effort）
+        try:
+            send_grant_execute_notification(
+                grant_id=grant_id,
+                command=normalized_cmd,
+                result=result_text,
+                source=source,
+                request_id=req_id
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to send grant execute notification", extra={"module": "grant", "operation": "send_notification"})
+
+        # 16. DynamoDB audit log
+        log_decision(
+            table=table,
+            request_id=req_id,
+            command=normalized_cmd,
+            reason=reason,
+            source=source,
+            account_id=account_id,
+            decision_type='grant_approved',
+            grant_id=grant_id,
+            result_summary=result_text[:200]
+        )
+
+        # 17. 回傳
+        response = {
+            'status': 'grant_executed',
+            'result': result_text,
+            'request_id': req_id,
+            'grant_id': grant_id,
+        }
+        if page_id:
+            response['page_id'] = page_id
+
+        return mcp_result(req_id, {
+            'content': [{
+                'type': 'text',
+                'text': json.dumps(response)
+            }],
+            'isError': False
+        })
+
+    except Exception as e:
+        logger.exception(f"[GRANT_EXECUTE] Internal error: {e}")
+        return mcp_error(req_id, -32603, f'Internal error: {str(e)}')

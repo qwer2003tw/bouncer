@@ -42,6 +42,7 @@ from utils import response, generate_request_id, decimal_to_native, mcp_result, 
 # MCP tool handlers — split into sub-modules
 from mcp_execute import (
     mcp_tool_execute, mcp_tool_request_grant, mcp_tool_grant_status, mcp_tool_revoke_grant,
+    mcp_tool_grant_execute,
 )
 from mcp_upload import mcp_tool_upload, mcp_tool_upload_batch, execute_upload  # noqa: F401
 from mcp_presigned import mcp_tool_request_presigned, mcp_tool_request_presigned_batch
@@ -540,6 +541,7 @@ TOOL_HANDLERS = {
     'bouncer_request_grant': mcp_tool_request_grant,
     'bouncer_grant_status': mcp_tool_grant_status,
     'bouncer_revoke_grant': mcp_tool_revoke_grant,
+    'bouncer_grant_execute': mcp_tool_grant_execute,
     'bouncer_history': mcp_tool_history,
     'bouncer_stats': mcp_tool_stats,
     'bouncer_deploy_frontend': mcp_tool_deploy_frontend,
