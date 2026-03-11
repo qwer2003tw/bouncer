@@ -255,37 +255,43 @@ def _query_command_history_table(
     since_ts: int,
     exclusive_start_key: dict | None,
 ) -> tuple[list[dict], int]:
-    """Scan command-history table. Returns (items, scanned_count).
+    """Query command-history via GSI. Returns (items, scanned_count).
 
-    NOTE: CommandHistoryTable has no GSI (only pk/sk composite key). A full-table
-    Scan with FilterExpression is the only option here. This is acceptable because
-    command-history is queried infrequently and the table is expected to remain small.
+    Uses type-created_at-index GSI (item_type=CMD, created_at>=since_ts).
+    Filters on source/account_id applied post-query.
     """
     dynamodb = _get_dynamodb_resource()
     cmd_table = _get_command_history_table(dynamodb)
     if cmd_table is None:
         return [], 0
 
-    expr = Attr("created_at").gte(since_ts)
+    key_condition = Key("item_type").eq("CMD") & Key("created_at").gte(since_ts)
+
+    filter_expr = None
     if source:
-        expr = expr & Attr("source").eq(source)
+        filter_expr = Attr("source").eq(source)
     if account_id:
-        expr = expr & Attr("account_id").eq(account_id)
+        account_filter = Attr("account_id").eq(account_id)
+        filter_expr = (filter_expr & account_filter) if filter_expr else account_filter
 
     kwargs: dict = {
-        "FilterExpression": expr,
+        "IndexName": "type-created_at-index",
+        "KeyConditionExpression": key_condition,
         "Limit": limit * 5,
+        "ScanIndexForward": False,  # newest first
     }
+    if filter_expr:
+        kwargs["FilterExpression"] = filter_expr
     if exclusive_start_key:
         kwargs["ExclusiveStartKey"] = exclusive_start_key
 
     try:
-        resp = cmd_table.scan(**kwargs)
+        resp = cmd_table.query(**kwargs)
         items = resp.get("Items", [])[:limit]
         scanned = resp.get("ScannedCount", 0)
         return items, scanned
     except Exception as e:
-        logger.error(f"[history] scan command-history error: {e}")
+        logger.error(f"[history] query command-history GSI error: {e}")
         return [], 0
 
 
