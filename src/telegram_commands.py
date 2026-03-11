@@ -4,10 +4,9 @@ Bouncer - Telegram 命令處理模組
 所有 handle_*_command 函數
 """
 
-import logging
 import time
 
-
+from aws_lambda_powertools import Logger
 
 # 從其他模組導入
 from utils import response
@@ -16,7 +15,7 @@ from telegram import send_telegram_message_to
 from constants import APPROVED_CHAT_IDS
 import db as _db
 
-logger = logging.getLogger(__name__)
+logger = Logger(service="bouncer")
 
 
 def _get_table():

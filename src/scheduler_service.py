@@ -12,12 +12,13 @@ Design goals (Aggressive approach):
 """
 
 import json
-import logging
 import os
 from datetime import datetime, timezone
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+from aws_lambda_powertools import Logger
+
+logger = Logger(service="bouncer")
 
 # ─── env vars ────────────────────────────────────────────────────────────────
 

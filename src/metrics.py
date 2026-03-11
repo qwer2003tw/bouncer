@@ -6,10 +6,11 @@ CloudWatch automatically picks these up from Lambda logs.
 """
 
 import json
-import logging
 import time
 
-logger = logging.getLogger(__name__)
+from aws_lambda_powertools import Logger
+
+logger = Logger(service="bouncer")
 
 
 def emit_metric(namespace: str, metric_name: str, value: float, unit: str = 'Count', dimensions: dict = None):

@@ -13,18 +13,18 @@ sprint24-003:
   - Deduplicate consecutive auto_approved notifications to reduce spam
 """
 
-import logging
 import os
 import time
 from typing import NamedTuple, Optional
 
+from aws_lambda_powertools import Logger
 import telegram as _telegram
 from commands import is_dangerous, check_lambda_env_update
 from constants import COMMAND_APPROVAL_TIMEOUT, TRUST_SESSION_MAX_COMMANDS, UPLOAD_TIMEOUT, GRANT_APPROVAL_TIMEOUT
 from telegram_entities import MessageBuilder
 from utils import format_size_human, extract_exit_code
 
-logger = logging.getLogger(__name__)
+logger = Logger(service="bouncer")
 
 # Notification throttling (sprint24-003)
 # Track last notification time to prevent spam from consecutive auto-approved commands

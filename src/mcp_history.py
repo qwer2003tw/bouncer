@@ -9,18 +9,18 @@ import base64
 import binascii
 import decimal
 import json
-import logging
 import time
 from decimal import Decimal
 
 import boto3
+from aws_lambda_powertools import Logger
 from boto3.dynamodb.conditions import Attr, Key
 
 from constants import TABLE_NAME
 from db import table
 from utils import decimal_to_native, mcp_error, mcp_result
 
-logger = logging.getLogger(__name__)
+logger = Logger(service="bouncer")
 
 # ============================================================================
 # Constants
@@ -79,7 +79,7 @@ def _compute_duration(item: dict) -> float | None:
         if approved_at and created_at:
             return round(float(Decimal(str(approved_at))) - float(Decimal(str(created_at))), 3)
     except (TypeError, ValueError, decimal.InvalidOperation):  # noqa: BLE001 — duration optional
-        logger.debug("[HISTORY] Failed to calculate decision_latency_ms (non-critical)", exc_info=True)
+        logger.debug("[HISTORY] Failed to calculate decision_latency_ms (non-critical)")
     return None
 
 

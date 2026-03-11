@@ -6,13 +6,12 @@ Also includes _format_size_human().
 """
 
 import json
-import logging
 import time
 from aws_clients import get_s3_client
 from dataclasses import dataclass
 from typing import Optional
 
-
+from aws_lambda_powertools import Logger
 
 from utils import mcp_result, generate_request_id, generate_display_summary, sanitize_filename
 from accounts import (
@@ -39,7 +38,7 @@ from constants import (
     APPROVAL_TTL_BUFFER, UPLOAD_TIMEOUT,
 )
 
-logger = logging.getLogger(__name__)
+logger = Logger(service="bouncer")
 
 
 # =============================================================================
@@ -862,7 +861,7 @@ def _submit_batch_for_approval(
                 try:
                     s3_staging.delete_object(Bucket=staging_bucket, Key=rk)
                 except Exception:
-                    logger.warning("[UPLOAD-BATCH] Rollback cleanup failed for key=%s", rk, exc_info=True)
+                    logger.warning("[UPLOAD-BATCH] Rollback cleanup failed for key=%s", rk)
             return mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
                     'status': 'error',
@@ -1011,7 +1010,7 @@ def execute_upload(request_id: str, approver: str) -> dict:
             try:
                 s3.delete_object(Bucket=staging_bucket, Key=content_s3_key)
             except Exception:
-                logger.warning("[UPLOAD] Staging cleanup failed for key=%s (non-critical, TTL will handle it)", content_s3_key, exc_info=True)
+                logger.warning("[UPLOAD] Staging cleanup failed for key=%s (non-critical, TTL will handle it)", content_s3_key)
         else:
             # Legacy path: base64-decode from DDB item then upload
             import base64

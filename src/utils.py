@@ -4,16 +4,16 @@ Bouncer - 工具函數模組
 
 import hashlib
 import json
-import logging
 import re
 import time
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
 
+from aws_lambda_powertools import Logger
 from constants import AUDIT_TTL_SHORT, AUDIT_TTL_LONG
 
-logger = logging.getLogger(__name__)
+logger = Logger(service="bouncer")
 
 
 # ============================================================================

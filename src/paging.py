@@ -9,11 +9,11 @@ Bouncer - 輸出分頁模組 (v2 — Aggressive Refactor)
 """
 from __future__ import annotations
 
-import logging
 import time
 from dataclasses import dataclass
 from typing import Optional
 
+from aws_lambda_powertools import Logger
 import db as _db
 
 from constants import (
@@ -25,7 +25,7 @@ from constants import (
 )
 from telegram import send_telegram_message_silent
 
-logger = logging.getLogger(__name__)
+logger = Logger(service="bouncer")
 
 __all__ = [
     'PaginatedOutput',

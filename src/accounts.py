@@ -4,17 +4,17 @@ Bouncer - 帳號管理模組
 """
 import time
 import json
-import logging
 import urllib.request
 from typing import Optional, Dict
 
+from aws_lambda_powertools import Logger
 import db as _db
 
 from constants import (
     DEFAULT_ACCOUNT_ID, TELEGRAM_TOKEN
 )
 
-logger = logging.getLogger(__name__)
+logger = Logger(service="bouncer")
 
 __all__ = [
     'init_bot_commands',
