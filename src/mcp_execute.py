@@ -6,7 +6,6 @@ Also includes grant-session tools: request_grant, grant_status, revoke_grant.
 """
 
 import json
-import logging
 import os
 import re
 import secrets
@@ -46,8 +45,9 @@ from constants import (
     AUDIT_TTL_SHORT,
     GRANT_SESSION_ENABLED,
 )
+from aws_lambda_powertools import Logger
 
-logger = logging.getLogger(__name__)
+logger = Logger(service="bouncer")
 
 
 # Shadow mode 表名（用於收集智慧審批數據）

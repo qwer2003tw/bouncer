@@ -7,7 +7,6 @@ Bouncer - Trust Session 模組
 - bound_source 在建立時綁定，防止不同來源重用同一 trust session
 - Legacy sessions（無 bound_source）向下相容，但會記錄警告
 """
-import logging
 import time
 import hashlib
 from dataclasses import dataclass, field
@@ -24,8 +23,9 @@ from constants import (
     TRUST_UPLOAD_MAX_BYTES_PER_FILE,
     TRUST_UPLOAD_MAX_BYTES_TOTAL, TRUST_UPLOAD_BLOCKED_EXTENSIONS,
 )
+from aws_lambda_powertools import Logger
 
-logger = logging.getLogger(__name__)
+logger = Logger(service="bouncer")
 
 __all__ = [
     'TrustSession',
