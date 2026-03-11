@@ -109,7 +109,7 @@ class TestTrustSessionApproval:
              patch("trust.should_trust_approve", return_value=(True, trust_session, "trust approved")), \
              patch("mcp_deploy_frontend.deployer_projects_table", mock_projects_table), \
              patch("mcp_deploy_frontend.deployer_history_table", mock_history), \
-             patch("mcp_deploy_frontend.get_cloudfront_client", return_value=mock_cf), \
+             patch("aws_clients.get_cloudfront_client", return_value=mock_cf), \
              patch("trust.increment_trust_command_count", return_value=5), \
              patch("notifications.send_trust_auto_approve_notification"), \
              patch("utils.log_decision"):
@@ -254,7 +254,7 @@ class TestTrustSessionApproval:
              patch("trust.should_trust_approve", return_value=(True, trust_session, "trust approved")), \
              patch("mcp_deploy_frontend.deployer_projects_table", mock_projects_table), \
              patch("mcp_deploy_frontend.deployer_history_table", mock_history), \
-             patch("mcp_deploy_frontend.get_cloudfront_client", return_value=mock_cf), \
+             patch("aws_clients.get_cloudfront_client", return_value=mock_cf), \
              patch("trust.increment_trust_command_count", return_value=1), \
              patch("notifications.send_trust_auto_approve_notification"), \
              patch("utils.log_decision"):
@@ -347,7 +347,7 @@ class TestTrustSessionApproval:
              patch("trust.should_trust_approve", return_value=(True, trust_session, "trust approved")), \
              patch("mcp_deploy_frontend.deployer_projects_table", mock_projects_table), \
              patch("mcp_deploy_frontend.deployer_history_table", mock_history), \
-             patch("mcp_deploy_frontend.get_cloudfront_client", return_value=mock_cf), \
+             patch("aws_clients.get_cloudfront_client", return_value=mock_cf), \
              patch("trust.increment_trust_command_count", return_value=2), \
              patch("notifications.send_trust_auto_approve_notification"), \
              patch("utils.log_decision"):
@@ -400,7 +400,7 @@ class TestTrustSessionAuditLogging:
              patch("trust.should_trust_approve", return_value=(True, trust_session, "trust approved")), \
              patch("mcp_deploy_frontend.deployer_projects_table", mock_projects_table), \
              patch("mcp_deploy_frontend.deployer_history_table", mock_history), \
-             patch("mcp_deploy_frontend.get_cloudfront_client", return_value=mock_cf), \
+             patch("aws_clients.get_cloudfront_client", return_value=mock_cf), \
              patch("trust.increment_trust_command_count", return_value=1), \
              patch("notifications.send_trust_auto_approve_notification"), \
              patch("utils.log_decision", mock_log_decision):
