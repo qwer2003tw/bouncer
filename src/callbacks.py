@@ -403,7 +403,7 @@ def _handle_trust_session(
             Limit=20,
         )
         pending_items = pending_resp.get('Items', [])
-    except Exception:
+    except Exception:  # noqa: BLE001 — DDB query failure is non-fatal; logged with exc_info
         logger.warning("[TRUST] Failed to query pending items for trust_scope=%s, skipping", trust_scope, exc_info=True)
 
     pending_count = len(pending_items)
@@ -866,7 +866,8 @@ def _parse_callback_files_manifest(item: dict, callback_id: str) -> 'list | dict
     try:
         files_manifest = _json.loads(item.get('files', '[]'))
         return files_manifest
-    except Exception:
+    except _json.JSONDecodeError as e:
+        logger.error("[CALLBACK] Failed to parse files manifest: %s", e, exc_info=True)
         answer_callback(callback_id, '❌ 檔案清單解析失敗')
         return response(500, {'error': 'Failed to parse files manifest'})
 
@@ -937,7 +938,7 @@ def _execute_callback_upload_batch(
                 # Cleanup staging object (best effort, non-blocking)
                 try:
                     s3_staging.delete_object(Bucket=staging_bucket, Key=s3_key)
-                except Exception:
+                except Exception:  # noqa: BLE001 — S3 staging cleanup is best-effort
                     logger.warning("[UPLOAD-BATCH] Staging cleanup failed for key=%s (non-critical)", s3_key, exc_info=True)
             else:
                 # Legacy path: decode base64 and upload directly to target
@@ -975,7 +976,7 @@ def _execute_callback_upload_batch(
                     f"📋 *請求 ID：* `{request_id}`\n"
                     f"進度: {i + 1}/{file_count}",
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 — progress update is best-effort
                 logger.warning("[UPLOAD-BATCH] Progress update failed at step %d (non-critical)", i + 1, exc_info=True)
 
     return (uploaded, errors, verification_failed)
@@ -1399,7 +1400,7 @@ def _deploy_files_to_frontend(files_manifest: list, s3_staging, s3_target, reque
                     f"📋 *請求 ID：* `{request_id}`\n"
                     f"進度: {i + 1}/{file_count}",
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 — progress update is best-effort
                 logger.warning("[DEPLOY-FRONTEND] Progress update failed at step %d (non-critical)", i + 1, exc_info=True)
 
     return deployed, failed
@@ -1561,7 +1562,8 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
     # action == 'approve'
     try:
         files_manifest = _json.loads(params['files_json'])
-    except Exception:
+    except _json.JSONDecodeError as e:
+        logger.error("[CALLBACK] Failed to parse files manifest for deploy-frontend: %s", e, exc_info=True)
         answer_callback(callback_id, '❌ 檔案清單解析失敗')
         return response(500, {'error': 'Failed to parse files manifest'})
 
