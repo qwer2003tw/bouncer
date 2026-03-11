@@ -307,7 +307,7 @@ def _normalize_json_payload(command: str) -> str:
 
     try:
         return re.sub(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)?\}', _try_normalize, command)
-    except Exception:
+    except re.error:
         return command
 
 

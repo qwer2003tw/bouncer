@@ -28,6 +28,7 @@ Named placeholder 語意：
   aws s3 cp s3://bouncer-uploads-190825685292/{date}/{uuid}/*.html \\
       s3://ztp-files-dev-frontendbucket-nvvimv31xp3v/*.html
 """
+import json
 import re
 import secrets
 import time
@@ -190,7 +191,7 @@ def match_pattern(pattern: str, normalized_cmd: str) -> bool:
             return pattern == normalized_cmd
         compiled = compile_pattern(pattern)
         return bool(compiled.match(normalized_cmd))
-    except Exception as e:
+    except (re.error, ValueError, TypeError) as e:
         logger.error(f"[GRANT] match_pattern error for pattern={pattern!r}: {e}")
         return False
 
@@ -213,7 +214,7 @@ def normalize_command(command: str) -> str:
         cmd = ' '.join(cmd.split())
         cmd = cmd.lower()
         return cmd
-    except Exception as e:
+    except (ValueError, TypeError, AttributeError) as e:
         logger.error(f"[GRANT] normalize_command error: {e}")
         return command.strip().lower() if command else ''
 
@@ -311,7 +312,7 @@ def create_grant_request(
 
     except ValueError:
         raise
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"[GRANT] create_grant_request error: {e}")
         raise
 
@@ -378,12 +379,12 @@ def _precheck_command(
             if score >= 66:
                 detail['category'] = 'requires_individual'
                 detail['block_reason'] = f'風險分數 {score} >= 66'
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — fail-open risk scoring
             logger.error(f"[GRANT] risk scoring error: {e}")
             # Fail-open for risk scoring: treat as grantable
             detail['risk_score'] = 0
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — fail-closed precheck
         logger.error(f"[GRANT] precheck error for command '{command[:100]}': {e}")
         # Fail-closed: 預檢失敗 → requires_individual
         detail['category'] = 'requires_individual'
@@ -409,7 +410,7 @@ def get_grant_session(grant_id: str) -> Optional[Dict]:
         if item and item.get('type') == 'grant_session':
             return item
         return None
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"[GRANT] get_grant_session error: {e}")
         return None
 
@@ -478,7 +479,7 @@ def approve_grant(grant_id: str, approved_by: str, mode: str = 'all') -> Optiona
         grant['approval_mode'] = mode
         return grant
 
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"[GRANT] approve_grant error: {e}")
         return None
 
@@ -503,7 +504,7 @@ def deny_grant(grant_id: str) -> bool:
             },
         )
         return True
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"[GRANT] deny_grant error: {e}")
         return False
 
@@ -528,7 +529,7 @@ def revoke_grant(grant_id: str) -> bool:
             },
         )
         return True
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"[GRANT] revoke_grant error: {e}")
         return False
 
@@ -561,7 +562,7 @@ def is_command_in_grant(normalized_cmd: str, grant: Dict) -> bool:
                 return True
 
         return False
-    except Exception as e:
+    except (re.error, ValueError, TypeError) as e:
         logger.error(f"[GRANT] is_command_in_grant error: {e}")
         return False
 
@@ -601,7 +602,7 @@ def try_use_grant_command(
                     if current_count >= _DANGEROUS_REPEAT_LIMIT:
                         logger.warning(f"[GRANT][SEC-009] Dangerous command repeat limit reached: {normalized_cmd[:80]!r}")
                         return False
-                except Exception as e:
+                except (json.JSONDecodeError, ValueError, TypeError) as e:
                     logger.error(f"[GRANT][SEC-009] Failed to read repeat count: {e}")
                     return False
 
@@ -651,7 +652,7 @@ def try_use_grant_command(
             return False  # 已用過或並發衝突
         logger.error(f"[GRANT] try_use_grant_command ClientError: {e}")
         return False
-    except Exception as e:
+    except (json.JSONDecodeError, ValueError) as e:
         logger.error(f"[GRANT] try_use_grant_command error: {e}")
         return False
 
@@ -701,6 +702,6 @@ def get_grant_status(grant_id: str, source: str) -> Optional[Dict]:
             'allow_repeat': grant.get('allow_repeat', False),
         }
 
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"[GRANT] get_grant_status error: {e}")
         return None

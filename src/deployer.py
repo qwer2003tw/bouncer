@@ -133,7 +133,7 @@ def get_git_commit_info(cwd: str = None) -> dict:
             'commit_short': short_sha,
             'commit_message': commit_message,
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — git subprocess operations, fail-safe fallback
         logger.warning(f"[deployer] get_git_commit_info failed (graceful fallback): {e}")
         return {'commit_sha': None, 'commit_short': None, 'commit_message': None}
 
@@ -168,7 +168,7 @@ def preflight_check_secrets(project: dict, branch: str) -> list:
         sm_client = _get_secretsmanager_client()
         github_pat_response = sm_client.get_secret_value(SecretId='sam-deployer/github-pat')
         github_pat = github_pat_response['SecretString']
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"Failed to get GitHub PAT: {e}")
         return []  # graceful degradation
 
@@ -228,13 +228,13 @@ def preflight_check_secrets(project: dict, branch: str) -> list:
 
             except sm_client.exceptions.ResourceNotFoundException:
                 missing_secrets.append(secret_name)
-            except Exception as e:
+            except ClientError as e:
                 logger.error(f"Error checking secret {secret_name}: {e}")
                 missing_secrets.append(secret_name)
 
         return missing_secrets
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — preflight fail-closed: subprocess, file I/O, git operations
         logger.error(f"Preflight check error: {e}")
         return []  # graceful degradation
     finally:
@@ -254,9 +254,6 @@ def list_projects() -> list:
     except ClientError:
         logger.exception("[DEPLOYER] list_projects failed")
         return []
-    except Exception:
-        logger.exception("[DEPLOYER] list_projects failed")
-        return []
 
 
 def get_project(project_id: str) -> dict:
@@ -265,9 +262,6 @@ def get_project(project_id: str) -> dict:
         result = _get_projects_table().get_item(Key={'project_id': project_id})
         return result.get('Item')
     except ClientError:
-        logger.exception("[DEPLOYER] get_project failed", extra={"project_id": project_id})
-        return None
-    except Exception:
         logger.exception("[DEPLOYER] get_project failed", extra={"project_id": project_id})
         return None
 
@@ -299,9 +293,6 @@ def remove_project(project_id: str) -> bool:
         _get_projects_table().delete_item(Key={'project_id': project_id})
         return True
     except ClientError:
-        logger.exception("[DEPLOYER] remove_project failed", extra={"project_id": project_id})
-        return False
-    except Exception:
         logger.exception("[DEPLOYER] remove_project failed", extra={"project_id": project_id})
         return False
 
@@ -338,9 +329,6 @@ def release_lock(project_id: str) -> bool:
     except ClientError:
         logger.exception("[DEPLOYER] release_lock failed", extra={"project_id": project_id})
         return False
-    except Exception:
-        logger.exception("[DEPLOYER] release_lock failed", extra={"project_id": project_id})
-        return False
 
 
 def get_lock(project_id: str) -> dict:
@@ -361,9 +349,6 @@ def get_lock(project_id: str) -> dict:
 
         return item
     except ClientError:
-        logger.exception("[DEPLOYER] get_lock failed", extra={"project_id": project_id})
-        return None
-    except Exception:
         logger.exception("[DEPLOYER] get_lock failed", extra={"project_id": project_id})
         return None
 
@@ -409,7 +394,7 @@ def update_deploy_record(deploy_id: str, updates: dict):
             ExpressionAttributeNames=expr_names,
             ExpressionAttributeValues=expr_values
         )
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"Error updating deploy record: {e}")
 
 
@@ -419,9 +404,6 @@ def get_deploy_record(deploy_id: str) -> dict:
         result = _get_history_table().get_item(Key={'deploy_id': deploy_id})
         return result.get('Item')
     except ClientError:
-        logger.exception("[DEPLOYER] get_deploy_record failed", extra={"deploy_id": deploy_id})
-        return None
-    except Exception:
         logger.exception("[DEPLOYER] get_deploy_record failed", extra={"deploy_id": deploy_id})
         return None
 
@@ -437,7 +419,7 @@ def get_deploy_history(project_id: str, limit: int = 10) -> list:
             Limit=limit
         )
         return result.get('Items', [])
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"Error getting deploy history: {e}")
         return []
 
@@ -532,13 +514,14 @@ def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str) -
             'commit_message': deploy_record.get('commit_message'),
         }
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — fail-closed deployment trigger with cleanup
         # 失敗時釋放鎖
         release_lock(project_id)
         update_deploy_record(deploy_id, {
             'status': 'FAILED',
             'error_message': str(e)
         })
+        logger.exception("[DEPLOYER] start_deploy failed")
         return {'error': f'啟動部署失敗: {str(e)}'}
 
 
@@ -558,7 +541,7 @@ def cancel_deploy(deploy_id: str) -> dict:
                 executionArn=execution_arn,
                 cause='User cancelled'
             )
-        except Exception as e:
+        except ClientError as e:
             logger.error(f"Error stopping execution: {e}")
 
     # 釋放鎖
@@ -678,7 +661,7 @@ def send_deploy_failure_notification(deploy_id: str, project_id: str, error_line
             f"{error_block}"
         )
         send_telegram_message_silent(text)
-    except Exception as exc:
+    except (OSError, TimeoutError, ConnectionError) as exc:
         logger.warning(f"[deployer] send_deploy_failure_notification failed: {exc}")
 
 
@@ -737,7 +720,7 @@ def get_deploy_status(deploy_id: str) -> dict:
                         )
                         history_events = history_resp.get('events', [])
                         error_lines = DeployErrorExtractor.from_sfn_history(history_events)
-                    except Exception as hist_exc:
+                    except ClientError as hist_exc:
                         logger.warning(f"[deployer] get_execution_history failed: {hist_exc}")
 
                     ddb_update['error_lines'] = error_lines
@@ -779,7 +762,7 @@ def get_deploy_status(deploy_id: str) -> dict:
                             failed_events[0].get('ResourceStatusReason', '')[:300]
                             if failed_events else ''
                         )
-                    except Exception as exc:
+                    except ClientError as exc:
                         logger.warning('[deployer] describe_stack_events failed: %s', exc)
 
                 update_deploy_record(deploy_id, ddb_update)
@@ -816,10 +799,10 @@ def get_deploy_status(deploy_id: str) -> dict:
                     try:
                         from telegram import unpin_message
                         unpin_message(int(telegram_message_id))
-                    except Exception as e:
+                    except (OSError, TimeoutError, ConnectionError, ValueError) as e:
                         logger.warning(f"[deployer] Failed to unpin message (ignored): {e}")
 
-        except Exception as e:
+        except ClientError as e:
             logger.error(f"Error getting execution status: {e}")
 
     # Add timing fields to response
@@ -1138,7 +1121,7 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
                     telegram_message_id=telegram_message_id,
                     expires_at=expires_at,
                 )
-            except Exception as exc:
+            except ClientError as exc:
                 logger.error(
                     "[deployer] post_notification_setup failed for %s: %s", request_id, exc
                 )

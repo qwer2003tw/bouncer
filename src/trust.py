@@ -12,6 +12,8 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
 
+from botocore.exceptions import ClientError
+
 import db as _db
 
 
@@ -204,7 +206,7 @@ def get_trust_session(
 
         return item
 
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"Trust session check error: {e}")
         return None
 
@@ -268,7 +270,7 @@ def create_trust_session(
     try:
         from scheduler_service import get_trust_expiry_notifier
         get_trust_expiry_notifier().schedule(trust_id=trust_id, expires_at=expires_at)
-    except Exception as exc:  # pragma: no cover
+    except ClientError as exc:  # pragma: no cover
         logger.error("Failed to schedule trust expiry notification for %s: %s", trust_id, exc)
 
     return trust_id
@@ -290,11 +292,11 @@ def revoke_trust_session(trust_id: str) -> bool:
         try:
             from scheduler_service import get_trust_expiry_notifier
             get_trust_expiry_notifier().cancel(trust_id=trust_id)
-        except Exception as exc:  # pragma: no cover
+        except ClientError as exc:  # pragma: no cover
             logger.error("Failed to cancel trust expiry schedule for %s: %s", trust_id, exc)
 
         return True
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"Revoke trust session error: {e}")
         return False
 
@@ -331,7 +333,7 @@ def increment_trust_command_count(trust_id: str) -> int:
     except _get_table().meta.client.exceptions.ConditionalCheckFailedException:
         logger.warning(f"Trust command count conditional update failed for {trust_id} (limit or expired)")
         return 0
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"Increment trust command count error: {e}")
         return 0
 
@@ -415,8 +417,8 @@ def should_trust_approve(
         try:
             from metrics import emit_metric
             emit_metric('Bouncer', 'TrustIPMismatch', 1, dimensions={'Event': 'mismatch'})
-        except Exception:
-            pass  # metrics are best-effort
+        except Exception:  # noqa: BLE001 — best-effort metrics
+            pass
 
     return True, session, f"Trust session active ({remaining}s remaining)"
 
@@ -453,7 +455,7 @@ def track_command_executed(trust_id: str, command: str, success: bool) -> None:
                 ':cmd': [entry],
             },
         )
-    except Exception as exc:
+    except ClientError as exc:
         logger.error('track_command_executed failed for %s: %s', trust_id, exc)
 
 
@@ -572,6 +574,6 @@ def increment_trust_upload_count(trust_id: str, content_size: int) -> bool:
     except _get_table().meta.client.exceptions.ConditionalCheckFailedException:
         logger.warning(f"Trust upload conditional update failed for {trust_id}")
         return False
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"Increment trust upload count error: {e}")
         return False

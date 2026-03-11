@@ -117,13 +117,13 @@ def get_command_help(command: str) -> dict:
     try:
         session = botocore.session.get_session()
         service_model = session.get_service_model(service_name)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return {'error': f'找不到服務: {service_name}', 'detail': str(e)}
 
     # 尋找操作
     try:
         operation_model = service_model.operation_model(action_name)
-    except Exception:
+    except Exception:  # noqa: BLE001
         # 列出可用的操作
         available_ops = list(service_model.operation_names)
 
@@ -187,7 +187,7 @@ def get_service_operations(service_name: str) -> dict:
             'operation_count': len(operations),
             'operations': operations
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return {'error': f'找不到服務: {service_name}', 'detail': str(e)}
 
 

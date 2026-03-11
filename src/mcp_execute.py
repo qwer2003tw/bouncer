@@ -10,8 +10,11 @@ import os
 import re
 import secrets
 import time
+import urllib.error
 from dataclasses import dataclass
 from typing import Optional
+
+from botocore.exceptions import ClientError
 
 
 
@@ -159,7 +162,7 @@ def _log_smart_approval_shadow(
 
         table.put_item(Item=item)
         logger.info(f"[SHADOW] Logged: {shadow_id} -> {smart_decision.decision} (score={smart_decision.final_score}, actual={actual_decision})")
-    except Exception as e:
+    except ClientError as e:
         # Shadow 記錄失敗不影響主流程
         logger.error(f"[SHADOW] Failed to log: {e}")
 
@@ -291,7 +294,7 @@ def _score_risk(ctx: ExecuteContext) -> None:
             account_id=ctx.account_id,
             enable_sequence_analysis=False,
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — shadow smart approval, non-blocking
         logger.error(f"[SHADOW] Smart approval error: {e}")
 
 
@@ -359,7 +362,7 @@ def _scan_template(ctx: ExecuteContext) -> None:
 
     except ImportError as e:
         logger.warning(f"[TEMPLATE] template_scanner or load_risk_rules not available: {e}")
-    except Exception as e:
+    except (ValueError, TypeError, OSError) as e:
         logger.error(f"[TEMPLATE] Scan error (non-fatal): {e}")
 
 
@@ -597,7 +600,7 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
             }]
         })
 
-    except Exception as e:
+    except ClientError as e:
         # Grant 失敗不影響主流程 → fallthrough
         logger.error(f"[GRANT] _check_grant_session error: {e}")
         return None
@@ -836,11 +839,11 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
         )
         if not notified.ok:
             raise RuntimeError("Telegram notification returned failure (ok=False or empty response)")
-    except Exception as tg_err:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as tg_err:
         # Cleanup DDB to prevent orphan pending record
         try:
             table.delete_item(Key={'request_id': request_id})
-        except Exception as del_err:
+        except ClientError as del_err:
             logger.error(f"[ORPHAN CLEANUP] Failed to delete DDB record {request_id}: {del_err}")
         logger.error(f"[ORPHAN CLEANUP] Telegram notification failed for {request_id}: {tg_err}")
         return mcp_result(ctx.req_id, {
@@ -1112,7 +1115,7 @@ def mcp_tool_request_grant(req_id: str, arguments: dict) -> dict:
                 ttl_minutes=result['ttl_minutes'],
                 allow_repeat=allow_repeat,
             )
-        except Exception as e:
+        except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
             logger.error(f"[GRANT] Failed to send notification: {e}")
 
         return mcp_result(req_id, {
@@ -1132,7 +1135,8 @@ def mcp_tool_request_grant(req_id: str, arguments: dict) -> dict:
             'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': str(e)})}],
             'isError': True
         })
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — MCP tool entry point
+        logger.exception(f"[MCP] request_grant error: {e}")
         return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
 
 
@@ -1163,7 +1167,8 @@ def mcp_tool_grant_status(req_id: str, arguments: dict) -> dict:
             'content': [{'type': 'text', 'text': json.dumps(status)}]
         })
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — MCP tool entry point
+        logger.exception(f"[MCP] grant_status error: {e}")
         return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
 
 
@@ -1190,5 +1195,6 @@ def mcp_tool_revoke_grant(req_id: str, arguments: dict) -> dict:
             'isError': not success
         })
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — MCP tool entry point
+        logger.exception(f"[MCP] revoke_grant error: {e}")
         return mcp_error(req_id, -32603, f'Internal error: {str(e)}')

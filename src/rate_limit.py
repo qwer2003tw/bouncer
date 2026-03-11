@@ -112,6 +112,6 @@ def check_rate_limit(source: str) -> None:
 
     except (RateLimitExceeded, PendingLimitExceeded):
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — fail-closed rate limit check
         # SEC-006: fail-close — DynamoDB 故障時拒絕而非放行
         raise RateLimitExceeded(f"Rate limit check failed: {e}") from e

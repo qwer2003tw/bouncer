@@ -241,7 +241,7 @@ def create_default_rules() -> RiskRules:
                 rules = _dict_to_rules(data)
                 rules.version = data.get('version', '1.0.0-json')
                 return rules
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             logger.error(f"[RiskScorer] Failed to load {p}: {e}")
 
     # Hardcoded fallback — 最小化，fail-closed（未知命令 = 高風險）
@@ -312,7 +312,7 @@ def load_risk_rules(
 
         return rules
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"[RiskScorer] Failed to load rules, using defaults: {e}")
         return create_default_rules()
 
@@ -483,7 +483,7 @@ def parse_command(command: str) -> ParsedCommand:
             is_valid=True,
         )
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return ParsedCommand(
             original=command,
             is_valid=False,
@@ -645,7 +645,7 @@ def score_parameters(
             factors.extend(template_factors)
             max_pattern_score = max(max_pattern_score, template_score)
             combined_score = min(100, max(combined_score, max_pattern_score + flag_score_total))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"[TEMPLATE_SCAN] Error: {e}")
         # Fail-open: don't change score on scanner error
 
@@ -999,7 +999,7 @@ def calculate_risk(
             rule_version=rules.version,
         )
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         # Fail-closed: 任何錯誤都回傳 manual
         return RiskResult(
             score=70,

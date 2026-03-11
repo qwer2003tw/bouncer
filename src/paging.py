@@ -13,6 +13,8 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
+from botocore.exceptions import ClientError
+
 from aws_lambda_powertools import Logger
 import db as _db
 
@@ -187,7 +189,7 @@ def get_paged_output(page_request_id: str) -> dict:
             'total_pages': total_pages,
             'next_page': next_page,
         }
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"get_paged_output error: {e}")
         return {'error': f'取得分頁失敗: {str(e)}'}
 
@@ -213,7 +215,7 @@ def send_remaining_pages(request_id: str, total_pages: int) -> None:
                 )
             else:
                 logger.warning(f"send_remaining_pages: page {page_id} not found in DynamoDB")
-        except Exception as e:
+        except (ClientError, OSError, TimeoutError, ConnectionError) as e:
             logger.error(f"send_remaining_pages error on page {page_num}: {e}")
             # Continue sending remaining pages even if one fails
 

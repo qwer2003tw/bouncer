@@ -16,6 +16,7 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
+from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
 
 logger = Logger(service="bouncer")
@@ -159,7 +160,7 @@ class SchedulerService:
             logger.info("[SCHEDULER] Created expiry schedule '%s' for request %s at %s", name, request_id, at_expr)
             return True
 
-        except Exception as exc:
+        except ClientError as exc:
             # Scheduler creation is non-critical; log but don't propagate
             logger.error(
                 "[SCHEDULER] Failed to create schedule for %s: %s", request_id, exc
@@ -184,7 +185,7 @@ class SchedulerService:
         except client.exceptions.ResourceNotFoundException:  # type: ignore[attr-defined]
             # Already deleted or never created — treat as success
             return True
-        except Exception as exc:
+        except ClientError as exc:
             logger.error("[SCHEDULER] Failed to delete schedule for %s: %s", request_id, exc)
             return False
 
@@ -323,7 +324,7 @@ class TrustExpiryNotifier:
             )
             return True
 
-        except Exception as exc:
+        except ClientError as exc:
             logger.error(
                 "[TRUST-NOTIFIER] Failed to create expiry schedule for trust %s: %s",
                 trust_id, exc,
@@ -349,7 +350,7 @@ class TrustExpiryNotifier:
                 name, trust_id,
             )
             return True
-        except Exception as exc:
+        except ClientError as exc:
             # ResourceNotFoundException → already fired or never created → OK
             exc_name = type(exc).__name__
             exc_str = str(exc)

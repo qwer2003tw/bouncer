@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
 
+from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
 from constants import AUDIT_TTL_SHORT, AUDIT_TTL_LONG
 
@@ -317,7 +318,7 @@ def log_decision(table, request_id, command, reason, source, account_id,
     item.update({k: v for k, v in kwargs.items() if v is not None})
     try:
         table.put_item(Item=item)
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"[AUDIT] Failed to log decision: {e}")
     return item
 
@@ -376,5 +377,5 @@ def record_execution_error(table, request_id: str, exit_code: int,
                 ':ea': int(time.time()),
             },
         )
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"[AUDIT] Failed to record execution error for {request_id}: {e}")

@@ -15,7 +15,10 @@ sprint24-003:
 
 import os
 import time
+import urllib.error
 from typing import NamedTuple, Optional
+
+from botocore.exceptions import ClientError
 
 from aws_lambda_powertools import Logger
 import telegram as _telegram
@@ -132,7 +135,7 @@ def post_notification_setup(
             telegram_message_id,
             request_id,
         )
-    except Exception as exc:
+    except ClientError as exc:
         logger.error(
             "[POST-NOTIFY] Failed to store telegram_message_id for %s: %s",
             request_id,
@@ -149,7 +152,7 @@ def post_notification_setup(
             expires_at=expires_at,
             telegram_message_id=telegram_message_id,
         )
-    except Exception as exc:
+    except ClientError as exc:
         logger.error(
             "[POST-NOTIFY] Failed to create expiry schedule for %s: %s",
             request_id,
@@ -190,7 +193,7 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
             role_name = assume_role.split('/')[-1]
             account_display = (parsed_account_id, role_name)
             account_mode = 'named'
-        except Exception as e:
+        except (ValueError, IndexError) as e:
             logger.error(f"Error: {e}")
             account_display = (assume_role, None)
             account_mode = 'role'
@@ -483,12 +486,12 @@ def send_grant_request_notification(
                     telegram_message_id=telegram_message_id,
                     expires_at=expires_at,
                 )
-            except Exception as pns_exc:
+            except ClientError as pns_exc:
                 logger.error(
                     "[GRANT] post_notification_setup failed for %s: %s", grant_id, pns_exc
                 )
 
-    except Exception as e:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
         logger.error(f"[GRANT] send_grant_request_notification error: {e}")
 
 
@@ -535,7 +538,7 @@ def send_grant_execute_notification(
 
         _telegram.send_message_with_entities(text, entities, reply_markup=keyboard, silent=True)
 
-    except Exception as e:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
         logger.error(f"[GRANT] send_grant_execute_notification error: {e}")
 
 
@@ -552,7 +555,7 @@ def send_grant_complete_notification(grant_id: str, reason: str) -> None:
         text, entities = mb.build()
         _telegram.send_message_with_entities(text, entities, silent=True)
 
-    except Exception as e:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
         logger.error(f"[GRANT] send_grant_complete_notification error: {e}")
 
 
@@ -574,7 +577,7 @@ def send_blocked_notification(
         text, entities = mb.build()
         _telegram.send_message_with_entities(text, entities, silent=True)
 
-    except Exception as e:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
         logger.error(f"[BLOCKED] send_blocked_notification error: {e}")
 
 # ============================================================================
@@ -614,7 +617,7 @@ def send_trust_upload_notification(
 
         _telegram.send_message_with_entities(text, entities, reply_markup=keyboard, silent=True)
 
-    except Exception as e:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
         logger.error(f"[TRUST UPLOAD] send_trust_upload_notification error: {e}")
 
 
@@ -685,7 +688,7 @@ def send_batch_upload_notification(
             message_id = result.get('result', {}).get('message_id')
         return NotificationResult(ok=ok, message_id=message_id)
 
-    except Exception as e:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
         logger.error(f"[BATCH UPLOAD] send_batch_upload_notification error: {e}")
         return NotificationResult(ok=False, message_id=None)
 
@@ -715,7 +718,7 @@ def send_presigned_notification(
         text, entities = mb.build()
         _telegram.send_message_with_entities(text, entities, silent=True)
 
-    except Exception as e:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
         logger.error(f"[PRESIGNED] send_presigned_notification error: {e}")
 
 
@@ -740,7 +743,7 @@ def send_presigned_batch_notification(
         text, entities = mb.build()
         _telegram.send_message_with_entities(text, entities, silent=True)
 
-    except Exception as e:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
         logger.error(f"[PRESIGNED] send_presigned_batch_notification error: {e}")
 
 
@@ -817,7 +820,7 @@ def send_trust_session_summary(trust_item: dict, end_reason: str = 'revoke') -> 
         text, entities = mb.build()
         _telegram.send_message_with_entities(text, entities, silent=True)
 
-    except Exception as exc:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as exc:
         logger.error('[TRUST SUMMARY] send_trust_session_summary error: %s', exc)
 # Deploy Frontend Notification (sprint9-003)
 # ============================================================================
@@ -894,6 +897,6 @@ def send_deploy_frontend_notification(
             message_id = result.get("result", {}).get("message_id")
         return NotificationResult(ok=ok, message_id=message_id)
 
-    except Exception as exc:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as exc:
         logger.error("[DEPLOY-FRONTEND] send_deploy_frontend_notification error: %s", exc)
         return NotificationResult(ok=False, message_id=None)

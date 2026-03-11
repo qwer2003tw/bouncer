@@ -91,7 +91,7 @@ def _list_batch_keys(bucket: str, prefix: str) -> "tuple[set[str], str | None]":
         code = exc.response.get("Error", {}).get("Code", "Unknown")
         msg = exc.response.get("Error", {}).get("Message", str(exc))
         return set(), f"S3 error [{code}]: {msg}"
-    except Exception as exc:
+    except ClientError as exc:
         return set(), f"Failed to list objects: {exc}"
 
     return found_keys, None
@@ -124,7 +124,7 @@ def _write_confirm_record(
 
     try:
         table.put_item(Item=item)
-    except Exception as exc:
+    except ClientError as exc:
         # Non-fatal: log and continue; verification result is still returned.
         logger.error(f"[confirm_upload] DynamoDB write failed: {exc}")
 

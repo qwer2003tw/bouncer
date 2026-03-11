@@ -5,6 +5,10 @@ Bouncer - Telegram Callback 處理模組
 """
 
 import time
+import urllib.error
+
+from botocore.exceptions import ClientError
+
 from aws_clients import get_s3_client
 from aws_lambda_powertools import Logger
 
@@ -102,7 +106,7 @@ def handle_grant_approve(query: dict, grant_id: str, mode: str = 'all') -> dict:
 
         return response(200, {'ok': True})
 
-    except Exception as e:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError) as e:
         logger.error(f"[GRANT] handle_grant_approve error (mode={mode}): {e}")
         answer_callback(callback_id, f'❌ 批准失敗: {str(e)[:50]}')
         return response(500, {'error': str(e)})
@@ -143,7 +147,7 @@ def handle_grant_deny(query: dict, grant_id: str) -> dict:
 
         return response(200, {'ok': True})
 
-    except Exception as e:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError) as e:
         logger.error(f"[GRANT] handle_grant_deny error: {e}")
         answer_callback(callback_id, f'❌ 處理失敗: {str(e)[:50]}')
         return response(500, {'error': str(e)})
@@ -418,7 +422,7 @@ def _handle_trust_session(
     # 自動執行同 trust_scope + account 的排隊中請求
     try:
         _auto_execute_pending_requests(trust_scope, account_id, assume_role, trust_id, source)
-    except Exception as e:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError) as e:
         logger.error(f"[TRUST] Auto-execute pending error: {e}")
 
     return trust_line
@@ -612,7 +616,7 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
                 extra_lines=f"{detail_lines}\n🔗 *Role：* `{role_arn}`"
             )
 
-        except Exception as e:
+        except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError) as e:
             answer_callback(callback_id, f'❌ 新增失敗: {str(e)[:50]}')
             return response(500, {'error': str(e)})
 
@@ -661,7 +665,7 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
                 extra_lines=detail_lines
             )
 
-        except Exception as e:
+        except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError) as e:
             answer_callback(callback_id, f'❌ 移除失敗: {str(e)[:50]}')
             return response(500, {'error': str(e)})
 
@@ -748,7 +752,7 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
                 try:
                     from deployer import update_deploy_record
                     update_deploy_record(deploy_id, {'telegram_message_id': message_id})
-                except Exception as e:
+                except ClientError as e:
                     logger.warning(f"[deploy] Failed to store telegram_message_id (ignored): {e}")
 
     elif action == 'deny':
@@ -876,7 +880,7 @@ def _setup_callback_s3_clients(assume_role, table, request_id: str, user_id: str
         s3_staging = get_s3_client(role_arn=None, session_name='bouncer-batch-upload-staging')
         s3_target = get_s3_client(role_arn=assume_role, session_name='bouncer-batch-upload')
         return (s3_staging, s3_target)
-    except Exception as e:
+    except ClientError as e:
         _update_request_status(table, request_id, 'error', user_id, extra_attrs={'error_message': str(e)})
         update_message(
             message_id,
@@ -957,7 +961,7 @@ def _execute_callback_upload_batch(
                 'verified': vr.verified,
                 's3_size': vr.s3_size,
             })
-        except Exception as e:
+        except (ClientError, ValueError, OSError) as e:
             errors.append({'filename': fname, 'reason': str(e)[:120]})
 
         # Update progress every 5 files
@@ -1203,7 +1207,7 @@ def _write_frontend_deploy_history(
             "[DEPLOY-FRONTEND] deploy_history written deploy_id=frontend-%s project=%s status=%s",
             request_id, project, history_status,
         )
-    except Exception as exc:
+    except ClientError as exc:
         logger.error(
             "[DEPLOY-FRONTEND] Failed to write deploy_history for %s: %s",
             request_id, exc,
@@ -1283,7 +1287,7 @@ def _assume_deploy_role(deploy_role_arn: str, request_id: str, files_manifest: l
     try:
         s3_target = get_s3_client(role_arn=deploy_role_arn, session_name=f"bouncer-deploy-{request_id[:16]}")
         return s3_target, None
-    except Exception as e:
+    except ClientError as e:
         logger.error("[DEPLOY-FRONTEND] AssumeRole failed for %s: %s", deploy_role_arn, e)
         failed = [
             {'filename': fm.get('filename', 'unknown'), 'reason': f'AssumeRole failed: {e}'}
@@ -1374,7 +1378,7 @@ def _deploy_files_to_frontend(files_manifest: list, s3_staging, s3_target, reque
                 f"s3://{staging_bucket}/{staged_key}",
                 frontend_bucket, filename, request_id, project, user_id,
             )
-        except Exception as e:
+        except ClientError as e:
             logger.error(
                 "[DEPLOY-FRONTEND] [AUDIT] upload_failed file=%s error=%s "
                 "source=%s target=s3://%s/%s request_id=%s project=%s user_id=%s",
@@ -1419,7 +1423,7 @@ def _invalidate_cloudfront(success_count: int, deploy_role_arn: str, distributio
             },
         )
         return False
-    except Exception as e:
+    except ClientError as e:
         logger.error("[DEPLOY-FRONTEND] CloudFront invalidation failed for dist=%s: %s", distribution_id, e)
         return True
 
@@ -1526,7 +1530,7 @@ def _finalize_deploy_frontend(deployed: list, failed: list, cf_invalidation_fail
         if cf_invalidation_failed:
             notif_text += "\n⚠️ CloudFront Invalidation 失敗"
         _send_message_silent(notif_text)
-    except Exception as notif_exc:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as notif_exc:
         logger.warning("[DEPLOY-FRONTEND] Result notification failed: %s", notif_exc)
 
     return response(200, {

@@ -15,6 +15,7 @@ from decimal import Decimal
 import boto3
 from aws_lambda_powertools import Logger
 from boto3.dynamodb.conditions import Attr, Key
+from botocore.exceptions import ClientError
 
 from constants import TABLE_NAME
 from db import table
@@ -235,7 +236,7 @@ def _query_requests_table(
         all_items.extend(resp.get("Items", []))
         last_key = resp.get("LastEvaluatedKey")
 
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"[history] query/scan requests error: {e}")
         return [], 0, None
 
@@ -290,7 +291,7 @@ def _query_command_history_table(
         items = resp.get("Items", [])[:limit]
         scanned = resp.get("ScannedCount", 0)
         return items, scanned
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"[history] query command-history GSI error: {e}")
         return [], 0
 
@@ -446,7 +447,7 @@ def mcp_tool_stats(req_id: str, arguments: dict) -> dict:
                 items.extend(batch)
                 scanned += resp.get("ScannedCount", len(batch))
 
-    except Exception as e:
+    except ClientError as e:
         return mcp_error(req_id, -32603, f"Internal error: {e}")
 
     # Tally by status, source, action, command

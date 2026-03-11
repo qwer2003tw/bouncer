@@ -12,12 +12,15 @@ Phase B (callback / actual S3 deploy / CloudFront invalidation) is NOT included 
 """
 
 import base64
+import binascii
 import json
 import os
 import time
 from typing import Optional
 
 import boto3
+from botocore.exceptions import ClientError
+
 from aws_lambda_powertools import Logger
 from aws_clients import get_s3_client
 
@@ -101,7 +104,7 @@ def _get_frontend_config(project_id: str) -> Optional[dict]:
             'region': region,
             'deploy_role_arn': deploy_role_arn,
         }
-    except Exception as exc:
+    except ClientError as exc:
         logger.warning(
             "[deploy-frontend] DDB config lookup failed for %s: %s",
             project_id, exc,
@@ -218,7 +221,7 @@ def _validate_files(files: list) -> Optional[str]:
 
         try:
             content_bytes = base64.b64decode(content_b64)
-        except Exception as exc:
+        except (binascii.Error, ValueError) as exc:
             return f"File #{i + 1} ({fname}): invalid base64 - {exc}"
 
         file_size = len(content_bytes)
@@ -276,7 +279,7 @@ def _check_deploy_trust(trust_scope: str, project: str, account_id: str, source:
         if not item or not item.get("frontend_deploy_role_arn"):
             logger.warning(f"[deploy-frontend] trust denied: no deploy_role_arn, project={project}")
             return False, None, "project not configured for frontend deploy"
-    except Exception:
+    except ClientError:
         logger.warning("[deploy-frontend] trust denied: project verification failed", exc_info=True)
         return False, None, "project verification failed"
 
@@ -340,7 +343,7 @@ def _submit_deploy_frontend_approval(
                 ContentType=pf["content_type"],
             )
             staged_keys.append(pf["s3_key"])
-        except Exception as exc:
+        except ClientError as exc:
             # Rollback: delete already-staged objects
             for rk in staged_keys:
                 try:
@@ -412,7 +415,7 @@ def _submit_deploy_frontend_approval(
         # Cleanup DDB and staged objects to avoid orphan records
         try:
             table.delete_item(Key={"request_id": request_id})
-        except Exception as del_err:
+        except ClientError as del_err:
             logger.error("[DEPLOY-FRONTEND] DDB cleanup failed for %s: %s", request_id, del_err)
         for rk in staged_keys:
             try:
@@ -510,7 +513,7 @@ def _execute_deploy_frontend_approved(
                 ContentType=pf["content_type"],
             )
             staged_keys.append(pf["s3_key"])
-        except Exception as exc:
+        except ClientError as exc:
             # Rollback: delete already-staged objects
             for rk in staged_keys:
                 try:
@@ -532,7 +535,7 @@ def _execute_deploy_frontend_approved(
             s3_target = get_s3_client(role_arn=deploy_role_arn, session_name=f"bouncer-deploy-{request_id[:16]}")
         else:
             s3_target = get_s3_client()
-    except Exception as exc:
+    except ClientError as exc:
         logger.error("[DEPLOY-FRONTEND] Trust deploy AssumeRole failed for %s: %s", deploy_role_arn, exc)
         return mcp_result(req_id, {
             "content": [{"type": "text", "text": json.dumps({
@@ -565,7 +568,7 @@ def _execute_deploy_frontend_approved(
             )
             deployed.append(filename)
             logger.info("[DEPLOY-FRONTEND] Trust deploy file %s -> %s", filename, frontend_bucket)
-        except Exception as exc:
+        except ClientError as exc:
             logger.error("[DEPLOY-FRONTEND] Trust deploy failed for %s: %s", filename, exc)
             failed.append({"filename": filename, "reason": str(exc)})
 
@@ -583,7 +586,7 @@ def _execute_deploy_frontend_approved(
                 },
             )
             logger.info("[DEPLOY-FRONTEND] Trust deploy CloudFront invalidation created for %s", distribution_id)
-        except Exception as exc:
+        except ClientError as exc:
             logger.error("[DEPLOY-FRONTEND] Trust deploy CloudFront invalidation failed: %s", exc)
             cf_invalidation_failed = True
 
@@ -628,7 +631,7 @@ def _execute_deploy_frontend_approved(
             "ttl": now + 30 * 24 * 3600,  # 30 days
         }
         deployer_history_table.put_item(Item=history_item)
-    except Exception as exc:
+    except ClientError as exc:
         logger.error("[DEPLOY-FRONTEND] Trust deploy history write failed for %s: %s", request_id, exc)
 
     # 9. Send silent trust notification

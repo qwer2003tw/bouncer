@@ -90,7 +90,7 @@ def evaluate_command(
         if enable_sequence_analysis:
             try:
                 sequence_modifier, _seq_reason = get_sequence_risk_modifier(source, command)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning(f"Sequence analysis failed: {e}")
                 # 序列分析失敗不影響主流程
 
@@ -124,7 +124,7 @@ def evaluate_command(
             reason=reason_text,
         )
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         # Fail-closed: 任何錯誤都 fallback 到人工審批
         logger.error(f"Risk evaluation failed: {e}")
         fallback_result = RiskResult(

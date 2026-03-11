@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 
+from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
 import db as _db
 from boto3.dynamodb.conditions import Key
@@ -576,7 +577,7 @@ def record_command(
             account_id=account_id,
         )
 
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"[SequenceAnalyzer] Failed to record command: {e}")
         return None
 
@@ -627,7 +628,7 @@ def get_recent_commands(
 
         return records
 
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"[SequenceAnalyzer] Failed to get recent commands: {e}")
         return []
 
@@ -668,7 +669,7 @@ def analyze_sequence(
     # 取得歷史命令
     try:
         history = get_recent_commands(source, minutes=history_minutes)
-    except Exception as e:
+    except ClientError as e:
         # 無法取得歷史，保守處理
         return SequenceAnalysis(
             has_prior_query=False,
@@ -754,6 +755,6 @@ def get_sequence_risk_modifier(
     try:
         analysis = analyze_sequence(source, command)
         return analysis.risk_modifier, analysis.reason
-    except Exception as e:
+    except ClientError as e:
         # 分析失敗，不調整風險
         return 0.0, f"序列分析失敗: {e}"

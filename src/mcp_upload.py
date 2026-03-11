@@ -5,12 +5,14 @@ UploadContext + upload step functions + mcp_tool_upload() + mcp_tool_upload_batc
 Also includes _format_size_human().
 """
 
+import binascii
 import json
 import time
 from aws_clients import get_s3_client
 from dataclasses import dataclass
 from typing import Optional
 
+from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
 
 from utils import mcp_result, generate_request_id, generate_display_summary, sanitize_filename
@@ -71,7 +73,7 @@ def _verify_upload(s3_client, bucket: str, key: str, filename: str) -> UploadVer
             verified=True,
             s3_size=s3_size,
         )
-    except Exception as exc:
+    except ClientError as exc:
         logger.warning(
             "[UPLOAD VERIFY] head_object failed for %s: %s",
             s3_uri,
@@ -161,7 +163,7 @@ def _parse_upload_request(req_id, arguments: dict) -> 'dict | UploadContext':
     try:
         content_bytes = base64.b64decode(content_b64)
         content_size = len(content_bytes)
-    except Exception as e:
+    except (binascii.Error, ValueError) as e:
         return mcp_result(req_id, {
             'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': f'Invalid base64 content: {str(e)}'})}],
             'isError': True
@@ -351,7 +353,7 @@ def _check_upload_trust(ctx: UploadContext) -> Optional[dict]:
             }]
         })
 
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"[TRUST UPLOAD] Execution error: {e}")
         return None  # Fall through to human approval
 
@@ -391,7 +393,7 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
             Body=content_bytes,
             ContentType=ctx.content_type,
         )
-    except Exception as e:
+    except ClientError as e:
         return mcp_result(ctx.req_id, {
             'content': [{'type': 'text', 'text': json.dumps({
                 'status': 'error',
@@ -454,11 +456,11 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
         tg_result = _telegram.send_telegram_message(message, keyboard)
         if not (tg_result and tg_result.get('ok')):
             raise RuntimeError("Telegram notification returned failure (ok=False or empty response)")
-    except Exception as tg_err:
+    except (OSError, TimeoutError, ConnectionError, RuntimeError) as tg_err:
         # Cleanup DDB to prevent orphan pending record
         try:
             table.delete_item(Key={'request_id': ctx.request_id})
-        except Exception as del_err:
+        except ClientError as del_err:
             logger.error(f"[ORPHAN CLEANUP] Failed to delete DDB record {ctx.request_id}: {del_err}")
         logger.error(f"[ORPHAN CLEANUP] Telegram notification failed for upload {ctx.request_id}: {tg_err}")
         return mcp_result(ctx.req_id, {
@@ -696,7 +698,7 @@ def _preprocess_upload_files(req_id: str, files: list) -> tuple:
 
         try:
             content_bytes = base64.b64decode(content_b64)
-        except Exception:
+        except (binascii.Error, ValueError):
             return None, None, mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
                     'status': 'error',
@@ -820,7 +822,7 @@ def _try_trust_auto_approve_batch(
             return mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps(result_payload)}],
             })
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"[BATCH TRUST] Error: {e}")
 
     return None
@@ -855,12 +857,12 @@ def _submit_batch_for_approval(
                 Body=pf['content_bytes'], ContentType=pf['content_type'],
             )
             staged_keys.append(s3_key)
-        except Exception as e:
+        except ClientError as e:
             # Rollback staged objects
             for rk in staged_keys:
                 try:
                     s3_staging.delete_object(Bucket=staging_bucket, Key=rk)
-                except Exception:
+                except ClientError:
                     logger.warning("[UPLOAD-BATCH] Rollback cleanup failed for key=%s", rk)
             return mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
@@ -1009,7 +1011,7 @@ def execute_upload(request_id: str, approver: str) -> dict:
             # Cleanup staging object
             try:
                 s3.delete_object(Bucket=staging_bucket, Key=content_s3_key)
-            except Exception:
+            except ClientError:
                 logger.warning("[UPLOAD] Staging cleanup failed for key=%s (non-critical, TTL will handle it)", content_s3_key)
         else:
             # Legacy path: base64-decode from DDB item then upload
@@ -1048,7 +1050,7 @@ def execute_upload(request_id: str, approver: str) -> dict:
             's3_url': s3_url
         }
 
-    except Exception as e:
+    except ClientError as e:
         # 記錄失敗
         table.update_item(
             Key={'request_id': request_id},

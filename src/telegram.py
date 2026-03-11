@@ -4,6 +4,7 @@ Bouncer - Telegram API 模組
 """
 import json
 import time
+import urllib.error
 import urllib.request
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -97,7 +98,7 @@ def _telegram_request(method: str, data: dict, timeout: int = 5, json_body: bool
             elapsed = (time.time() - start_time) * 1000
             logger.debug(f"[TIMING] Telegram {method}: {elapsed:.0f}ms")
             return result
-    except Exception as e:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, json.JSONDecodeError, ValueError) as e:
         elapsed = (time.time() - start_time) * 1000
         logger.debug(f"[TIMING] Telegram {method} error ({elapsed:.0f}ms): {e}")
 
@@ -124,7 +125,7 @@ def _telegram_request(method: str, data: dict, timeout: int = 5, json_body: bool
                     elapsed2 = (time.time() - start_time) * 1000
                     logger.debug(f"[TIMING] Telegram {method} fallback OK ({elapsed2:.0f}ms)")
                     return result
-            except Exception as e2:
+            except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, json.JSONDecodeError, ValueError) as e2:
                 logger.debug(f"[TIMING] Telegram {method} fallback also failed: {e2}")
 
         return {}
@@ -278,7 +279,7 @@ def send_chat_action(action: str = 'typing') -> None:
             'chat_id': APPROVED_CHAT_ID,
             'action': action,
         })
-    except Exception as e:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
         logger.debug(f'[send_chat_action] ignored error: {e}')
 
 
@@ -327,7 +328,7 @@ def pin_message(message_id: int, disable_notification: bool = True) -> bool:
             'disable_notification': disable_notification,
         })
         return result.get('ok', False)
-    except Exception as e:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
         logger.warning(f"[deployer] Failed to pin message {message_id} (ignored): {e}")
         return False
 
@@ -347,6 +348,6 @@ def unpin_message(message_id: int) -> bool:
             'message_id': message_id,
         })
         return result.get('ok', False)
-    except Exception as e:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
         logger.warning(f"[deployer] Failed to unpin message {message_id} (ignored): {e}")
         return False

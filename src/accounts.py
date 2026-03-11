@@ -7,6 +7,7 @@ import json
 import urllib.request
 from typing import Optional, Dict
 
+from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
 import db as _db
 
@@ -63,7 +64,7 @@ def init_bot_commands():
         urllib.request.urlopen(req, timeout=5)  # nosec B310
         _bot_commands_initialized = True
         logger.info("Bot commands initialized")
-    except Exception as e:
+    except (OSError, TimeoutError, ConnectionError) as e:
         logger.error(f"Failed to set bot commands: {e}")
 
 
@@ -80,7 +81,7 @@ def init_default_account():
                 'enabled': True,
                 'created_at': int(time.time())
             })
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"Error initializing default account: {e}")
 
 
@@ -89,7 +90,7 @@ def get_account(account_id: str) -> Optional[Dict]:
     try:
         result = _get_accounts_table().get_item(Key={'account_id': account_id})
         return result.get('Item')
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"Error: {e}")
         return None
 
@@ -99,7 +100,7 @@ def list_accounts() -> list:
     try:
         result = _get_accounts_table().scan()
         return result.get('Items', [])
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"Error: {e}")
         return []
 

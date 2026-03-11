@@ -9,6 +9,8 @@ mcp_tool_get_page, mcp_tool_list_pending, mcp_tool_list_safelist
 import json
 import time
 
+from botocore.exceptions import ClientError
+
 
 from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native, generate_display_summary
 from accounts import (
@@ -56,7 +58,7 @@ def mcp_tool_status(req_id: str, arguments: dict) -> dict:
             }]
         })
 
-    except Exception as e:
+    except ClientError as e:
         return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
 
 
@@ -141,7 +143,7 @@ def mcp_tool_trust_status(req_id: str, arguments: dict) -> dict:
             }]
         })
 
-    except Exception as e:
+    except ClientError as e:
         return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
 
 
@@ -327,7 +329,7 @@ def mcp_tool_list_pending(req_id: str, arguments: dict) -> dict:
             }]
         })
 
-    except Exception as e:
+    except ClientError as e:
         return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
 
 

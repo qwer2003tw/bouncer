@@ -94,7 +94,7 @@ def extract_json_payloads(command: str) -> List[Tuple[str, dict]]:
             payloads = _extract_param_json(command, param)
             for payload in payloads:
                 results.append((param, payload))
-        except Exception:
+        except Exception:  # noqa: BLE001
             # Fail-open: 解析失敗跳過此參數
             continue
 
@@ -612,7 +612,7 @@ def scan_payload(
 
         try:
             result = check_fn(payload)
-        except Exception:
+        except Exception:  # noqa: BLE001
             # 個別 check 失敗不影響其他
             continue
 

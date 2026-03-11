@@ -6,6 +6,7 @@ Bouncer - Telegram 命令處理模組
 
 import time
 
+from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
 
 # 從其他模組導入
@@ -96,7 +97,7 @@ def handle_trust_command(chat_id: str) -> dict:
             KeyConditionExpression=Key('type').eq('trust_session') & Key('expires_at').gt(now)
         )
         items = resp.get('Items', [])
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"Error: {e}")
         items = []
 
@@ -129,7 +130,7 @@ def handle_pending_command(chat_id: str) -> dict:
             ScanIndexForward=False,
         )
         items = resp.get('Items', [])
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"Error: {e}")
         items = []
 
@@ -193,7 +194,7 @@ def handle_stats_command(chat_id: str, hours: int = 24) -> dict:
                     ExclusiveStartKey=resp['LastEvaluatedKey'],
                 )
                 items.extend(resp.get('Items', []))
-    except Exception as e:
+    except ClientError as e:
         logger.error(f"Error in stats: {e}")
         items = []
 
@@ -225,7 +226,7 @@ def handle_stats_command(chat_id: str, hours: int = 24) -> dict:
             dt = datetime.datetime.utcfromtimestamp(ts)
             hour_key = dt.strftime('%Y-%m-%dT%H')
             hourly[hour_key] = hourly.get(hour_key, 0) + 1
-        except Exception:
+        except (ValueError, OSError):
             continue
 
     # 尖峰時段

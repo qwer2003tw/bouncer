@@ -11,6 +11,7 @@ from io import StringIO
 from typing import Callable, List, Optional
 
 import boto3
+from botocore.exceptions import ClientError
 
 from constants import BLOCKED_PATTERNS, DANGEROUS_PATTERNS, AUTO_APPROVE_PREFIXES
 
@@ -317,7 +318,7 @@ def _is_safe_s3_cp(command: str) -> bool:
     """
     try:
         argv = aws_cli_split(_normalize_whitespace(command))
-    except Exception:
+    except ValueError:
         return False
 
     # 收集位置參數（非 --flag 開頭）
@@ -660,7 +661,7 @@ def _execute_locked(command: str, assume_role_arn: str = None) -> str:
                 os.environ['AWS_SECRET_ACCESS_KEY'] = creds['SecretAccessKey']
                 os.environ['AWS_SESSION_TOKEN'] = creds['SessionToken']
 
-            except Exception as e:
+            except ClientError as e:
                 return f'❌ Assume role 失敗: {str(e)}'
 
         # 捕獲 stdout/stderr
@@ -711,5 +712,5 @@ def _execute_locked(command: str, assume_role_arn: str = None) -> str:
         return '❌ awscli 模組未安裝'
     except ValueError as e:
         return f'❌ 命令格式錯誤: {str(e)}'
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — fail-closed AWS CLI execution wrapper
         return f'❌ 執行錯誤: {str(e)}'
