@@ -5,10 +5,8 @@ Regression test for Sprint 27-003: Notifier Lambda missing unpin on deploy compl
 """
 
 import sys
-import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
-import json
+from unittest.mock import patch
 
 import pytest
 
@@ -36,6 +34,66 @@ def mock_dynamodb():
     with patch('app.history_table') as mock_history, \
          patch('app.locks_table') as mock_locks:
         yield mock_history, mock_locks
+
+
+class TestPinTelegramMessage:
+    """Test pin_telegram_message function (Sprint 29-004)"""
+
+    def test_pin_message_success(self):
+        """Test successful pin"""
+        with patch('urllib.request.urlopen') as mock_urlopen, \
+             patch.object(app, 'TELEGRAM_BOT_TOKEN', 'test_token'), \
+             patch.object(app, 'TELEGRAM_CHAT_ID', '12345'):
+
+            app.pin_telegram_message(456)
+
+            # Verify the request was made
+            assert mock_urlopen.called
+            request = mock_urlopen.call_args[0][0]
+            assert 'pinChatMessage' in request.full_url
+
+            # Check request data
+            data = request.data.decode()
+            assert 'chat_id=12345' in data
+            assert 'message_id=456' in data
+            assert 'disable_notification=True' in data
+
+    def test_pin_message_no_token(self):
+        """Test pin with missing token (should skip silently)"""
+        with patch('urllib.request.urlopen') as mock_urlopen, \
+             patch.object(app, 'TELEGRAM_BOT_TOKEN', ''), \
+             patch.object(app, 'TELEGRAM_CHAT_ID', ''):
+
+            app.pin_telegram_message(456)
+
+            # Should not make any requests
+            assert not mock_urlopen.called
+
+    def test_pin_message_no_message_id(self):
+        """Test pin with None message_id (should skip silently)"""
+        with patch('urllib.request.urlopen') as mock_urlopen, \
+             patch.object(app, 'TELEGRAM_BOT_TOKEN', 'test_token'), \
+             patch.object(app, 'TELEGRAM_CHAT_ID', '12345'):
+
+            app.pin_telegram_message(None)
+
+            # Should not make any requests
+            assert not mock_urlopen.called
+
+    def test_pin_message_error_handling(self):
+        """Test pin error is caught and logged (best-effort)"""
+        with patch('urllib.request.urlopen') as mock_urlopen, \
+             patch.object(app, 'TELEGRAM_BOT_TOKEN', 'test_token'), \
+             patch.object(app, 'TELEGRAM_CHAT_ID', '12345'):
+
+            mock_urlopen.side_effect = Exception("Network error")
+
+            # Should not raise exception (best-effort)
+            try:
+                app.pin_telegram_message(456)
+                # If it doesn't raise, that's correct behavior
+            except Exception:
+                pytest.fail("pin_telegram_message should not raise exceptions")
 
 
 class TestUnpinTelegramMessage:
@@ -228,3 +286,62 @@ class TestHandleFailureUnpin:
 
             # Should return failed
             assert result['status'] == 'failed'
+
+
+class TestHandleStartPin:
+    """Test handle_start calls pin correctly (Sprint 29-004)"""
+
+    def test_handle_start_pins_message(self, mock_env, mock_dynamodb):
+        """Test that handle_start pins the progress message"""
+        mock_history, mock_locks = mock_dynamodb
+
+        with patch('app.send_telegram_message') as mock_send, \
+             patch('app.pin_telegram_message') as mock_pin:
+
+            # Mock message send
+            mock_send.return_value = 789
+
+            event = {
+                'deploy_id': 'test-deploy-123',
+                'project_id': 'test-project',
+                'branch': 'main'
+            }
+
+            result = app.handle_start(event)
+
+            # Should send message
+            assert mock_send.called
+
+            # Should pin the message
+            assert mock_pin.called
+            assert mock_pin.call_args[0][0] == 789
+
+            # Should return message_id
+            assert result['message_id'] == 789
+
+    def test_handle_start_no_message_id(self, mock_env, mock_dynamodb):
+        """Test handle_start with no message_id (should not crash)"""
+        mock_history, mock_locks = mock_dynamodb
+
+        with patch('app.send_telegram_message') as mock_send, \
+             patch('app.pin_telegram_message') as mock_pin:
+
+            # Mock message send returns None
+            mock_send.return_value = None
+
+            event = {
+                'deploy_id': 'test-deploy-123',
+                'project_id': 'test-project',
+                'branch': 'main'
+            }
+
+            result = app.handle_start(event)
+
+            # Should send message
+            assert mock_send.called
+
+            # Should NOT call pin (no message_id)
+            assert not mock_pin.called
+
+            # Should return None message_id
+            assert result['message_id'] is None

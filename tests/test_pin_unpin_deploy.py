@@ -5,15 +5,8 @@ Tests for pin_message() and unpin_message() functions and their integration
 with the deploy approval and completion flow.
 """
 
-import json
-import sys
-import os
 import time
-import pytest
-from unittest.mock import patch, MagicMock, call
-from decimal import Decimal
-from moto import mock_aws
-import boto3
+from unittest.mock import patch, MagicMock
 
 
 class TestPinMessageFunction:
@@ -111,11 +104,15 @@ class TestUnpinMessageFunction:
             assert result is False
 
 
-class TestDeployApprovalCallsPin:
-    """Integration test: deploy approval calls pin_message"""
+class TestDeployApprovalNoPin:
+    """Integration test: deploy approval does NOT pin (moved to notifier)"""
 
-    def test_deploy_approval_calls_pin(self, app_module):
-        """Test that deploy approval callback calls pin_message"""
+    def test_deploy_approval_does_not_call_pin(self, app_module):
+        """Test that deploy approval callback does NOT call pin_message (Sprint 29-004)
+
+        Pin has been moved from approval callback to notifier progress message.
+        This test verifies the approval flow no longer calls pin_message.
+        """
         import callbacks
         import deployer
         import telegram
@@ -133,7 +130,6 @@ class TestDeployApprovalCallsPin:
                 'commit_short': 'abc1234',
                 'commit_message': 'feat: add feature',
             }
-            mock_pin.return_value = True
 
             # Create test request
             request_id = 'deploy_pin_test'
@@ -143,7 +139,7 @@ class TestDeployApprovalCallsPin:
                 'branch': 'main',
                 'stack_name': 'test-stack',
                 'source': 'mcp',
-                'reason': 'testing pin',
+                'reason': 'testing no pin',
                 'context': '',
             }
 
@@ -156,55 +152,14 @@ class TestDeployApprovalCallsPin:
                 user_id='user123'
             )
 
-            # Verify pin_message was called with correct message_id
-            mock_pin.assert_called_once_with(99999, disable_notification=True)
+            # Verify pin_message was NOT called (moved to notifier)
+            mock_pin.assert_not_called()
 
-            # Verify deploy record was updated with telegram_message_id
+            # Verify deploy record was still updated with telegram_message_id
             assert mock_update_record.called
             update_call = mock_update_record.call_args_list[0]
             assert update_call[0][0] == 'deploy-test123'
             assert update_call[0][1]['telegram_message_id'] == 99999
-
-    def test_deploy_approval_pin_failure_does_not_block(self, app_module):
-        """Test that pin_message failure doesn't block deploy approval"""
-        import callbacks
-        import deployer
-        import telegram
-
-        with patch.object(deployer, 'start_deploy') as mock_start_deploy, \
-             patch.object(callbacks, 'update_message'), \
-             patch.object(callbacks, 'answer_callback'), \
-             patch.object(telegram, 'pin_message') as mock_pin:
-
-            # Mock successful deploy but pin failure
-            mock_start_deploy.return_value = {
-                'status': 'started',
-                'deploy_id': 'deploy-test456',
-            }
-            mock_pin.side_effect = Exception('Pin failed')
-
-            item = {
-                'project_id': 'test-project',
-                'project_name': 'Test Project',
-                'branch': 'main',
-                'stack_name': 'test-stack',
-                'source': 'mcp',
-                'reason': 'testing pin failure',
-                'context': '',
-            }
-
-            # Should not raise exception
-            result = callbacks.handle_deploy_callback(
-                action='approve',
-                request_id='deploy_pin_fail_test',
-                item=item,
-                message_id=88888,
-                callback_id='cb_test2',
-                user_id='user456'
-            )
-
-            # Deploy should still succeed
-            assert result['statusCode'] == 200
 
 
 class TestDeployCompleteCallsUnpin:

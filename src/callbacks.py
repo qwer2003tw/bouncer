@@ -751,13 +751,6 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
                 except Exception as e:
                     logger.warning(f"[deploy] Failed to store telegram_message_id (ignored): {e}")
 
-            # Pin the message (best-effort, failure doesn't block deploy)
-            try:
-                from telegram import pin_message
-                pin_message(message_id, disable_notification=True)
-            except Exception as e:
-                logger.warning(f"[deploy] Failed to pin message (ignored): {e}")
-
     elif action == 'deny':
         answer_callback(callback_id, '❌ 已拒絕')
         _update_request_status(table, request_id, 'denied', user_id)
