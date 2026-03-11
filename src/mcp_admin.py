@@ -97,28 +97,23 @@ def mcp_tool_trust_status(req_id: str, arguments: dict) -> dict:
     now = int(time.time())
 
     try:
+        # Use type-expires-at-index GSI: query by type='trust_session' and expires_at > now
+        # This replaces full-table scan and is O(active sessions) instead of O(table size).
+        query_kwargs = {
+            'IndexName': 'type-expires-at-index',
+            'KeyConditionExpression': '#type = :type AND expires_at > :now',
+            'ExpressionAttributeNames': {'#type': 'type'},
+            'ExpressionAttributeValues': {
+                ':type': 'trust_session',
+                ':now': now,
+            },
+        }
         if source:
-            # 查詢特定 source 的信任時段
-            response = table.scan(
-                FilterExpression='#type = :type AND #src = :source AND expires_at > :now',
-                ExpressionAttributeNames={'#type': 'type', '#src': 'source'},
-                ExpressionAttributeValues={
-                    ':type': 'trust_session',
-                    ':source': source,
-                    ':now': now
-                }
-            )
-        else:
-            # 查詢所有活躍的信任時段
-            response = table.scan(
-                FilterExpression='#type = :type AND expires_at > :now',
-                ExpressionAttributeNames={'#type': 'type'},
-                ExpressionAttributeValues={
-                    ':type': 'trust_session',
-                    ':now': now
-                }
-            )
+            query_kwargs['FilterExpression'] = '#src = :source'
+            query_kwargs['ExpressionAttributeNames']['#src'] = 'source'
+            query_kwargs['ExpressionAttributeValues'][':source'] = source
 
+        response = table.query(**query_kwargs)
         items = response.get('Items', [])
 
         # 格式化輸出

@@ -35,6 +35,8 @@ def mock_dynamodb():
                 {'AttributeName': 'status', 'AttributeType': 'S'},
                 {'AttributeName': 'created_at', 'AttributeType': 'N'},
                 {'AttributeName': 'source', 'AttributeType': 'S'},
+                {'AttributeName': 'type', 'AttributeType': 'S'},
+                {'AttributeName': 'expires_at', 'AttributeType': 'N'},
             ],
             GlobalSecondaryIndexes=[
                 {
@@ -52,7 +54,15 @@ def mock_dynamodb():
                         {'AttributeName': 'created_at', 'KeyType': 'RANGE'}
                     ],
                     'Projection': {'ProjectionType': 'ALL'}
-                }
+                },
+                {
+                    'IndexName': 'type-expires-at-index',
+                    'KeySchema': [
+                        {'AttributeName': 'type', 'KeyType': 'HASH'},
+                        {'AttributeName': 'expires_at', 'KeyType': 'RANGE'}
+                    ],
+                    'Projection': {'ProjectionType': 'ALL'}
+                },
             ],
             BillingMode='PAY_PER_REQUEST'
         )
