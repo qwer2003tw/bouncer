@@ -19,6 +19,7 @@ import time
 from typing import Optional
 
 import boto3
+from aws_clients import get_s3_client
 
 from constants import DEFAULT_ACCOUNT_ID, APPROVAL_TTL_BUFFER, UPLOAD_TIMEOUT
 from db import table
@@ -302,7 +303,7 @@ def _submit_deploy_frontend_approval(
         total_size += file_size
 
     # 2. Stage files to S3
-    s3 = boto3.client("s3")
+    s3 = get_s3_client()
     staged_keys = []
 
     for pf in processed_files:

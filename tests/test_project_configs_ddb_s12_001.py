@@ -263,12 +263,10 @@ class TestDeployFrontendWithDDBConfig:
         mock_notif.message_id = 12345
 
         with patch('mcp_deploy_frontend._get_frontend_config', return_value=ddb_config), \
-             patch('mcp_deploy_frontend.boto3') as mock_b3, \
+             patch('mcp_deploy_frontend.get_s3_client', return_value=mock_s3), \
              patch('mcp_deploy_frontend.table') as mock_table, \
              patch('mcp_deploy_frontend.send_deploy_frontend_notification', return_value=mock_notif), \
              patch('mcp_deploy_frontend.post_notification_setup', create=True):
-
-            mock_b3.client.return_value = mock_s3
 
             r = self._call({
                 "project": "ztp-files",
@@ -364,11 +362,9 @@ class TestDeployFrontendWithDDBConfig:
         mock_approval_table.put_item.side_effect = lambda Item: written_items.append(Item)
 
         with patch('mcp_deploy_frontend._get_frontend_config', return_value=ddb_config), \
-             patch('mcp_deploy_frontend.boto3') as mock_b3, \
+             patch('mcp_deploy_frontend.get_s3_client', return_value=mock_s3), \
              patch('mcp_deploy_frontend.table', mock_approval_table), \
              patch('mcp_deploy_frontend.send_deploy_frontend_notification', return_value=mock_notif):
-
-            mock_b3.client.return_value = mock_s3
 
             self._call({
                 "project": "custom-app",

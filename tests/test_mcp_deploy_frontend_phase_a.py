@@ -229,12 +229,11 @@ class TestHappyPath:
         mock_notif_result.ok = True
         mock_notif_result.message_id = 12345
 
-        with patch("mcp_deploy_frontend.boto3") as mock_boto3, \
+        with patch("mcp_deploy_frontend.get_s3_client", return_value=mock_s3), \
              patch("mcp_deploy_frontend.table", mock_table), \
              patch("mcp_deploy_frontend._get_frontend_config", return_value=_ZTP_FRONTEND_CONFIG), \
              patch("mcp_deploy_frontend.send_deploy_frontend_notification", return_value=mock_notif_result) as mock_notif, \
              patch("notifications.post_notification_setup") as mock_pns:
-            mock_boto3.client.return_value = mock_s3
             result = _call({
                 "project": "ztp-files",
                 "files": files,
@@ -326,9 +325,9 @@ class TestRollback:
         mock_s3.put_object.side_effect = Exception("S3 error")
         mock_table = MagicMock()
 
-        with patch("mcp_deploy_frontend.boto3") as mock_boto3, \
-             patch("mcp_deploy_frontend.table", mock_table):
-            mock_boto3.client.return_value = mock_s3
+        with patch("mcp_deploy_frontend.get_s3_client", return_value=mock_s3), \
+             patch("mcp_deploy_frontend.table", mock_table), \
+             patch("mcp_deploy_frontend._get_frontend_config", return_value=_ZTP_FRONTEND_CONFIG):
             result = _call({"project": "ztp-files", "files": files, "source": "bot", "trust_scope": "ts"})
 
         body = _parse(result)
@@ -345,10 +344,10 @@ class TestRollback:
         mock_notif_result.ok = False
         mock_notif_result.message_id = None
 
-        with patch("mcp_deploy_frontend.boto3") as mock_boto3, \
+        with patch("mcp_deploy_frontend.get_s3_client", return_value=mock_s3), \
              patch("mcp_deploy_frontend.table", mock_table), \
+             patch("mcp_deploy_frontend._get_frontend_config", return_value=_ZTP_FRONTEND_CONFIG), \
              patch("mcp_deploy_frontend.send_deploy_frontend_notification", return_value=mock_notif_result):
-            mock_boto3.client.return_value = mock_s3
             result = _call({"project": "ztp-files", "files": files, "source": "bot", "trust_scope": "ts"})
 
         body = _parse(result)
@@ -434,12 +433,11 @@ class TestDeployRoleArnPhaseA:
         mock_notif_result.ok = True
         mock_notif_result.message_id = 12345
 
-        with patch("mcp_deploy_frontend.boto3") as mock_boto3, \
+        with patch("mcp_deploy_frontend.get_s3_client", return_value=mock_s3), \
              patch("mcp_deploy_frontend.table", mock_table), \
              patch("mcp_deploy_frontend._get_frontend_config", return_value=_ZTP_FRONTEND_CONFIG), \
              patch("mcp_deploy_frontend.send_deploy_frontend_notification", return_value=mock_notif_result), \
              patch("notifications.post_notification_setup"):
-            mock_boto3.client.return_value = mock_s3
             result = _call({
                 "project": "ztp-files",
                 "files": files,
@@ -472,12 +470,11 @@ class TestDeployRoleArnPhaseA:
         mock_notif_result.ok = True
         mock_notif_result.message_id = 42
 
-        with patch("mcp_deploy_frontend.boto3") as mock_boto3, \
+        with patch("mcp_deploy_frontend.get_s3_client", return_value=mock_s3), \
              patch("mcp_deploy_frontend.table", mock_table), \
              patch("mcp_deploy_frontend._get_frontend_config", return_value=config_without_role), \
              patch("mcp_deploy_frontend.send_deploy_frontend_notification", return_value=mock_notif_result), \
              patch("notifications.post_notification_setup"):
-            mock_boto3.client.return_value = mock_s3
             _call({
                 "project": "test-project",
                 "files": files,

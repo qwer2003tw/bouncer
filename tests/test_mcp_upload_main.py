@@ -269,16 +269,15 @@ class TestCrossAccountUploadExecution:
             'status': 'pending_approval'
         })
 
-        with patch('boto3.client') as mock_boto:
-            mock_s3 = MagicMock()
-            mock_s3.meta.region_name = 'us-east-1'
-            mock_boto.return_value = mock_s3
-
+        mock_s3 = MagicMock()
+        mock_s3.meta.region_name = 'us-east-1'
+        with patch('mcp_upload.get_s3_client', return_value=mock_s3) as mock_factory:
             result = app_module.execute_upload(request_id, 'test-approver')
 
             assert result['success'] is True
-            # Should NOT have called sts assume_role
-            mock_boto.assert_called_once_with('s3')
+            # Called with role_arn=None (no assume role)
+            mock_factory.assert_called_once()
+            assert mock_factory.call_args[1].get('role_arn') is None
             mock_s3.put_object.assert_called_once()
 
     def test_execute_upload_with_assume_role(self, app_module):
@@ -308,19 +307,13 @@ class TestCrossAccountUploadExecution:
         mock_s3 = MagicMock()
         mock_s3.meta.region_name = 'us-east-1'
 
-        def mock_client(service, **kwargs):
-            if service == 'sts':
-                return mock_sts
-            return mock_s3
-
-        with patch('boto3.client', side_effect=mock_client):
+        with patch('mcp_upload.get_s3_client', return_value=mock_s3) as mock_factory:
             result = app_module.execute_upload(request_id, 'test-approver')
 
             assert result['success'] is True
-            mock_sts.assume_role.assert_called_once_with(
-                RoleArn='arn:aws:iam::222222222222:role/BouncerRole',
-                RoleSessionName='bouncer-upload'
-            )
+            # get_s3_client called with role_arn
+            mock_factory.assert_called_once()
+            assert mock_factory.call_args[1].get('role_arn') == 'arn:aws:iam::222222222222:role/BouncerRole'
             mock_s3.put_object.assert_called_once()
 
 
@@ -1309,8 +1302,8 @@ class TestUploadBatchCrossAccountFix:
         }
 
         # With @mock_aws, the assume_role call will use fake AWS creds.
-        # Patch get_s3_client to use the mocked boto3 clients instead of STS.
-        with patch('aws_clients.get_s3_client') as mock_get_s3:
+        # Patch get_s3_client in callbacks module (imported at module level)
+        with patch('callbacks.get_s3_client') as mock_get_s3:
             s3_staging_mock = boto3.client('s3', region_name='us-east-1')
             s3_target_mock = boto3.client('s3', region_name='us-east-1')
 
@@ -1394,7 +1387,7 @@ class TestUploadBatchCrossAccountFix:
             # No assume_role key
         }
 
-        with patch('aws_clients.get_s3_client') as mock_get_s3:
+        with patch('callbacks.get_s3_client') as mock_get_s3:
             s3_client = boto3.client('s3', region_name='us-east-1')
             mock_get_s3.return_value = s3_client
 
@@ -1529,7 +1522,7 @@ class TestUploadBatchCrossAccountFix:
             'status': 'pending_approval',
         }
 
-        with patch('aws_clients.get_s3_client') as mock_get_s3:
+        with patch('callbacks.get_s3_client') as mock_get_s3:
             mock_s3 = MagicMock()
             mock_s3.get_object.return_value = {'Body': MagicMock(read=lambda: b'data')}
             mock_get_s3.return_value = mock_s3

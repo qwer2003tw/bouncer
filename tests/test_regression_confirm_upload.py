@@ -309,11 +309,10 @@ def test_s3_client_error_returns_error(mocked_aws):
         "list_objects_v2",
         side_effect=client_error,
     ):
-        # We need to patch at module level
-        with patch("mcp_confirm.boto3") as mock_boto3:
-            mock_s3 = MagicMock()
-            mock_boto3.client.return_value = mock_s3
-            mock_s3.list_objects_v2.side_effect = client_error
+    # We need to patch at module level
+        mock_s3 = MagicMock()
+        mock_s3.list_objects_v2.side_effect = client_error
+        with patch("mcp_confirm.get_s3_client", return_value=mock_s3) as _:
 
             result = mc.handle_confirm_upload({
                 "_req_id": "req-001",
@@ -333,10 +332,9 @@ def test_s3_generic_exception_returns_error(mocked_aws):
     import mcp_confirm as mc
     importlib.reload(mc)
 
-    with patch("mcp_confirm.boto3") as mock_boto3:
-        mock_s3 = MagicMock()
-        mock_boto3.client.return_value = mock_s3
-        mock_s3.list_objects_v2.side_effect = RuntimeError("connection reset")
+    mock_s3 = MagicMock()
+    mock_s3.list_objects_v2.side_effect = RuntimeError("connection reset")
+    with patch("mcp_confirm.get_s3_client", return_value=mock_s3) as _:
 
         result = mc.handle_confirm_upload({
             "_req_id": "req-001",

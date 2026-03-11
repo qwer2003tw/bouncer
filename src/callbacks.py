@@ -5,7 +5,7 @@ Bouncer - Telegram Callback 處理模組
 """
 
 import time
-import boto3 as _boto3
+from aws_clients import get_s3_client
 from aws_lambda_powertools import Logger
 
 
@@ -876,7 +876,6 @@ def _setup_callback_s3_clients(assume_role, table, request_id: str, user_id: str
         dict: Error response on failure
     """
     try:
-        from aws_clients import get_s3_client
         s3_staging = get_s3_client(role_arn=None, session_name='bouncer-batch-upload-staging')
         s3_target = get_s3_client(role_arn=assume_role, session_name='bouncer-batch-upload')
         return (s3_staging, s3_target)
@@ -1280,10 +1279,9 @@ def _assume_deploy_role(deploy_role_arn: str, request_id: str, files_manifest: l
     import json as _json
 
     if not deploy_role_arn:
-        return _boto3.client('s3'), None
+        return get_s3_client(), None
 
     try:
-        from aws_clients import get_s3_client
         s3_target = get_s3_client(role_arn=deploy_role_arn, session_name=f"bouncer-deploy-{request_id[:16]}")
         return s3_target, None
     except Exception as e:
@@ -1583,7 +1581,7 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
         return error_response
 
     # 2. Deploy files to frontend bucket
-    s3_staging = _boto3.client('s3')
+    s3_staging = get_s3_client()
     deployed, failed = _deploy_files_to_frontend(
         files_manifest, s3_staging, s3_target, request_id, message_id, params, user_id
     )

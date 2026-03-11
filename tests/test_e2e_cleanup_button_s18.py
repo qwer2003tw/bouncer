@@ -418,11 +418,10 @@ class TestE2ECleanupDeployFrontendPath:
         ]
 
         with patch('mcp_deploy_frontend._get_frontend_config', return_value=ddb_config), \
-             patch('mcp_deploy_frontend.boto3') as mock_b3, \
+             patch('mcp_deploy_frontend.get_s3_client', return_value=mock_s3), \
              patch('mcp_deploy_frontend.table', mock_dbtable), \
              patch('mcp_deploy_frontend.send_deploy_frontend_notification', return_value=mock_notif), \
              patch('notifications.post_notification_setup', mock_post_setup):
-            mock_b3.client.return_value = mock_s3
             from mcp_deploy_frontend import mcp_tool_deploy_frontend
             mcp_tool_deploy_frontend('req-e2e-df-001', {
                 'project': 'test-project',
