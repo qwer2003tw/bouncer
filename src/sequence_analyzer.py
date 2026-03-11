@@ -549,6 +549,7 @@ def record_command(
 
         # 寫入 DynamoDB
         table = _get_history_table()
+        created_at_unix = int(time.time())
         item = {
             'pk': f'source#{source_hash}',
             'sk': f'ts#{timestamp}',
@@ -559,6 +560,8 @@ def record_command(
             'resource_ids': resource_ids,
             'account_id': account_id,
             'ttl': ttl,
+            'item_type': 'CMD',
+            'created_at': created_at_unix,
         }
 
         table.put_item(Item=item)

@@ -96,6 +96,18 @@ def mock_ddb(aws_env):
             KeySchema=[{"AttributeName": "request_id", "KeyType": "HASH"}],
             AttributeDefinitions=[
                 {"AttributeName": "request_id", "AttributeType": "S"},
+                {"AttributeName": "item_type", "AttributeType": "S"},
+                {"AttributeName": "created_at", "AttributeType": "N"},
+            ],
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": "type-created_at-index",
+                    "KeySchema": [
+                        {"AttributeName": "item_type", "KeyType": "HASH"},
+                        {"AttributeName": "created_at", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
             ],
             BillingMode="PAY_PER_REQUEST",
         )
@@ -123,6 +135,9 @@ def _seed_cmd_history(cmd_tbl, items):
     """Bulk-write items to the command-history table."""
     with cmd_tbl.batch_writer() as batch:
         for item in items:
+            # Ensure item_type field is present for GSI
+            if "item_type" not in item:
+                item["item_type"] = "CMD"
             batch.put_item(Item=item)
 
 
