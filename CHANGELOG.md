@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.27.0] - 2026-03-11
+
+### Refactored
+- `src/deployer.py` — 6 silent bare except blocks → typed `ClientError`/`Exception` + `logger.exception()` with structured context (project_id, deploy_id) (#sprint28-001)
+- `src/grant.py`, `src/risk_scorer.py`, `src/smart_approval.py`, `src/mcp_confirm.py` — Migrated from stdlib `logging` to aws-lambda-powertools `Logger` for structured JSON logs (#sprint28-002)
+- `src/mcp_history.py` — 4 bare except blocks → typed exceptions (`binascii.Error`, `UnicodeDecodeError`, `json.JSONDecodeError`, `TypeError`, `ValueError`, `decimal.InvalidOperation`) + noqa annotations (#sprint28-003)
+- `src/mcp_deploy_frontend.py` — 3 bare except blocks → noqa annotations with warning log (best-effort cleanup patterns) (#sprint28-003)
+
+### Tests
+- Backend: 1974 tests, coverage ≥ 75%
+
 ## [3.16.0] - 2026-03-08
 
 ### Added
