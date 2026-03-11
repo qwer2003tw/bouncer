@@ -975,7 +975,7 @@ def mcp_tool_deploy_status(req_id: str, arguments: dict) -> dict:
     record = get_deploy_status(deploy_id)
 
     # TTL expiry check: if the approval record still exists but TTL has passed → expired
-    if record.get('status') == 'pending':
+    if record.get('status') == 'pending_approval':
         ttl = int(record.get('ttl', 0))
         if ttl and int(time.time()) > ttl:
             record = {
@@ -989,7 +989,7 @@ def mcp_tool_deploy_status(req_id: str, arguments: dict) -> dict:
     # not_found / expired = informational (agent can decide what to do); never set isError
     is_error = (
         'error' in record
-        and record.get('status') not in ('pending', 'PENDING', 'RUNNING', 'SUCCESS', 'FAILED', 'not_found', 'expired')
+        and record.get('status') not in ('pending', 'pending_approval', 'PENDING', 'RUNNING', 'SUCCESS', 'FAILED', 'not_found', 'expired')
     )
 
     return mcp_result(req_id, {
