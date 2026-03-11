@@ -133,7 +133,7 @@ def _list_known_projects() -> list:
         for item in result.get('Items', []):
             if item.get('frontend_bucket'):
                 known.add(item['project_id'])
-    except Exception:
+    except Exception:  # noqa: BLE001 — fallback to empty list
         logger.warning("[DEPLOY-FRONTEND] Failed to list known projects from DDB, returning empty list", exc_info=True)
     return sorted(known)
 
@@ -320,7 +320,7 @@ def _submit_deploy_frontend_approval(
             for rk in staged_keys:
                 try:
                     s3.delete_object(Bucket=staging_bucket, Key=rk)
-                except Exception:
+                except Exception:  # noqa: BLE001 — best-effort cleanup
                     logger.warning("[DEPLOY-FRONTEND] Rollback cleanup failed for key=%s (non-critical)", rk, exc_info=True)
             return mcp_result(req_id, {
                 "content": [{"type": "text", "text": json.dumps({
@@ -392,7 +392,7 @@ def _submit_deploy_frontend_approval(
         for rk in staged_keys:
             try:
                 s3.delete_object(Bucket=staging_bucket, Key=rk)
-            except Exception:
+            except Exception:  # noqa: BLE001 — best-effort cleanup
                 logger.warning("[DEPLOY-FRONTEND] Notification-failure cleanup skipped for key=%s (non-critical)", rk, exc_info=True)
         return mcp_result(req_id, {
             "content": [{"type": "text", "text": json.dumps({

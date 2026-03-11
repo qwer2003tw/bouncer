@@ -6,6 +6,8 @@ bouncer_stats:   最近 24h 的統計資訊
 """
 
 import base64
+import binascii
+import decimal
 import json
 import logging
 import time
@@ -49,7 +51,7 @@ def _get_command_history_table(dynamodb=None):
         tbl = dynamodb.Table(COMMAND_HISTORY_TABLE_NAME)
         tbl.load()  # raises if the table doesn't exist
         return tbl
-    except Exception:
+    except Exception:  # noqa: BLE001 — table may not exist, caller handles None
         return None
 
 
@@ -65,7 +67,7 @@ def _decode_page_token(token: str) -> dict | None:
         raw = base64.urlsafe_b64decode(token.encode()).decode()
         data = json.loads(raw)
         return data
-    except Exception:
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, ValueError):  # noqa: BLE001 — invalid token returns None
         return None
 
 
@@ -76,7 +78,7 @@ def _compute_duration(item: dict) -> float | None:
         created_at = item.get("created_at")
         if approved_at and created_at:
             return round(float(Decimal(str(approved_at))) - float(Decimal(str(created_at))), 3)
-    except Exception:
+    except (TypeError, ValueError, decimal.InvalidOperation):  # noqa: BLE001 — duration optional
         logger.debug("[HISTORY] Failed to calculate decision_latency_ms (non-critical)", exc_info=True)
     return None
 
@@ -559,7 +561,7 @@ def _compute_hourly_breakdown(items: list, now_ts: int) -> dict:
             hour_key = dt.strftime("%Y-%m-%dT%H")
             if hour_key in breakdown:
                 breakdown[hour_key] += 1
-        except Exception:
+        except (TypeError, ValueError):  # noqa: BLE001 — skip invalid timestamps
             continue
 
     return breakdown
