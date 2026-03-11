@@ -3,7 +3,6 @@ Bouncer Deployer Tools
 MCP tools for SAM deployment
 """
 import json
-import logging
 import os
 import re
 import subprocess
@@ -15,8 +14,9 @@ from metrics import emit_metric
 from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native, generate_display_summary
 import db as _db
 import notifications
+from aws_lambda_powertools import Logger
 
-logger = logging.getLogger(__name__)
+logger = Logger(service="bouncer")
 
 # 環境變數
 PROJECTS_TABLE = os.environ.get('PROJECTS_TABLE', 'bouncer-projects')

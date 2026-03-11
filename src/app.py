@@ -11,7 +11,6 @@ Bouncer - Clawdbot AWS 命令審批執行系統
 import json
 import hashlib
 import hmac
-import logging
 import time
 import unicodedata
 
@@ -80,9 +79,9 @@ from constants import (  # noqa: F401
 
 # DynamoDB — canonical references in db.py; re-exported for backward compat
 from db import table, accounts_table  # noqa: F401
+from aws_lambda_powertools import Logger
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s %(name)s %(message)s')
-logger = logging.getLogger(__name__)
+logger = Logger(service="bouncer")
 
 
 # ============================================================================

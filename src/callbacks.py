@@ -5,8 +5,8 @@ Bouncer - Telegram Callback 處理模組
 """
 
 import time
-import logging
 import boto3 as _boto3
+from aws_lambda_powertools import Logger
 
 
 # 從其他模組導入
@@ -34,7 +34,7 @@ def _is_execute_failed(output: str) -> bool:
     return code is not None and code != 0
 
 
-logger = logging.getLogger(__name__)
+logger = Logger(service="bouncer")
 
 
 def _get_table():
