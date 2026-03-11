@@ -251,7 +251,11 @@ def list_projects() -> list:
     try:
         result = _get_projects_table().scan()
         return result.get('Items', [])
+    except ClientError:
+        logger.exception("[DEPLOYER] list_projects failed")
+        return []
     except Exception:
+        logger.exception("[DEPLOYER] list_projects failed")
         return []
 
 
@@ -260,7 +264,11 @@ def get_project(project_id: str) -> dict:
     try:
         result = _get_projects_table().get_item(Key={'project_id': project_id})
         return result.get('Item')
+    except ClientError:
+        logger.exception("[DEPLOYER] get_project failed", extra={"project_id": project_id})
+        return None
     except Exception:
+        logger.exception("[DEPLOYER] get_project failed", extra={"project_id": project_id})
         return None
 
 
@@ -290,7 +298,11 @@ def remove_project(project_id: str) -> bool:
     try:
         _get_projects_table().delete_item(Key={'project_id': project_id})
         return True
+    except ClientError:
+        logger.exception("[DEPLOYER] remove_project failed", extra={"project_id": project_id})
+        return False
     except Exception:
+        logger.exception("[DEPLOYER] remove_project failed", extra={"project_id": project_id})
         return False
 
 
@@ -323,7 +335,11 @@ def release_lock(project_id: str) -> bool:
     try:
         _get_locks_table().delete_item(Key={'project_id': project_id})
         return True
+    except ClientError:
+        logger.exception("[DEPLOYER] release_lock failed", extra={"project_id": project_id})
+        return False
     except Exception:
+        logger.exception("[DEPLOYER] release_lock failed", extra={"project_id": project_id})
         return False
 
 
@@ -344,7 +360,11 @@ def get_lock(project_id: str) -> dict:
             return None
 
         return item
+    except ClientError:
+        logger.exception("[DEPLOYER] get_lock failed", extra={"project_id": project_id})
+        return None
     except Exception:
+        logger.exception("[DEPLOYER] get_lock failed", extra={"project_id": project_id})
         return None
 
 
@@ -398,7 +418,11 @@ def get_deploy_record(deploy_id: str) -> dict:
     try:
         result = _get_history_table().get_item(Key={'deploy_id': deploy_id})
         return result.get('Item')
+    except ClientError:
+        logger.exception("[DEPLOYER] get_deploy_record failed", extra={"deploy_id": deploy_id})
+        return None
     except Exception:
+        logger.exception("[DEPLOYER] get_deploy_record failed", extra={"deploy_id": deploy_id})
         return None
 
 
