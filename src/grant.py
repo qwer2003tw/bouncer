@@ -28,12 +28,12 @@ Named placeholder 語意：
   aws s3 cp s3://bouncer-uploads-190825685292/{date}/{uuid}/*.html \\
       s3://ztp-files-dev-frontendbucket-nvvimv31xp3v/*.html
 """
-import logging
 import re
 import secrets
 import time
 from typing import Optional, Dict, List, Any
 
+from aws_lambda_powertools import Logger
 from botocore.exceptions import ClientError
 
 from db import table
@@ -47,7 +47,7 @@ from constants import (
     GRANT_APPROVAL_TIMEOUT,
 )
 
-logger = logging.getLogger(__name__)
+logger = Logger(service="bouncer")
 
 __all__ = [
     'normalize_command',

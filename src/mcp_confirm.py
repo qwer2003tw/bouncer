@@ -13,10 +13,10 @@ Design notes (Approach C):
 """
 
 import json
-import logging
 import re
 import time
 
+from aws_lambda_powertools import Logger
 from aws_clients import get_s3_client
 from botocore.exceptions import ClientError
 
@@ -24,7 +24,7 @@ from constants import STAGING_BUCKET
 from db import table
 from utils import mcp_result
 
-logger = logging.getLogger(__name__)
+logger = Logger(service="bouncer")
 
 
 # ---------------------------------------------------------------------------

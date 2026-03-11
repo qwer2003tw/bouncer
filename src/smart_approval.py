@@ -5,15 +5,14 @@ Bouncer - Smart Approval Module
 這個模組提供統一的 API 給 mcp_tools.py 使用，替換原有的 is_blocked/is_auto_approve 邏輯。
 """
 
-import logging
 from typing import Dict
-
+from aws_lambda_powertools import Logger
 
 from risk_scorer import calculate_risk, RiskCategory, RiskResult
 from utils import RiskFactor
 from sequence_analyzer import get_sequence_risk_modifier
 
-logger = logging.getLogger(__name__)
+logger = Logger(service="bouncer")
 
 __all__ = [
     'evaluate_command',
