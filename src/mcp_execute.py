@@ -96,7 +96,8 @@ def _safe_risk_category(smart_decision):
     try:
         cat = smart_decision.risk_result.category
         return cat.value if hasattr(cat, 'value') else cat
-    except Exception:
+    except (AttributeError, KeyError) as e:
+        logger.warning("[RISK] Failed to extract risk category: %s", e)
         return None
 
 
@@ -115,7 +116,8 @@ def _safe_risk_factors(smart_decision):
                 for k, v in factor.items()
             })
         return sanitized
-    except Exception:
+    except (AttributeError, KeyError, TypeError, ValueError) as e:
+        logger.warning("[RISK] Failed to extract/convert risk factors: %s", e)
         return None
 
 
@@ -385,7 +387,8 @@ def _extract_actual_decision(result: dict) -> str:
         data = json.loads(text)
         status = data.get('status', '')
         return _map_status_to_decision(status)
-    except Exception:
+    except (json.JSONDecodeError, KeyError, TypeError, IndexError) as e:
+        logger.warning("[SMART] Failed to parse response decision: %s", e)
         return 'unknown'
 
 
@@ -626,7 +629,7 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
                 f"\u2705 *結果：*\n```\n{result_preview}\n```"
             )
             send_telegram_message_silent(_notif_text)
-        except Exception:
+        except Exception:  # noqa: BLE001 — notification is best-effort
             logger.warning("[EXECUTE] Result notification failed (non-critical)", exc_info=True)
     else:
         logger.info(f"[EXECUTE] Skipped auto-approve notification for command: {ctx.command[:50]}...")
