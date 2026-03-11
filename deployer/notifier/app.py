@@ -8,7 +8,6 @@ import time
 import urllib.request
 import urllib.parse
 import boto3
-from decimal import Decimal
 
 # 環境變數
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
@@ -27,7 +26,7 @@ def lambda_handler(event, context):
     action = event.get('action', '')
     deploy_id = event.get('deploy_id', '')
     project_id = event.get('project_id', '')
-    
+
     if action == 'start':
         return handle_start(event)
     elif action == 'progress':
@@ -45,7 +44,7 @@ def handle_start(event):
     deploy_id = event.get('deploy_id', '')
     project_id = event.get('project_id', '')
     branch = event.get('branch', 'master')
-    
+
     text = (
         f"⏳ *部署開始*\n\n"
         f"📦 *專案：* {project_id}\n"
@@ -57,16 +56,20 @@ def handle_start(event):
         f"├── ⏳ sam build\n"
         f"└── ⏳ sam deploy"
     )
-    
+
     message_id = send_telegram_message(text)
-    
+
     # 更新歷史記錄
     update_history(deploy_id, {
         'status': 'RUNNING',
         'telegram_message_id': message_id,
         'phase': 'INITIALIZING'
     })
-    
+
+    # Pin the progress message (best-effort)
+    if message_id:
+        pin_telegram_message(message_id)
+
     return {'message_id': message_id}
 
 
@@ -77,11 +80,11 @@ def handle_progress(event):
     branch = event.get('branch', 'master')
     phase = event.get('phase', '')
     elapsed_seconds = event.get('elapsed_seconds', 0)
-    
+
     # 取得之前的 message_id
     history = get_history(deploy_id)
     message_id = history.get('telegram_message_id') if history else None
-    
+
     # 根據 phase 建立進度顯示
     phases = {
         'INITIALIZING': ('🔄', '⏳', '⏳', '⏳'),
@@ -89,9 +92,9 @@ def handle_progress(event):
         'BUILDING': ('✅', '✅', '🔄', '⏳'),
         'DEPLOYING': ('✅', '✅', '✅', '🔄'),
     }
-    
+
     icons = phases.get(phase, ('⏳', '⏳', '⏳', '⏳'))
-    
+
     text = (
         f"⏳ *部署進行中*\n\n"
         f"📦 *專案：* {project_id}\n"
@@ -104,18 +107,18 @@ def handle_progress(event):
         f"└── {icons[3]} sam deploy\n\n"
         f"⏱️ *已執行：* {format_duration(elapsed_seconds)}"
     )
-    
+
     if message_id:
         update_telegram_message(message_id, text)
     else:
         message_id = send_telegram_message(text)
-    
+
     # 更新歷史
     update_history(deploy_id, {
         'phase': phase,
         'telegram_message_id': message_id
     })
-    
+
     return {'message_id': message_id}
 
 
@@ -124,16 +127,16 @@ def handle_success(event):
     deploy_id = event.get('deploy_id', '')
     project_id = event.get('project_id', '')
     build_id = event.get('build_id', '')
-    
+
     # 取得歷史記錄
     history = get_history(deploy_id)
     message_id = history.get('telegram_message_id') if history else None
     started_at = history.get('started_at', 0) if history else 0
     branch = history.get('branch', 'master') if history else 'master'
-    
+
     # 計算時間
     duration = int(time.time()) - int(started_at) if started_at else 0
-    
+
     text = (
         f"✅ *部署成功！*\n\n"
         f"📦 *專案：* {project_id}\n"
@@ -146,7 +149,7 @@ def handle_success(event):
         f"└── ✅ sam deploy\n\n"
         f"⏱️ *總時間：* {format_duration(duration)}"
     )
-    
+
     if message_id:
         update_telegram_message(message_id, text)
         unpin_telegram_message(message_id)
@@ -172,24 +175,24 @@ def handle_failure(event):
     deploy_id = event.get('deploy_id', '')
     project_id = event.get('project_id', '')
     error = event.get('error', {})
-    
+
     # 取得歷史記錄
     history = get_history(deploy_id)
     message_id = history.get('telegram_message_id') if history else None
     started_at = history.get('started_at', 0) if history else 0
     branch = history.get('branch', 'master') if history else 'master'
     phase = history.get('phase', 'UNKNOWN') if history else 'UNKNOWN'
-    
+
     # 計算時間
     duration = int(time.time()) - int(started_at) if started_at else 0
-    
+
     # 解析錯誤訊息
     error_message = extract_error_message(error)
-    
+
     # 截斷錯誤訊息
     if len(error_message) > 500:
         error_message = error_message[:500] + '...'
-    
+
     text = (
         f"❌ *部署失敗*\n\n"
         f"📦 *專案：* {project_id}\n"
@@ -199,7 +202,7 @@ def handle_failure(event):
         f"📄 *錯誤：*\n```\n{error_message}\n```\n\n"
         f"⏱️ *執行時間：* {format_duration(duration)}"
     )
-    
+
     if message_id:
         update_telegram_message(message_id, text)
         unpin_telegram_message(message_id)
@@ -226,14 +229,14 @@ def send_telegram_message(text: str) -> int:
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("Telegram not configured")
         return 0
-    
+
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     data = {
         'chat_id': TELEGRAM_CHAT_ID,
         'text': text,
         'parse_mode': 'Markdown'
     }
-    
+
     try:
         req = urllib.request.Request(
             url,
@@ -270,6 +273,30 @@ def update_telegram_message(message_id: int, text: str):
         urllib.request.urlopen(req, timeout=10)
     except Exception as e:
         print(f"Telegram update error: {e}")
+
+
+def pin_telegram_message(message_id: int):
+    """Pin Telegram 訊息"""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID or not message_id:
+        return
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/pinChatMessage"
+    data = {
+        'chat_id': TELEGRAM_CHAT_ID,
+        'message_id': message_id,
+        'disable_notification': True
+    }
+
+    try:
+        req = urllib.request.Request(
+            url,
+            data=urllib.parse.urlencode(data).encode(),
+            method='POST'
+        )
+        urllib.request.urlopen(req, timeout=10)
+        print(f"Pinned message {message_id}")
+    except Exception as e:
+        print(f"Telegram pin error: {e}")
 
 
 def unpin_telegram_message(message_id: int):
@@ -311,7 +338,7 @@ def update_history(deploy_id: str, updates: dict):
         update_expr = 'SET ' + ', '.join(f'#{k} = :{k}' for k in updates.keys())
         expr_names = {f'#{k}': k for k in updates.keys()}
         expr_values = {f':{k}': v for k, v in updates.items()}
-        
+
         history_table.update_item(
             Key={'deploy_id': deploy_id},
             UpdateExpression=update_expr,
@@ -351,29 +378,29 @@ def extract_error_message(error) -> str:
     """從 Step Functions 錯誤中提取可讀訊息"""
     if not error:
         return 'Unknown error'
-    
+
     # 如果是字串，直接返回
     if isinstance(error, str):
         return error
-    
+
     # 如果是 dict，嘗試解析
     if isinstance(error, dict):
         # Step Functions 錯誤結構
         cause = error.get('Cause', '')
         error_type = error.get('Error', '')
-        
+
         # 嘗試解析 Cause（可能是 JSON 字串）
         if cause:
             try:
                 cause_obj = json.loads(cause) if isinstance(cause, str) else cause
-                
+
                 # CodeBuild 錯誤
                 if isinstance(cause_obj, dict):
                     build = cause_obj.get('Build', {})
                     if build:
                         status = build.get('BuildStatus', '')
                         phases = build.get('Phases', [])
-                        
+
                         # 找到失敗的 phase
                         for phase in phases:
                             if phase.get('PhaseStatus') == 'FAILED':
@@ -382,20 +409,20 @@ def extract_error_message(error) -> str:
                                 if contexts:
                                     msg = contexts[0].get('Message', '')
                                     return f"[{phase_type}] {msg}"
-                        
+
                         return f"Build {status}"
-                    
+
                     # 其他錯誤
                     return str(cause_obj)[:500]
             except (json.JSONDecodeError, TypeError):
                 pass
-            
+
             # 無法解析，返回原始 cause（截斷）
             return cause[:500] if len(cause) > 500 else cause
-        
+
         # 沒有 Cause，返回 Error type
         if error_type:
             return f"Error: {error_type}"
-    
+
     # 兜底
     return str(error)[:500]
