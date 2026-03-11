@@ -107,7 +107,7 @@ def handle_grant_approve(query: dict, grant_id: str, mode: str = 'all') -> dict:
         return response(200, {'ok': True})
 
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError) as e:
-        logger.error(f"[GRANT] handle_grant_approve error (mode={mode}): {e}")
+        logger.error(f"[GRANT] handle_grant_approve error (mode={mode}): {e}", extra={"src_module": "grant", "operation": "handle_grant_approve", "mode": mode, "error": str(e)})
         answer_callback(callback_id, f'❌ 批准失敗: {str(e)[:50]}')
         return response(500, {'error': str(e)})
 
@@ -148,7 +148,7 @@ def handle_grant_deny(query: dict, grant_id: str) -> dict:
         return response(200, {'ok': True})
 
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError) as e:
-        logger.error(f"[GRANT] handle_grant_deny error: {e}")
+        logger.error(f"[GRANT] handle_grant_deny error: {e}", extra={"src_module": "grant", "operation": "handle_grant_deny", "error": str(e)})
         answer_callback(callback_id, f'❌ 處理失敗: {str(e)[:50]}')
         return response(500, {'error': str(e)})
 
@@ -408,7 +408,7 @@ def _handle_trust_session(
         )
         pending_items = pending_resp.get('Items', [])
     except Exception:  # noqa: BLE001 — DDB query failure is non-fatal; logged with exc_info
-        logger.warning("[TRUST] Failed to query pending items for trust_scope=%s, skipping", trust_scope, exc_info=True)
+        logger.warning("Failed to query pending items", extra={"module": "trust", "operation": "query_pending", "trust_scope": trust_scope}, exc_info=True)
 
     pending_count = len(pending_items)
     if pending_count > 0:
@@ -423,8 +423,7 @@ def _handle_trust_session(
     try:
         _auto_execute_pending_requests(trust_scope, account_id, assume_role, trust_id, source)
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError) as e:
-        logger.error(f"[TRUST] Auto-execute pending error: {e}")
-
+        logger.error(f"[TRUST] Auto-execute pending error: {e}", extra={"src_module": "trust", "operation": "auto_execute_pending", "error": str(e)})
     return trust_line
 
 
@@ -1697,7 +1696,7 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
             from compliance_checker import check_compliance
             is_compliant, violation = check_compliance(cmd)
             if not is_compliant:
-                logger.warning(f"[TRUST][SEC-013] Pending request {req_id} failed compliance: {violation.rule_id if violation else 'unknown'}")
+                logger.warning("Pending request failed compliance", extra={"module": "trust", "sec_rule": "SEC-013", "request_id": req_id, "violation_rule": violation.rule_id if violation else "unknown"})
                 # 更新狀態為 compliance_rejected
                 now_rej = int(time.time())
                 table.update_item(
@@ -1768,4 +1767,4 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
         executed += 1
 
     if executed > 0:
-        logger.info(f"[TRUST] Auto-executed {executed} pending requests for trust_scope={trust_scope}")
+        logger.info("Auto-executed pending requests", extra={"module": "trust", "operation": "auto_execute_complete", "executed": executed, "trust_scope": trust_scope})

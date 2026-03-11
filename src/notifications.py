@@ -494,7 +494,6 @@ def send_grant_request_notification(
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
         logger.error(f"[GRANT] send_grant_request_notification error: {e}")
 
-
 def send_grant_execute_notification(
     command: str,
     grant_id: str,
@@ -539,8 +538,7 @@ def send_grant_execute_notification(
         _telegram.send_message_with_entities(text, entities, reply_markup=keyboard, silent=True)
 
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
-        logger.error(f"[GRANT] send_grant_execute_notification error: {e}")
-
+        logger.error(f"[GRANT] send_grant_execute_notification error: {e}", extra={"src_module": "grant", "operation": "send_grant_execute_notification", "error": str(e)})
 
 def send_grant_complete_notification(grant_id: str, reason: str) -> None:
     """發送 Grant Session 完成/過期通知（entities 模式，無 parse_mode）"""
@@ -556,8 +554,7 @@ def send_grant_complete_notification(grant_id: str, reason: str) -> None:
         _telegram.send_message_with_entities(text, entities, silent=True)
 
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
-        logger.error(f"[GRANT] send_grant_complete_notification error: {e}")
-
+        logger.error(f"[GRANT] send_grant_complete_notification error: {e}", extra={"src_module": "grant", "operation": "send_grant_complete_notification", "error": str(e)})
 
 def send_blocked_notification(
     command: str,

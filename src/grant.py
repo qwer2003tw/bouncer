@@ -192,7 +192,7 @@ def match_pattern(pattern: str, normalized_cmd: str) -> bool:
         compiled = compile_pattern(pattern)
         return bool(compiled.match(normalized_cmd))
     except (re.error, ValueError, TypeError) as e:
-        logger.error(f"[GRANT] match_pattern error for pattern={pattern!r}: {e}")
+        logger.error(f"[GRANT] match_pattern error for pattern={pattern!r}: {e}", extra={"src_module": "grant", "operation": "match_pattern", "pattern": repr(pattern), "error": str(e)})
         return False
 
 
@@ -215,7 +215,7 @@ def normalize_command(command: str) -> str:
         cmd = cmd.lower()
         return cmd
     except (ValueError, TypeError, AttributeError) as e:
-        logger.error(f"[GRANT] normalize_command error: {e}")
+        logger.error(f"[GRANT] normalize_command error: {e}", extra={"src_module": "grant", "operation": "normalize_command", "error": str(e)})
         return command.strip().lower() if command else ''
 
 
@@ -313,7 +313,7 @@ def create_grant_request(
     except ValueError:
         raise
     except ClientError as e:
-        logger.error(f"[GRANT] create_grant_request error: {e}")
+        logger.error(f"[GRANT] create_grant_request error: {e}", extra={"src_module": "grant", "operation": "create_grant_request", "error": str(e)})
         raise
 
 
@@ -380,13 +380,12 @@ def _precheck_command(
                 detail['category'] = 'requires_individual'
                 detail['block_reason'] = f'風險分數 {score} >= 66'
         except Exception as e:  # noqa: BLE001 — fail-open risk scoring
-            logger.error(f"[GRANT] risk scoring error: {e}")
+            logger.error(f"[GRANT] risk scoring error: {e}", extra={"src_module": "grant", "operation": "risk_scoring", "error": str(e)})
             # Fail-open for risk scoring: treat as grantable
             detail['risk_score'] = 0
 
     except Exception as e:  # noqa: BLE001 — fail-closed precheck
-        logger.error(f"[GRANT] precheck error for command '{command[:100]}': {e}")
-        # Fail-closed: 預檢失敗 → requires_individual
+        logger.error(f"[GRANT] precheck error for command '{command[:100]}': {e}", extra={"src_module": "grant", "operation": "risk_scoring", "error": str(e)})        # Fail-closed: 預檢失敗 → requires_individual
         detail['category'] = 'requires_individual'
         detail['block_reason'] = f'預檢失敗: {str(e)}'
 
@@ -411,7 +410,7 @@ def get_grant_session(grant_id: str) -> Optional[Dict]:
             return item
         return None
     except ClientError as e:
-        logger.error(f"[GRANT] get_grant_session error: {e}")
+        logger.error(f"[GRANT] get_grant_session error: {e}", extra={"src_module": "grant", "operation": "get_grant_session", "error": str(e)})
         return None
 
 
@@ -480,7 +479,7 @@ def approve_grant(grant_id: str, approved_by: str, mode: str = 'all') -> Optiona
         return grant
 
     except ClientError as e:
-        logger.error(f"[GRANT] approve_grant error: {e}")
+        logger.error(f"[GRANT] approve_grant error: {e}", extra={"src_module": "grant", "operation": "approve_grant", "error": str(e)})
         return None
 
 
@@ -505,7 +504,7 @@ def deny_grant(grant_id: str) -> bool:
         )
         return True
     except ClientError as e:
-        logger.error(f"[GRANT] deny_grant error: {e}")
+        logger.error(f"[GRANT] deny_grant error: {e}", extra={"src_module": "grant", "operation": "deny_grant", "error": str(e)})
         return False
 
 
@@ -530,7 +529,7 @@ def revoke_grant(grant_id: str) -> bool:
         )
         return True
     except ClientError as e:
-        logger.error(f"[GRANT] revoke_grant error: {e}")
+        logger.error(f"[GRANT] revoke_grant error: {e}", extra={"src_module": "grant", "operation": "revoke_grant", "error": str(e)})
         return False
 
 
@@ -563,7 +562,7 @@ def is_command_in_grant(normalized_cmd: str, grant: Dict) -> bool:
 
         return False
     except (re.error, ValueError, TypeError) as e:
-        logger.error(f"[GRANT] is_command_in_grant error: {e}")
+        logger.error(f"[GRANT] is_command_in_grant error: {e}", extra={"src_module": "grant", "operation": "is_command_in_grant", "error": str(e)})
         return False
 
 
@@ -600,10 +599,10 @@ def try_use_grant_command(
                     used_commands = grant_item.get('used_commands', {})
                     current_count = int(used_commands.get(normalized_cmd, 0))
                     if current_count >= _DANGEROUS_REPEAT_LIMIT:
-                        logger.warning(f"[GRANT][SEC-009] Dangerous command repeat limit reached: {normalized_cmd[:80]!r}")
+                        logger.warning("Dangerous command repeat limit reached", extra={"module": "grant", "sec_rule": "SEC-009", "command": normalized_cmd[:80]})
                         return False
                 except (json.JSONDecodeError, ValueError, TypeError) as e:
-                    logger.error(f"[GRANT][SEC-009] Failed to read repeat count: {e}")
+                    logger.error(f"[GRANT][SEC-009] Failed to read repeat count: {e}", extra={"src_module": "grant", "sec_rule": "SEC-009", "operation": "read_repeat_count", "error": str(e)})
                     return False
 
             # 允許重複：只增加計數 + 總次數
@@ -650,10 +649,10 @@ def try_use_grant_command(
     except ClientError as e:
         if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
             return False  # 已用過或並發衝突
-        logger.error(f"[GRANT] try_use_grant_command ClientError: {e}")
+        logger.error("try_use_grant_command ClientError", extra={"module": "grant", "operation": "try_use_grant_command", "error_type": "ClientError", "error": str(e)})
         return False
     except (json.JSONDecodeError, ValueError) as e:
-        logger.error(f"[GRANT] try_use_grant_command error: {e}")
+        logger.error(f"[GRANT] try_use_grant_command error: {e}", extra={"src_module": "grant", "operation": "try_use_grant_command", "error": str(e)})
         return False
 
 
@@ -703,5 +702,5 @@ def get_grant_status(grant_id: str, source: str) -> Optional[Dict]:
         }
 
     except ClientError as e:
-        logger.error(f"[GRANT] get_grant_status error: {e}")
+        logger.error(f"[GRANT] get_grant_status error: {e}", extra={"src_module": "grant", "operation": "get_grant_status", "error": str(e)})
         return None

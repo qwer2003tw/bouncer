@@ -602,7 +602,7 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
 
     except ClientError as e:
         # Grant 失敗不影響主流程 → fallthrough
-        logger.error(f"[GRANT] _check_grant_session error: {e}")
+        logger.error("_check_grant_session error", extra={"module": "grant", "operation": "_check_grant_session", "error": str(e)})
         return None
 
 
@@ -1116,8 +1116,7 @@ def mcp_tool_request_grant(req_id: str, arguments: dict) -> dict:
                 allow_repeat=allow_repeat,
             )
         except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
-            logger.error(f"[GRANT] Failed to send notification: {e}")
-
+            logger.error(f"[GRANT] Failed to send notification: {e}", extra={"src_module": "grant", "operation": "send_notification", "error": str(e)})
         return mcp_result(req_id, {
             'content': [{
                 'type': 'text',

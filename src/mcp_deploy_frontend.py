@@ -137,7 +137,7 @@ def _list_known_projects() -> list:
             if item.get('frontend_bucket'):
                 known.add(item['project_id'])
     except Exception:  # noqa: BLE001 — fallback to empty list
-        logger.warning("[DEPLOY-FRONTEND] Failed to list known projects from DDB, returning empty list")
+        logger.warning("Failed to list known projects from DDB, returning empty list", extra={"module": "deploy_frontend", "operation": "list_known_projects"})
     return sorted(known)
 
 
@@ -349,7 +349,7 @@ def _submit_deploy_frontend_approval(
                 try:
                     s3.delete_object(Bucket=staging_bucket, Key=rk)
                 except Exception:  # noqa: BLE001 — best-effort cleanup
-                    logger.warning("[DEPLOY-FRONTEND] Rollback cleanup failed for key=%s (non-critical)", rk)
+                    logger.warning("Rollback cleanup failed (non-critical)", extra={"module": "deploy_frontend", "operation": "rollback_cleanup", "s3_key": rk})
             return mcp_result(req_id, {
                 "content": [{"type": "text", "text": json.dumps({
                     "status": "error",
@@ -421,7 +421,7 @@ def _submit_deploy_frontend_approval(
             try:
                 s3.delete_object(Bucket=staging_bucket, Key=rk)
             except Exception:  # noqa: BLE001 — best-effort cleanup
-                logger.warning("[DEPLOY-FRONTEND] Notification-failure cleanup skipped for key=%s (non-critical)", rk)
+                logger.warning("Notification-failure cleanup skipped (non-critical)", extra={"module": "deploy_frontend", "operation": "notification_failure_cleanup", "s3_key": rk})
         return mcp_result(req_id, {
             "content": [{"type": "text", "text": json.dumps({
                 "status": "error",
@@ -519,7 +519,7 @@ def _execute_deploy_frontend_approved(
                 try:
                     s3_staging.delete_object(Bucket=staging_bucket, Key=rk)
                 except Exception:  # noqa: BLE001 — best-effort cleanup
-                    logger.warning("[DEPLOY-FRONTEND] Trust deploy rollback cleanup failed for key=%s", rk, exc_info=True)
+                    logger.warning("Trust deploy rollback cleanup failed", extra={"module": "deploy_frontend", "operation": "trust_deploy_rollback_cleanup", "s3_key": rk}, exc_info=True)
             return mcp_result(req_id, {
                 "content": [{"type": "text", "text": json.dumps({
                     "status": "error",
@@ -536,7 +536,7 @@ def _execute_deploy_frontend_approved(
         else:
             s3_target = get_s3_client()
     except ClientError as exc:
-        logger.error("[DEPLOY-FRONTEND] Trust deploy AssumeRole failed for %s: %s", deploy_role_arn, exc)
+        logger.error("[DEPLOY-FRONTEND] Trust deploy AssumeRole failed for %s: %s", deploy_role_arn, exc, extra={"src_module": "deploy_frontend", "operation": "trust_deploy_assume_role", "role_arn": deploy_role_arn, "error": str(exc)})
         return mcp_result(req_id, {
             "content": [{"type": "text", "text": json.dumps({
                 "status": "error",
@@ -585,9 +585,9 @@ def _execute_deploy_frontend_approved(
                     "CallerReference": request_id,
                 },
             )
-            logger.info("[DEPLOY-FRONTEND] Trust deploy CloudFront invalidation created for %s", distribution_id)
+            logger.info("[DEPLOY-FRONTEND] Trust deploy CloudFront invalidation created for %s", distribution_id, extra={"src_module": "deploy_frontend", "operation": "cloudfront_invalidation", "distribution_id": distribution_id})
         except ClientError as exc:
-            logger.error("[DEPLOY-FRONTEND] Trust deploy CloudFront invalidation failed: %s", exc)
+            logger.error("[DEPLOY-FRONTEND] Trust deploy CloudFront invalidation failed: %s", exc, extra={"src_module": "deploy_frontend", "operation": "cloudfront_invalidation", "distribution_id": distribution_id})
             cf_invalidation_failed = True
 
     # 6. Increment trust command count
@@ -632,8 +632,7 @@ def _execute_deploy_frontend_approved(
         }
         deployer_history_table.put_item(Item=history_item)
     except ClientError as exc:
-        logger.error("[DEPLOY-FRONTEND] Trust deploy history write failed for %s: %s", request_id, exc)
-
+        logger.error("[DEPLOY-FRONTEND] Trust deploy history write failed for %s: %s", request_id, exc, extra={"src_module": "deploy_frontend", "operation": "trust_deploy_history_write", "request_id": request_id, "error": str(exc)})
     # 9. Send silent trust notification
     remaining = int(trust_session.get("expires_at", 0)) - now
     remaining_str = f"{remaining // 60}:{remaining % 60:02d}" if remaining > 0 else "0:00"
@@ -659,7 +658,7 @@ def _execute_deploy_frontend_approved(
         try:
             s3_staging.delete_object(Bucket=staging_bucket, Key=staged_key)
         except Exception:  # noqa: BLE001 — best-effort cleanup
-            logger.warning("[DEPLOY-FRONTEND] Trust deploy cleanup skipped for key=%s", staged_key, exc_info=True)
+            logger.warning("Trust deploy cleanup skipped", extra={"module": "deploy_frontend", "operation": "trust_deploy_cleanup", "s3_key": staged_key}, exc_info=True)
 
     # 11. Return result
     status = "success" if not failed and not cf_invalidation_failed else "partial_success" if deployed else "error"
