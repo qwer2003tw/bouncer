@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.28.0] - 2026-03-11
+
+### Security
+- `src/mcp_deploy_frontend.py` — Trust Session integration: `_check_deploy_trust()` now calls `should_trust_approve()` with frontend project validation via `deploy_role_arn` check; `_execute_trusted_deploy()` implemented with audit log (`trust_bypass=True`) (#sprint29-001)
+
+### Refactored
+- `src/telegram.py`, `src/utils.py`, `src/accounts.py`, `src/notifications.py`, `src/mcp_deploy_frontend.py`, `src/mcp_history.py`, `src/metrics.py`, `src/sequence_analyzer.py`, `src/scheduler_service.py`, `src/paging.py`, `src/telegram_commands.py`, `src/mcp_presigned.py`, `src/mcp_upload.py` — Migrated all 13 remaining stdlib `logging` modules to aws-lambda-powertools `Logger`; fixed 6 `exc_info=True` incompatibilities (#sprint29-002)
+- `src/mcp_history.py` — `_query_command_history_table()` replaced full-table `scan()` with GSI query on `type-created_at-index` (newest-first, cost-efficient) (#sprint29-003)
+- `src/sequence_analyzer.py` — `record_command()` now writes `item_type="CMD"` + `created_at` Unix timestamp for GSI compatibility
+
+### Fixed
+- `src/callbacks.py` — Removed `pin_message()` from approval callback (was pinning static approval message) (#sprint29-004)
+- `deployer/notifier/app.py` — `handle_start()` now pins progress message; `pin_telegram_message()` added; unpin in `handle_success()`/`handle_fail()` verified
+
+### Infrastructure
+- `template.yaml` — Added `type-created_at-index` GSI to `CommandHistoryTable` (`item_type` HASH + `created_at` RANGE, PAY_PER_REQUEST, ALL projection) — requires CFN stack update
+
+### Tests
+- Backend: ~2000 tests, coverage ≥ 75%
+
 ## [3.27.0] - 2026-03-11
 
 ### Refactored
