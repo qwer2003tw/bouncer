@@ -23,7 +23,6 @@ Version: 1.0.0
 """
 
 import json
-import logging
 import re
 import time
 from dataclasses import dataclass, field
@@ -31,9 +30,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
+from aws_lambda_powertools import Logger
 from utils import RiskFactor  # canonical definition in utils.py
 
-logger = logging.getLogger(__name__)
+logger = Logger(service="bouncer")
 
 __all__ = [
     # Core types
