@@ -6,12 +6,12 @@ Follows the same dataclass pipeline style as mcp_upload.py (UploadContext).
 """
 
 import json
-import logging
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import List
 
+from aws_lambda_powertools import Logger
 from aws_clients import get_s3_client
 from botocore.exceptions import ClientError
 
@@ -21,7 +21,7 @@ from notifications import send_presigned_notification, send_presigned_batch_noti
 from rate_limit import PendingLimitExceeded, RateLimitExceeded, check_rate_limit
 from utils import generate_request_id, mcp_result, sanitize_filename
 
-logger = logging.getLogger(__name__)
+logger = Logger(service="bouncer")
 
 
 # =============================================================================

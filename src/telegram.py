@@ -3,17 +3,16 @@ Bouncer - Telegram API 模組
 處理所有 Telegram 訊息發送、更新、callback 回應
 """
 import json
-import logging
 import time
 import urllib.request
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-
+from aws_lambda_powertools import Logger
 
 from constants import TELEGRAM_TOKEN, TELEGRAM_API_BASE, APPROVED_CHAT_ID
 
-logger = logging.getLogger(__name__)
+logger = Logger(service="bouncer")
 
 __all__ = [
     'escape_markdown',

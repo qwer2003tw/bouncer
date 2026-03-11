@@ -13,12 +13,12 @@ Phase B (callback / actual S3 deploy / CloudFront invalidation) is NOT included 
 
 import base64
 import json
-import logging
 import os
 import time
 from typing import Optional
 
 import boto3
+from aws_lambda_powertools import Logger
 from aws_clients import get_s3_client
 
 from constants import DEFAULT_ACCOUNT_ID, APPROVAL_TTL_BUFFER, UPLOAD_TIMEOUT
@@ -26,7 +26,7 @@ from db import table, deployer_projects_table, deployer_history_table
 from notifications import send_deploy_frontend_notification
 from utils import generate_request_id, mcp_result
 
-logger = logging.getLogger(__name__)
+logger = Logger(service="bouncer")
 
 # ---------------------------------------------------------------------------
 # Project Config (DynamoDB-only; no hardcoded fallback)
@@ -134,7 +134,7 @@ def _list_known_projects() -> list:
             if item.get('frontend_bucket'):
                 known.add(item['project_id'])
     except Exception:  # noqa: BLE001 — fallback to empty list
-        logger.warning("[DEPLOY-FRONTEND] Failed to list known projects from DDB, returning empty list", exc_info=True)
+        logger.warning("[DEPLOY-FRONTEND] Failed to list known projects from DDB, returning empty list")
     return sorted(known)
 
 
@@ -346,7 +346,7 @@ def _submit_deploy_frontend_approval(
                 try:
                     s3.delete_object(Bucket=staging_bucket, Key=rk)
                 except Exception:  # noqa: BLE001 — best-effort cleanup
-                    logger.warning("[DEPLOY-FRONTEND] Rollback cleanup failed for key=%s (non-critical)", rk, exc_info=True)
+                    logger.warning("[DEPLOY-FRONTEND] Rollback cleanup failed for key=%s (non-critical)", rk)
             return mcp_result(req_id, {
                 "content": [{"type": "text", "text": json.dumps({
                     "status": "error",
@@ -418,7 +418,7 @@ def _submit_deploy_frontend_approval(
             try:
                 s3.delete_object(Bucket=staging_bucket, Key=rk)
             except Exception:  # noqa: BLE001 — best-effort cleanup
-                logger.warning("[DEPLOY-FRONTEND] Notification-failure cleanup skipped for key=%s (non-critical)", rk, exc_info=True)
+                logger.warning("[DEPLOY-FRONTEND] Notification-failure cleanup skipped for key=%s (non-critical)", rk)
         return mcp_result(req_id, {
             "content": [{"type": "text", "text": json.dumps({
                 "status": "error",
