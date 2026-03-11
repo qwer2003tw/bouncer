@@ -22,7 +22,7 @@ import boto3
 from aws_clients import get_s3_client
 
 from constants import DEFAULT_ACCOUNT_ID, APPROVAL_TTL_BUFFER, UPLOAD_TIMEOUT
-from db import table
+from db import table, deployer_projects_table, deployer_history_table
 from notifications import send_deploy_frontend_notification
 from utils import generate_request_id, mcp_result
 
@@ -255,7 +255,6 @@ def _check_deploy_trust(trust_scope: str, project: str, account_id: str, source:
     Returns (should_trust: bool, trust_session: dict or None, reason: str)
     """
     from trust import should_trust_approve
-    from db import deployer_projects_table
 
     # 1. Check trust session
     synthetic_command = f"bouncer_deploy_frontend project={project}"
@@ -471,7 +470,6 @@ def _execute_deploy_frontend_approved(
     from notifications import send_trust_auto_approve_notification
     from utils import log_decision
     from aws_clients import get_cloudfront_client
-    from db import deployer_history_table
 
     # 1. Pre-process files (decode + compute metadata)
     request_id = generate_request_id(f"deploy_frontend:{project}")
