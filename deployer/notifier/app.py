@@ -149,9 +149,10 @@ def handle_success(event):
     
     if message_id:
         update_telegram_message(message_id, text)
+        unpin_telegram_message(message_id)
     else:
         send_telegram_message(text)
-    
+
     # 更新歷史
     update_history(deploy_id, {
         'status': 'SUCCESS',
@@ -159,10 +160,10 @@ def handle_success(event):
         'duration_seconds': duration,
         'build_id': build_id
     })
-    
+
     # 釋放部署鎖
     release_lock(project_id)
-    
+
     return {'status': 'success'}
 
 
@@ -201,9 +202,10 @@ def handle_failure(event):
     
     if message_id:
         update_telegram_message(message_id, text)
+        unpin_telegram_message(message_id)
     else:
         send_telegram_message(text)
-    
+
     # 更新歷史
     update_history(deploy_id, {
         'status': 'FAILED',
@@ -212,10 +214,10 @@ def handle_failure(event):
         'error_message': error_message[:1000],
         'error_phase': phase
     })
-    
+
     # 釋放部署鎖
     release_lock(project_id)
-    
+
     return {'status': 'failed'}
 
 
@@ -250,7 +252,7 @@ def update_telegram_message(message_id: int, text: str):
     """更新 Telegram 訊息"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID or not message_id:
         return
-    
+
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageText"
     data = {
         'chat_id': TELEGRAM_CHAT_ID,
@@ -258,7 +260,7 @@ def update_telegram_message(message_id: int, text: str):
         'text': text,
         'parse_mode': 'Markdown'
     }
-    
+
     try:
         req = urllib.request.Request(
             url,
@@ -268,6 +270,29 @@ def update_telegram_message(message_id: int, text: str):
         urllib.request.urlopen(req, timeout=10)
     except Exception as e:
         print(f"Telegram update error: {e}")
+
+
+def unpin_telegram_message(message_id: int):
+    """Unpin Telegram 訊息"""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID or not message_id:
+        return
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/unpinChatMessage"
+    data = {
+        'chat_id': TELEGRAM_CHAT_ID,
+        'message_id': message_id
+    }
+
+    try:
+        req = urllib.request.Request(
+            url,
+            data=urllib.parse.urlencode(data).encode(),
+            method='POST'
+        )
+        urllib.request.urlopen(req, timeout=10)
+        print(f"Unpinned message {message_id}")
+    except Exception as e:
+        print(f"Telegram unpin error (ignored): {e}")
 
 
 def get_history(deploy_id: str) -> dict:
