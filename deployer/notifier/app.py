@@ -77,9 +77,9 @@ def handle_start(event):
         'phase': 'INITIALIZING'
     })
 
-    # Pin the progress message (best-effort)
-    if message_id:
-        pin_telegram_message(message_id)
+    # NOTE: Do NOT pin here. callbacks.py already pins the message when the deploy
+    # is approved (handle_deploy_callback). Pinning again in handle_start would
+    # cause a double-pin regression (Issue #119).
 
     return {'message_id': message_id}
 

@@ -4,8 +4,8 @@ test_sprint31_003_deploy_pin.py — Deploy Pin / Notifier Progress Msg (Sprint 3
 Tests:
   1. handle_deploy_callback (approve) → calls pin_message(message_id) best-effort
   2. handle_deploy_callback pin failure → deploy proceeds, warning logged
-  3. Notifier handle_start with existing telegram_message_id → updates existing msg + pins
-  4. Notifier handle_start without existing telegram_message_id → sends new msg + pins
+  3. Notifier handle_start with existing telegram_message_id → updates existing msg, does NOT pin (pin already done by callbacks.py on approve)
+  4. Notifier handle_start without existing telegram_message_id → sends new msg, does NOT pin
   5. Notifier handle_success → updates existing message + unpins
 """
 import json
@@ -162,7 +162,8 @@ class TestNotifierHandleStart:
         # Must update existing message, not send new
         assert 55555 in update_calls, "Expected update_telegram_message to be called with existing message_id"
         assert len(send_calls) == 0, "Must not send new message when existing message_id is available"
-        assert 55555 in pin_calls, "Expected pin_telegram_message to be called"
+        # Must NOT pin — callbacks.py already pinned on approve; double-pin is a regression (Issue #119)
+        assert len(pin_calls) == 0, "handle_start must NOT call pin_telegram_message (callbacks.py pins on approve)"
         assert result['message_id'] == 55555
 
     def test_handle_start_sends_new_when_no_existing_message(self):
@@ -206,6 +207,8 @@ class TestNotifierHandleStart:
         # Should send new message
         assert len(send_calls) == 1, "Expected send_telegram_message to be called"
         assert len(update_calls) == 0, "Must not call update when no existing message"
+        # Must NOT pin — callbacks.py already pinned on approve; double-pin is a regression (Issue #119)
+        notifier.pin_telegram_message.assert_not_called()
 
 
 class TestNotifierHandleSuccess:
