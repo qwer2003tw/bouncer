@@ -291,3 +291,4 @@ def cleanup_changeset(
             },
         )
 # Sprint 33: SAM artifacts S3 permission added to Lambda role (2026-03-12)
+# Sprint 33: DescribeStacks permission added (2026-03-12)
