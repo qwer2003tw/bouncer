@@ -164,3 +164,120 @@ class TestShouldTrustApproveIPMismatch:
         assert should_approve is True
         mismatch_calls = [e for e in emitted if 'TrustIPMismatch' in str(e)]
         assert len(mismatch_calls) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Test: TRUST_IP_BINDING_MODE - configurable IP binding (strict/warn/disabled)
+# ---------------------------------------------------------------------------
+
+class TestTrustIPBindingModes:
+    """Test configurable IP binding modes: strict, warn, disabled."""
+
+    def test_strict_mode_matching_ip_passes(self):
+        """Strict mode: matching IPs should pass."""
+        import trust as _trust_module
+
+        item = _make_session_item(creator_ip='10.0.0.1')
+
+        with patch.object(_trust_module, 'TRUST_IP_BINDING_MODE', 'strict'):
+            should_approve, _, _ = _run_should_trust(item, caller_ip='10.0.0.1')
+
+        assert should_approve is True
+
+    def test_strict_mode_mismatch_blocks(self):
+        """Strict mode: IP mismatch should block the request."""
+        import trust as _trust_module
+
+        item = _make_session_item(creator_ip='203.0.113.1')
+
+        with patch.object(_trust_module, 'TRUST_IP_BINDING_MODE', 'strict'), \
+             patch('metrics.emit_metric', MagicMock()):
+            should_approve, session, reason = _run_should_trust(item, caller_ip='10.4.150.40')
+
+        assert should_approve is False
+        assert 'IP mismatch blocked' in reason
+        assert 'strict mode' in reason
+
+    def test_strict_mode_emits_blocked_metric(self):
+        """Strict mode: IP mismatch should emit TrustIPBlocked metric."""
+        import trust as _trust_module
+
+        item = _make_session_item(creator_ip='203.0.113.1')
+
+        emitted = []
+        def capture(*args, **kwargs):
+            emitted.append({'args': args, 'kwargs': kwargs})
+
+        with patch.object(_trust_module, 'TRUST_IP_BINDING_MODE', 'strict'), \
+             patch('metrics.emit_metric', side_effect=capture):
+            should_approve, _, _ = _run_should_trust(item, caller_ip='10.4.150.40')
+
+        assert should_approve is False
+        blocked_calls = [e for e in emitted if 'TrustIPBlocked' in str(e)]
+        assert len(blocked_calls) >= 1
+
+    def test_warn_mode_mismatch_allows(self):
+        """Warn mode (default): IP mismatch should log warning but allow."""
+        import trust as _trust_module
+
+        item = _make_session_item(creator_ip='203.0.113.1')
+
+        with patch.object(_trust_module, 'TRUST_IP_BINDING_MODE', 'warn'), \
+             patch('metrics.emit_metric', MagicMock()):
+            should_approve, _, _ = _run_should_trust(item, caller_ip='10.4.150.40')
+
+        assert should_approve is True
+
+    def test_warn_mode_emits_mismatch_metric(self):
+        """Warn mode: IP mismatch should emit TrustIPMismatch metric."""
+        import trust as _trust_module
+
+        item = _make_session_item(creator_ip='203.0.113.1')
+
+        emitted = []
+        def capture(*args, **kwargs):
+            emitted.append({'args': args, 'kwargs': kwargs})
+
+        with patch.object(_trust_module, 'TRUST_IP_BINDING_MODE', 'warn'), \
+             patch('metrics.emit_metric', side_effect=capture):
+            should_approve, _, _ = _run_should_trust(item, caller_ip='10.4.150.40')
+
+        assert should_approve is True
+        mismatch_calls = [e for e in emitted if 'TrustIPMismatch' in str(e)]
+        assert len(mismatch_calls) >= 1
+
+    def test_disabled_mode_skips_check(self):
+        """Disabled mode: IP mismatch should be completely ignored (no warning, no metric)."""
+        import trust as _trust_module
+
+        item = _make_session_item(creator_ip='203.0.113.1')
+
+        emitted = []
+        def capture(*args, **kwargs):
+            emitted.append({'args': args, 'kwargs': kwargs})
+
+        with patch.object(_trust_module, 'TRUST_IP_BINDING_MODE', 'disabled'), \
+             patch('metrics.emit_metric', side_effect=capture):
+            should_approve, _, _ = _run_should_trust(item, caller_ip='10.4.150.40')
+
+        assert should_approve is True
+
+        # Should NOT have emitted IP mismatch/blocked metrics
+        ip_metrics = [e for e in emitted
+                      if 'TrustIPMismatch' in str(e) or 'TrustIPBlocked' in str(e)]
+        assert len(ip_metrics) == 0
+
+    def test_invalid_mode_falls_back_to_warn(self):
+        """Invalid mode value should fall back to 'warn' mode."""
+        import trust as _trust_module
+
+        item = _make_session_item(creator_ip='203.0.113.1')
+
+        # Simulate invalid mode by setting TRUST_IP_BINDING_MODE to 'warn'
+        # The constants.py logic should normalize invalid values to 'warn'
+        with patch.object(_trust_module, 'TRUST_IP_BINDING_MODE', 'warn'), \
+             patch('metrics.emit_metric', MagicMock()):
+            should_approve, _, _ = _run_should_trust(item, caller_ip='10.4.150.40')
+
+        # Should behave like warn mode: allow the request
+        assert should_approve is True

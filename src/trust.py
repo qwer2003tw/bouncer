@@ -24,6 +24,7 @@ from constants import (
     TRUST_EXCLUDED_SERVICES, TRUST_EXCLUDED_ACTIONS, TRUST_EXCLUDED_FLAGS,
     TRUST_UPLOAD_MAX_BYTES_PER_FILE,
     TRUST_UPLOAD_MAX_BYTES_TOTAL, TRUST_UPLOAD_BLOCKED_EXTENSIONS,
+    TRUST_IP_BINDING_MODE,
 )
 from aws_lambda_powertools import Logger
 
@@ -407,21 +408,40 @@ def should_trust_approve(
     if remaining <= 0:
         return False, None, "Trust session expired"
 
-    # IP binding check (informational only — best-effort defence in depth)
+    # IP binding check (configurable: strict/warn/disabled — best-effort defence in depth)
     creator_ip = session.get('creator_ip', '')
     if creator_ip and caller_ip and creator_ip != caller_ip:
         trust_id = session.get('request_id', trust_scope)
-        logger.warning(
-            "Trust session %s IP mismatch: creator_ip=%r caller_ip=%r "
-            "(note: Telegram callbacks and MCP calls intentionally use different IPs)",
-            trust_id, creator_ip, caller_ip,
-            extra={"src_module": "trust", "operation": "should_trust_approve", "trust_id": trust_id},
-        )
-        try:
-            from metrics import emit_metric
-            emit_metric('Bouncer', 'TrustIPMismatch', 1, dimensions={'Event': 'mismatch'})
-        except Exception:  # noqa: BLE001 — best-effort metrics
+
+        if TRUST_IP_BINDING_MODE == 'disabled':
+            # Skip IP check entirely
             pass
+        elif TRUST_IP_BINDING_MODE == 'strict':
+            # Block request on IP mismatch
+            logger.warning(
+                "Trust session %s IP mismatch (strict mode): BLOCKED - creator_ip=%r caller_ip=%r",
+                trust_id, creator_ip, caller_ip,
+                extra={"src_module": "trust", "operation": "should_trust_approve", "trust_id": trust_id, "mode": "strict"},
+            )
+            try:
+                from metrics import emit_metric
+                emit_metric('Bouncer', 'TrustIPBlocked', 1, dimensions={'Event': 'blocked', 'Mode': 'strict'})
+            except Exception:  # noqa: BLE001 — best-effort metrics
+                pass
+            return False, session, f"IP mismatch blocked (strict mode): creator={creator_ip} caller={caller_ip}"
+        else:
+            # Default 'warn' mode: log warning + metric but allow the request
+            logger.warning(
+                "Trust session %s IP mismatch (warn mode): allowed - creator_ip=%r caller_ip=%r "
+                "(note: Telegram callbacks and MCP calls intentionally use different IPs)",
+                trust_id, creator_ip, caller_ip,
+                extra={"src_module": "trust", "operation": "should_trust_approve", "trust_id": trust_id, "mode": "warn"},
+            )
+            try:
+                from metrics import emit_metric
+                emit_metric('Bouncer', 'TrustIPMismatch', 1, dimensions={'Event': 'mismatch', 'Mode': 'warn'})
+            except Exception:  # noqa: BLE001 — best-effort metrics
+                pass
 
     return True, session, f"Trust session active ({remaining}s remaining)"
 

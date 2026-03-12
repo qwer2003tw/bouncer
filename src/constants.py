@@ -110,6 +110,13 @@ TRUST_SESSION_DURATION = 600  # 10 分鐘
 TRUST_SESSION_MAX_COMMANDS = 20  # 信任時段內最多執行 20 個命令
 TRUST_SESSION_ENABLED = os.environ.get('TRUST_SESSION_ENABLED', 'true').lower() == 'true'
 
+# IP binding mode for Trust Sessions: 'strict', 'warn', or 'disabled'
+# - 'warn' (default): IP mismatch logs warning + metric but allows the request
+# - 'strict': IP mismatch blocks the request (only suitable for single-IP environments)
+# - 'disabled': skip IP check entirely
+TRUST_IP_BINDING_MODE_RAW = os.environ.get('BOUNCER_IP_BINDING_MODE', 'warn').lower()
+TRUST_IP_BINDING_MODE = TRUST_IP_BINDING_MODE_RAW if TRUST_IP_BINDING_MODE_RAW in ('strict', 'warn', 'disabled') else 'warn'
+
 # Trust Upload Quota
 TRUST_SESSION_MAX_UPLOADS = 5  # 信任時段內最多上傳 5 個檔案（0=不信任上傳）
 TRUST_UPLOAD_MAX_BYTES_PER_FILE = 5 * 1024 * 1024  # 5MB per file
