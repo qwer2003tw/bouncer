@@ -566,6 +566,21 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         else:
             answer_callback(callback_id, '✅ 執行中...')
 
+        # Immediate feedback: remove buttons before execute_command (best-effort)
+        try:
+            update_message(
+                message_id,
+                f"⏳ *執行中...*\n\n"
+                f"📋 *請求 ID：* `{request_id}`\n"
+                f"{info['source_line']}"
+                f"{info['account_line']}"
+                f"📋 *命令：*\n`{info['cmd_preview']}`\n\n"
+                f"💬 *原因：* {info['safe_reason']}",
+                remove_buttons=True,
+            )
+        except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
+            logger.warning(f"[execute] Immediate feedback update_message failed (non-critical): {e}")
+
         # 執行命令並存入結果
         try:
             send_chat_action('typing')

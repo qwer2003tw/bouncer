@@ -207,7 +207,51 @@ class TestTelegramCallbackHandlers:
         # 驗證狀態更新
         item = app_module.table.get_item(Key={'request_id': request_id})['Item']
         assert item['status'] == 'approved'
-    
+
+    @patch('app.answer_callback')
+    @patch('callbacks.update_message')
+    @patch('callbacks.execute_command')
+    def test_callback_execute_immediate_feedback(self, mock_execute, mock_update, mock_answer, app_module):
+        """執行 callback 應在 execute_command 前立即更新訊息 (#117)"""
+        mock_execute.return_value = 'Command executed successfully'
+
+        request_id = 'exec-immediate-123'
+        app_module.table.put_item(Item={
+            'request_id': request_id,
+            'command': 'echo test',
+            'status': 'pending_approval',
+            'source': 'test-source',
+            'reason': 'test immediate feedback',
+            'account_id': '111111111111',
+            'ttl': int(time.time()) + 300
+        })
+
+        event = {
+            'rawPath': '/webhook',
+            'headers': {},
+            'body': json.dumps({
+                'callback_query': {
+                    'id': 'cb123',
+                    'from': {'id': 999999999},
+                    'data': f'approve:{request_id}',
+                    'message': {'message_id': 999}
+                }
+            }),
+            'requestContext': {'http': {'method': 'POST'}}
+        }
+
+        result = app_module.lambda_handler(event, None)
+        assert result['statusCode'] == 200
+
+        # 驗證 update_message 在 execute_command 之前被調用
+        assert mock_update.call_count >= 2  # immediate feedback + final result
+        assert mock_execute.call_count == 1
+
+        # 檢查第一次 update_message 調用包含 "執行中" 訊息
+        first_call_args = mock_update.call_args_list[0]
+        first_message = first_call_args[0][1]
+        assert '執行中' in first_message or '⏳' in first_message
+
     @patch('app.answer_callback')
     @patch('app.update_message')
     def test_callback_add_account_approve(self, mock_update, mock_answer, app_module):
