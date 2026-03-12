@@ -406,6 +406,9 @@ def _run_sam_package(artifacts_bucket: str, project_id: str) -> None:
     consumed by ``_build_sam_cmd`` so that ``sam deploy`` does not need
     ``--resolve-s3``.
 
+    Also uploads the packaged template YAML to S3 so that changeset_analyzer
+    can fetch it for dry-run changesets.
+
     This must be called *after* ``sam build`` and *before* any cross-account
     assume-role, so the S3 upload uses the original CodeBuild credentials.
     """
@@ -418,6 +421,24 @@ def _run_sam_package(artifacts_bucket: str, project_id: str) -> None:
     print(f"[package] sam package → s3://{artifacts_bucket}/{project_id}/templates/")
     subprocess.run(cmd, check=True)
     print(f"[package] Packaged template written to {_PACKAGED_TEMPLATE}")
+
+    # Upload the packaged YAML template to S3 with a stable key so changeset_analyzer can fetch it
+    template_s3_key = f"{project_id}/packaged-template.yaml"
+    try:
+        import boto3 as _boto3
+        region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+        s3 = _boto3.client("s3", region_name=region)
+        with open(_PACKAGED_TEMPLATE, "rb") as f:
+            s3.put_object(
+                Bucket=artifacts_bucket,
+                Key=template_s3_key,
+                Body=f.read(),
+                ContentType="application/x-yaml",
+            )
+        print(f"[package] Uploaded packaged template YAML to s3://{artifacts_bucket}/{template_s3_key}")
+    except Exception as exc:
+        print(f"[package] Warning: failed to upload packaged template YAML: {exc}")
+        # Non-fatal
 
 
 def update_template_s3_url(project_id: str, artifacts_bucket: str) -> None:
@@ -436,20 +457,9 @@ def update_template_s3_url(project_id: str, artifacts_bucket: str) -> None:
         print("[DDB] Skipping template_s3_url update: PROJECT_ID or ARTIFACTS_BUCKET not set")
         return
     try:
-        prefix = f"{project_id}/templates/"
+        # Use the stable key uploaded by _run_sam_package
+        s3_key = f"{project_id}/packaged-template.yaml"
         region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
-        s3 = boto3.client("s3", region_name=region)
-
-        # Find the most recently uploaded packaged template in the prefix
-        resp = s3.list_objects_v2(Bucket=artifacts_bucket, Prefix=prefix)
-        objects = resp.get("Contents", [])
-        if not objects:
-            print(f"[DDB] Warning: no objects found at s3://{artifacts_bucket}/{prefix}")
-            return
-
-        # Pick the most recently modified object
-        latest = max(objects, key=lambda o: o["LastModified"])
-        s3_key = latest["Key"]
         template_url = f"https://{artifacts_bucket}.s3.amazonaws.com/{s3_key}"
 
         projects_table = os.environ.get("PROJECTS_TABLE", "bouncer-projects")
