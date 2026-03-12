@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.33.0] - 2026-03-12
+
+### Added
+- `src/changeset_analyzer.py` — `create_dry_run_changeset()`: fetch template via S3 `GetObject` + `TemplateBody` (replaces `TemplateURL`); query existing stack params with `describe_stacks()` and pass `UsePreviousValue=True` to avoid "Parameters must have values" error; supports encrypted SAM artifacts bucket (#118 fix-2/4/6/7)
+- `src/deployer.py` — Auto-approve deploy flow: `bouncer_deploy` performs dry-run changeset analysis before creating approval request; code-only changes (Lambda::Function/Version/Alias only) auto-approve and call `start_deploy()` directly; infra changes append changeset summary to context (#118)
+- `src/notifications.py` — `send_auto_approve_deploy_notification()`: silent Telegram notification for auto-approved deploys (#118)
+- `template.yaml` — IAM: `s3:GetObject` on `sam-deployer-artifacts-*`; `kms:Decrypt`/`kms:GenerateDataKey` for SAM artifacts KMS key; `cloudformation:CreateChangeSet`/`DescribeChangeSet`/`DeleteChangeSet`/`DescribeStacks` (#118 fix-2/5/7)
+
+### Fixed
+- `src/changeset_analyzer.py` — `is_code_only_change()`: allow `Lambda::Version Add/Delete` and `Lambda::Alias Modify` for SAM AutoPublishAlias lifecycle; empty changeset treated as safe no-op (#118 fix-1)
+- `src/deployer.py` — `create_dry_run_changeset` uses stable S3 key (`bouncer/packaged-template.yaml`) instead of content-addressed hash key discovered via `list_objects_v2` (#118/#120 fix)
+
+### Infrastructure
+- DynamoDB `bouncer-projects`: `auto_approve_deploy=true`, `template_s3_url` set for `bouncer` project (#118)
+
+### Tests
+- `tests/test_changeset_analyzer.py` — Full unit test coverage for `is_code_only_change()`, `create_dry_run_changeset()`, `analyze_changeset()`, `cleanup_changeset()` (#118)
+
 ## [3.28.0] - 2026-03-11
 
 ### Security
