@@ -497,10 +497,8 @@ def send_grant_execute_notification(
     try:
         cmd_preview = command[:100] + '...' if len(command) > 100 else command
 
-        if result and (result.startswith('❌') or 'error' in result.lower()[:100]):
-            result_status = "❌"
-        else:
-            result_status = "✅"
+        _exit_code = extract_exit_code(result)
+        result_status = "❌" if (_exit_code is not None and _exit_code != 0) else "✅"
 
         result_text = result[:500] + '...' if result and len(result) > 500 else (result or '')
         grant_short = grant_id[:20] + '...' if len(grant_id) > 20 else grant_id

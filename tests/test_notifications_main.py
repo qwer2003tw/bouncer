@@ -868,6 +868,64 @@ class TestNotificationsCoverage:
         assert '...' in text
 
     # ------------------------------------------------------------------
+    # send_grant_execute_notification - exit code regression tests (S34)
+    # ------------------------------------------------------------------
+
+    def test_send_grant_execute_notification_exit_code_0_shows_success(self):
+        """Exit code 0 should show ✅ status."""
+        ctx, entities_mock = self._patch_entities_send()
+        with ctx:
+            self.notif.send_grant_execute_notification(
+                command='echo "Hello World"',
+                grant_id='grant-exec-exit0',
+                result='Hello World\n\n(exit code: 0)',
+                remaining_info='1/1',
+            )
+        text = entities_mock.call_args[0][0]
+        assert '✅' in text
+        assert '❌' not in text
+
+    def test_send_grant_execute_notification_exit_code_1_shows_failure(self):
+        """Exit code 1 should show ❌ status."""
+        ctx, entities_mock = self._patch_entities_send()
+        with ctx:
+            self.notif.send_grant_execute_notification(
+                command='false',
+                grant_id='grant-exec-exit1',
+                result='Command failed\n\n(exit code: 1)',
+                remaining_info='1/1',
+            )
+        text = entities_mock.call_args[0][0]
+        assert '❌' in text
+
+    def test_send_grant_execute_notification_exit_code_127_shows_failure(self):
+        """Exit code 127 (command not found) should show ❌ status."""
+        ctx, entities_mock = self._patch_entities_send()
+        with ctx:
+            self.notif.send_grant_execute_notification(
+                command='nonexistent_command',
+                grant_id='grant-exec-exit127',
+                result='bash: nonexistent_command: command not found\n\n(exit code: 127)',
+                remaining_info='1/1',
+            )
+        text = entities_mock.call_args[0][0]
+        assert '❌' in text
+
+    def test_send_grant_execute_notification_no_exit_code_defaults_to_success(self):
+        """No exit code in result should default to ✅ status."""
+        ctx, entities_mock = self._patch_entities_send()
+        with ctx:
+            self.notif.send_grant_execute_notification(
+                command='some command',
+                grant_id='grant-exec-no-exit',
+                result='Some output without exit code marker',
+                remaining_info='1/1',
+            )
+        text = entities_mock.call_args[0][0]
+        assert '✅' in text
+        assert '❌' not in text
+
+    # ------------------------------------------------------------------
     # send_grant_complete_notification
     # ------------------------------------------------------------------
 
