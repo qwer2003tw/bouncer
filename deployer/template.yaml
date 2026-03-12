@@ -646,6 +646,9 @@ Resources:
                 - Name: DEPLOY_ID
                   Type: PLAINTEXT
                   Value.$: $.deploy_id
+                - Name: PROJECT_ID
+                  Type: PLAINTEXT
+                  Value.$: $.project_id
             ResultPath: $.build_result
             Next: NotifySuccess
             Catch:
