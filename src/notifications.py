@@ -883,3 +883,36 @@ def send_deploy_frontend_notification(
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as exc:
         logger.error("send_deploy_frontend_notification error: %s", exc, extra={"src_module": "notifications", "operation": "send_deploy_frontend_notification", "error": str(exc)})
         return NotificationResult(ok=False, message_id=None)
+
+
+# ============================================================================
+# Deploy Auto-Approve Notification (sprint32-001b)
+# ============================================================================
+
+def send_auto_approve_deploy_notification(
+    project_id: str,
+    deploy_id: str,
+    source: Optional[str] = None,
+    reason: str = '',
+) -> None:
+    """自動批准 deploy 的靜默通知（Steven 知道但不需要互動）"""
+    try:
+        mb = MessageBuilder()
+        mb.text("🤖 ").bold("自動批准部署").newline(2)
+        mb.text("📦 ").bold("專案：").text(f" {project_id}").newline()
+        mb.text("🆔 ").bold("Deploy ID：").text(" ").code(deploy_id).newline()
+        mb.text("🤖 ").bold("來源：").text(f" {source or 'auto-approve'}").newline()
+        mb.text("📝 ").bold("原因：").text(f" {reason}").newline(2)
+        mb.text("_純 code 變更，CFN changeset 分析通過_")
+
+        text, entities = mb.build()
+        _telegram.send_message_with_entities(text, entities, silent=True)
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
+        logger.warning(
+            "send_auto_approve_deploy_notification failed",
+            extra={
+                "src_module": "notifications",
+                "operation": "auto_approve_deploy_notification",
+                "error": str(e),
+            },
+        )

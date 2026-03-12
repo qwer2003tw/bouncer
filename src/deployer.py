@@ -283,10 +283,48 @@ def add_project(project_id: str, config: dict) -> dict:
         'sam_template_path': config.get('sam_template_path', '.'),
         'allowed_deployers': config.get('allowed_deployers', []),
         'enabled': True,
-        'created_at': int(time.time())
+        'created_at': int(time.time()),
+        'auto_approve_deploy': config.get('auto_approve_deploy', False),
+        'template_s3_url': config.get('template_s3_url', ''),
     }
+    # Filter out empty strings for optional fields to keep DDB clean
+    if not item['template_s3_url']:
+        del item['template_s3_url']
     _get_projects_table().put_item(Item=item)
     return item
+
+
+def update_project_config(project_id: str, updates: dict) -> dict:
+    """更新 project config 的部分欄位（patch 語義）。
+
+    支援欄位：auto_approve_deploy (bool), template_s3_url (str), 及其他 config 欄位。
+    不存在的 project → raise ValueError。
+    """
+    project = get_project(project_id)
+    if not project:
+        raise ValueError(f"Project {project_id!r} not found")
+
+    if not updates:
+        return project
+
+    # Build DDB UpdateExpression
+    set_parts = []
+    expr_names = {}
+    expr_values = {}
+    for k, v in updates.items():
+        placeholder = f"#upd_{k}"
+        val_placeholder = f":upd_{k}"
+        set_parts.append(f"{placeholder} = {val_placeholder}")
+        expr_names[placeholder] = k
+        expr_values[val_placeholder] = v
+
+    _get_projects_table().update_item(
+        Key={'project_id': project_id},
+        UpdateExpression='SET ' + ', '.join(set_parts),
+        ExpressionAttributeNames=expr_names,
+        ExpressionAttributeValues=expr_values,
+    )
+    return {**project, **updates}
 
 
 def remove_project(project_id: str) -> bool:
@@ -925,6 +963,66 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
             }, ensure_ascii=False)}],
             'isError': True
         })
+
+    # Auto-approve 分析（若 project 啟用）
+    auto_approve_enabled = project.get('auto_approve_deploy', False)
+    template_s3_url = project.get('template_s3_url', '').strip()
+    stack_name = project.get('stack_name', '')
+
+    if auto_approve_enabled and template_s3_url and stack_name:
+        from changeset_analyzer import (
+            create_dry_run_changeset, analyze_changeset,
+            cleanup_changeset, is_code_only_change,
+        )
+        changeset_name = None
+        cfn = _get_cfn_client()
+        try:
+            changeset_name = create_dry_run_changeset(cfn, stack_name, template_s3_url)
+            analysis = analyze_changeset(cfn, stack_name, changeset_name)
+
+            if is_code_only_change(analysis):
+                # Code-only → auto-approve，直接 start_deploy
+                deploy_result = start_deploy(
+                    project_id,
+                    branch or project.get('default_branch', 'master'),
+                    source or 'auto-approve',
+                    reason,
+                )
+                # 發靜默通知
+                from notifications import send_auto_approve_deploy_notification
+                send_auto_approve_deploy_notification(
+                    project_id=project_id,
+                    deploy_id=deploy_result.get('deploy_id', ''),
+                    source=source,
+                    reason=reason,
+                )
+                return mcp_result(req_id, {
+                    'content': [{'type': 'text', 'text': json.dumps({
+                        'status': 'started',
+                        'deploy_id': deploy_result.get('deploy_id', ''),
+                        'project_id': project_id,
+                        'auto_approved': True,
+                        'message': '純 code 變更，已自動批准並啟動部署',
+                    }, ensure_ascii=False)}]
+                })
+            else:
+                # Infra change or error → 繼續走審批，附加 changeset summary
+                if analysis.error:
+                    context = f"[changeset 分析失敗: {analysis.error}] {context or ''}"
+                else:
+                    changed = [c.get('ResourceChange', {}).get('LogicalResourceId', '') for c in analysis.resource_changes]
+                    context = f"[需審批：infra 變更 {changed}] {context or ''}"
+        except Exception as e:  # noqa: BLE001 — fail-safe: any error → human approval
+            logger.warning(
+                "auto-approve changeset analysis failed, fallback to human approval",
+                extra={"src_module": "deployer", "operation": "auto_approve_analysis", "error": str(e)},
+            )
+        finally:
+            if changeset_name:
+                try:
+                    cleanup_changeset(cfn, stack_name, changeset_name)
+                except Exception:  # noqa: BLE001 — cleanup is best-effort
+                    pass
 
     # 建立審批請求
     request_id = generate_request_id(f"deploy:{project_id}")
