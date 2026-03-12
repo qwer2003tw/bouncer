@@ -130,11 +130,24 @@ def create_dry_run_changeset(
 
     changeset_name = f"bouncer-dryrun-{str(uuid.uuid4())[:12]}"
 
+    # Query existing stack parameters so we can pass UsePreviousValue=True
+    # This avoids the "Parameters must have values" error for NoEcho / SecretManager params
+    try:
+        stack_resp = cfn_client.describe_stacks(StackName=stack_name)
+        existing_params = stack_resp["Stacks"][0].get("Parameters", [])
+        reuse_params = [
+            {"ParameterKey": p["ParameterKey"], "UsePreviousValue": True}
+            for p in existing_params
+        ]
+    except Exception:  # noqa: BLE001 — fall back to no params (may fail for required params)
+        reuse_params = []
+
     cfn_client.create_change_set(
         StackName=stack_name,
         TemplateBody=template_body,
         ChangeSetName=changeset_name,
         ChangeSetType="UPDATE",
+        Parameters=reuse_params,
         Capabilities=[
             "CAPABILITY_IAM",
             "CAPABILITY_NAMED_IAM",
