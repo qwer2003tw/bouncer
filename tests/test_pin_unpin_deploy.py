@@ -6,6 +6,7 @@ with the deploy approval and completion flow.
 """
 
 import time
+import urllib.error
 from unittest.mock import patch, MagicMock
 
 
@@ -43,8 +44,8 @@ class TestPinMessageFunction:
         """Test pin_message returns False and logs warning when exception occurs"""
         import telegram
         with patch.object(telegram, '_telegram_request') as mock_request:
-            # Mock exception
-            mock_request.side_effect = Exception('Network error')
+            # Mock exception (use URLError which is a network error type)
+            mock_request.side_effect = urllib.error.URLError('Network error')
 
             result = telegram.pin_message(12345)
 
@@ -96,8 +97,8 @@ class TestUnpinMessageFunction:
         """Test unpin_message returns False and logs warning when exception occurs"""
         import telegram
         with patch.object(telegram, '_telegram_request') as mock_request:
-            # Mock exception
-            mock_request.side_effect = Exception('Message was deleted')
+            # Mock exception (use URLError which is a network error type)
+            mock_request.side_effect = urllib.error.URLError('Message was deleted')
 
             result = telegram.unpin_message(12345)
 
@@ -105,23 +106,22 @@ class TestUnpinMessageFunction:
 
 
 class TestDeployApprovalNoPin:
-    """Integration test: deploy approval does NOT pin (moved to notifier)"""
+    """Integration test: deploy approval DOES pin (Sprint 31-003 re-adds pin in callbacks)"""
 
-    def test_deploy_approval_does_not_call_pin(self, app_module):
-        """Test that deploy approval callback does NOT call pin_message (Sprint 29-004)
+    def test_deploy_approval_calls_pin(self, app_module):
+        """Test that deploy approval callback DOES call pin_message (Sprint 31-003)
 
-        Pin has been moved from approval callback to notifier progress message.
-        This test verifies the approval flow no longer calls pin_message.
+        Sprint 29-004 moved pin to notifier; Sprint 31-003 adds it back to
+        handle_deploy_callback as a best-effort pin right after 部署已啟動.
         """
         import callbacks
         import deployer
-        import telegram
 
         with patch.object(deployer, 'start_deploy') as mock_start_deploy, \
              patch.object(callbacks, 'update_message'), \
              patch.object(callbacks, 'answer_callback'), \
              patch.object(deployer, 'update_deploy_record') as mock_update_record, \
-             patch.object(telegram, 'pin_message') as mock_pin:
+             patch('callbacks.pin_message') as mock_pin:
 
             # Mock successful deploy start
             mock_start_deploy.return_value = {
@@ -130,6 +130,7 @@ class TestDeployApprovalNoPin:
                 'commit_short': 'abc1234',
                 'commit_message': 'feat: add feature',
             }
+            mock_pin.return_value = True
 
             # Create test request
             request_id = 'deploy_pin_test'
@@ -139,7 +140,7 @@ class TestDeployApprovalNoPin:
                 'branch': 'main',
                 'stack_name': 'test-stack',
                 'source': 'mcp',
-                'reason': 'testing no pin',
+                'reason': 'testing pin',
                 'context': '',
             }
 
@@ -152,8 +153,8 @@ class TestDeployApprovalNoPin:
                 user_id='user123'
             )
 
-            # Verify pin_message was NOT called (moved to notifier)
-            mock_pin.assert_not_called()
+            # Verify pin_message WAS called (Sprint 31-003 adds pin back)
+            mock_pin.assert_called_once_with(99999)
 
             # Verify deploy record was still updated with telegram_message_id
             assert mock_update_record.called
@@ -297,8 +298,8 @@ class TestDeployCompleteCallsUnpin:
              patch.object(deployer, 'release_lock'), \
              patch.object(telegram, 'unpin_message') as mock_unpin:
 
-            # Mock unpin failure
-            mock_unpin.side_effect = Exception('Message was deleted')
+            # Mock unpin failure (use ValueError which is caught in deployer.py)
+            mock_unpin.side_effect = ValueError('Message was deleted')
 
             # Should not raise exception
             result = deployer.get_deploy_status(deploy_id)

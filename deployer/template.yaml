@@ -14,6 +14,11 @@ Parameters:
     Default: ""
     Description: Telegram Chat ID
   
+  MessageThreadId:
+    Type: String
+    Default: ""
+    Description: Telegram Message Thread ID (for group topic support, optional)
+  
   GitHubPATSecretName:
     Type: String
     Default: sam-deployer/github-pat
@@ -549,6 +554,7 @@ Resources:
         Variables:
           TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
           TELEGRAM_CHAT_ID: !Ref TelegramChatId
+          MESSAGE_THREAD_ID: !Ref MessageThreadId
           HISTORY_TABLE: !Ref DeployHistoryTable
           LOCKS_TABLE: !Ref DeployLocksTable
       Tags:

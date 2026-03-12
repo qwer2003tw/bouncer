@@ -328,7 +328,7 @@ def pin_message(message_id: int, disable_notification: bool = True) -> bool:
             'disable_notification': disable_notification,
         })
         return result.get('ok', False)
-    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ValueError, RuntimeError) as e:
         logger.warning(f"[deployer] Failed to pin message {message_id} (ignored): {e}")
         return False
 
@@ -348,6 +348,6 @@ def unpin_message(message_id: int) -> bool:
             'message_id': message_id,
         })
         return result.get('ok', False)
-    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ValueError, RuntimeError) as e:
         logger.warning(f"[deployer] Failed to unpin message {message_id} (ignored): {e}")
         return False

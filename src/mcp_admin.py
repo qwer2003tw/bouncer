@@ -51,6 +51,17 @@ def mcp_tool_status(req_id: str, arguments: dict) -> dict:
                 'isError': True
             })
 
+        # TTL expiry check: pending_approval + ttl passed → expired
+        if item.get('status') == 'pending_approval':
+            ttl = int(item.get('ttl', 0))
+            if ttl and int(time.time()) > ttl:
+                item = {
+                    'status': 'expired',
+                    'request_id': request_id,
+                    'message': '請求已過期，未在時限內批准',
+                    'hint': 'Re-issue the command to create a new request.',
+                }
+
         return mcp_result(req_id, {
             'content': [{
                 'type': 'text',

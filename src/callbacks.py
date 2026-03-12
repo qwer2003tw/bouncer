@@ -18,7 +18,7 @@ from utils import response, format_size_human, build_info_lines
 from commands import execute_command, is_dangerous
 from paging import store_paged_output, get_paged_output
 from trust import create_trust_session, track_command_executed
-from telegram import escape_markdown, update_message, answer_callback, send_telegram_message_silent
+from telegram import escape_markdown, update_message, answer_callback, send_telegram_message_silent, pin_message
 from notifications import send_trust_auto_approve_notification
 from constants import DEFAULT_ACCOUNT_ID, RESULT_TTL, TRUST_SESSION_MAX_UPLOADS, TRUST_SESSION_MAX_COMMANDS
 from metrics import emit_metric
@@ -773,6 +773,12 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
                 f"\n🆔 *部署 ID：* `{deploy_id}`\n\n"
                 f"⏳ 部署進行中..."
             )
+
+            # Pin the approval message so progress is visible (best-effort)
+            try:
+                pin_message(message_id)
+            except Exception as pin_err:
+                logger.warning(f"[deploy] Failed to pin message (ignored): {pin_err}")
 
             # Store telegram_message_id in deploy record for unpinning later
             if deploy_id:

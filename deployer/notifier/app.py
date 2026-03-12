@@ -12,6 +12,7 @@ import boto3
 # 環境變數
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
+MESSAGE_THREAD_ID = os.environ.get('MESSAGE_THREAD_ID', '')
 HISTORY_TABLE = os.environ.get('HISTORY_TABLE', 'bouncer-deploy-history')
 LOCKS_TABLE = os.environ.get('LOCKS_TABLE', 'bouncer-deploy-locks')
 
@@ -40,7 +41,7 @@ def lambda_handler(event, context):
 
 
 def handle_start(event):
-    """部署開始通知"""
+    """部署開始通知：更新現有審批訊息 + pin"""
     deploy_id = event.get('deploy_id', '')
     project_id = event.get('project_id', '')
     branch = event.get('branch', 'master')
@@ -57,7 +58,17 @@ def handle_start(event):
         f"└── ⏳ sam deploy"
     )
 
-    message_id = send_telegram_message(text)
+    # 從 DDB 讀取現有的 telegram_message_id（由 callbacks.py 儲存）
+    history = get_history(deploy_id)
+    existing_message_id = history.get('telegram_message_id') if history else None
+
+    if existing_message_id:
+        # 更新現有訊息（審批訊息）而非新建
+        update_telegram_message(int(existing_message_id), text)
+        message_id = int(existing_message_id)
+    else:
+        # 若無現有訊息（例如直接觸發），則新建
+        message_id = send_telegram_message(text)
 
     # 更新歷史記錄
     update_history(deploy_id, {
@@ -236,6 +247,8 @@ def send_telegram_message(text: str) -> int:
         'text': text,
         'parse_mode': 'Markdown'
     }
+    if MESSAGE_THREAD_ID:
+        data['message_thread_id'] = MESSAGE_THREAD_ID
 
     try:
         req = urllib.request.Request(
