@@ -255,3 +255,4 @@ def cleanup_changeset(
                 "error": str(e),
             },
         )
+# Sprint 33: SAM artifacts S3 permission added to Lambda role (2026-03-12)
