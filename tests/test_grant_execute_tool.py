@@ -131,7 +131,7 @@ def create_test_grant(mcp_module, grant_id='test-grant-001', status='active',
 
     grant = {
         'request_id': grant_id,
-        'type': 'grant_request',
+        'type': 'grant_session',
         'status': status,
         'source': source,
         'account_id': account_id,
@@ -139,6 +139,8 @@ def create_test_grant(mcp_module, grant_id='test-grant-001', status='active',
         'granted_commands': [normalize_command(cmd) for cmd in commands],
         'allow_repeat': allow_repeat,
         'used_commands': {},
+        'total_executions': 0,
+        'max_total_executions': 50,
         'expires_at': expires_at,
         'created_at': int(time.time()),
     }
@@ -171,8 +173,8 @@ class TestGrantExecuteHappyPath:
             'reason': 'Test execution'
         })
 
-        assert 'error' not in result
-        content = json.loads(result['result']['content'][0]['text'])
+        assert 'error' not in json.loads(result['body'])
+        content = json.loads(json.loads(result['body'])['result']['content'][0]['text'])
         assert content['status'] == 'grant_executed'
         assert 'result' in content
         assert content['grant_id'] == 'test-grant-001'
@@ -193,7 +195,7 @@ class TestGrantExecuteHappyPath:
             'command': 'aws s3 ls',
             'source': 'test-source'
         })
-        assert 'error' not in result1
+        assert 'error' not in json.loads(result1['body'])
 
         # 第二次執行同一命令（allow_repeat=True 應該允許）
         result2 = mcp_module.mcp_tool_grant_execute('req-002', {
@@ -201,8 +203,8 @@ class TestGrantExecuteHappyPath:
             'command': 'aws s3 ls',
             'source': 'test-source'
         })
-        assert 'error' not in result2
-        content = json.loads(result2['result']['content'][0]['text'])
+        assert 'error' not in json.loads(result2['body'])
+        content = json.loads(json.loads(result2['body'])['result']['content'][0]['text'])
         assert content['status'] == 'grant_executed'
 
     @patch('mcp_execute.execute_command')
@@ -219,8 +221,8 @@ class TestGrantExecuteHappyPath:
             'source': 'test-source'
         })
 
-        assert 'error' not in result
-        content = json.loads(result['result']['content'][0]['text'])
+        assert 'error' not in json.loads(result['body'])
+        content = json.loads(json.loads(result['body'])['result']['content'][0]['text'])
         assert content['status'] == 'grant_executed'
 
 
@@ -233,8 +235,8 @@ class TestGrantExecuteValidation:
             'command': 'aws s3 ls',
             'source': 'test-source'
         })
-        assert 'error' in result
-        assert result['error']['code'] == -32602
+        assert 'error' in json.loads(result['body'])
+        assert json.loads(result['body'])['error']['code'] == -32602
 
     def test_missing_command(self, mcp_module):
         """測試缺少 command"""
@@ -242,8 +244,8 @@ class TestGrantExecuteValidation:
             'grant_id': 'test-grant-001',
             'source': 'test-source'
         })
-        assert 'error' in result
-        assert result['error']['code'] == -32602
+        assert 'error' in json.loads(result['body'])
+        assert json.loads(result['body'])['error']['code'] == -32602
 
     def test_missing_source(self, mcp_module):
         """測試缺少 source"""
@@ -251,8 +253,8 @@ class TestGrantExecuteValidation:
             'grant_id': 'test-grant-001',
             'command': 'aws s3 ls'
         })
-        assert 'error' in result
-        assert result['error']['code'] == -32602
+        assert 'error' in json.loads(result['body'])
+        assert json.loads(result['body'])['error']['code'] == -32602
 
 
 class TestGrantExecuteAccountValidation:
@@ -269,7 +271,7 @@ class TestGrantExecuteAccountValidation:
             'account': '999999999999'
         })
 
-        content = json.loads(result['result']['content'][0]['text'])
+        content = json.loads(json.loads(result['body'])['result']['content'][0]['text'])
         assert content['status'] == 'account_not_found'
         assert 'not found' in content['message']
 
@@ -284,7 +286,7 @@ class TestGrantExecuteAccountValidation:
             'account': 'invalid-account'
         })
 
-        content = json.loads(result['result']['content'][0]['text'])
+        content = json.loads(json.loads(result['body'])['result']['content'][0]['text'])
         assert content['status'] == 'account_not_found'
 
 
@@ -299,7 +301,7 @@ class TestGrantExecuteGrantValidation:
             'source': 'test-source'
         })
 
-        content = json.loads(result['result']['content'][0]['text'])
+        content = json.loads(json.loads(result['body'])['result']['content'][0]['text'])
         assert content['status'] == 'grant_not_found'
         assert content['message'] == 'Grant not found or expired'
 
@@ -313,7 +315,7 @@ class TestGrantExecuteGrantValidation:
             'source': 'wrong-source'
         })
 
-        content = json.loads(result['result']['content'][0]['text'])
+        content = json.loads(json.loads(result['body'])['result']['content'][0]['text'])
         assert content['status'] == 'grant_not_found'
         assert content['message'] == 'Grant not found or expired'
 
@@ -327,7 +329,7 @@ class TestGrantExecuteGrantValidation:
             'source': 'test-source'
         })
 
-        content = json.loads(result['result']['content'][0]['text'])
+        content = json.loads(json.loads(result['body'])['result']['content'][0]['text'])
         assert content['status'] == 'grant_not_active'
         assert 'pending' in content['message']
 
@@ -342,7 +344,7 @@ class TestGrantExecuteGrantValidation:
             'source': 'test-source'
         })
 
-        content = json.loads(result['result']['content'][0]['text'])
+        content = json.loads(json.loads(result['body'])['result']['content'][0]['text'])
         assert content['status'] == 'grant_expired'
 
     def test_account_mismatch(self, mcp_module):
@@ -368,7 +370,7 @@ class TestGrantExecuteGrantValidation:
             'account': '222222222222'
         })
 
-        content = json.loads(result['result']['content'][0]['text'])
+        content = json.loads(json.loads(result['body'])['result']['content'][0]['text'])
         assert content['status'] == 'account_mismatch'
 
 
@@ -391,7 +393,7 @@ class TestGrantExecuteCommandValidation:
             'source': 'test-source'
         })
 
-        content = json.loads(result['result']['content'][0]['text'])
+        content = json.loads(json.loads(result['body'])['result']['content'][0]['text'])
         assert content['status'] == 'compliance_violation'
         assert content['rule_id'] == 'TEST-001'
 
@@ -408,7 +410,7 @@ class TestGrantExecuteCommandValidation:
             'source': 'test-source'
         })
 
-        content = json.loads(result['result']['content'][0]['text'])
+        content = json.loads(json.loads(result['body'])['result']['content'][0]['text'])
         assert content['status'] == 'command_not_in_grant'
 
     @patch('compliance_checker.check_compliance')
@@ -427,7 +429,7 @@ class TestGrantExecuteCommandValidation:
             'command': 'aws s3 ls',
             'source': 'test-source'
         })
-        assert 'error' not in result1
+        assert 'error' not in json.loads(result1['body'])
 
         # 第二次執行同一命令（應該失敗）
         result2 = mcp_module.mcp_tool_grant_execute('req-002', {
@@ -436,7 +438,7 @@ class TestGrantExecuteCommandValidation:
             'source': 'test-source'
         })
 
-        content = json.loads(result2['result']['content'][0]['text'])
+        content = json.loads(json.loads(result2['body'])['result']['content'][0]['text'])
         assert content['status'] == 'command_already_used'
 
 
@@ -459,7 +461,7 @@ class TestGrantExecuteExecution:
             'source': 'test-source'
         })
 
-        content = json.loads(result['result']['content'][0]['text'])
+        content = json.loads(json.loads(result['body'])['result']['content'][0]['text'])
         assert content['status'] == 'grant_executed'
         assert 'i-123456789' in content['result']
 
@@ -481,7 +483,7 @@ class TestGrantExecuteExecution:
         })
 
         # 即使通知失敗，執行仍應成功
-        content = json.loads(result['result']['content'][0]['text'])
+        content = json.loads(json.loads(result['body'])['result']['content'][0]['text'])
         assert content['status'] == 'grant_executed'
 
     @patch('compliance_checker.check_compliance')
@@ -492,7 +494,8 @@ class TestGrantExecuteExecution:
         """測試分頁輸出"""
         mock_compliance.return_value = (True, None)
         mock_exec.return_value = 'Large output...'
-        mock_page.return_value = ('Truncated output...', 'page-001')
+        from paging import PaginatedOutput
+        mock_page.return_value = PaginatedOutput(paged=True, result='Truncated output...', page=1, total_pages=2, output_length=1000, next_page='page-001')
 
         create_test_grant(mcp_module)
 
@@ -502,7 +505,7 @@ class TestGrantExecuteExecution:
             'source': 'test-source'
         })
 
-        content = json.loads(result['result']['content'][0]['text'])
+        content = json.loads(json.loads(result['body'])['result']['content'][0]['text'])
         assert content['status'] == 'grant_executed'
         assert content['page_id'] == 'page-001'
 

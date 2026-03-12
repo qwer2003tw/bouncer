@@ -1393,7 +1393,9 @@ def mcp_tool_grant_execute(req_id: str, arguments: dict) -> dict:
         result = execute_command(normalized_cmd, assume_role_arn=assume_role)
 
         # 14. 分頁輸出（大輸出時）
-        result_text, page_id = store_paged_output(req_id, result)
+        paged = store_paged_output(req_id, result)
+        result_text = paged.result
+        page_id = paged.next_page if paged.paged else None
 
         # 15. Telegram 通知（best-effort）
         try:
@@ -1405,7 +1407,7 @@ def mcp_tool_grant_execute(req_id: str, arguments: dict) -> dict:
                 request_id=req_id
             )
         except Exception:  # noqa: BLE001
-            logger.exception("Failed to send grant execute notification", extra={"module": "grant", "operation": "send_notification"})
+            logger.exception("Failed to send grant execute notification", extra={"src_module": "grant", "operation": "send_notification"})
 
         # 16. DynamoDB audit log
         log_decision(
