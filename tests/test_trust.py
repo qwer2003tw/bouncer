@@ -12,6 +12,11 @@ from unittest.mock import patch, MagicMock
 from decimal import Decimal
 from moto import mock_aws
 import boto3
+from botocore.exceptions import ClientError
+
+
+def _make_client_error(code='TestError', message='Test error'):
+    return ClientError({'Error': {'Code': code, 'Message': message}}, 'TestOperation')
 
 
 # ============================================================================
@@ -1012,7 +1017,7 @@ class TestTrustExpiryNotifier:
         from scheduler_service import TrustExpiryNotifier, SchedulerService
 
         mock_client = MagicMock()
-        mock_client.delete_schedule.side_effect = Exception("ResourceNotFoundException")
+        mock_client.delete_schedule.side_effect = _make_client_error('ResourceNotFoundException', 'Schedule not found')
         svc = SchedulerService(
             scheduler_client=mock_client,
             lambda_arn='arn:aws:lambda:us-east-1:111:function:bouncer',
@@ -1032,7 +1037,7 @@ class TestTrustExpiryNotifier:
         import scheduler_service as sched_mod
 
         mock_notifier = MagicMock()
-        mock_notifier.schedule.side_effect = RuntimeError("AWS scheduler down")
+        mock_notifier.schedule.side_effect = _make_client_error('SchedulerException', 'AWS scheduler down')
         original = sched_mod.get_trust_expiry_notifier()
         sched_mod.set_trust_expiry_notifier(mock_notifier)
         try:
@@ -1050,7 +1055,7 @@ class TestTrustExpiryNotifier:
         import scheduler_service as sched_mod
 
         mock_notifier = MagicMock()
-        mock_notifier.cancel.side_effect = RuntimeError("AWS scheduler down")
+        mock_notifier.cancel.side_effect = _make_client_error('SchedulerException', 'AWS scheduler down')
         original = sched_mod.get_trust_expiry_notifier()
         sched_mod.set_trust_expiry_notifier(mock_notifier)
         try:
@@ -1059,7 +1064,7 @@ class TestTrustExpiryNotifier:
                 'expiry-fail-revoke', '111111111111', '999999999'
             )
             mock_notifier.reset_mock()
-            mock_notifier.cancel.side_effect = RuntimeError("AWS scheduler down")
+            mock_notifier.cancel.side_effect = _make_client_error('SchedulerException', 'AWS scheduler down')
             result = trust_mod.revoke_trust_session(trust_id)
             assert result is True, "revoke must succeed despite scheduler failure"
         finally:

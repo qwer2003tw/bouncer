@@ -335,7 +335,7 @@ class TestTelegramMore:
     def test_send_telegram_message_error(self, mock_urlopen, app_module):
         """發送失敗"""
         from telegram import send_telegram_message
-        mock_urlopen.side_effect = Exception('Network error')
+        mock_urlopen.side_effect = OSError('Network error')
         # 不應該拋出異常
         send_telegram_message('test message')
     
@@ -343,7 +343,7 @@ class TestTelegramMore:
     def test_answer_callback_error(self, mock_urlopen, app_module):
         """callback 回答失敗"""
         from telegram import answer_callback
-        mock_urlopen.side_effect = Exception('Network error')
+        mock_urlopen.side_effect = OSError('Network error')
         answer_callback('callback-id', 'text')
 
 

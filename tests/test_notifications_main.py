@@ -12,6 +12,11 @@ from unittest.mock import patch, MagicMock
 from decimal import Decimal
 from moto import mock_aws
 import boto3
+from botocore.exceptions import ClientError
+
+
+def _make_client_error(code='TestError', message='Test error'):
+    return ClientError({'Error': {'Code': code, 'Message': message}}, 'TestOperation')
 
 
 # ============================================================================
@@ -155,6 +160,11 @@ class TestDisplaySummaryInItems:
     @patch('mcp_execute.send_blocked_notification')
     def test_execute_item_has_display_summary(self, mock_blocked, mock_approval, app_module):
         """Execute approval item has display_summary field"""
+        import sys as _sys, os as _os
+        _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), '..', 'src'))
+        from notifications import NotificationResult
+        mock_approval.return_value = NotificationResult(ok=True, message_id=None)
+        """Execute approval item has display_summary field"""
         event = {
             'rawPath': '/mcp',
             'headers': {'x-approval-secret': os.environ.get('REQUEST_SECRET', 'test-secret')},
@@ -183,6 +193,7 @@ class TestDisplaySummaryInItems:
     @patch('telegram.send_telegram_message')
     def test_upload_item_has_display_summary(self, mock_telegram, app_module):
         """Upload approval item has display_summary field"""
+        mock_telegram.return_value = {'ok': True}
         import base64
         content_b64 = base64.b64encode(b'test content').decode()
 
@@ -215,6 +226,10 @@ class TestDisplaySummaryInItems:
     @patch('mcp_upload.send_batch_upload_notification')
     def test_upload_batch_item_has_display_summary(self, mock_notification, app_module):
         """Upload batch approval item has display_summary field"""
+        import sys, os as _os
+        sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), '..', 'src'))
+        from notifications import NotificationResult
+        mock_notification.return_value = NotificationResult(ok=True, message_id=None)
         import base64
         content_b64 = base64.b64encode(b'test content').decode()
 
@@ -795,7 +810,7 @@ class TestNotificationsCoverage:
     def test_send_grant_request_error_handling(self):
         """Exception inside the function is caught — does not raise."""
         # Pass invalid commands_detail to trigger error path
-        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=RuntimeError('fail')):
+        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=OSError('fail')):
             # Should not raise
             self.notif.send_grant_request_notification(
                 grant_id='grant-err',
@@ -924,7 +939,7 @@ class TestNotificationsCoverage:
 
     def test_send_blocked_notification_error_handling(self):
         """Exception is caught — does not raise."""
-        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=RuntimeError('fail')):
+        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=OSError('fail')):
             # Should not raise
             self.notif.send_blocked_notification(
                 command='aws s3 ls',
@@ -971,7 +986,7 @@ class TestNotificationsCoverage:
 
     def test_send_trust_upload_notification_error_handling(self):
         """Exception is caught — does not raise."""
-        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=RuntimeError('fail')):
+        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=OSError('fail')):
             self.notif.send_trust_upload_notification(
                 filename='file.txt',
                 content_size=100,
@@ -1007,7 +1022,7 @@ class TestNotificationsCoverage:
 
     def test_send_batch_upload_notification_error_handling(self):
         """Exception is caught — does not raise."""
-        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=RuntimeError('fail')):
+        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=OSError('fail')):
             self.notif.send_batch_upload_notification(
                 batch_id='batch-err',
                 file_count=2,
@@ -1067,7 +1082,7 @@ class TestNotificationsCoverage:
 
     def test_send_presigned_notification_error_handling(self):
         """Exception in send_message_with_entities is caught — no crash."""
-        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=RuntimeError('fail')):
+        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=OSError('fail')):
             self.notif.send_presigned_notification(
                 filename='file.pdf',
                 source='Bot',
@@ -1109,7 +1124,7 @@ class TestNotificationsCoverage:
 
     def test_send_presigned_batch_notification_error_handling(self):
         """Exception is caught — no crash."""
-        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=RuntimeError('fail')):
+        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=OSError('fail')):
             self.notif.send_presigned_batch_notification(
                 source='Bot',
                 count=3,
@@ -1205,7 +1220,7 @@ class TestNotificationsCoverage:
 
     def test_send_grant_execute_notification_error_handling(self):
         """Exception in send_grant_execute_notification is caught — no crash."""
-        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=RuntimeError('tg fail')):
+        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=OSError('tg fail')):
             self.notif.send_grant_execute_notification(
                 command='aws s3 ls',
                 grant_id='grant-exec-err',
@@ -1215,7 +1230,7 @@ class TestNotificationsCoverage:
 
     def test_send_grant_complete_notification_error_handling(self):
         """Exception in send_grant_complete_notification is caught — no crash."""
-        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=RuntimeError('tg fail')):
+        with patch.object(self.notif._telegram, 'send_message_with_entities', side_effect=OSError('tg fail')):
             self.notif.send_grant_complete_notification(
                 grant_id='grant-complete-err',
                 reason='expired',
@@ -1350,7 +1365,7 @@ class TestSchedulerIntegration:
 
     def test_post_notification_setup_ddb_error_is_non_fatal(self):
         """post_notification_setup swallows DynamoDB exceptions."""
-        self.mock_table.update_item.side_effect = Exception("ProvisionedThroughputExceeded")
+        self.mock_table.update_item.side_effect = _make_client_error('ProvisionedThroughputExceededException', 'Throughput exceeded')
         with patch('scheduler_service.get_scheduler_service') as mock_svc:
             mock_svc.return_value = MagicMock()
             # Should not raise
@@ -1407,7 +1422,7 @@ class TestSchedulerIntegration:
     def test_scheduler_failure_is_non_fatal(self):
         """post_notification_setup does not raise even if SchedulerService fails."""
         mock_service = MagicMock()
-        mock_service.create_expiry_schedule.side_effect = RuntimeError("Scheduler API unavailable")
+        mock_service.create_expiry_schedule.side_effect = _make_client_error('SchedulerServiceException', 'Scheduler API unavailable')
 
         with patch('scheduler_service.get_scheduler_service', return_value=mock_service):
             # Should NOT raise
@@ -1493,7 +1508,7 @@ class TestSchedulerIntegration:
     def test_scheduler_service_create_failure_returns_false(self):
         """SchedulerService.create_expiry_schedule returns False on boto3 error."""
         mock_client = MagicMock()
-        mock_client.create_schedule.side_effect = Exception("AccessDenied")
+        mock_client.create_schedule.side_effect = _make_client_error('AccessDeniedException', 'Access denied')
 
         svc_mod = __import__('scheduler_service')
         svc = svc_mod.SchedulerService(

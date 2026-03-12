@@ -7,6 +7,11 @@ from unittest.mock import patch, MagicMock
 from decimal import Decimal
 from moto import mock_aws
 import boto3
+from botocore.exceptions import ClientError
+
+
+def _make_client_error(code='TestError', message='Test error'):
+    return ClientError({'Error': {'Code': code, 'Message': message}}, 'TestOperation')
 
 
 class TestMCPExecuteBlocked:
@@ -1252,6 +1257,8 @@ class TestDeployNotificationFallback:
         with patch('urllib.request.urlopen') as mock_urlopen:
             mock_resp = MagicMock()
             mock_resp.read.return_value = b'{"ok":true,"result":{"message_id":1}}'
+            mock_resp.__enter__ = lambda s: mock_resp
+            mock_resp.__exit__ = MagicMock(return_value=False)
             mock_urlopen.return_value = mock_resp
 
             send_deploy_approval_request('deploy-test-123', project, 'main', 'test', 'test-bot')
@@ -1281,6 +1288,8 @@ class TestDeployNotificationFallback:
         with patch('urllib.request.urlopen') as mock_urlopen:
             mock_resp = MagicMock()
             mock_resp.read.return_value = b'{"ok":true,"result":{"message_id":1}}'
+            mock_resp.__enter__ = lambda s: mock_resp
+            mock_resp.__exit__ = MagicMock(return_value=False)
             mock_urlopen.return_value = mock_resp
 
             send_deploy_approval_request('deploy-test-456', project, 'main', 'test', 'test-bot')
@@ -1306,6 +1315,8 @@ class TestDeployNotificationFallback:
         with patch('urllib.request.urlopen') as mock_urlopen:
             mock_resp = MagicMock()
             mock_resp.read.return_value = b'{"ok":true,"result":{"message_id":1}}'
+            mock_resp.__enter__ = lambda s: mock_resp
+            mock_resp.__exit__ = MagicMock(return_value=False)
             mock_urlopen.return_value = mock_resp
 
             send_deploy_approval_request('deploy-test-789', project, 'main', 'test', 'test-bot')
@@ -1683,7 +1694,7 @@ class TestGetDeployStatusFailedPath:
 
         mock_sfn = MagicMock()
         mock_sfn.describe_execution.return_value = {'status': 'FAILED'}
-        mock_sfn.get_execution_history.side_effect = Exception('SFN history unavailable')
+        mock_sfn.get_execution_history.side_effect = _make_client_error('SFNError', 'SFN history unavailable')
 
         with patch.object(deployer_mod, 'sfn_client', mock_sfn), \
              patch('deployer.send_deploy_failure_notification'):

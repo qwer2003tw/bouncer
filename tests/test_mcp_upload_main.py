@@ -10,6 +10,11 @@ from unittest.mock import patch, MagicMock
 from decimal import Decimal
 from moto import mock_aws
 import boto3
+from botocore.exceptions import ClientError
+
+
+def _make_client_error(code='TestError', message='Test error'):
+    return ClientError({'Error': {'Code': code, 'Message': message}}, 'TestOperation')
 
 
 class TestUploadFunctionality:
@@ -76,6 +81,7 @@ class TestUploadFunctionality:
     @patch('telegram.send_telegram_message')
     def test_mcp_tool_upload_success_async(self, mock_telegram, app_module):
         """上傳成功（異步模式）"""
+        mock_telegram.return_value = {'ok': True}
         import base64
         content = base64.b64encode(b'test content').decode()
         
@@ -116,6 +122,7 @@ class TestCrossAccountUpload:
     @patch('telegram.send_telegram_message')
     def test_upload_default_account_no_assume_role(self, mock_telegram, app_module):
         """不帶 account 參數 → 使用預設帳號，不 assume role"""
+        mock_telegram.return_value = {'ok': True}
         import base64
         content = base64.b64encode(b'test content').decode()
 
@@ -142,6 +149,7 @@ class TestCrossAccountUpload:
     @patch('telegram.send_telegram_message')
     def test_upload_cross_account_with_role(self, mock_telegram, app_module):
         """帶 account 參數 → 使用跨帳號，存 assume_role"""
+        mock_telegram.return_value = {'ok': True}
         import base64
         content = base64.b64encode(b'cross account test').decode()
 
@@ -227,6 +235,7 @@ class TestCrossAccountUpload:
     @patch('telegram.send_telegram_message')
     def test_upload_notification_includes_account(self, mock_telegram, app_module):
         """通知訊息包含帳號資訊"""
+        mock_telegram.return_value = {'ok': True}
         import base64
         content = base64.b64encode(b'test').decode()
 
@@ -494,7 +503,7 @@ class TestUploadVerificationResult:
         from mcp_upload import _verify_upload, UploadVerificationResult
 
         mock_s3 = MagicMock()
-        mock_s3.head_object.side_effect = Exception("403 Forbidden")
+        mock_s3.head_object.side_effect = _make_client_error('AccessDenied', '403 Forbidden')
 
         result = _verify_upload(mock_s3, 'my-bucket', 'some/key.txt', 'key.txt')
 
@@ -511,7 +520,7 @@ class TestUploadVerificationResult:
         from mcp_upload import _verify_upload
 
         mock_s3 = MagicMock()
-        mock_s3.head_object.side_effect = Exception("NoSuchKey")
+        mock_s3.head_object.side_effect = _make_client_error('NoSuchKey', 'The specified key does not exist')
 
         with caplog.at_level(logging.WARNING, logger='mcp_upload'):
             _verify_upload(mock_s3, 'bucket', 'key.txt', 'key.txt')

@@ -422,7 +422,7 @@ class TestSendRemainingPages:
         def raise_on_second(msg):
             call_count[0] += 1
             if call_count[0] == 1:
-                raise RuntimeError("Telegram timeout")
+                raise OSError("Telegram timeout")
 
         with patch('paging.send_telegram_message_silent', side_effect=raise_on_second):
             # Must not raise
