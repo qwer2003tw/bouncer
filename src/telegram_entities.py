@@ -42,9 +42,9 @@ class MessageBuilder:
 
     Supported entity types (Telegram Bot API):
       'bold', 'italic', 'underline', 'strikethrough', 'spoiler',
-      'code', 'pre', 'text_link', 'text_mention', 'custom_emoji',
-      'date_time' (display hint only — not a standard Telegram entity,
-                   but stored as a custom entity for downstream use)
+      'code', 'pre', 'expandable_blockquote', 'text_link', 'text_mention',
+      'custom_emoji', 'date_time' (display hint only — not a standard
+      Telegram entity, but stored as a custom entity for downstream use)
 
     Plain text segments (entity_type=None) contribute to offset but
     produce no entity in the output list.
@@ -80,6 +80,11 @@ class MessageBuilder:
     def pre(self, content) -> "MessageBuilder":
         """Add pre-formatted block text."""
         self._parts.append((str(content), 'pre'))
+        return self
+
+    def expandable_blockquote(self, content) -> "MessageBuilder":
+        """Add expandable blockquote text (collapsible block)."""
+        self._parts.append((str(content), 'expandable_blockquote'))
         return self
 
     def underline(self, content) -> "MessageBuilder":
@@ -170,3 +175,46 @@ def build_entities_message(parts: list) -> tuple[str, list]:
     """
     builder = MessageBuilder.from_parts(parts)
     return builder.build()
+
+
+def format_command_output(result: str, threshold: int = 50) -> tuple[list, str]:
+    """Format command output as plain text + entities.
+
+    Long output (>threshold lines) → expandable_blockquote entity
+    Short output → pre entity (code block)
+    Empty output → "(no output)" plain text
+
+    Args:
+        result: Command output string
+        threshold: Line count threshold for expandable blockquote (default: 50)
+
+    Returns:
+        Tuple of (entities_list, text_for_api)
+        - entities_list: List of entity dicts for Telegram API
+        - text_for_api: Plain text content
+
+    Note:
+        expandable_blockquote is supported since Telegram Bot API 7.0 (2024-03-31)
+    """
+    if not result or not result.strip():
+        return [], "(no output)"
+
+    lines = result.strip().splitlines()
+    text = result.strip()
+
+    if len(lines) > threshold:
+        # Long output: use expandable_blockquote
+        entity = {
+            "type": "expandable_blockquote",
+            "offset": 0,
+            "length": _utf16_len(text)
+        }
+        return [entity], text
+    else:
+        # Short output: use pre entity (existing behavior)
+        entity = {
+            "type": "pre",
+            "offset": 0,
+            "length": _utf16_len(text)
+        }
+        return [entity], text

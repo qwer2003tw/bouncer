@@ -24,7 +24,7 @@ from aws_lambda_powertools import Logger
 import telegram as _telegram
 from commands import is_dangerous, check_lambda_env_update
 from constants import COMMAND_APPROVAL_TIMEOUT, TRUST_SESSION_MAX_COMMANDS, UPLOAD_TIMEOUT, GRANT_APPROVAL_TIMEOUT
-from telegram_entities import MessageBuilder
+from telegram_entities import MessageBuilder, format_command_output
 from utils import format_size_human, extract_exit_code
 
 logger = Logger(service="bouncer")
@@ -355,14 +355,36 @@ def send_trust_auto_approve_notification(command: str, trust_id: str, remaining:
     if reason:
         mb.newline().text("💬 ").text(reason)
 
+    # Build header first (without result)
+    header_text, header_entities = mb.build()
+
+    # Format command result with expandable blockquote for long output
     if result:
+        from telegram_entities import _utf16_len
         _exit_code = extract_exit_code(result)
         result_status = "❌" if (_exit_code is not None and _exit_code != 0) else "✅"
-        result_text = result[:500] + '...' if len(result) > 500 else result
-        mb.newline().text(f"{result_status} ").bold("結果：").newline()
-        mb.pre(result_text)
 
-    text, entities = mb.build()
+        # Build result header line
+        result_header = f"\n{result_status} 結果：\n"
+        result_header_entity = {
+            "type": "bold",
+            "offset": _utf16_len(header_text) + _utf16_len(f"\n{result_status} "),
+            "length": _utf16_len("結果：")
+        }
+
+        # Get formatted result entities (expandable_blockquote or pre based on length)
+        result_entities, result_text = format_command_output(result)
+
+        # Adjust result entity offsets to account for header + result_header
+        header_and_result_header_len = _utf16_len(header_text + result_header)
+        for entity in result_entities:
+            entity['offset'] += header_and_result_header_len
+
+        # Combine everything
+        text = header_text + result_header + result_text
+        entities = header_entities + [result_header_entity] + result_entities
+    else:
+        text, entities = header_text, header_entities
 
     keyboard = {
         'inline_keyboard': [[
@@ -500,18 +522,40 @@ def send_grant_execute_notification(
         _exit_code = extract_exit_code(result)
         result_status = "❌" if (_exit_code is not None and _exit_code != 0) else "✅"
 
-        result_text = result[:500] + '...' if result and len(result) > 500 else (result or '')
         grant_short = grant_id[:20] + '...' if len(grant_id) > 20 else grant_id
 
+        # Build header without result
         mb = MessageBuilder()
         mb.text("🔑 ").bold("Grant 自動執行").newline()
         mb.text("📋 ").code(cmd_preview).newline()
         mb.text(f"{result_status} ").bold("結果：").newline()
-        mb.pre(result_text).newline()
-        mb.text("📊 剩餘: ").text(remaining_info).newline()
-        mb.text("🆔 ").code(grant_short)
 
-        text, entities = mb.build()
+        header_text, header_entities = mb.build()
+
+        # Format result with expandable blockquote for long output
+        result_text = result if result else ''
+        result_entities, formatted_result = format_command_output(result_text)
+
+        # Adjust result entity offsets
+        from telegram_entities import _utf16_len
+        header_len = _utf16_len(header_text)
+        for entity in result_entities:
+            entity['offset'] += header_len
+
+        # Build footer
+        footer_mb = MessageBuilder()
+        footer_mb.text("📊 剩餘: ").text(remaining_info).newline()
+        footer_mb.text("🆔 ").code(grant_short)
+        footer_text, footer_entities = footer_mb.build()
+
+        # Adjust footer entity offsets
+        footer_offset = _utf16_len(header_text + formatted_result + "\n")
+        for entity in footer_entities:
+            entity['offset'] += footer_offset
+
+        # Combine everything
+        text = header_text + formatted_result + "\n" + footer_text
+        entities = header_entities + result_entities + footer_entities
 
         keyboard = {
             'inline_keyboard': [[

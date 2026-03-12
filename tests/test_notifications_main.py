@@ -673,18 +673,26 @@ class TestNotificationsCoverage:
         assert '❌' in text
 
     def test_send_trust_auto_approve_with_long_result(self):
-        """Long result is truncated to 500 chars."""
+        """Long result (>50 lines) uses expandable_blockquote (S34-004)."""
         ctx, entities_mock = self._patch_entities_send()
         with ctx:
+            # Create result with 60 lines (above threshold of 50)
+            long_result = '\n'.join([f'Line {i}' for i in range(60)])
             self.notif.send_trust_auto_approve_notification(
                 command='aws s3 ls',
                 trust_id='trust-004',
                 remaining='',
                 count=1,
-                result='x' * 600,
+                result=long_result,
             )
         text = entities_mock.call_args[0][0]
-        assert '...' in text
+        entities = entities_mock.call_args[0][1]
+
+        # Long results are NOT truncated anymore - they use expandable_blockquote
+        assert long_result in text
+
+        # Verify expandable_blockquote entity is present for long output
+        assert any(e.get('type') == 'expandable_blockquote' for e in entities)
 
     def test_send_trust_auto_approve_with_source_and_reason(self):
         """source and reason appear in notification."""
