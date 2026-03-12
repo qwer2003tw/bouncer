@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.34.0] - 2026-03-12
+
+### Fixed
+- `src/notifications.py` — `send_grant_execute_notification()`: replace unreliable `result.startswith('❌')` with `extract_exit_code()` for correct ✅/❌ status in auto-approved notifications (#102 S34-001)
+- `src/callbacks.py` — `handle_command_callback()`: add immediate feedback `update_message("⏳ 執行中...")` before `execute_command()`, aligned with deploy callback pattern (#117 S34-002)
+
+### Security
+- `src/constants.py` — `TRUST_IP_BINDING_MODE`: configurable IP binding mode via `BOUNCER_IP_BINDING_MODE` env var (`strict`/`warn`/`disabled`, default `warn`) (#sec-004 S34-003)
+- `src/trust.py` — `should_trust_approve()`: `strict` mode blocks IP mismatch; `warn` mode logs+metric but allows (default); `disabled` skips check entirely
+
+### Added
+- `src/telegram_entities.py` — `format_command_output()`: long output (>50 lines) → `expandable_blockquote` entity; short output → `pre` entity; empty → "(no output)" (#63 S34-004)
+- `src/telegram_entities.py` — `MessageBuilder.expandable_blockquote()` method
+- `src/notifications.py` — `send_trust_auto_approve_notification()` and `send_grant_execute_notification()` use `format_command_output()` for collapsible long output
+
+### Tests
+- 4 regression tests for exit code 0/1/127/no-code in `test_notifications_main.py` (S34-001)
+- 1 test verifying call order in `test_callbacks_main.py` (S34-002)
+- 9 new IP binding mode tests in `test_trust_ip_binding.py` (S34-003)
+- 16 new tests in `tests/test_format_command_output.py` (S34-004)
+
 ## [3.33.0] - 2026-03-12
 
 ### Added
