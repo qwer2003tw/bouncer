@@ -342,6 +342,12 @@ Resources:
                     - dynamodb:GetItem
                   Resource: !Ref ProjectsTableArn
                 - !Ref AWS::NoValue
+              - Sid: ProjectsTableUpdateDirect
+                Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                  - dynamodb:GetItem
+                Resource: "arn:aws:dynamodb:us-east-1:190825685292:table/bouncer-projects"
       Tags:
         - Key: Project
           Value: BounceDeployer
