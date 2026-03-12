@@ -39,14 +39,14 @@ class AnalysisResult:
 def is_code_only_change(result: AnalysisResult) -> bool:
     """Whitelist check: return True only when ALL conditions are met.
 
-    1. result.error is None (analysis succeeded)
-    2. All ResourceChange.Action == 'Modify' (no Add / Remove)
-    3. All modified ResourceType == 'AWS::Lambda::Function'
-    4. All Details[].Target.Attribute == 'Properties'
-    5. All Details[].Target.Name == 'Code'
+    Allowed resource changes (SAM AutoPublishAlias normal lifecycle):
+    - AWS::Lambda::Function  Modify  → Code property change only
+    - AWS::Lambda::Version   Add     → SAM publishes a new version
+    - AWS::Lambda::Version   Delete  → SAM removes old version
+    - AWS::Lambda::Alias     Modify  → Alias points to new version
 
+    Any other resource type or action → False (fail-safe → human approval).
     Empty resource_changes (no-op deploy) → True.
-    Any condition not satisfied → False (fail-safe).
     """
     # Condition 1 — analysis must have succeeded
     if result.error is not None:
@@ -56,18 +56,29 @@ def is_code_only_change(result: AnalysisResult) -> bool:
     if not result.resource_changes:
         return True
 
+    # SAM AutoPublishAlias lifecycle types that are always safe
+    _SAFE_LAMBDA_TYPES = {
+        "AWS::Lambda::Version",
+        "AWS::Lambda::Alias",
+    }
+
     for change in result.resource_changes:
         rc = change.get("ResourceChange", {})
+        resource_type = rc.get("ResourceType", "")
+        action = rc.get("Action", "")
 
-        # Condition 2 — only Modify actions allowed
-        if rc.get("Action") != "Modify":
+        # Lambda Version Add/Delete and Alias Modify are SAM lifecycle — always safe
+        if resource_type in _SAFE_LAMBDA_TYPES:
+            continue
+
+        # Lambda Function must be Modify-only
+        if resource_type != "AWS::Lambda::Function":
             return False
 
-        # Condition 3 — only Lambda functions allowed
-        if rc.get("ResourceType") != "AWS::Lambda::Function":
+        if action != "Modify":
             return False
 
-        # Conditions 4 & 5 — all detail targets must be Properties.Code
+        # All detail targets must be Properties.Code
         details = rc.get("Details", [])
         for detail in details:
             target = detail.get("Target", {})

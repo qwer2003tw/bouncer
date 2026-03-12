@@ -266,3 +266,84 @@ def test_tc10_analyze_changeset_timeout(monkeypatch):
     assert result.error == "timeout"
     assert result.is_code_only is False
     assert result.resource_changes == []
+
+
+# ---------------------------------------------------------------------------
+# TC11 — SAM AutoPublishAlias lifecycle (Version Add + Alias Modify + Function Code Modify) → True
+# ---------------------------------------------------------------------------
+
+
+def test_tc11_sam_autopublishalias_lifecycle():
+    """SAM AutoPublishAlias causes Lambda::Version Add, Lambda::Version Delete,
+    Lambda::Alias Modify alongside Lambda::Function Code Modify — all safe."""
+    result = AnalysisResult(
+        is_code_only=True,
+        resource_changes=[
+            {
+                "ResourceChange": {
+                    "Action": "Modify",
+                    "ResourceType": "AWS::Lambda::Function",
+                    "LogicalResourceId": "ApprovalFunction",
+                    "Details": [
+                        {"Target": {"Attribute": "Properties", "Name": "Code"}}
+                    ],
+                }
+            },
+            {
+                "ResourceChange": {
+                    "Action": "Add",
+                    "ResourceType": "AWS::Lambda::Version",
+                    "LogicalResourceId": "ApprovalFunctionVersionABC",
+                    "Details": [],
+                }
+            },
+            {
+                "ResourceChange": {
+                    "Action": "Delete",
+                    "ResourceType": "AWS::Lambda::Version",
+                    "LogicalResourceId": "ApprovalFunctionVersionOLD",
+                    "Details": [],
+                }
+            },
+            {
+                "ResourceChange": {
+                    "Action": "Modify",
+                    "ResourceType": "AWS::Lambda::Alias",
+                    "LogicalResourceId": "ApprovalFunctionAliaslive",
+                    "Details": [],
+                }
+            },
+        ],
+    )
+    assert is_code_only_change(result) is True
+
+
+# ---------------------------------------------------------------------------
+# TC12 — Lambda::Version Add OK but DynamoDB Modify → False
+# ---------------------------------------------------------------------------
+
+
+def test_tc12_version_add_with_ddb_modify_is_false():
+    """Lambda::Version Add is safe but DynamoDB::Table Modify is infra change."""
+    result = AnalysisResult(
+        is_code_only=False,
+        resource_changes=[
+            {
+                "ResourceChange": {
+                    "Action": "Add",
+                    "ResourceType": "AWS::Lambda::Version",
+                    "LogicalResourceId": "ApprovalFunctionVersionNew",
+                    "Details": [],
+                }
+            },
+            {
+                "ResourceChange": {
+                    "Action": "Modify",
+                    "ResourceType": "AWS::DynamoDB::Table",
+                    "LogicalResourceId": "RequestsTable",
+                    "Details": [],
+                }
+            },
+        ],
+    )
+    assert is_code_only_change(result) is False
