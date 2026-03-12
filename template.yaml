@@ -427,6 +427,13 @@ Resources:
               Action:
                 - s3:GetObject
               Resource: !Sub "arn:aws:s3:::sam-deployer-artifacts-${DefaultAccountId}/*"
+            # sprint33: KMS decrypt for SAM deployer artifacts bucket encryption key (#118)
+            - Sid: SAMDeployerKMSDecrypt
+              Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+              Resource: "arn:aws:kms:us-east-1:190825685292:key/5b26bc8c-34a1-4195-bcef-6122d0bcb224"
             # sprint7-002: Allow Lambda to manage expiry schedules in EventBridge Scheduler
             - Sid: SchedulerManageExpiry
               Effect: Allow
