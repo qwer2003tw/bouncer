@@ -412,6 +412,7 @@ Resources:
                 - cloudformation:CreateChangeSet
                 - cloudformation:DescribeChangeSet
                 - cloudformation:DeleteChangeSet
+                - cloudformation:DescribeStacks
               Resource: "*"  # TODO Sprint 33: 收窄到 arn:aws:cloudformation:*:*:stack/{stack-pattern}/*
             # SEC-004b: Allow Lambda to generate presigned URLs and write audit metadata for staging bucket
             - Sid: StagingBucketPresignedAccess
