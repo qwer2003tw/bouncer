@@ -114,6 +114,36 @@ def dry_importer(mock_cfn_client):
     return CloudFormationImporter(STACK, cfn_client=mock_cfn_client, dry_run=True)
 
 
+@pytest.fixture(autouse=True)
+def _patch_sam_package_and_ddb(request):
+    """Auto-patch _run_sam_package and update_template_s3_url for all tests that
+    invoke main() via TestMain* or TestEarlyValidation* or TestSuggestImport* or
+    TestMainWithParams* classes.  This prevents subprocess.run from trying to call
+    the real ``sam package`` command and a real DDB endpoint.
+    """
+    marker = request.node.get_closest_marker("no_patch_sam_package")
+    if marker:
+        yield
+        return
+
+    class_name = getattr(request.cls, "__name__", "") if request.cls else ""
+    if not class_name.startswith(
+        (
+            "TestMain",
+            "TestEarlyValidation",
+            "TestSuggestImport",
+        )
+    ):
+        yield
+        return
+
+    with (
+        patch("sam_deploy._run_sam_package"),
+        patch("sam_deploy.update_template_s3_url"),
+    ):
+        yield
+
+
 # ===========================================================================
 # 1. Validation helpers
 # ===========================================================================

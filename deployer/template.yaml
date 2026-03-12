@@ -30,8 +30,19 @@ Parameters:
     AllowedValues: ["true", "false"]
     Description: 是否建立 CloudFormation execution role（首次部署用，之後 import）
 
+  ProjectsTableArn:
+    Type: String
+    Default: ""
+    Description: ARN of the bouncer-projects DynamoDB table (in the main Bouncer stack). When set, CodeBuildRole is granted dynamodb:UpdateItem and dynamodb:GetItem on this table so sam_deploy.py can persist template_s3_url.
+
+  ProjectsTableName:
+    Type: String
+    Default: "bouncer-projects"
+    Description: Name of the bouncer-projects DynamoDB table, passed to CodeBuild as PROJECTS_TABLE env var.
+
 Conditions:
   ShouldCreateCFNRole: !Equals [!Ref CreateCFNRole, "true"]
+  HasProjectsTableArn: !Not [!Equals [!Ref ProjectsTableArn, ""]]
 
 Globals:
   Function:
@@ -322,6 +333,15 @@ Resources:
                 Resource:
                   - "arn:aws:iam::*:role/BouncerRole"
                   - "arn:aws:iam::*:role/BouncerDeployerRole"  # Legacy support
+              - !If
+                - HasProjectsTableArn
+                - Sid: ProjectsTableUpdate
+                  Effect: Allow
+                  Action:
+                    - dynamodb:UpdateItem
+                    - dynamodb:GetItem
+                  Resource: !Ref ProjectsTableArn
+                - !Ref AWS::NoValue
       Tags:
         - Key: Project
           Value: BounceDeployer
@@ -478,6 +498,10 @@ Resources:
         EnvironmentVariables:
           - Name: ARTIFACTS_BUCKET
             Value: !Ref ArtifactsBucket
+          - Name: PROJECT_ID
+            Value: !Ref AWS::StackName
+          - Name: PROJECTS_TABLE
+            Value: !Ref ProjectsTableName
           - Name: KMS_KEY_ID
             Value: !Ref DeployerKMSKey
       Source:

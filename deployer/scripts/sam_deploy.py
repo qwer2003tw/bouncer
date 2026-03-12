@@ -396,6 +396,61 @@ class CloudFormationImporter:
 # Deploy orchestration
 # ---------------------------------------------------------------------------
 
+_PACKAGED_TEMPLATE = "/tmp/packaged-template.yaml"
+
+
+def _run_sam_package(artifacts_bucket: str, project_id: str) -> None:
+    """Run ``sam package`` to upload Lambda artifacts and produce a packaged template.
+
+    The resulting template file is written to ``_PACKAGED_TEMPLATE`` and later
+    consumed by ``_build_sam_cmd`` so that ``sam deploy`` does not need
+    ``--resolve-s3``.
+
+    This must be called *after* ``sam build`` and *before* any cross-account
+    assume-role, so the S3 upload uses the original CodeBuild credentials.
+    """
+    cmd = [
+        "sam", "package",
+        "--s3-bucket", artifacts_bucket,
+        "--s3-prefix", f"{project_id}/templates",
+        "--output-template-file", _PACKAGED_TEMPLATE,
+    ]
+    print(f"[package] sam package → s3://{artifacts_bucket}/{project_id}/templates/")
+    subprocess.run(cmd, check=True)
+    print(f"[package] Packaged template written to {_PACKAGED_TEMPLATE}")
+
+
+def update_template_s3_url(project_id: str, artifacts_bucket: str) -> None:
+    """Persist the packaged template S3 URL into the bouncer-projects DDB table.
+
+    Must be called *before* any cross-account assume-role so that the update
+    uses the original CodeBuild credentials (main-account IAM role), not the
+    assumed cross-account role.
+
+    Non-fatal: exceptions are caught and printed; deploy continues regardless.
+    """
+    if not project_id or not artifacts_bucket:
+        print("[DDB] Skipping template_s3_url update: PROJECT_ID or ARTIFACTS_BUCKET not set")
+        return
+    try:
+        s3_key = f"{project_id}/templates/packaged-template.yaml"
+        template_url = f"https://{artifacts_bucket}.s3.amazonaws.com/{s3_key}"
+
+        projects_table = os.environ.get("PROJECTS_TABLE", "bouncer-projects")
+        region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+
+        ddb = boto3.client("dynamodb", region_name=region)
+        ddb.update_item(
+            TableName=projects_table,
+            Key={"project_id": {"S": project_id}},
+            UpdateExpression="SET template_s3_url = :url",
+            ExpressionAttributeValues={":url": {"S": template_url}},
+        )
+        print(f"[DDB] Updated template_s3_url for {project_id}: {template_url}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[DDB] Warning: failed to update template_s3_url: {exc}")
+        # Non-fatal: don't break deploy
+
 
 def _build_sam_cmd(
     stack: str,
@@ -408,7 +463,7 @@ def _build_sam_cmd(
         "sam", "deploy",
         "--stack-name", stack,
         "--capabilities", "CAPABILITY_IAM", "CAPABILITY_AUTO_EXPAND", "CAPABILITY_NAMED_IAM",
-        "--resolve-s3",
+        "--template-file", _PACKAGED_TEMPLATE,
         "--no-confirm-changeset",
         "--no-fail-on-empty-changeset",
     ]
@@ -481,7 +536,7 @@ def _run_deploy(cmd: Sequence[str]) -> DeployResult:
 
 def _check_github_pat() -> None:
     """Validate GitHub PAT before attempting git clone.
-    
+
     Exits with clear error message if PAT is expired/invalid (HTTP 401).
     Gracefully skips validation on API errors (network, rate limit, etc.).
     """
@@ -528,6 +583,19 @@ def main(argv: Optional[List[str]] = None) -> None:
     params_raw = os.environ.get("SAM_PARAMS", "").strip()
     cfn_role = os.environ.get("CFN_ROLE_ARN", "").strip()
     target_role = os.environ.get("TARGET_ROLE_ARN", "").strip()
+    artifacts_bucket = os.environ.get("ARTIFACTS_BUCKET", "").strip()
+    project_id = os.environ.get("PROJECT_ID", "").strip()
+
+    # --- sam package: upload Lambda artifacts + produce packaged template ---
+    # Must run BEFORE any cross-account assume-role so the S3 upload uses the
+    # original CodeBuild IAM credentials (main account).
+    _run_sam_package(artifacts_bucket, project_id)
+
+    # --- Update template_s3_url in DDB (before assume-role) ---
+    # After assume-role the env-var credentials are overwritten with the
+    # cross-account role creds; DDB is in the main account, so we must call
+    # this before the role switch.
+    update_template_s3_url(project_id, artifacts_bucket)
 
     cmd = _build_sam_cmd(stack, params_raw, cfn_role, target_role)
     sys.stdout.flush()
