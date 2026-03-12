@@ -428,17 +428,31 @@ def update_template_s3_url(project_id: str, artifacts_bucket: str) -> None:
     assumed cross-account role.
 
     Non-fatal: exceptions are caught and printed; deploy continues regardless.
+
+    The S3 key is discovered by listing the prefix and picking the most-recently
+    modified object — SAM uploads a content-addressed key (hash), not a fixed name.
     """
     if not project_id or not artifacts_bucket:
         print("[DDB] Skipping template_s3_url update: PROJECT_ID or ARTIFACTS_BUCKET not set")
         return
     try:
-        s3_key = f"{project_id}/templates/packaged-template.yaml"
+        prefix = f"{project_id}/templates/"
+        region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+        s3 = boto3.client("s3", region_name=region)
+
+        # Find the most recently uploaded packaged template in the prefix
+        resp = s3.list_objects_v2(Bucket=artifacts_bucket, Prefix=prefix)
+        objects = resp.get("Contents", [])
+        if not objects:
+            print(f"[DDB] Warning: no objects found at s3://{artifacts_bucket}/{prefix}")
+            return
+
+        # Pick the most recently modified object
+        latest = max(objects, key=lambda o: o["LastModified"])
+        s3_key = latest["Key"]
         template_url = f"https://{artifacts_bucket}.s3.amazonaws.com/{s3_key}"
 
         projects_table = os.environ.get("PROJECTS_TABLE", "bouncer-projects")
-        region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
-
         ddb = boto3.client("dynamodb", region_name=region)
         ddb.update_item(
             TableName=projects_table,
