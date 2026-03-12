@@ -567,6 +567,7 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
             account_name=ctx.account_name,
             grant_id=grant_id,
             mode='mcp',
+            command_status='failed' if is_failed else 'success',
         )
 
         # Record execution error to DDB if command failed (sprint9-001)
@@ -650,6 +651,7 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
         risk_factors=_safe_risk_factors(ctx.smart_decision),
         account_name=ctx.account_name,
         mode='mcp',
+        command_status='failed' if is_failed else 'success',
     )
 
     # Record execution error to DDB if command failed (sprint9-001)
@@ -760,6 +762,7 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
         account_name=ctx.account_name,
         trust_session_id=trust_session['request_id'],
         mode='mcp',
+        command_status='failed' if is_failed else 'success',
     )
 
     # Record execution error to DDB if command failed (sprint9-001)

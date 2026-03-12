@@ -318,7 +318,8 @@ def _execute_and_store_result(
     update_expr = (
         'SET #s = :s, #r = :r, approved_at = :t, approver = :a, '
         'approved_by = :aby, duration_ms = :dms, source_ip = :sip, '
-        'decision_type = :dt, decided_at = :da, decision_latency_ms = :dl, #ttl = :ttl'
+        'decision_type = :dt, decided_at = :da, decision_latency_ms = :dl, '
+        'command_status = :cs, #ttl = :ttl'
     )
     expr_names = {'#s': 'status', '#r': 'result', '#ttl': 'ttl'}
     expr_values = {
@@ -332,6 +333,7 @@ def _execute_and_store_result(
         ':dt': decision_type,
         ':da': now,
         ':dl': decision_latency_ms,
+        ':cs': cmd_status,
         ':ttl': now + RESULT_TTL
     }
 
@@ -465,7 +467,19 @@ def _format_approval_response(
         truncate_notice = ""
         next_page_button = None
 
-    title = "✅ *已批准並執行* + 🔓 *信任 10 分鐘*" if action == 'approve_trust' else "✅ *已批准並執行*"
+    failed = _is_execute_failed(result)
+    if failed:
+        if action == 'approve_trust':
+            title = "❌ *已批准但執行失敗* + 🔓 *信任 10 分鐘*"
+        else:
+            title = "❌ *已批准但執行失敗*"
+    else:
+        if action == 'approve_trust':
+            title = "✅ *已批准並執行* + 🔓 *信任 10 分鐘*"
+        else:
+            title = "✅ *已批准並執行*"
+
+    result_emoji = "❌" if failed else "✅"
 
     # Send result message; append inline Next Page button when paged
     send_telegram_message_silent(
@@ -479,7 +493,7 @@ def _format_approval_response(
         reply_markup=next_page_button,
     )
     # Overwrite the approval message (remove buttons from it)
-    update_message(message_id, "✅ *已執行* — 見下方結果", remove_buttons=True)
+    update_message(message_id, f"{result_emoji} *已執行* — 見下方結果", remove_buttons=True)
 
 
 def _handle_deny_callback(
@@ -703,6 +717,20 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
     if action == 'approve':
         answer_callback(callback_id, '🚀 啟動部署中...')
         _update_request_status(table, request_id, 'approved', user_id)
+
+        # Immediate feedback: remove buttons before start_deploy (best-effort)
+        try:
+            update_message(
+                message_id,
+                f"⏳ *部署排隊中...*\n\n"
+                f"📋 *請求 ID：* `{request_id}`\n"
+                f"{source_line}"
+                f"📦 *專案：* {project_name}\n"
+                f"🌿 *分支：* {branch}",
+                remove_buttons=True,
+            )
+        except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
+            logger.warning(f"[deploy] Immediate feedback update_message failed (non-critical): {e}")
 
         # 啟動部署
         result = start_deploy(project_id, branch, user_id, reason)
@@ -1715,7 +1743,7 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
 
         # 執行命令
         result = execute_command(cmd, item_assume_role)
-        cmd_status = 'error' if _is_execute_failed(result) else 'success'
+        cmd_status = 'failed' if _is_execute_failed(result) else 'success'
         emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'trust_callback'})
         paged = store_paged_output(req_id, result)
 
@@ -1723,7 +1751,7 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
         now = int(time.time())
         table.update_item(
             Key={'request_id': req_id},
-            UpdateExpression='SET #s = :s, #r = :r, approved_at = :t, decision_type = :dt, decided_at = :da',
+            UpdateExpression='SET #s = :s, #r = :r, approved_at = :t, decision_type = :dt, decided_at = :da, command_status = :cs',
             ExpressionAttributeNames={'#s': 'status', '#r': 'result'},
             ExpressionAttributeValues={
                 ':s': 'approved',
@@ -1731,6 +1759,7 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
                 ':t': now,
                 ':dt': 'trust_auto_approved',
                 ':da': now,
+                ':cs': cmd_status,
             },
         )
 

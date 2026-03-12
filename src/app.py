@@ -60,6 +60,7 @@ from callbacks import (
     handle_grant_approve_all, handle_grant_approve_safe, handle_grant_deny,
     handle_deploy_frontend_callback,
     handle_show_page_callback,
+    _is_execute_failed,
 )
 from telegram_commands import (  # noqa: F401
     handle_telegram_command, handle_accounts_command,
@@ -708,7 +709,7 @@ def handle_clawdbot_request(event: dict) -> dict:
     # Layer 2: SAFELIST
     if is_auto_approve(command):
         result = execute_command(command, assume_role)
-        cmd_status = 'error' if result.startswith('❌') else 'success'
+        cmd_status = 'failed' if _is_execute_failed(result) else 'success'
         emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'auto_approve'})
         log_decision(
             table=table,
@@ -719,6 +720,7 @@ def handle_clawdbot_request(event: dict) -> dict:
             account_id=None,
             decision_type='auto_approved',
             mode='rest',
+            command_status=cmd_status,
         )
         return response(200, {
             'status': 'auto_approved',
