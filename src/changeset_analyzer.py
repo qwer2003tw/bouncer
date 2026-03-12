@@ -105,12 +105,34 @@ def create_dry_run_changeset(
     Uses ChangeSetType=UPDATE and all three CAPABILITY_* values.
     Does NOT forward Parameters so the existing stack values are reused.
     ChangeSetName format: bouncer-dryrun-{uuid4()[:12]}
+
+    Fetches the template body from S3 using the Lambda role credentials
+    (rather than passing TemplateURL which would require CloudFormation to
+    access S3 with its own service principal — which may be denied).
     """
+    import re
+    import boto3
+
+    # Parse S3 URL → bucket + key
+    # Supports: https://{bucket}.s3.amazonaws.com/{key}
+    #           https://{bucket}.s3.{region}.amazonaws.com/{key}
+    m = re.match(
+        r'https://([^.]+)\.s3(?:\.[^.]+)?\.amazonaws\.com/(.+)',
+        template_s3_url,
+    )
+    if not m:
+        raise ValueError(f"Cannot parse S3 URL: {template_s3_url!r}")
+
+    bucket, key = m.group(1), m.group(2)
+    s3 = boto3.client("s3")
+    obj = s3.get_object(Bucket=bucket, Key=key)
+    template_body = obj["Body"].read().decode("utf-8")
+
     changeset_name = f"bouncer-dryrun-{str(uuid.uuid4())[:12]}"
 
     cfn_client.create_change_set(
         StackName=stack_name,
-        TemplateURL=template_s3_url,
+        TemplateBody=template_body,
         ChangeSetName=changeset_name,
         ChangeSetType="UPDATE",
         Capabilities=[
