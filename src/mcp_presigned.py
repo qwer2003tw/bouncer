@@ -272,7 +272,7 @@ def _generate_presigned_url(ctx: PresignedContext) -> dict:
             expires_at=expires_at_iso,
         )
     except (OSError, TimeoutError, ConnectionError) as _notify_exc:
-        logger.error(f"[PRESIGNED] notification error (non-fatal): {_notify_exc}")
+        logger.error("Presigned notification error (non-fatal): %s", _notify_exc, extra={"src_module": "presigned", "operation": "send_notification", "error": str(_notify_exc)})
 
     payload = {
         "status": "ready",
@@ -544,7 +544,7 @@ def _generate_presigned_batch_urls(ctx: PresignedBatchContext) -> dict:
             expires_at=expires_at_iso,
         )
     except (OSError, TimeoutError, ConnectionError) as _notify_exc:
-        logger.error(f"[PRESIGNED BATCH] notification error (non-fatal): {_notify_exc}")
+        logger.error("Presigned batch notification error (non-fatal): %s", _notify_exc, extra={"src_module": "presigned", "operation": "send_batch_notification", "error": str(_notify_exc)})
 
     payload = {
         "status": "ready",

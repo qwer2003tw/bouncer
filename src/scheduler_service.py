@@ -119,13 +119,14 @@ class SchedulerService:
             ``True`` on success, ``False`` on any failure (non-raising).
         """
         if not self._enabled:
-            logger.debug("[SCHEDULER] Disabled — skipping schedule creation for %s", request_id)
+            logger.debug("Disabled — skipping schedule creation for %s", request_id, extra={"src_module": "scheduler", "operation": "create_expiry_schedule", "request_id": request_id})
             return False
 
         if not self._lambda_arn or not self._role_arn:
             logger.warning(
-                "[SCHEDULER] Missing LAMBDA_ARN or ROLE_ARN — cannot schedule expiry for %s",
+                "Missing LAMBDA_ARN or ROLE_ARN — cannot schedule expiry for %s",
                 request_id,
+                extra={"src_module": "scheduler", "operation": "create_expiry_schedule", "request_id": request_id},
             )
             return False
 
@@ -157,13 +158,14 @@ class SchedulerService:
                     "Input": json.dumps(payload),
                 },
             )
-            logger.info("[SCHEDULER] Created expiry schedule '%s' for request %s at %s", name, request_id, at_expr)
+            logger.info("Created expiry schedule '%s' for request %s at %s", name, request_id, at_expr, extra={"src_module": "scheduler", "operation": "create_expiry_schedule", "request_id": request_id, "schedule_name": name})
             return True
 
         except ClientError as exc:
             # Scheduler creation is non-critical; log but don't propagate
             logger.error(
-                "[SCHEDULER] Failed to create schedule for %s: %s", request_id, exc
+                "Failed to create schedule for %s: %s", request_id, exc,
+                extra={"src_module": "scheduler", "operation": "create_expiry_schedule", "request_id": request_id, "error": str(exc)},
             )
             return False
 
@@ -180,13 +182,13 @@ class SchedulerService:
             client = self._get_client()
             name = schedule_name(request_id)
             client.delete_schedule(Name=name, GroupName=self._group_name)
-            logger.info("[SCHEDULER] Deleted schedule '%s' for request %s", name, request_id)
+            logger.info("Deleted schedule '%s' for request %s", name, request_id, extra={"src_module": "scheduler", "operation": "delete_schedule", "request_id": request_id, "schedule_name": name})
             return True
         except client.exceptions.ResourceNotFoundException:  # type: ignore[attr-defined]
             # Already deleted or never created — treat as success
             return True
         except ClientError as exc:
-            logger.error("[SCHEDULER] Failed to delete schedule for %s: %s", request_id, exc)
+            logger.error("Failed to delete schedule for %s: %s", request_id, exc, extra={"src_module": "scheduler", "operation": "delete_schedule", "request_id": request_id, "error": str(exc)})
             return False
 
     # ── private helpers ───────────────────────────────────────────────────────
@@ -282,15 +284,17 @@ class TrustExpiryNotifier:
         svc = self._get_svc()
         if not svc._enabled:
             logger.debug(
-                "[TRUST-NOTIFIER] Scheduler disabled — skipping trust expiry schedule for %s",
+                "Scheduler disabled — skipping trust expiry schedule for %s",
                 trust_id,
+                extra={"src_module": "scheduler", "operation": "trust_expiry_schedule", "trust_id": trust_id},
             )
             return False
 
         if not svc._lambda_arn or not svc._role_arn:
             logger.warning(
-                "[TRUST-NOTIFIER] Missing LAMBDA_ARN or ROLE_ARN — cannot schedule trust expiry for %s",
+                "Missing LAMBDA_ARN or ROLE_ARN — cannot schedule trust expiry for %s",
                 trust_id,
+                extra={"src_module": "scheduler", "operation": "trust_expiry_schedule", "trust_id": trust_id},
             )
             return False
 
@@ -319,15 +323,17 @@ class TrustExpiryNotifier:
                 },
             )
             logger.info(
-                "[TRUST-NOTIFIER] Created expiry schedule '%s' for trust %s at %s",
+                "Created expiry schedule '%s' for trust %s at %s",
                 name, trust_id, at_expr,
+                extra={"src_module": "scheduler", "operation": "trust_expiry_schedule", "trust_id": trust_id, "schedule_name": name},
             )
             return True
 
         except ClientError as exc:
             logger.error(
-                "[TRUST-NOTIFIER] Failed to create expiry schedule for trust %s: %s",
+                "Failed to create expiry schedule for trust %s: %s",
                 trust_id, exc,
+                extra={"src_module": "scheduler", "operation": "trust_expiry_schedule", "trust_id": trust_id, "error": str(exc)},
             )
             return False
 
@@ -346,8 +352,9 @@ class TrustExpiryNotifier:
             client = svc._get_client()
             client.delete_schedule(Name=name, GroupName=svc._group_name)
             logger.info(
-                "[TRUST-NOTIFIER] Cancelled trust expiry schedule '%s' for trust %s",
+                "Cancelled trust expiry schedule '%s' for trust %s",
                 name, trust_id,
+                extra={"src_module": "scheduler", "operation": "cancel_trust_schedule", "trust_id": trust_id, "schedule_name": name},
             )
             return True
         except ClientError as exc:
@@ -357,13 +364,15 @@ class TrustExpiryNotifier:
             if "ResourceNotFound" in exc_name or "NotFound" in exc_name \
                     or "ResourceNotFound" in exc_str:
                 logger.debug(
-                    "[TRUST-NOTIFIER] Schedule '%s' not found (already fired or never created)",
+                    "Schedule '%s' not found (already fired or never created)",
                     name,
+                    extra={"src_module": "scheduler", "operation": "cancel_trust_schedule", "trust_id": trust_id},
                 )
                 return True
             logger.error(
-                "[TRUST-NOTIFIER] Failed to cancel trust expiry schedule for trust %s: %s",
+                "Failed to cancel trust expiry schedule for trust %s: %s",
                 trust_id, exc,
+                extra={"src_module": "scheduler", "operation": "cancel_trust_schedule", "trust_id": trust_id, "error": str(exc)},
             )
             return False
 

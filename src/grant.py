@@ -599,7 +599,7 @@ def try_use_grant_command(
                     used_commands = grant_item.get('used_commands', {})
                     current_count = int(used_commands.get(normalized_cmd, 0))
                     if current_count >= _DANGEROUS_REPEAT_LIMIT:
-                        logger.warning("Dangerous command repeat limit reached", extra={"module": "grant", "sec_rule": "SEC-009", "command": normalized_cmd[:80]})
+                        logger.warning("Dangerous command repeat limit reached", extra={"src_module": "grant", "sec_rule": "SEC-009", "command": normalized_cmd[:80]})
                         return False
                 except (json.JSONDecodeError, ValueError, TypeError) as e:
                     logger.error(f"[GRANT][SEC-009] Failed to read repeat count: {e}", extra={"src_module": "grant", "sec_rule": "SEC-009", "operation": "read_repeat_count", "error": str(e)})
@@ -649,7 +649,7 @@ def try_use_grant_command(
     except ClientError as e:
         if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
             return False  # 已用過或並發衝突
-        logger.error("try_use_grant_command ClientError", extra={"module": "grant", "operation": "try_use_grant_command", "error_type": "ClientError", "error": str(e)})
+        logger.error("try_use_grant_command ClientError", extra={"src_module": "grant", "operation": "try_use_grant_command", "error_type": "ClientError", "error": str(e)})
         return False
     except (json.JSONDecodeError, ValueError) as e:
         logger.error(f"[GRANT] try_use_grant_command error: {e}", extra={"src_module": "grant", "operation": "try_use_grant_command", "error": str(e)})

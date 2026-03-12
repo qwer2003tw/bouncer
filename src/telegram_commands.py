@@ -98,7 +98,7 @@ def handle_trust_command(chat_id: str) -> dict:
         )
         items = resp.get('Items', [])
     except ClientError as e:
-        logger.error(f"Error: {e}")
+        logger.error("Query trust sessions error: %s", e, extra={"src_module": "telegram_commands", "operation": "handle_trust_command", "error": str(e)})
         items = []
 
     if not items:
@@ -131,7 +131,7 @@ def handle_pending_command(chat_id: str) -> dict:
         )
         items = resp.get('Items', [])
     except ClientError as e:
-        logger.error(f"Error: {e}")
+        logger.error("Query pending requests error: %s", e, extra={"src_module": "telegram_commands", "operation": "handle_pending_command", "error": str(e)})
         items = []
 
     if not items:
@@ -195,7 +195,7 @@ def handle_stats_command(chat_id: str, hours: int = 24) -> dict:
                 )
                 items.extend(resp.get('Items', []))
     except ClientError as e:
-        logger.error(f"Error in stats: {e}")
+        logger.error("Stats query error: %s", e, extra={"src_module": "telegram_commands", "operation": "handle_stats", "error": str(e)})
         items = []
 
     total = len(items)

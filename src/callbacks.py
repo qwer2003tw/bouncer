@@ -410,7 +410,7 @@ def _handle_trust_session(
         )
         pending_items = pending_resp.get('Items', [])
     except Exception:  # noqa: BLE001 — DDB query failure is non-fatal; logged with exc_info
-        logger.warning("Failed to query pending items", extra={"module": "trust", "operation": "query_pending", "trust_scope": trust_scope}, exc_info=True)
+        logger.warning("Failed to query pending items", extra={"src_module": "trust", "operation": "query_pending", "trust_scope": trust_scope}, exc_info=True)  # [TRUST] Failed to query pending items
 
     pending_count = len(pending_items)
     if pending_count > 0:
@@ -786,7 +786,7 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
                     from deployer import update_deploy_record
                     update_deploy_record(deploy_id, {'telegram_message_id': message_id})
                 except ClientError as e:
-                    logger.warning(f"[deploy] Failed to store telegram_message_id (ignored): {e}")
+                    logger.warning("Failed to store telegram_message_id (ignored): %s", e, extra={"src_module": "callbacks", "operation": "handle_deploy_callback", "error": str(e)})
 
     elif action == 'deny':
         answer_callback(callback_id, '❌ 已拒絕')
@@ -897,7 +897,7 @@ def _parse_callback_files_manifest(item: dict, callback_id: str) -> 'list | dict
         files_manifest = _json.loads(item.get('files', '[]'))
         return files_manifest
     except _json.JSONDecodeError as e:
-        logger.error("[CALLBACK] Failed to parse files manifest: %s", e, exc_info=True)
+        logger.error("Failed to parse files manifest: %s", e, extra={"src_module": "callbacks", "operation": "parse_files_manifest", "error": str(e)}, exc_info=True)
         answer_callback(callback_id, '❌ 檔案清單解析失敗')
         return response(500, {'error': 'Failed to parse files manifest'})
 
@@ -969,7 +969,7 @@ def _execute_callback_upload_batch(
                 try:
                     s3_staging.delete_object(Bucket=staging_bucket, Key=s3_key)
                 except Exception:  # noqa: BLE001 — S3 staging cleanup is best-effort
-                    logger.warning("[UPLOAD-BATCH] Staging cleanup failed for key=%s (non-critical)", s3_key, exc_info=True)
+                    logger.warning("Staging cleanup failed for key=%s (non-critical)", s3_key, extra={"src_module": "callbacks", "operation": "upload_batch_cleanup", "s3_key": s3_key}, exc_info=True)  # [UPLOAD-BATCH] Staging cleanup failed
             else:
                 # Legacy path: decode base64 and upload directly to target
                 import base64 as _b64
@@ -1007,7 +1007,7 @@ def _execute_callback_upload_batch(
                     f"進度: {i + 1}/{file_count}",
                 )
             except Exception:  # noqa: BLE001 — progress update is best-effort
-                logger.warning("[UPLOAD-BATCH] Progress update failed at step %d (non-critical)", i + 1, exc_info=True)
+                logger.warning("Progress update failed at step %d (non-critical)", i + 1, extra={"src_module": "callbacks", "operation": "upload_batch_progress", "step": i + 1}, exc_info=True)  # [UPLOAD-BATCH] Progress update failed at step
 
     return (uploaded, errors, verification_failed)
 
@@ -1236,15 +1236,9 @@ def _write_frontend_deploy_history(
         # DynamoDB does not allow None values
         history_item = {k: v for k, v in history_item.items() if v is not None}
         _get_history_table().put_item(Item=history_item)
-        logger.info(
-            "[DEPLOY-FRONTEND] deploy_history written deploy_id=frontend-%s project=%s status=%s",
-            request_id, project, history_status,
-        )
+        logger.info("deploy_history written deploy_id=frontend-%s project=%s status=%s", request_id, project, history_status, extra={"src_module": "callbacks", "operation": "write_deploy_history", "request_id": request_id, "project": project, "status": history_status})
     except ClientError as exc:
-        logger.error(
-            "[DEPLOY-FRONTEND] Failed to write deploy_history for %s: %s",
-            request_id, exc,
-        )
+        logger.error("Failed to write deploy_history for %s: %s", request_id, exc, extra={"src_module": "callbacks", "operation": "write_deploy_history", "request_id": request_id, "error": str(exc)})
 
 
 def _parse_deploy_frontend_params(item: dict) -> dict:
@@ -1321,7 +1315,7 @@ def _assume_deploy_role(deploy_role_arn: str, request_id: str, files_manifest: l
         s3_target = get_s3_client(role_arn=deploy_role_arn, session_name=f"bouncer-deploy-{request_id[:16]}")
         return s3_target, None
     except ClientError as e:
-        logger.error("[DEPLOY-FRONTEND] AssumeRole failed for %s: %s", deploy_role_arn, e)
+        logger.error("AssumeRole failed for %s: %s", deploy_role_arn, e, extra={"src_module": "callbacks", "operation": "assume_role", "deploy_role_arn": deploy_role_arn, "error": str(e)})
         failed = [
             {'filename': fm.get('filename', 'unknown'), 'reason': f'AssumeRole failed: {e}'}
             for fm in files_manifest
@@ -1404,21 +1398,9 @@ def _deploy_files_to_frontend(files_manifest: list, s3_staging, s3_target, reque
                 CacheControl=cache_control,
             )
             deployed.append({'filename': filename, 's3_key': filename})
-            logger.info(
-                "[DEPLOY-FRONTEND] [AUDIT] uploaded file=%s size=%d content_type=%s "
-                "source=%s target=s3://%s/%s request_id=%s project=%s user_id=%s",
-                filename, len(body), content_type,
-                f"s3://{staging_bucket}/{staged_key}",
-                frontend_bucket, filename, request_id, project, user_id,
-            )
+            logger.info("uploaded file=%s size=%d content_type=%s request_id=%s project=%s", filename, len(body), content_type, request_id, project, extra={"src_module": "callbacks", "operation": "deploy_frontend_upload", "filename": filename, "request_id": request_id, "project": project})
         except ClientError as e:
-            logger.error(
-                "[DEPLOY-FRONTEND] [AUDIT] upload_failed file=%s error=%s "
-                "source=%s target=s3://%s/%s request_id=%s project=%s user_id=%s",
-                filename, str(e)[:200],
-                f"s3://{staging_bucket}/{staged_key}",
-                frontend_bucket, filename, request_id, project, user_id,
-            )
+            logger.error("upload_failed file=%s error=%s request_id=%s project=%s", filename, str(e)[:200], request_id, project, extra={"src_module": "callbacks", "operation": "deploy_frontend_upload", "filename": filename, "request_id": request_id, "project": project, "error": str(e)[:200]})
             failed.append({'filename': filename, 'reason': str(e)[:200]})
 
         # Progress update every 5 files
@@ -1431,7 +1413,7 @@ def _deploy_files_to_frontend(files_manifest: list, s3_staging, s3_target, reque
                     f"進度: {i + 1}/{file_count}",
                 )
             except Exception:  # noqa: BLE001 — progress update is best-effort
-                logger.warning("[DEPLOY-FRONTEND] Progress update failed at step %d (non-critical)", i + 1, exc_info=True)
+                logger.warning("Progress update failed at step %d (non-critical)", i + 1, extra={"src_module": "callbacks", "operation": "deploy_frontend_progress", "step": i + 1}, exc_info=True)  # [DEPLOY-FRONTEND] Progress update failed at step
 
     return deployed, failed
 
@@ -1457,7 +1439,7 @@ def _invalidate_cloudfront(success_count: int, deploy_role_arn: str, distributio
         )
         return False
     except ClientError as e:
-        logger.error("[DEPLOY-FRONTEND] CloudFront invalidation failed for dist=%s: %s", distribution_id, e)
+        logger.error("CloudFront invalidation failed for dist=%s: %s", distribution_id, e, extra={"src_module": "callbacks", "operation": "cloudfront_invalidation", "distribution_id": distribution_id, "error": str(e)})
         return True
 
 
@@ -1564,7 +1546,7 @@ def _finalize_deploy_frontend(deployed: list, failed: list, cf_invalidation_fail
             notif_text += "\n⚠️ CloudFront Invalidation 失敗"
         _send_message_silent(notif_text)
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as notif_exc:
-        logger.warning("[DEPLOY-FRONTEND] Result notification failed: %s", notif_exc)
+        logger.warning("Result notification failed: %s", notif_exc, extra={"src_module": "callbacks", "operation": "deploy_frontend_notify", "request_id": request_id, "error": str(notif_exc)})
 
     return response(200, {
         'ok': True,
@@ -1593,7 +1575,7 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
     try:
         files_manifest = _json.loads(params['files_json'])
     except _json.JSONDecodeError as e:
-        logger.error("[CALLBACK] Failed to parse files manifest for deploy-frontend: %s", e, exc_info=True)
+        logger.error("Failed to parse files manifest for deploy-frontend: %s", e, extra={"src_module": "callbacks", "operation": "handle_deploy_frontend_callback", "error": str(e)}, exc_info=True)
         answer_callback(callback_id, '❌ 檔案清單解析失敗')
         return response(500, {'error': 'Failed to parse files manifest'})
 
@@ -1730,7 +1712,7 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
             from compliance_checker import check_compliance
             is_compliant, violation = check_compliance(cmd)
             if not is_compliant:
-                logger.warning("Pending request failed compliance", extra={"module": "trust", "sec_rule": "SEC-013", "request_id": req_id, "violation_rule": violation.rule_id if violation else "unknown"})
+                logger.warning("Pending request failed compliance", extra={"src_module": "trust", "sec_rule": "SEC-013", "request_id": req_id, "violation_rule": violation.rule_id if violation else "unknown"})
                 # 更新狀態為 compliance_rejected
                 now_rej = int(time.time())
                 table.update_item(
@@ -1802,4 +1784,4 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
         executed += 1
 
     if executed > 0:
-        logger.info("Auto-executed pending requests", extra={"module": "trust", "operation": "auto_execute_complete", "executed": executed, "trust_scope": trust_scope})
+        logger.info("Auto-executed pending requests", extra={"src_module": "trust", "operation": "auto_execute_complete", "executed": executed, "trust_scope": trust_scope})

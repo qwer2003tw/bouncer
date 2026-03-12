@@ -100,7 +100,7 @@ def _safe_risk_category(smart_decision):
         cat = smart_decision.risk_result.category
         return cat.value if hasattr(cat, 'value') else cat
     except (AttributeError, KeyError) as e:
-        logger.warning("[RISK] Failed to extract risk category: %s", e)
+        logger.warning("Failed to extract risk category: %s", e, extra={"src_module": "execute", "operation": "safe_risk_category", "error": str(e)})
         return None
 
 
@@ -120,7 +120,7 @@ def _safe_risk_factors(smart_decision):
             })
         return sanitized
     except (AttributeError, KeyError, TypeError, ValueError) as e:
-        logger.warning("[RISK] Failed to extract/convert risk factors: %s", e)
+        logger.warning("Failed to extract/convert risk factors: %s", e, extra={"src_module": "execute", "operation": "safe_risk_factors", "error": str(e)})
         return None
 
 
@@ -161,10 +161,10 @@ def _log_smart_approval_shadow(
         }
 
         table.put_item(Item=item)
-        logger.info(f"[SHADOW] Logged: {shadow_id} -> {smart_decision.decision} (score={smart_decision.final_score}, actual={actual_decision})")
+        logger.info("Shadow logged: %s -> %s (score=%s, actual=%s)", shadow_id, smart_decision.decision, smart_decision.final_score, actual_decision, extra={"src_module": "shadow", "operation": "log_shadow", "shadow_id": shadow_id, "decision": smart_decision.decision})
     except ClientError as e:
         # Shadow 記錄失敗不影響主流程
-        logger.error(f"[SHADOW] Failed to log: {e}")
+        logger.error("Shadow log failed: %s", e, extra={"src_module": "shadow", "operation": "log_shadow", "error": str(e)})
 
 
 # =============================================================================
@@ -295,7 +295,7 @@ def _score_risk(ctx: ExecuteContext) -> None:
             enable_sequence_analysis=False,
         )
     except Exception as e:  # noqa: BLE001 — shadow smart approval, non-blocking
-        logger.error(f"[SHADOW] Smart approval error: {e}")
+        logger.error("Smart approval error: %s", e, extra={"src_module": "shadow", "operation": "score_risk", "error": str(e)})
 
 
 def _scan_template(ctx: ExecuteContext) -> None:
@@ -356,14 +356,15 @@ def _scan_template(ctx: ExecuteContext) -> None:
 
         if escalate:
             logger.info(
-                f"[TEMPLATE] Escalating to MANUAL: {hit_count} hits, "
-                f"max_score={max_score}, severity={severity}"
+                "Escalating to MANUAL: %d hits, max_score=%d, severity=%s",
+                hit_count, max_score, severity,
+                extra={"src_module": "execute", "operation": "scan_template", "hit_count": hit_count, "max_score": max_score, "severity": severity},
             )
 
     except ImportError as e:
-        logger.warning(f"[TEMPLATE] template_scanner or load_risk_rules not available: {e}")
+        logger.warning("template_scanner or load_risk_rules not available: %s", e, extra={"src_module": "execute", "operation": "scan_template", "error": str(e)})
     except (ValueError, TypeError, OSError) as e:
-        logger.error(f"[TEMPLATE] Scan error (non-fatal): {e}")
+        logger.error("Template scan error (non-fatal): %s", e, extra={"src_module": "execute", "operation": "scan_template", "error": str(e)})
 
 
 def _extract_actual_decision(result: dict) -> str:
@@ -391,7 +392,7 @@ def _extract_actual_decision(result: dict) -> str:
         status = data.get('status', '')
         return _map_status_to_decision(status)
     except (json.JSONDecodeError, KeyError, TypeError, IndexError) as e:
-        logger.warning("[SMART] Failed to parse response decision: %s", e)
+        logger.warning("Failed to parse response decision: %s", e, extra={"src_module": "execute", "operation": "extract_decision", "error": str(e)})
         return 'unknown'
 
 
@@ -414,7 +415,7 @@ def _check_compliance(ctx: ExecuteContext) -> Optional[dict]:
         from compliance_checker import check_compliance
         is_compliant, violation = check_compliance(ctx.command)
         if not is_compliant:
-            logger.warning(f"[COMPLIANCE] Blocked: {violation.rule_id} - {violation.rule_name}")
+            logger.warning("Compliance blocked: %s - %s", violation.rule_id, violation.rule_name, extra={"src_module": "execute", "operation": "check_compliance", "rule_id": violation.rule_id, "rule_name": violation.rule_name})
             emit_metric('Bouncer', 'BlockedCommand', 1, dimensions={'Reason': 'compliance'})
             log_decision(
                 table=table,
@@ -603,7 +604,7 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
 
     except ClientError as e:
         # Grant 失敗不影響主流程 → fallthrough
-        logger.error("_check_grant_session error", extra={"module": "grant", "operation": "_check_grant_session", "error": str(e)})
+        logger.error("_check_grant_session error", extra={"src_module": "grant", "operation": "_check_grant_session", "error": str(e)})
         return None
 
 
@@ -634,9 +635,9 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
             )
             send_telegram_message_silent(_notif_text)
         except Exception:  # noqa: BLE001 — notification is best-effort
-            logger.warning("[EXECUTE] Result notification failed (non-critical)", exc_info=True)
+            logger.warning("[EXECUTE] Result notification failed (non-critical)", exc_info=True, extra={"src_module": "execute", "operation": "auto_approve_notification"})
     else:
-        logger.info(f"[EXECUTE] Skipped auto-approve notification for command: {ctx.command[:50]}...")
+        logger.info("Skipped auto-approve notification for command: %s...", ctx.command[:50], extra={"src_module": "execute", "operation": "auto_approve_notification"})
 
     log_decision(
         table=table,
@@ -847,8 +848,8 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
         try:
             table.delete_item(Key={'request_id': request_id})
         except ClientError as del_err:
-            logger.error(f"[ORPHAN CLEANUP] Failed to delete DDB record {request_id}: {del_err}")
-        logger.error(f"[ORPHAN CLEANUP] Telegram notification failed for {request_id}: {tg_err}")
+            logger.error("Failed to delete DDB record %s: %s", request_id, del_err, extra={"src_module": "execute", "operation": "orphan_cleanup", "request_id": request_id, "error": str(del_err)})
+        logger.error("Telegram notification failed for %s: %s", request_id, tg_err, extra={"src_module": "execute", "operation": "orphan_cleanup", "request_id": request_id, "error": str(tg_err)})
         return mcp_result(ctx.req_id, {
             'content': [{
                 'type': 'text',
@@ -917,7 +918,7 @@ def _check_chain_risks(ctx: ExecuteContext) -> Optional[dict]:
         args = aws_cli_split(sub_cmd)
         if not args or args[0] != 'aws':
             non_aws_cmd = args[0] if args else '(empty)'
-            logger.warning(f"[CHAIN] Non-AWS command in chain: {non_aws_cmd}")
+            logger.warning("Non-AWS command in chain: %s", non_aws_cmd, extra={"src_module": "execute", "operation": "check_chain_risks", "non_aws_cmd": non_aws_cmd})
             emit_metric('Bouncer', 'BlockedCommand', 1, dimensions={'Reason': 'chain_non_aws'})
             return mcp_result(ctx.req_id, {
                 'content': [{
@@ -938,7 +939,7 @@ def _check_chain_risks(ctx: ExecuteContext) -> Optional[dict]:
             from compliance_checker import check_compliance
             is_compliant, violation = check_compliance(sub_cmd)
             if not is_compliant:
-                logger.warning(f"[CHAIN] Compliance violation in sub-command: {sub_cmd[:100]}")
+                logger.warning("Compliance violation in sub-command: %s", sub_cmd[:100], extra={"src_module": "execute", "operation": "check_chain_risks", "sub_cmd": sub_cmd[:100]})
                 emit_metric('Bouncer', 'BlockedCommand', 1, dimensions={'Reason': 'chain_compliance'})
                 return mcp_result(ctx.req_id, {
                     'content': [{
@@ -961,7 +962,7 @@ def _check_chain_risks(ctx: ExecuteContext) -> Optional[dict]:
         # Layer 1: blocked check per sub-command
         block_reason = get_block_reason(sub_cmd)
         if block_reason:
-            logger.warning(f"[CHAIN] Blocked sub-command: {sub_cmd[:100]}")
+            logger.warning("Blocked sub-command: %s", sub_cmd[:100], extra={"src_module": "execute", "operation": "check_chain_risks", "sub_cmd": sub_cmd[:100]})
             send_blocked_notification(sub_cmd, block_reason, ctx.source)
             emit_metric('Bouncer', 'BlockedCommand', 1, dimensions={'Reason': 'chain_blocked'})
             log_decision(

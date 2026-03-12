@@ -242,10 +242,10 @@ def create_default_rules() -> RiskRules:
                 rules.version = data.get('version', '1.0.0-json')
                 return rules
         except (OSError, json.JSONDecodeError) as e:
-            logger.error(f"[RiskScorer] Failed to load {p}: {e}")
+            logger.error("Failed to load %s: %s", p, e, extra={"src_module": "risk_scorer", "operation": "load_risk_rules", "path": str(p), "error": str(e)})
 
     # Hardcoded fallback — 最小化，fail-closed（未知命令 = 高風險）
-    logger.warning("[RiskScorer] WARNING: No risk-rules.json found, using minimal fallback")
+    logger.warning("No risk-rules.json found, using minimal fallback", extra={"src_module": "risk_scorer", "operation": "load_risk_rules"})
     return RiskRules(
         version="1.0.0-fallback",
         verb_scores={'describe': 0, 'list': 0, 'get': 5},
@@ -303,7 +303,7 @@ def load_risk_rules(
         # 驗證規則
         is_valid, errors = rules.validate()
         if not is_valid:
-            logger.warning(f"[RiskScorer] Rule validation errors: {errors}")
+            logger.warning("Rule validation errors: %s", errors, extra={"src_module": "risk_scorer", "operation": "validate_rules", "error_count": len(errors)})
             # 仍然使用載入的規則，但記錄警告
 
         # 更新快取
@@ -313,7 +313,7 @@ def load_risk_rules(
         return rules
 
     except Exception as e:  # noqa: BLE001
-        logger.error(f"[RiskScorer] Failed to load rules, using defaults: {e}")
+        logger.error("Failed to load rules, using defaults: %s", e, extra={"src_module": "risk_scorer", "operation": "load_risk_rules", "error": str(e)})
         return create_default_rules()
 
 
@@ -646,7 +646,7 @@ def score_parameters(
             max_pattern_score = max(max_pattern_score, template_score)
             combined_score = min(100, max(combined_score, max_pattern_score + flag_score_total))
     except Exception as e:  # noqa: BLE001
-        logger.error(f"[TEMPLATE_SCAN] Error: {e}")
+        logger.error("Template scan error: %s", e, extra={"src_module": "risk_scorer", "operation": "template_scan", "error": str(e)})
         # Fail-open: don't change score on scanner error
 
     # 如果沒有匹配任何模式或旗標，給予基礎分數

@@ -105,15 +105,15 @@ def handle_cleanup_expired(event: dict) -> dict:
     """
     request_id = event.get('request_id')
     if not request_id:
-        logger.warning("[CLEANUP] Missing request_id in event")
+        logger.warning("Missing request_id in event", extra={"src_module": "cleanup", "operation": "handle_cleanup_expired"})
         return response(200, {'ok': True, 'skipped': True, 'reason': 'missing_request_id'})
 
-    logger.info("[CLEANUP] Processing expiry for request_id=%s", request_id)
+    logger.info("Processing expiry for request_id=%s", request_id, extra={"src_module": "cleanup", "operation": "handle_cleanup_expired", "request_id": request_id})
 
     try:
         item = table.get_item(Key={'request_id': request_id}).get('Item')
     except ClientError as e:
-        logger.error(f"[CLEANUP] DynamoDB error for {request_id}: {e}")
+        logger.error("DynamoDB error for request_id=%s: %s", request_id, e, extra={"src_module": "cleanup", "operation": "get_item", "request_id": request_id, "error": str(e)})
         return response(200, {'ok': True, 'skipped': True, 'reason': 'db_error'})
 
     if not item:
@@ -123,22 +123,21 @@ def handle_cleanup_expired(event: dict) -> dict:
             try:
                 update_message(int(fallback_msg_id), "⏰ 此請求已過期", remove_buttons=True)
             except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
-                logger.warning("[CLEANUP] Fallback message update failed: %s", e)
-        logger.info("[CLEANUP] Request %s not found — %s",
-                    request_id, "buttons cleared via fallback" if fallback_msg_id else "skipping")
+                logger.warning("Fallback message update failed: %s", e, extra={"src_module": "cleanup", "operation": "fallback_update", "request_id": request_id, "error": str(e)})
+        logger.info("Request %s not found — %s", request_id, "buttons cleared via fallback" if fallback_msg_id else "skipping", extra={"src_module": "cleanup", "operation": "not_found", "request_id": request_id})
         return response(200, {'ok': True, 'skipped': True, 'reason': 'not_found'})
 
     current_status = item.get('status', 'pending')
 
     # Already actioned — no-op
     if current_status in ('approved', 'rejected', 'denied', 'timeout', 'auto_approved'):
-        logger.info(f"[CLEANUP] Request {request_id} already {current_status} — no-op")
+        logger.info("Request %s already %s — no-op", request_id, current_status, extra={"src_module": "cleanup", "operation": "no_op", "request_id": request_id, "current_status": current_status})
         return response(200, {'ok': True, 'skipped': True, 'reason': f'already_{current_status}'})
 
     # Retrieve stored telegram_message_id
     telegram_message_id = item.get('telegram_message_id')
     if not telegram_message_id:
-        logger.info(f"[CLEANUP] Request {request_id} has no telegram_message_id — cannot update message")
+        logger.info("Request %s has no telegram_message_id — cannot update message", request_id, extra={"src_module": "cleanup", "operation": "no_message_id", "request_id": request_id})
         # Still mark as timed out
         _mark_request_timeout(request_id)
         return response(200, {'ok': True, 'skipped': True, 'reason': 'no_message_id'})
@@ -178,15 +177,9 @@ def handle_cleanup_expired(event: dict) -> dict:
     # Update Telegram message (remove buttons)
     try:
         update_message(int(telegram_message_id), expiry_text, remove_buttons=True)
-        logger.info(
-            "[CLEANUP] Updated Telegram message %s for request %s",
-            telegram_message_id, request_id,
-        )
+        logger.info("Updated Telegram message %s for request %s", telegram_message_id, request_id, extra={"src_module": "cleanup", "operation": "update_message", "request_id": request_id, "message_id": telegram_message_id})
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as exc:
-        logger.warning(
-            "[CLEANUP] Failed to update Telegram message %s: %s",
-            telegram_message_id, exc,
-        )
+        logger.warning("Failed to update Telegram message %s: %s", telegram_message_id, exc, extra={"src_module": "cleanup", "operation": "update_message", "request_id": request_id, "error": str(exc)})
         # Continue to update DynamoDB even if Telegram update fails
 
     # Mark as timeout in DynamoDB
@@ -206,7 +199,7 @@ def _mark_request_timeout(request_id: str) -> None:
             ExpressionAttributeValues={':s': 'timeout'},
         )
     except ClientError as exc:
-        logger.error("[CLEANUP] Failed to update DynamoDB status for %s: %s", request_id, exc)
+        logger.error("Failed to update DynamoDB status for %s: %s", request_id, exc, extra={"src_module": "cleanup", "operation": "mark_timeout", "request_id": request_id, "error": str(exc)})
 
 
 # ============================================================================
@@ -233,25 +226,25 @@ def handle_trust_expiry(event: dict) -> dict:
     """
     trust_id = event.get('trust_id')
     if not trust_id:
-        logger.warning("[TRUST-EXPIRY] Missing trust_id in event")
+        logger.warning("Missing trust_id in event", extra={"src_module": "trust_expiry", "operation": "handle_trust_expiry"})
         return response(200, {'ok': True, 'skipped': True, 'reason': 'missing_trust_id'})
 
-    logger.info("[TRUST-EXPIRY] Processing expiry notification for trust_id=%s", trust_id)
+    logger.info("Processing expiry notification for trust_id=%s", trust_id, extra={"src_module": "trust_expiry", "operation": "handle_trust_expiry", "trust_id": trust_id})
 
     # Fetch the trust session item to get source + trust_scope
     try:
         trust_item = table.get_item(Key={'request_id': trust_id}).get('Item')
     except ClientError as exc:
-        logger.error("[TRUST-EXPIRY] DynamoDB error fetching trust session %s: %s", trust_id, exc)
+        logger.error("DynamoDB error fetching trust session %s: %s", trust_id, exc, extra={"src_module": "trust_expiry", "operation": "get_item", "trust_id": trust_id, "error": str(exc)})
         return response(200, {'ok': True, 'skipped': True, 'reason': 'db_error'})
 
     if not trust_item:
-        logger.info("[TRUST-EXPIRY] Trust session %s not found (already revoked?) — skipping", trust_id)
+        logger.info("Trust session %s not found (already revoked?) — skipping", trust_id, extra={"src_module": "trust_expiry", "operation": "not_found", "trust_id": trust_id})
         return response(200, {'ok': True, 'skipped': True, 'reason': 'not_found'})
 
     # De-duplicate: skip if summary was already sent (e.g. session was revoked first)
     if trust_item.get('summary_sent'):
-        logger.info("[TRUST-EXPIRY] Summary already sent for trust_id=%s — skipping", trust_id)
+        logger.info("Summary already sent for trust_id=%s — skipping", trust_id, extra={"src_module": "trust_expiry", "operation": "already_sent", "trust_id": trust_id})
         return response(200, {'ok': True, 'skipped': True, 'reason': 'summary_already_sent'})
 
     source = trust_item.get('source', '') or trust_item.get('bound_source', '')
@@ -268,18 +261,15 @@ def handle_trust_expiry(event: dict) -> dict:
                 ExpressionAttributeValues={':t': True},
             )
         except ClientError as _mark_exc:
-            logger.warning("[TRUST-EXPIRY] Failed to mark summary_sent for %s: %s", trust_id, _mark_exc)
+            logger.warning("Failed to mark summary_sent for %s: %s", trust_id, _mark_exc, extra={"src_module": "trust_expiry", "operation": "mark_summary_sent", "trust_id": trust_id, "error": str(_mark_exc)})
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as _sum_exc:
-        logger.error("[TRUST-EXPIRY] send_trust_session_summary error for %s: %s", trust_id, _sum_exc)
+        logger.error("send_trust_session_summary error for %s: %s", trust_id, _sum_exc, extra={"src_module": "trust_expiry", "operation": "send_summary", "trust_id": trust_id, "error": str(_sum_exc)})
 
     # Query pending requests that match source + trust_scope
     pending_requests = _query_pending_for_trust(source=source, trust_scope=trust_scope)
     pending_count = len(pending_requests)
 
-    logger.info(
-        "[TRUST-EXPIRY] trust_id=%s source=%r trust_scope=%r pending_count=%d",
-        trust_id, source, trust_scope, pending_count,
-    )
+    logger.info("trust_id=%s source=%r trust_scope=%r pending_count=%d", trust_id, source, trust_scope, pending_count, extra={"src_module": "trust_expiry", "operation": "query_pending", "trust_id": trust_id, "pending_count": pending_count})
 
     # Send Telegram notification
     _send_trust_expiry_notification(
@@ -315,7 +305,7 @@ def _query_pending_for_trust(source: str, trust_scope: str) -> list:
     """
     effective_source = source or trust_scope
     if not effective_source:
-        logger.warning("[TRUST-EXPIRY] No source or trust_scope — cannot query pending requests")
+        logger.warning("No source or trust_scope — cannot query pending requests", extra={"src_module": "trust_expiry", "operation": "query_pending"})
         return []
 
     try:
@@ -332,13 +322,10 @@ def _query_pending_for_trust(source: str, trust_scope: str) -> list:
             Limit=100,
         )
         items = resp.get('Items', [])
-        logger.info(
-            "[TRUST-EXPIRY] Found %d pending_approval items for source=%r",
-            len(items), effective_source,
-        )
+        logger.info("Found %d pending_approval items for source=%r", len(items), effective_source, extra={"src_module": "trust_expiry", "operation": "query_pending", "count": len(items)})
         return items
     except ClientError as exc:
-        logger.error("[TRUST-EXPIRY] Failed to query pending requests for source=%r: %s", effective_source, exc)
+        logger.error("Failed to query pending requests for source=%r: %s", effective_source, exc, extra={"src_module": "trust_expiry", "operation": "query_pending", "error": str(exc)})
         return []
 
 
@@ -397,15 +384,9 @@ def _send_trust_expiry_notification(
             send_telegram_message(text)   # ring: pending requests need manual approval
         else:
             send_telegram_message_silent(text)  # silent: no action needed
-        logger.info(
-            "[TRUST-EXPIRY] Sent expiry notification for trust_id=%s (pending=%d, ring=%s)",
-            trust_id, pending_count, pending_count > 0,
-        )
+        logger.info("Sent expiry notification for trust_id=%s (pending=%d, ring=%s)", trust_id, pending_count, pending_count > 0, extra={"src_module": "trust_expiry", "operation": "send_notification", "trust_id": trust_id, "pending_count": pending_count})
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as exc:
-        logger.error(
-            "[TRUST-EXPIRY] Failed to send Telegram notification for trust %s: %s",
-            trust_id, exc,
-        )
+        logger.error("Failed to send Telegram notification for trust %s: %s", trust_id, exc, extra={"src_module": "trust_expiry", "operation": "send_notification", "trust_id": trust_id, "error": str(exc)})
 
 
 # ============================================================================
@@ -475,7 +456,7 @@ def handle_mcp_request(event) -> dict:
     try:
         body = json.loads(event.get('body', '{}'))
     except (json.JSONDecodeError, ValueError) as e:
-        logger.error(f"Error: {e}")
+        logger.error("JSON parse error: %s", e, extra={"src_module": "mcp", "operation": "handle_mcp_request", "error": str(e)})
         return mcp_error(None, -32700, 'Parse error')
 
     jsonrpc = body.get('jsonrpc')
@@ -647,7 +628,7 @@ def handle_clawdbot_request(event: dict) -> dict:
     try:
         body = json.loads(event.get('body', '{}'))
     except (json.JSONDecodeError, ValueError) as e:
-        logger.error(f"Error: {e}")
+        logger.error("JSON parse error: %s", e, extra={"src_module": "rest", "operation": "handle_clawdbot_request", "error": str(e)})
         return response(400, {'error': 'Invalid JSON'})
 
     command = unicodedata.normalize('NFKC', body.get('command', '')).strip()
@@ -794,10 +775,10 @@ def _is_grant_expired(request_id: str, callback: dict) -> bool:
                     ExpressionAttributeValues={':s': 'timeout'},
                 )
             except ClientError:
-                logger.warning("[GRANT EXPIRY] Failed to update DDB status=timeout for request_id=%s", request_id, exc_info=True)
+                logger.warning("[GRANT EXPIRY] Failed to update DDB status=timeout for request_id=%s", request_id, extra={"src_module": "grant_expiry", "operation": "mark_timeout", "request_id": request_id}, exc_info=True)
             return True
     except ClientError as e:
-        logger.error(f"[GRANT EXPIRY] Error checking grant TTL: {e}")
+        logger.error("Error checking grant TTL: %s", e, extra={"src_module": "grant_expiry", "operation": "check_ttl", "request_id": request_id, "error": str(e)})
     return False
 
 
@@ -822,7 +803,7 @@ def handle_telegram_webhook(event: dict) -> dict:
     try:
         body = json.loads(event.get('body', '{}'))
     except (json.JSONDecodeError, ValueError) as e:
-        logger.error(f"Error: {e}")
+        logger.error("JSON parse error in webhook: %s", e, extra={"src_module": "webhook", "operation": "handle_telegram_webhook", "error": str(e)})
         return response(400, {'error': 'Invalid JSON'})
 
     # 處理文字訊息（指令）
@@ -871,7 +852,7 @@ def handle_telegram_webhook(event: dict) -> dict:
             _resp = table.get_item(Key={'request_id': request_id})
             trust_item_for_summary = _resp.get('Item')
         except ClientError as _e:
-            logger.warning('Failed to fetch trust item for summary: %s', _e)
+            logger.warning('Failed to fetch trust item for summary: %s', _e, extra={"src_module": "webhook", "operation": "revoke_trust", "request_id": request_id, "error": str(_e)})
         success = revoke_trust_session(request_id)
         emit_metric('Bouncer', 'TrustSession', 1, dimensions={'Event': 'revoked'})
         message_id = callback.get('message', {}).get('message_id')
@@ -884,7 +865,7 @@ def handle_telegram_webhook(event: dict) -> dict:
                 try:
                     send_trust_session_summary(trust_item_for_summary)
                 except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as _se:
-                    logger.error('send_trust_session_summary error: %s', _se)
+                    logger.error('send_trust_session_summary error: %s', _se, extra={"src_module": "webhook", "operation": "revoke_trust_summary", "request_id": request_id, "error": str(_se)})
         else:
             answer_callback(callback['id'], '❌ 撤銷失敗')
         return response(200, {'ok': True})
@@ -920,9 +901,9 @@ def handle_telegram_webhook(event: dict) -> dict:
     try:
         db_start = time.time()
         item = table.get_item(Key={'request_id': request_id}).get('Item')
-        logger.debug(f"[TIMING] DynamoDB get_item: {(time.time() - db_start) * 1000:.0f}ms")
+        logger.debug("DynamoDB get_item: %dms", (time.time() - db_start) * 1000, extra={"src_module": "webhook", "operation": "get_item", "request_id": request_id})
     except ClientError as e:
-        logger.error(f"Error: {e}")
+        logger.error("DynamoDB get_item error: %s", e, extra={"src_module": "webhook", "operation": "get_item", "request_id": request_id, "error": str(e)})
         item = None
 
     if not item:
@@ -1007,7 +988,7 @@ def verify_hmac(headers: dict, body: str) -> bool:
         if abs(time.time() - ts) > TELEGRAM_TIMESTAMP_MAX_AGE:
             return False
     except ValueError as e:
-        logger.error(f"Error: {e}")
+        logger.error("HMAC timestamp parse error: %s", e, extra={"src_module": "hmac", "operation": "verify_hmac", "error": str(e)})
         return False
 
     payload = f"{timestamp}.{nonce}.{body}"

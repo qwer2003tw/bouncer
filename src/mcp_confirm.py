@@ -126,7 +126,7 @@ def _write_confirm_record(
         table.put_item(Item=item)
     except ClientError as exc:
         # Non-fatal: log and continue; verification result is still returned.
-        logger.error(f"[confirm_upload] DynamoDB write failed: {exc}")
+        logger.error("DynamoDB write failed: %s", exc, extra={"src_module": "confirm", "operation": "confirm_upload", "error": str(exc)})
 
 
 # ---------------------------------------------------------------------------

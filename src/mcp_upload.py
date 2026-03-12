@@ -75,9 +75,10 @@ def _verify_upload(s3_client, bucket: str, key: str, filename: str) -> UploadVer
         )
     except ClientError as exc:
         logger.warning(
-            "[UPLOAD VERIFY] head_object failed for %s: %s",
+            "head_object failed for %s: %s",
             s3_uri,
             exc,
+            extra={"src_module": "upload", "operation": "verify_upload", "s3_uri": s3_uri, "error": str(exc)},
         )
         return UploadVerificationResult(
             filename=filename,
@@ -354,7 +355,7 @@ def _check_upload_trust(ctx: UploadContext) -> Optional[dict]:
         })
 
     except ClientError as e:
-        logger.error(f"[TRUST UPLOAD] Execution error: {e}")
+        logger.error("Trust upload execution error: %s", e, extra={"src_module": "upload", "operation": "trust_upload", "error": str(e)})
         return None  # Fall through to human approval
 
 
@@ -461,8 +462,8 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
         try:
             table.delete_item(Key={'request_id': ctx.request_id})
         except ClientError as del_err:
-            logger.error(f"[ORPHAN CLEANUP] Failed to delete DDB record {ctx.request_id}: {del_err}")
-        logger.error(f"[ORPHAN CLEANUP] Telegram notification failed for upload {ctx.request_id}: {tg_err}")
+            logger.error("Failed to delete DDB record %s: %s", ctx.request_id, del_err, extra={"src_module": "upload", "operation": "orphan_cleanup", "request_id": ctx.request_id, "error": str(del_err)})
+        logger.error("Telegram notification failed for upload %s: %s", ctx.request_id, tg_err, extra={"src_module": "upload", "operation": "orphan_cleanup", "request_id": ctx.request_id, "error": str(tg_err)})
         return mcp_result(ctx.req_id, {
             'content': [{'type': 'text', 'text': json.dumps({
                 'status': 'error',
@@ -823,7 +824,7 @@ def _try_trust_auto_approve_batch(
                 'content': [{'type': 'text', 'text': json.dumps(result_payload)}],
             })
     except ClientError as e:
-        logger.error(f"[BATCH TRUST] Error: {e}")
+        logger.error("Batch trust upload error: %s", e, extra={"src_module": "upload", "operation": "batch_trust_upload", "error": str(e)})
 
     return None
 
@@ -863,7 +864,7 @@ def _submit_batch_for_approval(
                 try:
                     s3_staging.delete_object(Bucket=staging_bucket, Key=rk)
                 except ClientError:
-                    logger.warning("[UPLOAD-BATCH] Rollback cleanup failed for key=%s", rk)
+                    logger.warning("[UPLOAD-BATCH] Rollback cleanup failed for key=%s", rk, extra={"src_module": "upload", "operation": "rollback_cleanup", "s3_key": rk})
             return mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
                     'status': 'error',
@@ -1012,7 +1013,7 @@ def execute_upload(request_id: str, approver: str) -> dict:
             try:
                 s3.delete_object(Bucket=staging_bucket, Key=content_s3_key)
             except ClientError:
-                logger.warning("[UPLOAD] Staging cleanup failed for key=%s (non-critical, TTL will handle it)", content_s3_key)
+                logger.warning("[UPLOAD] Staging cleanup failed for key=%s (non-critical, TTL will handle it)", content_s3_key, extra={"src_module": "upload", "operation": "staging_cleanup", "s3_key": content_s3_key})
         else:
             # Legacy path: base64-decode from DDB item then upload
             import base64

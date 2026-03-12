@@ -80,7 +80,7 @@ def _compute_duration(item: dict) -> float | None:
         if approved_at and created_at:
             return round(float(Decimal(str(approved_at))) - float(Decimal(str(created_at))), 3)
     except (TypeError, ValueError, decimal.InvalidOperation):  # noqa: BLE001 — duration optional
-        logger.debug("[HISTORY] Failed to calculate decision_latency_ms (non-critical)")
+        logger.debug("[HISTORY] Failed to calculate decision_latency_ms (non-critical)", extra={"src_module": "history", "operation": "calc_latency"})
     return None
 
 
@@ -221,7 +221,7 @@ def _query_requests_table(
 
         else:
             # No GSI-suitable filter — fallback to Scan with warning
-            logger.warning("[history] no GSI filter provided, falling back to full Scan")
+            logger.warning("No GSI filter provided, falling back to full Scan", extra={"src_module": "history", "operation": "query_requests"})
             filter_expr = _build_filter_expression(source, action, status, account_id, since_ts)
             kwargs = {
                 "FilterExpression": filter_expr,
@@ -237,7 +237,7 @@ def _query_requests_table(
         last_key = resp.get("LastEvaluatedKey")
 
     except ClientError as e:
-        logger.error(f"[history] query/scan requests error: {e}")
+        logger.error("query/scan requests error: %s", e, extra={"src_module": "history", "operation": "query_requests", "error": str(e)})
         return [], 0, None
 
     # Trim to desired limit
@@ -292,7 +292,7 @@ def _query_command_history_table(
         scanned = resp.get("ScannedCount", 0)
         return items, scanned
     except ClientError as e:
-        logger.error(f"[history] query command-history GSI error: {e}")
+        logger.error("query command-history GSI error: %s", e, extra={"src_module": "history", "operation": "query_command_history", "error": str(e)})
         return [], 0
 
 

@@ -96,15 +96,15 @@ def _telegram_request(method: str, data: dict, timeout: int = 5, json_body: bool
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
             result = json.loads(resp.read().decode())
             elapsed = (time.time() - start_time) * 1000
-            logger.debug(f"[TIMING] Telegram {method}: {elapsed:.0f}ms")
+            logger.debug("Telegram %s: %.0fms", method, elapsed, extra={"src_module": "telegram", "operation": "call_api", "method": method, "elapsed_ms": elapsed})
             return result
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, json.JSONDecodeError, ValueError) as e:
         elapsed = (time.time() - start_time) * 1000
-        logger.debug(f"[TIMING] Telegram {method} error ({elapsed:.0f}ms): {e}")
+        logger.debug("Telegram %s error (%.0fms): %s", method, elapsed, e, extra={"src_module": "telegram", "operation": "call_api", "method": method, "elapsed_ms": elapsed, "error": str(e)})
 
         # Fallback: if sendMessage fails with Markdown, retry without parse_mode
         if method == 'sendMessage' and 'parse_mode' in data and '400' in str(e):
-            logger.info(f"[FALLBACK] Retrying {method} without parse_mode")
+            logger.info("Retrying %s without parse_mode", method, extra={"src_module": "telegram", "operation": "call_api_fallback", "method": method})
             fallback_data = {k: v for k, v in data.items() if k != 'parse_mode'}
             try:
                 if json_body:
@@ -123,10 +123,10 @@ def _telegram_request(method: str, data: dict, timeout: int = 5, json_body: bool
                 with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
                     result = json.loads(resp.read().decode())
                     elapsed2 = (time.time() - start_time) * 1000
-                    logger.debug(f"[TIMING] Telegram {method} fallback OK ({elapsed2:.0f}ms)")
+                    logger.debug("Telegram %s fallback OK (%.0fms)", method, elapsed2, extra={"src_module": "telegram", "operation": "call_api_fallback", "method": method, "elapsed_ms": elapsed2})
                     return result
             except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, json.JSONDecodeError, ValueError) as e2:
-                logger.debug(f"[TIMING] Telegram {method} fallback also failed: {e2}")
+                logger.debug("Telegram %s fallback also failed: %s", method, e2, extra={"src_module": "telegram", "operation": "call_api_fallback", "method": method, "error": str(e2)})
 
         return {}
 
@@ -265,7 +265,7 @@ def update_and_answer(message_id: int, text: str, callback_id: str, callback_tex
     ]
     start_time = time.time()
     _telegram_requests_parallel(requests)
-    logger.debug(f"[TIMING] update_and_answer parallel: {(time.time() - start_time) * 1000:.0f}ms")
+    logger.debug("update_and_answer parallel: %.0fms", (time.time() - start_time) * 1000, extra={"src_module": "telegram", "operation": "update_and_answer"})
 
 
 def send_chat_action(action: str = 'typing') -> None:
@@ -280,7 +280,7 @@ def send_chat_action(action: str = 'typing') -> None:
             'action': action,
         })
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
-        logger.debug(f'[send_chat_action] ignored error: {e}')
+        logger.debug('send_chat_action ignored error: %s', e, extra={"src_module": "telegram", "operation": "send_chat_action", "error": str(e)})
 
 
 def send_message_with_entities(text: str, entities: list, reply_markup: dict = None, silent: bool = False) -> dict:
@@ -329,7 +329,7 @@ def pin_message(message_id: int, disable_notification: bool = True) -> bool:
         })
         return result.get('ok', False)
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ValueError, RuntimeError) as e:
-        logger.warning(f"[deployer] Failed to pin message {message_id} (ignored): {e}")
+        logger.warning("Failed to pin message %s (ignored): %s", message_id, e, extra={"src_module": "telegram", "operation": "pin_message", "message_id": message_id, "error": str(e)})
         return False
 
 
@@ -349,5 +349,5 @@ def unpin_message(message_id: int) -> bool:
         })
         return result.get('ok', False)
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ValueError, RuntimeError) as e:
-        logger.warning(f"[deployer] Failed to unpin message {message_id} (ignored): {e}")
+        logger.warning("Failed to unpin message %s (ignored): %s", message_id, e, extra={"src_module": "telegram", "operation": "unpin_message", "message_id": message_id, "error": str(e)})
         return False

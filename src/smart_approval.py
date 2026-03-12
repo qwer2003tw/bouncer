@@ -91,7 +91,7 @@ def evaluate_command(
             try:
                 sequence_modifier, _seq_reason = get_sequence_risk_modifier(source, command)
             except Exception as e:  # noqa: BLE001
-                logger.warning(f"Sequence analysis failed: {e}")
+                logger.warning("Sequence analysis failed: %s", e, extra={"src_module": "smart_approval", "operation": "evaluate_command", "error": str(e)})
                 # 序列分析失敗不影響主流程
 
         # Step 3: 計算最終分數（加入序列修正）
@@ -126,7 +126,7 @@ def evaluate_command(
 
     except Exception as e:  # noqa: BLE001
         # Fail-closed: 任何錯誤都 fallback 到人工審批
-        logger.error(f"Risk evaluation failed: {e}")
+        logger.error("Risk evaluation failed: %s", e, extra={"src_module": "smart_approval", "operation": "evaluate_command", "error": str(e)})
         fallback_result = RiskResult(
             score=70,
             category=RiskCategory.MANUAL,

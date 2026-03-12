@@ -134,7 +134,7 @@ def get_git_commit_info(cwd: str = None) -> dict:
             'commit_message': commit_message,
         }
     except Exception as e:  # noqa: BLE001 — git subprocess operations, fail-safe fallback
-        logger.warning(f"[deployer] get_git_commit_info failed (graceful fallback): {e}")
+        logger.warning("get_git_commit_info failed (graceful fallback): %s", e, extra={"src_module": "deployer", "operation": "get_git_commit_info", "error": str(e)})
         return {'commit_sha': None, 'commit_short': None, 'commit_message': None}
 
 
@@ -169,7 +169,7 @@ def preflight_check_secrets(project: dict, branch: str) -> list:
         github_pat_response = sm_client.get_secret_value(SecretId='sam-deployer/github-pat')
         github_pat = github_pat_response['SecretString']
     except ClientError as e:
-        logger.error(f"Failed to get GitHub PAT: {e}")
+        logger.error("Failed to get GitHub PAT: %s", e, extra={"src_module": "deployer", "operation": "get_preflight_secrets", "error": str(e)})
         return []  # graceful degradation
 
     # Clone repo to temp dir
@@ -187,7 +187,7 @@ def preflight_check_secrets(project: dict, branch: str) -> list:
         clone_cmd = ['git', 'clone', '--depth', '1', '--branch', branch, clone_url, tmpdir]
         result = subprocess.run(clone_cmd, capture_output=True, text=True, timeout=30)
         if result.returncode != 0:
-            logger.error(f"Git clone failed: {result.stderr}")
+            logger.error("Git clone failed: %s", result.stderr, extra={"src_module": "deployer", "operation": "git_clone", "error": result.stderr[:200]})
             return []  # graceful degradation
 
         # Find template.yaml
@@ -196,7 +196,7 @@ def preflight_check_secrets(project: dict, branch: str) -> list:
             template_path = os.path.join(tmpdir, sam_template_path, 'template.yml')
 
         if not os.path.exists(template_path):
-            logger.warning(f"template.yaml not found in {sam_template_path}")
+            logger.warning("template.yaml not found in %s", sam_template_path, extra={"src_module": "deployer", "operation": "find_template", "sam_template_path": sam_template_path})
             return []
 
         # Read template and extract secret references
@@ -229,13 +229,13 @@ def preflight_check_secrets(project: dict, branch: str) -> list:
             except sm_client.exceptions.ResourceNotFoundException:
                 missing_secrets.append(secret_name)
             except ClientError as e:
-                logger.error(f"Error checking secret {secret_name}: {e}")
+                logger.error("Error checking secret %s: %s", secret_name, e, extra={"src_module": "deployer", "operation": "check_secret", "secret_name": secret_name, "error": str(e)})
                 missing_secrets.append(secret_name)
 
         return missing_secrets
 
     except Exception as e:  # noqa: BLE001 — preflight fail-closed: subprocess, file I/O, git operations
-        logger.error(f"Preflight check error: {e}")
+        logger.error("Preflight check error: %s", e, extra={"src_module": "deployer", "operation": "preflight_check", "error": str(e)})
         return []  # graceful degradation
     finally:
         if tmpdir and os.path.exists(tmpdir):
@@ -252,10 +252,10 @@ def list_projects() -> list:
         result = _get_projects_table().scan()
         return result.get('Items', [])
     except ClientError:
-        logger.exception("list_projects failed", extra={"module": "deployer", "operation": "list_projects", "error_type": "ClientError"})
+        logger.exception("list_projects failed", extra={"src_module": "deployer", "operation": "list_projects", "error_type": "ClientError"})
         return []
     except Exception:
-        logger.exception("list_projects failed", extra={"module": "deployer", "operation": "list_projects"})
+        logger.exception("list_projects failed", extra={"src_module": "deployer", "operation": "list_projects"})
         return []
 
 
@@ -265,7 +265,7 @@ def get_project(project_id: str) -> dict:
         result = _get_projects_table().get_item(Key={'project_id': project_id})
         return result.get('Item')
     except ClientError:
-        logger.exception("get_project failed", extra={"module": "deployer", "operation": "get_project", "project_id": project_id, "error_type": "ClientError"})
+        logger.exception("get_project failed", extra={"src_module": "deployer", "operation": "get_project", "project_id": project_id, "error_type": "ClientError"})
         return None
 
 def add_project(project_id: str, config: dict) -> dict:
@@ -295,7 +295,7 @@ def remove_project(project_id: str) -> bool:
         _get_projects_table().delete_item(Key={'project_id': project_id})
         return True
     except ClientError:
-        logger.exception("remove_project failed", extra={"module": "deployer", "operation": "remove_project", "project_id": project_id, "error_type": "ClientError"})
+        logger.exception("remove_project failed", extra={"src_module": "deployer", "operation": "remove_project", "project_id": project_id, "error_type": "ClientError"})
         return False
 
 
@@ -329,7 +329,7 @@ def release_lock(project_id: str) -> bool:
         _get_locks_table().delete_item(Key={'project_id': project_id})
         return True
     except ClientError:
-        logger.exception("release_lock failed", extra={"module": "deployer", "operation": "release_lock", "project_id": project_id, "error_type": "ClientError"})
+        logger.exception("release_lock failed", extra={"src_module": "deployer", "operation": "release_lock", "project_id": project_id, "error_type": "ClientError"})
         return False
 
 def get_lock(project_id: str) -> dict:
@@ -350,7 +350,7 @@ def get_lock(project_id: str) -> dict:
 
         return item
     except ClientError:
-        logger.exception("get_lock failed", extra={"module": "deployer", "operation": "get_lock", "project_id": project_id, "error_type": "ClientError"})
+        logger.exception("get_lock failed", extra={"src_module": "deployer", "operation": "get_lock", "project_id": project_id, "error_type": "ClientError"})
         return None
 
 
@@ -405,7 +405,7 @@ def get_deploy_record(deploy_id: str) -> dict:
         result = _get_history_table().get_item(Key={'deploy_id': deploy_id})
         return result.get('Item')
     except ClientError:
-        logger.exception("get_deploy_record failed", extra={"module": "deployer", "operation": "get_deploy_record", "deploy_id": deploy_id, "error_type": "ClientError"})
+        logger.exception("get_deploy_record failed", extra={"src_module": "deployer", "operation": "get_deploy_record", "deploy_id": deploy_id, "error_type": "ClientError"})
         return None
 
 def get_deploy_history(project_id: str, limit: int = 10) -> list:
@@ -420,7 +420,7 @@ def get_deploy_history(project_id: str, limit: int = 10) -> list:
         )
         return result.get('Items', [])
     except ClientError as e:
-        logger.error(f"Error getting deploy history: {e}")
+        logger.error("Error getting deploy history: %s", e, extra={"src_module": "deployer", "operation": "get_deploy_history", "error": str(e)})
         return []
 
 
@@ -542,7 +542,7 @@ def cancel_deploy(deploy_id: str) -> dict:
                 cause='User cancelled'
             )
         except ClientError as e:
-            logger.error(f"Error stopping execution: {e}")
+            logger.error("Error stopping execution: %s", e, extra={"src_module": "deployer", "operation": "cancel_deploy", "error": str(e)})
 
     # 釋放鎖
     release_lock(record.get('project_id'))
@@ -662,7 +662,7 @@ def send_deploy_failure_notification(deploy_id: str, project_id: str, error_line
         )
         send_telegram_message_silent(text)
     except (OSError, TimeoutError, ConnectionError) as exc:
-        logger.warning(f"[deployer] send_deploy_failure_notification failed: {exc}")
+        logger.warning("send_deploy_failure_notification failed: %s", exc, extra={"src_module": "deployer", "operation": "send_deploy_failure_notification", "error": str(exc)})
 
 
 def _get_progress_hint(elapsed: int) -> str:
@@ -721,7 +721,7 @@ def get_deploy_status(deploy_id: str) -> dict:
                         history_events = history_resp.get('events', [])
                         error_lines = DeployErrorExtractor.from_sfn_history(history_events)
                     except ClientError as hist_exc:
-                        logger.warning(f"[deployer] get_execution_history failed: {hist_exc}")
+                        logger.warning("get_execution_history failed: %s", hist_exc, extra={"src_module": "deployer", "operation": "get_execution_history", "error": str(hist_exc)})
 
                     ddb_update['error_lines'] = error_lines
 
@@ -763,7 +763,7 @@ def get_deploy_status(deploy_id: str) -> dict:
                             if failed_events else ''
                         )
                     except ClientError as exc:
-                        logger.warning('[deployer] describe_stack_events failed: %s', exc)
+                        logger.warning('describe_stack_events failed: %s', exc, extra={"src_module": "deployer", "operation": "describe_stack_events", "stack_name": stack_name, "error": str(exc)})
 
                 update_deploy_record(deploy_id, ddb_update)
                 record['status'] = new_status
@@ -800,10 +800,10 @@ def get_deploy_status(deploy_id: str) -> dict:
                         from telegram import unpin_message
                         unpin_message(int(telegram_message_id))
                     except (OSError, TimeoutError, ConnectionError, ValueError) as e:
-                        logger.warning(f"[deployer] Failed to unpin message (ignored): {e}")
+                        logger.warning("Failed to unpin message (ignored): %s", e, extra={"src_module": "deployer", "operation": "unpin_message", "error": str(e)})
 
         except ClientError as e:
-            logger.error(f"Error getting execution status: {e}")
+            logger.error("Error getting execution status: %s", e, extra={"src_module": "deployer", "operation": "get_execution_status", "deploy_id": deploy_id, "error": str(e)})
 
     # Add timing fields to response
     status = record.get('status', '')
@@ -1122,6 +1122,4 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
                     expires_at=expires_at,
                 )
             except ClientError as exc:
-                logger.error(
-                    "[deployer] post_notification_setup failed for %s: %s", request_id, exc
-                )
+                logger.error("post_notification_setup failed for %s: %s", request_id, exc, extra={"src_module": "deployer", "operation": "post_notification_setup", "request_id": request_id, "error": str(exc)})
