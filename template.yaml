@@ -421,6 +421,12 @@ Resources:
                 - s3:GetObject
                 - s3:DeleteObject
               Resource: !Sub "arn:aws:s3:::bouncer-uploads-${DefaultAccountId}/*"
+            # sprint33: Allow Lambda to read SAM deployer packaged templates for changeset analysis (#118)
+            - Sid: SAMDeployerArtifactsRead
+              Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: !Sub "arn:aws:s3:::sam-deployer-artifacts-${DefaultAccountId}/*"
             # sprint7-002: Allow Lambda to manage expiry schedules in EventBridge Scheduler
             - Sid: SchedulerManageExpiry
               Effect: Allow
