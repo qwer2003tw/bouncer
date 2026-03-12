@@ -18,7 +18,7 @@ from utils import response, format_size_human, build_info_lines
 from commands import execute_command, is_dangerous
 from paging import store_paged_output, get_paged_output
 from trust import create_trust_session, track_command_executed
-from telegram import escape_markdown, update_message, answer_callback, send_telegram_message_silent, pin_message
+from telegram import escape_markdown, update_message, answer_callback, send_telegram_message_silent, pin_message, send_chat_action
 from notifications import send_trust_auto_approve_notification
 from constants import DEFAULT_ACCOUNT_ID, RESULT_TTL, TRUST_SESSION_MAX_UPLOADS, TRUST_SESSION_MAX_COMMANDS
 from metrics import emit_metric
@@ -567,6 +567,10 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             answer_callback(callback_id, '✅ 執行中...')
 
         # 執行命令並存入結果
+        try:
+            send_chat_action('typing')
+        except Exception:
+            pass
         exec_result = _execute_and_store_result(
             command, assume_role, request_id, item, user_id, source_ip, action
         )
@@ -1730,6 +1734,10 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
             pass  # compliance_checker 不存在時跳過
 
         # 執行命令
+        try:
+            send_chat_action('typing')
+        except Exception:
+            pass
         result = execute_command(cmd, item_assume_role)
         cmd_status = 'failed' if _is_execute_failed(result) else 'success'
         emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'trust_callback'})
