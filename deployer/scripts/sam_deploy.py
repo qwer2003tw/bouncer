@@ -516,6 +516,7 @@ def _build_sam_cmd(
     params_raw: str,
     cfn_role: str,
     target_role: str,
+    artifacts_bucket: str = "",
 ) -> List[str]:
     """Construct the sam deploy command list."""
     cmd: List[str] = [
@@ -526,6 +527,10 @@ def _build_sam_cmd(
         "--no-confirm-changeset",
         "--no-fail-on-empty-changeset",
     ]
+    # SAM CLI requires --s3-bucket when the packaged template exceeds 51,200 bytes.
+    # Pass the artifacts bucket so SAM can upload the template automatically.
+    if artifacts_bucket:
+        cmd.extend(["--s3-bucket", artifacts_bucket])
 
     base_len = len(cmd)
 
@@ -679,7 +684,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             print("ERROR: SKIP_PACKAGE=true but ARTIFACTS_BUCKET or PROJECT_ID not set", file=sys.stderr)
             sys.exit(1)
 
-    cmd = _build_sam_cmd(stack, params_raw, cfn_role, target_role)
+    cmd = _build_sam_cmd(stack, params_raw, cfn_role, target_role, artifacts_bucket)
     sys.stdout.flush()
 
     # --- First deploy attempt ---
