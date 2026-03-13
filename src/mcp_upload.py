@@ -39,6 +39,7 @@ from constants import (
     UPLOAD_BATCH_PAYLOAD_SAFE_LIMIT, UPLOAD_BATCH_PER_FILE_B64_LIMIT,
     APPROVAL_TTL_BUFFER, UPLOAD_TIMEOUT,
 )
+from upload_scanner import scan_upload
 
 logger = Logger(service="bouncer")
 
@@ -384,6 +385,19 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
     content_s3_key = f"pending/{ctx.request_id}/{ctx.filename or ctx.legacy_key or 'file'}"
     try:
         content_bytes = _base64.b64decode(ctx.content_b64)
+
+        # Security scan before staging
+        scan_result = scan_upload(ctx.filename, content_bytes, ctx.content_type)
+        if scan_result.is_blocked:
+            return mcp_result(ctx.req_id, {
+                'content': [{'type': 'text', 'text': json.dumps({
+                    'status': 'error',
+                    'error': f'Upload rejected by security scan: {scan_result.summary}',
+                    'scan_findings': scan_result.findings,
+                }, ensure_ascii=False)}],
+                'isError': True,
+            })
+
         # Use assume_role credentials if available (e.g. BouncerRole has S3 access)
         # The Lambda execution role may not have direct S3 PutObject permissions.
         from aws_clients import get_s3_client
@@ -394,6 +408,11 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
             Body=content_bytes,
             ContentType=ctx.content_type,
         )
+
+        # Add scan warnings to context for approval notification
+        if scan_result.risk_level in ('high', 'medium'):
+            ctx.reason = f"[⚠️ 安全掃描警告: {scan_result.summary}] {ctx.reason}"
+
     except ClientError as e:
         return mcp_result(ctx.req_id, {
             'content': [{'type': 'text', 'text': json.dumps({
@@ -708,6 +727,18 @@ def _preprocess_upload_files(req_id: str, files: list) -> tuple:
                 'isError': True,
             })
 
+        # Security scan for each file in batch
+        scan_result = scan_upload(safe_name, content_bytes, ct)
+        if scan_result.is_blocked:
+            return None, None, mcp_result(req_id, {
+                'content': [{'type': 'text', 'text': json.dumps({
+                    'status': 'error',
+                    'error': f'File #{i+1} ({safe_name}): rejected by security scan: {scan_result.summary}',
+                    'scan_findings': scan_result.findings,
+                }, ensure_ascii=False)}],
+                'isError': True,
+            })
+
         fsize = len(content_bytes)
         if fsize > TRUST_UPLOAD_MAX_BYTES_PER_FILE:
             return None, None, mcp_result(req_id, {
@@ -719,7 +750,7 @@ def _preprocess_upload_files(req_id: str, files: list) -> tuple:
             })
 
         total_size += fsize
-        processed_files.append({
+        file_metadata = {
             'filename': safe_name,
             'original_filename': fname,
             'content_b64': content_b64,
@@ -727,7 +758,12 @@ def _preprocess_upload_files(req_id: str, files: list) -> tuple:
             'content_type': ct,
             'size': fsize,
             'sha256': _hashlib.sha256(content_bytes).hexdigest(),
-        })
+        }
+        # Add scan results for notification purposes
+        if scan_result.risk_level in ('high', 'medium'):
+            file_metadata['scan_warning'] = scan_result.summary
+            file_metadata['scan_findings'] = scan_result.findings
+        processed_files.append(file_metadata)
 
     if total_size > TRUST_UPLOAD_MAX_BYTES_TOTAL:
         return None, None, mcp_result(req_id, {
