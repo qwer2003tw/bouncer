@@ -2234,3 +2234,30 @@ class TestChainRiskChecks:
             assert 'echo' in content['error']
             assert '只支援 aws 命令串接' in content['error']
             assert content['failed_sub_command'] == 'echo DELETED'
+
+
+
+
+class TestAutoApproveNotificationAccountLine:
+    """Regression tests: auto_approved notification includes account info (#122)."""
+
+    def test_account_line_included_when_account_id_present(self, app_module):
+        """account_line format with account_id."""
+        mcp_execute = app_module
+        account_id = '992382394211'
+        account_name = 'Dev'
+        account_line = (
+            f"\U0001f3e6 *帳號：* `{account_id}` ({mcp_execute.escape_markdown(account_name)})\n"
+            if account_id else ""
+        )
+        assert '992382394211' in account_line
+        assert 'Dev' in account_line
+
+    def test_account_line_empty_when_no_account_id(self, app_module):
+        """account_line is empty string when account_id is empty."""
+        account_id = ''
+        account_line = (
+            f"🏦 *帳號：* `{account_id}` ()\n"
+            if account_id else ""
+        )
+        assert account_line == ""

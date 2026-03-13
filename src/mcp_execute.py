@@ -626,9 +626,14 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
         try:
             result_preview = (result[:300] if result else '(無輸出)').strip()
             reason_line = f"\U0001f4ac *原因：* {escape_markdown(ctx.reason or '(未填寫)')}\n" if ctx.reason else ""
+            account_line = (
+                f"\U0001f3e6 *帳號：* `{ctx.account_id}` ({escape_markdown(ctx.account_name or '')})\n"
+                if ctx.account_id else ""
+            )
             _notif_text = (
                 f"\u26a1 *自動執行*\n\n"
                 f"\U0001f916 *來源：* {escape_markdown(ctx.source or '(unknown)')}\n"
+                f"{account_line}"
                 f"{reason_line}"
                 f"\U0001f4cb *命令：*\n```\n{ctx.command[:300]}\n```\n\n"
                 f"\u2705 *結果：*\n```\n{result_preview}\n```"
