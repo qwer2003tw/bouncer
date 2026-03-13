@@ -419,6 +419,16 @@ Resources:
                   - s3:GetObject
                 Resource:
                   - !Sub "${ArtifactsBucket.Arn}/*"
+              - Sid: CloudFormationChangeset
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:ListChangeSets
+                  - cloudformation:DescribeStacks
+                  - cloudformation:GetTemplateSummary
+                Resource: "*"
       Tags:
         - Key: Project
           Value: BounceDeployer
