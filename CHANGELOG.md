@@ -10,6 +10,11 @@ All notable changes to this project will be documented in this file.
 - `src/upload_scanner.py` — `scan_upload()`: block dangerous file extensions (.exe/.sh/.bat etc.); detect secret patterns (AWS keys, GitHub PAT, private keys, hardcoded credentials); fail-open design (#smart-phase5 S36-002)
 - `src/mcp_upload.py` — integrate `scan_upload()` in single upload + batch upload; blocked files rejected before approval; high-risk findings shown in Telegram approval notification (#smart-phase5 S36-002)
 
+### Fixed
+- `deployer/scripts/sam_deploy.py` — pass `artifacts_bucket` to SAM CLI `--s3-bucket` for large templates (#123)
+- `deployer/scripts/sam_deploy.py` — auto-sync `sam_deploy.py` to S3 during bouncer-deployer deploy; download packaged template from S3 when `SKIP_PACKAGE=true` (#124)
+- `src/template.yaml` — add `secretsmanager:GetSecretValue` to `ApprovalFunctionRole` — required for git diff auto-approve to read GitHub PAT (#123)
+
 ### Tests
 - 10 new tests in `tests/test_template_diff_analyzer.py` (S36-001)
 - 26 new tests in `tests/test_upload_scanner.py` (S36-002)
