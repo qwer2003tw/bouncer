@@ -552,6 +552,16 @@ Resources:
                 - echo "WORK_DIR=$WORK_DIR"
                 - echo "Running cfn-lint..."
                 - cfn-lint ${WORK_DIR}/template.yaml --non-zero-exit-code error
+                - |
+                  # Sync sam_deploy.py to S3 so future deploys pick up latest version
+                  DEPLOY_SCRIPT="$(pwd)/repo/deployer/scripts/sam_deploy.py"
+                  if [ -f "$DEPLOY_SCRIPT" ]; then
+                    echo "Syncing sam_deploy.py to s3://${ARTIFACTS_BUCKET}/deployer-scripts/sam_deploy.py"
+                    aws s3 cp "$DEPLOY_SCRIPT" "s3://${ARTIFACTS_BUCKET}/deployer-scripts/sam_deploy.py"
+                    echo "✅ sam_deploy.py synced to S3"
+                  else
+                    echo "WARNING: sam_deploy.py not found at $DEPLOY_SCRIPT, skipping sync"
+                  fi
             build:
               commands:
                 - export WORK_DIR=$(pwd)/repo/${SAM_TEMPLATE_PATH}
