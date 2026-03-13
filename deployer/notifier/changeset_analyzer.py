@@ -12,10 +12,11 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Optional
 
-from aws_lambda_powertools import Logger
+import logging
 from botocore.exceptions import ClientError
 
-logger = Logger(service="bouncer")
+# aws_lambda_powertools not available in notifier Lambda — use stdlib logging
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Data model
