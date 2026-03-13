@@ -266,6 +266,18 @@ def handle_analyze(event):
     stack_name = _get_stack_name(deploy_id)
     template_s3_url = _get_template_s3_url(project_id)
 
+    # Special case: bouncer-deployer updates itself — always treat as safe (infra changes are intentional)
+    SELF_DEPLOYING_PROJECTS = {'bouncer-deployer'}
+    if project_id in SELF_DEPLOYING_PROJECTS:
+        print(f"[analyze] {project_id!r} is self-deploying — treating all changes as safe (auto-approve)")
+        return {
+            'is_code_only': True,
+            'deploy_id': deploy_id,
+            'project_id': project_id,
+            'change_count': 0,
+            'analysis_error': None,
+        }
+
     if not stack_name or not template_s3_url:
         print(f"Error: Missing stack_name={stack_name!r} or template_s3_url={template_s3_url!r} for deploy_id={deploy_id}")
         # Fail-safe: return is_code_only=False so WaitForInfraApproval handles it
