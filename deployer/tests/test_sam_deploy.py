@@ -1276,7 +1276,7 @@ class TestSfnNotification:
         assert "Network error" in captured.out
 
     def test_main_skip_package_true(self, monkeypatch, capsys):
-        """SKIP_PACKAGE=true → _run_sam_package not called, skip message printed."""
+        """SKIP_PACKAGE=true → _run_sam_package not called, template downloaded from S3."""
         monkeypatch.setenv("STACK_NAME", STACK)
         monkeypatch.setenv("SKIP_PACKAGE", "true")
         monkeypatch.setenv("ARTIFACTS_BUCKET", "my-bucket")
@@ -1291,8 +1291,11 @@ class TestSfnNotification:
         mock_proc.stdout = iter(["Deploy successful\n"])
         mock_proc.wait.return_value = None
 
+        mock_s3_client = MagicMock()
+
         with patch("sam_deploy.subprocess.run") as mock_run, \
-             patch("sam_deploy.subprocess.Popen", return_value=mock_proc):
+             patch("sam_deploy.subprocess.Popen", return_value=mock_proc), \
+             patch("boto3.client", return_value=mock_s3_client):
             with pytest.raises(SystemExit) as exc:
                 main([])
             assert exc.value.code == 0
@@ -1300,10 +1303,16 @@ class TestSfnNotification:
         # Verify sam package was NOT called
         mock_run.assert_not_called()
 
+        # Verify S3 download was called for packaged template
+        mock_s3_client.download_file.assert_called_once_with(
+            "my-bucket", "my-project/packaged-template.yaml", "/tmp/packaged-template.yaml"
+        )
+
         # Verify skip message printed
         captured = capsys.readouterr()
         assert "[package] SKIP_PACKAGE=true" in captured.out
         assert "skipping sam package step" in captured.out
+        assert "Downloading packaged template" in captured.out
 
     def test_main_skip_package_false(self, monkeypatch, capsys):
         """SKIP_PACKAGE=false → _run_sam_package IS called."""

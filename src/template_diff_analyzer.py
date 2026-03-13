@@ -40,7 +40,7 @@ def _github_api(url: str, pat: str) -> dict:
         'Accept': 'application/vnd.github.v3+json',
         'User-Agent': 'bouncer-auto-approve/1.0',
     })
-    with urllib.request.urlopen(req, timeout=10) as resp:
+    with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310 — URL is constructed from trusted S3 presigned URL
         return json.loads(resp.read())
 
 

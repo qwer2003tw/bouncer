@@ -662,6 +662,22 @@ def main(argv: Optional[List[str]] = None) -> None:
         update_template_s3_url(project_id, artifacts_bucket)
     else:
         print("[package] SKIP_PACKAGE=true — skipping sam package step")
+        # When skipping package, we must still have the packaged template available.
+        # Download it from S3 (uploaded by the previous package build).
+        if artifacts_bucket and project_id:
+            s3_key = f"{project_id}/packaged-template.yaml"
+            print(f"[package] Downloading packaged template from s3://{artifacts_bucket}/{s3_key}")
+            try:
+                import boto3 as _boto3_s3
+                s3 = _boto3_s3.client("s3")
+                s3.download_file(artifacts_bucket, s3_key, _PACKAGED_TEMPLATE)
+                print(f"[package] Downloaded packaged template to {_PACKAGED_TEMPLATE}")
+            except Exception as exc:
+                print(f"ERROR: Failed to download packaged template: {exc}", file=sys.stderr)
+                sys.exit(1)
+        else:
+            print("ERROR: SKIP_PACKAGE=true but ARTIFACTS_BUCKET or PROJECT_ID not set", file=sys.stderr)
+            sys.exit(1)
 
     cmd = _build_sam_cmd(stack, params_raw, cfn_role, target_role)
     sys.stdout.flush()
