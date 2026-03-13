@@ -157,7 +157,7 @@ class TestMainCallsPackageAndDDB:
 # ---------------------------------------------------------------------------
 
 
-class TestUpdateTemplatS3UrlCredentials:
+class TestUpdateTemplateS3UrlCredentials:
     """update_template_s3_url creates a boto3 client with region from env (not assumed creds)."""
 
     def test_uses_env_region(self):
@@ -253,7 +253,7 @@ class TestUpdateTemplatS3UrlCredentials:
 # ---------------------------------------------------------------------------
 
 
-class TestUpdateTemplatS3UrlNonFatal:
+class TestUpdateTemplateS3UrlNonFatal:
     """DDB update failures must not raise — deploy continues regardless."""
 
     def test_boto3_exception_does_not_raise(self):
@@ -339,7 +339,7 @@ class TestUpdateTemplatS3UrlNonFatal:
 # ---------------------------------------------------------------------------
 
 
-class TestUpdateTemplatS3UrlSkipWhenEmpty:
+class TestUpdateTemplateS3UrlSkipWhenEmpty:
     """update_template_s3_url must be a no-op when PROJECT_ID or ARTIFACTS_BUCKET is empty."""
 
     def test_empty_project_id_skips(self):
