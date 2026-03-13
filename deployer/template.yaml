@@ -413,6 +413,12 @@ Resources:
                   - states:SendTaskFailure
                   - states:SendTaskHeartbeat
                 Resource: "*"
+              - Sid: S3ArtifactsRead
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub "${ArtifactsBucket.Arn}/*"
       Tags:
         - Key: Project
           Value: BounceDeployer
