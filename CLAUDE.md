@@ -6,11 +6,20 @@ All AWS ops go through Bouncer itself — no direct AWS CLI.
 
 ## Critical Rules
 
-### Testing
-- **DO NOT run `bash scripts/run-tests.sh --all`** — it triggers 60s+ silence → acpx timeout
-- Run lint only: `ruff check src/ mcp_server/`
-- Commit with `git commit --no-verify` (skip pre-commit hooks)
-- Full tests run via GitHub CI after push
+### Testing — CRITICAL RULE
+
+**DO NOT run `bash scripts/run-tests.sh --all` or any full test suite.**
+
+This causes acpx 60-second no-output timeout → exit code 3.
+
+Your job as Claude Code:
+1. Write code
+2. Run lint only: `ruff check src/ mcp_server/`
+3. Optionally run a **single relevant test file** with `-v`: `python3 -m pytest -v tests/test_specific.py`
+4. `git commit --no-verify`
+5. Report commit hash
+
+Full test suite is run by GitHub CI after push. Do NOT run it locally.
 
 ### CI
 - After every push: check `gh run list --limit 1`
