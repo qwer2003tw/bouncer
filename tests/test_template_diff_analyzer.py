@@ -255,7 +255,7 @@ class TestTemplateDiffAnalyzer:
 
         assert result.is_safe is True
         assert mock_github_api.call_count == 2
-        # Verify owner/repo was correctly parsed (no .git in API call)
+        # Verify owner/repo was correctly parsed (repo.git suffix removed)
         first_call_url = mock_github_api.call_args_list[0][0][0]
         assert '/repos/owner/repo/' in first_call_url
-        assert '.git' not in first_call_url
+        assert '/repos/owner/repo.git/' not in first_call_url
