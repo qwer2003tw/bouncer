@@ -395,6 +395,12 @@ Resources:
                 Resource:
                   - !GetAtt DeployHistoryTable.Arn
                   - !GetAtt DeployLocksTable.Arn
+              - Sid: DynamoDBReadProjects
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/bouncer-projects"
               - Sid: KMS
                 Effect: Allow
                 Action:
