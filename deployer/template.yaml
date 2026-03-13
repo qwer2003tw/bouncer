@@ -348,6 +348,12 @@ Resources:
                   - dynamodb:UpdateItem
                   - dynamodb:GetItem
                 Resource: "arn:aws:dynamodb:us-east-1:190825685292:table/bouncer-projects"
+              - Sid: StepFunctionsCallback
+                Effect: Allow
+                Action:
+                  - states:SendTaskSuccess
+                  - states:SendTaskFailure
+                Resource: "*"
       Tags:
         - Key: Project
           Value: BounceDeployer
@@ -394,6 +400,13 @@ Resources:
                 Action:
                   - kms:Decrypt
                 Resource: !GetAtt DeployerKMSKey.Arn
+              - Sid: StepFunctionsCallback
+                Effect: Allow
+                Action:
+                  - states:SendTaskSuccess
+                  - states:SendTaskFailure
+                  - states:SendTaskHeartbeat
+                Resource: "*"
       Tags:
         - Key: Project
           Value: BounceDeployer
@@ -621,6 +634,99 @@ Resources:
           
           StartBuild:
             Type: Task
+            Resource: "arn:aws:states:::codebuild:startBuild.waitForTaskToken"
+            Parameters:
+              ProjectName: sam-deployer
+              EnvironmentVariablesOverride:
+                - Name: GIT_REPO
+                  Type: PLAINTEXT
+                  Value.$: $.git_repo
+                - Name: GIT_BRANCH
+                  Type: PLAINTEXT
+                  Value.$: $.branch
+                - Name: STACK_NAME
+                  Type: PLAINTEXT
+                  Value.$: $.stack_name
+                - Name: SAM_TEMPLATE_PATH
+                  Type: PLAINTEXT
+                  Value.$: $.sam_template_path
+                - Name: SAM_PARAMS
+                  Type: PLAINTEXT
+                  Value.$: $.sam_params
+                - Name: GITHUB_PAT_SECRET
+                  Type: PLAINTEXT
+                  Value.$: $.github_pat_secret
+                - Name: TARGET_ROLE_ARN
+                  Type: PLAINTEXT
+                  Value.$: $.target_role_arn
+                - Name: CFN_ROLE_ARN
+                  Type: PLAINTEXT
+                  Value: !Sub "arn:aws:iam::${AWS::AccountId}:role/BounceDeployerCFNRole"
+                - Name: DEPLOY_ID
+                  Type: PLAINTEXT
+                  Value.$: $.deploy_id
+                - Name: PROJECT_ID
+                  Type: PLAINTEXT
+                  Value.$: $.project_id
+                - Name: SFN_TASK_TOKEN
+                  Type: PLAINTEXT
+                  Value.$: $$.Task.Token
+                - Name: SFN_EXECUTION_ARN
+                  Type: PLAINTEXT
+                  Value.$: $$.Execution.Id
+            HeartbeatSeconds: 900
+            ResultPath: $.package_result
+            Next: AnalyzeChangeset
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                ResultPath: $.error
+                Next: NotifyFailure
+
+          AnalyzeChangeset:
+            Type: Task
+            Resource: !GetAtt NotifierLambda.Arn
+            Parameters:
+              action: analyze
+              deploy_id.$: $.deploy_id
+              project_id.$: $.project_id
+              template_s3_key.$: $.package_result.template_s3_key
+              task_token.$: $$.Task.Token
+            ResultPath: $.analyze_result
+            Next: CheckChangesetResult
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                ResultPath: $.error
+                Next: NotifyFailure
+
+          CheckChangesetResult:
+            Type: Choice
+            Choices:
+              - Variable: $.analyze_result.is_code_only
+                BooleanEquals: true
+                Next: SamDeploy
+            Default: WaitForInfraApproval
+
+          WaitForInfraApproval:
+            Type: Task
+            Resource: "arn:aws:states:::lambda:invoke.waitForTaskToken"
+            Parameters:
+              FunctionName: !GetAtt NotifierLambda.Arn
+              Payload:
+                action: infra_approval_request
+                deploy_id.$: $.deploy_id
+                project_id.$: $.project_id
+                analyze_result.$: $.analyze_result
+                task_token.$: $$.Task.Token
+            HeartbeatSeconds: 86400
+            ResultPath: $.infra_approval_result
+            Next: SamDeploy
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                ResultPath: $.error
+                Next: NotifyFailure
+
+          SamDeploy:
+            Type: Task
             Resource: "arn:aws:states:::codebuild:startBuild.sync"
             Parameters:
               ProjectName: sam-deployer
@@ -655,13 +761,16 @@ Resources:
                 - Name: PROJECT_ID
                   Type: PLAINTEXT
                   Value.$: $.project_id
-            ResultPath: $.build_result
+                - Name: SKIP_PACKAGE
+                  Type: PLAINTEXT
+                  Value: "true"
+            ResultPath: $.deploy_result
             Next: NotifySuccess
             Catch:
               - ErrorEquals: ["States.ALL"]
                 ResultPath: $.error
                 Next: NotifyFailure
-          
+
           NotifySuccess:
             Type: Task
             Resource: !GetAtt NotifierLambda.Arn
