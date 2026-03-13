@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.37.0] - 2026-03-13
+
+### Added
+- `src/deployer.py` — include CFN changeset resource details (Added/Modified/Removed) in infra approval notification (#123)
+- `src/deployer.py` / `deployer/scripts/sam_deploy.py` — `auto_approve_code_only` flag: changeset-based auto-approve for ztp-files project when no infra changes detected (#125)
+
+### Fixed
+- `src/notifier/app.py` — `No updates` FAILED changeset status now treated as `is_code_only=True`, skipping infra approval (#124)
+- `src/callbacks.py` / `src/mcp_execute.py` — add `account_id` and `account_name` to auto-approved notification (#122)
+- CI: replace specific exception catches (ClientError/OSError) with generic Exception in fire-and-forget paths; fix silent except:pass patterns; fix test isolation (patch targets, DEFAULT_ACCOUNT_ID leakage)
+
+### Tests
+- 2125 tests passing (2 pre-existing flaky in test_e2e_cleanup_button_s18 — ordering dependent, pass in isolation)
+
 ## [3.36.0] - 2026-03-13
 
 ### Added
