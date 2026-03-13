@@ -448,6 +448,12 @@ Resources:
               Effect: Allow
               Action: iam:PassRole
               Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/bouncer-${Environment}-scheduler-invoke"
+            # Sprint 36: git diff auto-approve (#123) — read GitHub PAT for template diff analysis
+            - Sid: SecretsManagerReadGithubPat
+              Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:sam-deployer/github-pat*"
 
   # ============================================================
   # API Gateway
