@@ -16,6 +16,7 @@ import sys
 import os
 import pytest
 from unittest.mock import patch, MagicMock, call
+from botocore.exceptions import ClientError
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
@@ -101,7 +102,7 @@ def _build_mocks(
     """Build mock objects and a boto3.client dispatcher. Returns (mocks_dict, dispatcher)."""
     mock_sts = MagicMock()
     if assume_role_fail:
-        mock_sts.assume_role.side_effect = Exception("AccessDenied: cannot assume role")
+        mock_sts.assume_role.side_effect = ClientError({'Error': {'Code': 'AccessDenied', 'Message': 'AccessDenied: cannot assume role'}}, 'AssumeRole')
     else:
         mock_sts.assume_role.return_value = {
             'Credentials': {
@@ -186,7 +187,7 @@ def _make_s3_factory(mocks, has_deploy_role=True, assume_role_fail=False):
     def factory(role_arn=None, session_name='bouncer-s3', region=None):
         if role_arn:
             if assume_role_fail:
-                raise Exception("AccessDenied: cannot assume role")
+                raise ClientError({'Error': {'Code': 'AccessDenied', 'Message': 'AccessDenied: cannot assume role'}}, 'AssumeRole')
             return mocks['s3_target']
         if not has_deploy_role:
             no_role_count['n'] += 1
@@ -316,7 +317,7 @@ class TestR3StagingGetObjectFails:
     def test_failed_file_in_failed_list(self):
         item = _make_item()
         # Second file (main.js) fails on get_object
-        get_effects = [None, Exception("NoSuchKey: main.js not found"), None]
+        get_effects = [None, ClientError({'Error': {'Code': 'NoSuchKey', 'Message': 'NoSuchKey: main.js not found'}}, 'GetObject'), None]
         mocks, dispatcher = _build_mocks(s3_get_side_effects=get_effects, has_deploy_role=True)
         result, mock_update_status, _ = _run(item, mocks, dispatcher)
         extra = mock_update_status.call_args[1].get('extra_attrs', {})
@@ -328,7 +329,7 @@ class TestR3StagingGetObjectFails:
 
     def test_other_files_still_deployed(self):
         item = _make_item()
-        get_effects = [None, Exception("NoSuchKey"), None]
+        get_effects = [None, ClientError({'Error': {'Code': 'NoSuchKey', 'Message': 'NoSuchKey'}}, 'GetObject'), None]
         mocks, dispatcher = _build_mocks(s3_get_side_effects=get_effects, has_deploy_role=True)
         result, _, _ = _run(item, mocks, dispatcher)
         # put_object should be called for the 2 successful files
@@ -336,7 +337,7 @@ class TestR3StagingGetObjectFails:
 
     def test_cf_invalidation_called_despite_one_failure(self):
         item = _make_item()
-        get_effects = [None, Exception("NoSuchKey"), None]
+        get_effects = [None, ClientError({'Error': {'Code': 'NoSuchKey', 'Message': 'NoSuchKey'}}, 'GetObject'), None]
         mocks, dispatcher = _build_mocks(s3_get_side_effects=get_effects, has_deploy_role=True)
         result, _, _ = _run(item, mocks, dispatcher)
         mocks['cf'].create_invalidation.assert_called_once()

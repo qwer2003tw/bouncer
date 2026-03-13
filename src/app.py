@@ -122,7 +122,7 @@ def handle_cleanup_expired(event: dict) -> dict:
         if fallback_msg_id:
             try:
                 update_message(int(fallback_msg_id), "⏰ 此請求已過期", remove_buttons=True)
-            except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
+            except Exception as e:  # noqa: BLE001 — fire-and-forget
                 logger.warning("Fallback message update failed: %s", e, extra={"src_module": "cleanup", "operation": "fallback_update", "request_id": request_id, "error": str(e)})
         logger.info("Request %s not found — %s", request_id, "buttons cleared via fallback" if fallback_msg_id else "skipping", extra={"src_module": "cleanup", "operation": "not_found", "request_id": request_id})
         return response(200, {'ok': True, 'skipped': True, 'reason': 'not_found'})

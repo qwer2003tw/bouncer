@@ -74,7 +74,7 @@ def _generate_presigned_url_for_file(
         code = exc.response.get("Error", {}).get("Code", "Unknown")
         msg = exc.response.get("Error", {}).get("Message", str(exc))
         return None, f"S3 error [{code}]: {msg}"
-    except ClientError as exc:
+    except Exception as exc:  # noqa: BLE001
         return None, f"Failed to generate presigned URL: {exc}"
 
 
@@ -271,7 +271,7 @@ def _generate_presigned_url(ctx: PresignedContext) -> dict:
             account_id=ctx.account_id,
             expires_at=expires_at_iso,
         )
-    except (OSError, TimeoutError, ConnectionError) as _notify_exc:
+    except Exception as _notify_exc:  # noqa: BLE001 — fire-and-forget
         logger.error("Presigned notification error (non-fatal): %s", _notify_exc, extra={"src_module": "presigned", "operation": "send_notification", "error": str(_notify_exc)})
 
     payload = {
@@ -504,7 +504,7 @@ def _generate_presigned_batch_urls(ctx: PresignedBatchContext) -> dict:
             code = exc.response.get("Error", {}).get("Code", "Unknown")
             msg = exc.response.get("Error", {}).get("Message", str(exc))
             return _error(f"S3 error [{code}]: {msg}")
-        except ClientError as exc:
+        except Exception as exc:  # noqa: BLE001
             return _error(f"Failed to generate presigned URL for {raw_filename}: {exc}")
 
         file_results.append(
@@ -543,7 +543,7 @@ def _generate_presigned_batch_urls(ctx: PresignedBatchContext) -> dict:
             account_id=ctx.account_id,
             expires_at=expires_at_iso,
         )
-    except (OSError, TimeoutError, ConnectionError) as _notify_exc:
+    except Exception as _notify_exc:  # noqa: BLE001 — fire-and-forget
         logger.error("Presigned batch notification error (non-fatal): %s", _notify_exc, extra={"src_module": "presigned", "operation": "send_batch_notification", "error": str(_notify_exc)})
 
     payload = {

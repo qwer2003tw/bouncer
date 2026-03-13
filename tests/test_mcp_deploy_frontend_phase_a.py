@@ -16,6 +16,7 @@ import sys
 import os
 import pytest
 from unittest.mock import patch, MagicMock, call
+from botocore.exceptions import ClientError
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
@@ -322,7 +323,7 @@ class TestRollback:
     def test_s3_staging_failure_returns_error(self):
         files = _make_files()
         mock_s3 = MagicMock()
-        mock_s3.put_object.side_effect = Exception("S3 error")
+        mock_s3.put_object.side_effect = ClientError({'Error': {'Code': 'ServiceUnavailable', 'Message': 'S3 error'}}, 'PutObject')
         mock_table = MagicMock()
 
         with patch("mcp_deploy_frontend.get_s3_client", return_value=mock_s3), \
@@ -412,7 +413,7 @@ class TestSendDeployFrontendNotification:
         files_summary = [{"filename": "index.html", "size": 100, "cache_control": "no-cache", "content_type": "text/html"}]
         target_info = {"frontend_bucket": "b", "distribution_id": "d", "region": "us-east-1"}
 
-        with patch("telegram.send_message_with_entities", side_effect=RuntimeError("boom")):
+        with patch("telegram.send_message_with_entities", side_effect=OSError("boom")):
             result = send_deploy_frontend_notification("req-y", files_summary, target_info)
 
         assert result.ok is False

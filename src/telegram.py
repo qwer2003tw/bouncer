@@ -279,7 +279,7 @@ def send_chat_action(action: str = 'typing') -> None:
             'chat_id': APPROVED_CHAT_ID,
             'action': action,
         })
-    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
+    except Exception as e:  # fire-and-forget: suppress all errors
         logger.debug('send_chat_action ignored error: %s', e, extra={"src_module": "telegram", "operation": "send_chat_action", "error": str(e)})
 
 

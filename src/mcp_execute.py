@@ -886,8 +886,8 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
                 command_preview=ctx.command[:100],
                 source=ctx.source or '',
             )
-        except Exception:  # noqa: BLE001 — best-effort, never block approval flow
-            pass
+        except Exception as _e:  # noqa: BLE001 — best-effort, never block approval flow
+            logger.debug("post-execute notify ignored: %s", _e, extra={"src_module": "mcp_execute", "operation": "post_execute_notify"})
 
     # 一律異步返回：讓 client 用 bouncer_status 輪詢結果。
     # sync long-polling 已移除（Lambda 60s timeout + API Gateway 29s timeout 使其無意義）。

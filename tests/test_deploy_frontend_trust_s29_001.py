@@ -15,6 +15,7 @@ import sys
 import os
 import pytest
 from unittest.mock import patch, MagicMock, call
+from botocore.exceptions import ClientError
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
@@ -112,7 +113,8 @@ class TestTrustSessionApproval:
              patch("aws_clients.get_cloudfront_client", return_value=mock_cf), \
              patch("trust.increment_trust_command_count", return_value=5), \
              patch("notifications.send_trust_auto_approve_notification"), \
-             patch("utils.log_decision"):
+             patch("utils.log_decision"), \
+             patch("mcp_deploy_frontend.DEFAULT_ACCOUNT_ID", "190825685292"):
             result = _call({
                 "project": "ztp-files",
                 "files": files,
@@ -236,7 +238,7 @@ class TestTrustSessionApproval:
         mock_table = MagicMock()
         mock_history = MagicMock()
         mock_cf = MagicMock()
-        mock_cf.create_invalidation.side_effect = Exception("CF API error")
+        mock_cf.create_invalidation.side_effect = ClientError({'Error': {'Code': 'TooManyInvalidationsInProgress', 'Message': 'CF API error'}}, 'CreateInvalidation')
 
         trust_session = {"request_id": "trust-789", "expires_at": 9999999999}
 
@@ -284,7 +286,7 @@ class TestTrustSessionApproval:
             {"filename": "app.js", "content": _b64("console.log('hi')"), "content_type": "application/javascript"}
         ])
         mock_s3 = MagicMock()
-        mock_s3.put_object.side_effect = [None, Exception("S3 staging error")]
+        mock_s3.put_object.side_effect = [None, ClientError({'Error': {'Code': 'ServiceUnavailable', 'Message': 'S3 staging error'}}, 'PutObject')]
 
         trust_session = {"request_id": "trust-999", "expires_at": 9999999999}
 
@@ -325,7 +327,7 @@ class TestTrustSessionApproval:
         # Staging succeeds for both files
         mock_s3.put_object.return_value = None
         # Copy succeeds for first, fails for second
-        mock_s3.copy_object.side_effect = [None, Exception("Copy failed for app.js")]
+        mock_s3.copy_object.side_effect = [None, ClientError({'Error': {'Code': 'NoSuchKey', 'Message': 'Copy failed for app.js'}}, 'CopyObject')]
 
         mock_table = MagicMock()
         mock_history = MagicMock()

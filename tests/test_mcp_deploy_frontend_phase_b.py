@@ -16,6 +16,7 @@ import os
 import pytest
 from io import BytesIO
 from unittest.mock import patch, MagicMock, call
+from botocore.exceptions import ClientError
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
@@ -324,7 +325,7 @@ class TestApprovePartialFailure:
         def get_object_side_effect(**kwargs):
             call_count['n'] += 1
             if call_count['n'] == 2:
-                raise Exception('S3 access denied')
+                raise ClientError({'Error': {'Code': 'AccessDenied', 'Message': 'S3 access denied'}}, 'GetObject')
             body_mock = _make_body_mock()
             return {'Body': body_mock}
 
@@ -377,7 +378,7 @@ class TestApprovePartialFailure:
 class TestApproveFullFailure:
     def _run(self):
         def get_object_side_effect(**kwargs):
-            raise Exception('S3 error for all files')
+            raise ClientError({'Error': {'Code': 'NoSuchKey', 'Message': 'S3 error for all files'}}, 'GetObject')
 
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
             get_object_side_effect=get_object_side_effect
@@ -415,7 +416,7 @@ class TestApproveFullFailure:
 class TestCFInvalidationFailure:
     def _run(self):
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
-            cf_side_effect=Exception('CF rate limit exceeded')
+            cf_side_effect=ClientError({'Error': {'Code': 'TooManyInvalidationsInProgress', 'Message': 'CF rate limit exceeded'}}, 'CreateInvalidation')
         )
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
              patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
@@ -802,7 +803,7 @@ class TestStagingCleanupAfterDeploy:
     def test_cf_not_called_when_all_files_fail_get_object(self):
         """CloudFront invalidation must NOT be called when all get_object calls fail."""
         def get_fail(**kwargs):
-            raise Exception('Staging read error')
+            raise ClientError({'Error': {'Code': 'NoSuchKey', 'Message': 'Staging read error'}}, 'GetObject')
 
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
             get_object_side_effect=get_fail
@@ -821,7 +822,7 @@ class TestStagingCleanupAfterDeploy:
     def test_full_failure_when_all_get_object_fail(self):
         """deploy_status must be deploy_failed when all files fail at get_object."""
         def get_fail(**kwargs):
-            raise Exception('Staging read error')
+            raise ClientError({'Error': {'Code': 'NoSuchKey', 'Message': 'Staging read error'}}, 'GetObject')
 
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
             get_object_side_effect=get_fail
@@ -841,7 +842,7 @@ class TestStagingCleanupAfterDeploy:
     def test_put_object_error_does_not_call_cf_on_full_failure(self):
         """When all put_object calls fail, CF invalidation must not be triggered."""
         def put_fail(**kwargs):
-            raise Exception('Target S3 write error')
+            raise ClientError({'Error': {'Code': 'AccessDenied', 'Message': 'Target S3 write error'}}, 'PutObject')
 
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
             put_object_side_effect=put_fail
@@ -864,7 +865,7 @@ class TestStagingCleanupAfterDeploy:
         def put_fail_second(**kwargs):
             call_count['n'] += 1
             if call_count['n'] == 2:
-                raise Exception('Second file failed')
+                raise ClientError({'Error': {'Code': 'ServiceUnavailable', 'Message': 'Second file failed'}}, 'PutObject')
 
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
             put_object_side_effect=put_fail_second
@@ -934,7 +935,7 @@ class TestDeployHistoryWrite:
     def test_deploy_history_status_deploy_failed_on_full_failure(self):
         """_write_frontend_deploy_history receives deploy_status='deploy_failed' on full failure."""
         def get_fail(**kwargs):
-            raise Exception('S3 error')
+            raise ClientError({'Error': {'Code': 'NoSuchKey', 'Message': 'S3 error'}}, 'GetObject')
 
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
             get_object_side_effect=get_fail
@@ -987,7 +988,7 @@ class TestDeployHistoryWrite:
     def test_deploy_history_cf_invalidation_failed_flag(self):
         """_write_frontend_deploy_history receives cf_invalidation_failed=True when CF fails."""
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all(
-            cf_side_effect=Exception('CF error')
+            cf_side_effect=ClientError({'Error': {'Code': 'TooManyInvalidationsInProgress', 'Message': 'CF error'}}, 'CreateInvalidation')
         )
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
              patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \

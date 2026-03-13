@@ -12,6 +12,7 @@ import pytest
 import boto3
 from unittest.mock import MagicMock, patch
 from moto import mock_aws
+from botocore.exceptions import ClientError
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -298,7 +299,7 @@ class TestCFNEventsEdgeCases:
         _put_running(dep, deploy_id, arn)
 
         mock_cfn = MagicMock()
-        mock_cfn.describe_stack_events.side_effect = Exception('CFN API error')
+        mock_cfn.describe_stack_events.side_effect = ClientError({'Error': {'Code': 'Throttling', 'Message': 'CFN API error'}}, 'DescribeStackEvents')
 
         with patch.object(dep, 'sfn_client', _mock_sfn('FAILED')), \
              patch.object(dep, 'cfn_client', mock_cfn), \

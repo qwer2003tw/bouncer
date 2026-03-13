@@ -1297,5 +1297,5 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
                     telegram_message_id=telegram_message_id,
                     expires_at=expires_at,
                 )
-            except ClientError as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.error("post_notification_setup failed for %s: %s", request_id, exc, extra={"src_module": "deployer", "operation": "post_notification_setup", "request_id": request_id, "error": str(exc)})
