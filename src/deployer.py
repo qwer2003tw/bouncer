@@ -285,6 +285,7 @@ def add_project(project_id: str, config: dict) -> dict:
         'enabled': True,
         'created_at': int(time.time()),
         'auto_approve_deploy': config.get('auto_approve_deploy', False),
+        'auto_approve_code_only': config.get('auto_approve_code_only', False),
         'template_s3_url': config.get('template_s3_url', ''),
     }
     # Filter out empty strings for optional fields to keep DDB clean
@@ -966,6 +967,7 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
 
     # Auto-approve 分析（若 project 啟用）
     auto_approve_enabled = project.get('auto_approve_deploy', False)
+    auto_approve_code_only_enabled = project.get('auto_approve_code_only', False)
 
     if auto_approve_enabled:
         from template_diff_analyzer import analyze_template_diff
@@ -1008,6 +1010,97 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
             else:
                 context = f"[需審批：{diff_result.diff_summary}] {context or ''}"
             # Fall through to normal approval flow below
+
+    # Auto-approve code-only 分析（若 project 啟用）— 使用 changeset 分析而非 git diff
+    if auto_approve_code_only_enabled:
+        from changeset_analyzer import create_dry_run_changeset, analyze_changeset, cleanup_changeset
+
+        stack_name = project.get('stack_name', '')
+        template_s3_url = project.get('template_s3_url', '')
+
+        if not stack_name:
+            logger.warning("auto_approve_code_only enabled but stack_name not set", extra={
+                "src_module": "deployer",
+                "project_id": project_id,
+            })
+            context = f"[auto_approve_code_only: stack_name 未設定] {context or ''}"
+            # Fall through to human approval
+        elif not template_s3_url:
+            logger.warning("auto_approve_code_only enabled but template_s3_url not set", extra={
+                "src_module": "deployer",
+                "project_id": project_id,
+            })
+            context = f"[auto_approve_code_only: template_s3_url 未設定] {context or ''}"
+            # Fall through to human approval
+        else:
+            changeset_name = None
+            try:
+                # Create dry-run changeset
+                changeset_name = create_dry_run_changeset(
+                    _get_cfn_client(),
+                    stack_name,
+                    template_s3_url,
+                )
+
+                # Analyze changeset
+                changeset_result = analyze_changeset(
+                    _get_cfn_client(),
+                    stack_name,
+                    changeset_name,
+                )
+
+                if changeset_result.is_code_only:
+                    # Auto-approve: start deploy directly
+                    deploy_result = start_deploy(
+                        project_id,
+                        branch or project.get('default_branch', 'master'),
+                        source or 'auto-approve-code-only',
+                        reason,
+                    )
+                    from notifications import send_auto_approve_deploy_notification
+                    send_auto_approve_deploy_notification(
+                        project_id=project_id,
+                        deploy_id=deploy_result.get('deploy_id', ''),
+                        source=source,
+                        reason=reason,
+                    )
+                    return mcp_result(req_id, {
+                        'content': [{'type': 'text', 'text': json.dumps({
+                            'status': 'started',
+                            'deploy_id': deploy_result.get('deploy_id', ''),
+                            'project_id': project_id,
+                            'auto_approved': True,
+                            'auto_approve_type': 'code_only',
+                            'message': f'Code-only 變更（{len(changeset_result.resource_changes)} resources）→ auto-approved',
+                        }, ensure_ascii=False)}]
+                    })
+                else:
+                    # Infrastructure changes detected → human approval with context
+                    if changeset_result.error:
+                        context = f"[changeset 分析失敗: {changeset_result.error}] {context or ''}"
+                    else:
+                        context = f"[需審批：檢測到 infra 變更（{len(changeset_result.resource_changes)} resources）] {context or ''}"
+                    # Fall through to normal approval flow below
+
+            except Exception as e:  # noqa: BLE001 — fail-safe: route to human approval
+                logger.exception("auto_approve_code_only changeset analysis failed", extra={
+                    "src_module": "deployer",
+                    "project_id": project_id,
+                    "stack_name": stack_name,
+                })
+                context = f"[changeset 分析異常: {str(e)[:100]}] {context or ''}"
+                # Fall through to human approval
+            finally:
+                # Always cleanup changeset
+                if changeset_name:
+                    try:
+                        cleanup_changeset(_get_cfn_client(), stack_name, changeset_name)
+                    except Exception as cleanup_error:  # noqa: BLE001
+                        logger.error("Failed to cleanup changeset", extra={
+                            "src_module": "deployer",
+                            "changeset_name": changeset_name,
+                            "error": str(cleanup_error),
+                        })
 
     # 建立審批請求
     request_id = generate_request_id(f"deploy:{project_id}")
