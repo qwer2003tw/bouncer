@@ -27,8 +27,6 @@ locks_table = dynamodb.Table(LOCKS_TABLE)
 def lambda_handler(event, context):
     """處理通知請求"""
     action = event.get('action', '')
-    deploy_id = event.get('deploy_id', '')
-    project_id = event.get('project_id', '')
 
     if action == 'start':
         return handle_start(event)
@@ -275,6 +273,7 @@ def handle_analyze(event):
             'deploy_id': deploy_id,
             'project_id': project_id,
             'change_count': 0,
+            'resource_changes': [],
             'analysis_error': None,
         }
 
@@ -286,6 +285,7 @@ def handle_analyze(event):
             'deploy_id': deploy_id,
             'project_id': project_id,
             'change_count': 0,
+            'resource_changes': [],
             'analysis_error': 'Missing stack_name or template_s3_url',
         }
 
@@ -304,6 +304,7 @@ def handle_analyze(event):
                 'deploy_id': deploy_id,
                 'project_id': project_id,
                 'change_count': 0,
+                'resource_changes': [],
                 'analysis_error': None,
             }
 
@@ -313,6 +314,7 @@ def handle_analyze(event):
             'deploy_id': deploy_id,
             'project_id': project_id,
             'change_count': len(analysis.resource_changes),
+            'resource_changes': analysis.resource_changes,
             'analysis_error': analysis.error,
         }
 
@@ -323,6 +325,7 @@ def handle_analyze(event):
             'deploy_id': deploy_id,
             'project_id': project_id,
             'change_count': 0,
+            'resource_changes': [],
             'analysis_error': str(exc)[:256],
         }
     finally:
@@ -345,7 +348,7 @@ def _get_template_s3_url(project_id: str) -> str:
         return item.get('template_s3_url', '')
     except Exception as e:  # noqa: BLE001
         print(f"Error getting template_s3_url from DDB: {e}")
-        return 
+        return ''
 
 
 def _get_stack_name(project_id: str) -> str:
@@ -376,6 +379,7 @@ def handle_infra_approval_request(event):
     project_id = event.get('project_id', '')
     task_token = event.get('task_token', '')
     change_count = event.get('change_count', 0)
+    resource_changes = event.get('resource_changes', [])
 
     # Get deploy details from history
     history = get_history(deploy_id)
@@ -389,15 +393,30 @@ def handle_infra_approval_request(event):
         'infra_approval_status': 'PENDING',
     })
 
+    # Format resource changes for display
+    changes_detail = _format_resource_changes(resource_changes)
+
     # Send Telegram notification with Approve/Deny buttons
-    text = (
-        f"⚠️ *Infrastructure Changes Detected*\n\n"
-        f"📦 *專案：* {project_id}\n"
-        f"🌿 *分支：* {branch}\n"
-        f"🆔 *ID：* `{deploy_id}`\n\n"
-        f"🔧 *變更數量：* {change_count}\n\n"
-        f"⚡ 偵測到 infra 變更，需要人工確認才能繼續部署。"
-    )
+    if changes_detail:
+        text = (
+            f"⚠️ *Infrastructure Changes Detected*\n\n"
+            f"📦 *專案：* {project_id}\n"
+            f"🌿 *分支：* {branch}\n"
+            f"🆔 *ID：* `{deploy_id}`\n\n"
+            f"🔧 *CFN 變更：*\n{changes_detail}\n\n"
+            f"⚡ 偵測到 infra 變更，需要人工確認才能繼續部署。"
+        )
+    else:
+        # Fallback to old format if no resource_changes available
+        text = (
+            f"⚠️ *Infrastructure Changes Detected*\n\n"
+            f"📦 *專案：* {project_id}\n"
+            f"🌿 *分支：* {branch}\n"
+            f"🆔 *ID：* `{deploy_id}`\n\n"
+            f"🔧 *變更數量：* {change_count}\n\n"
+            f"⚡ 偵測到 infra 變更，需要人工確認才能繼續部署。"
+        )
+
     keyboard = {
         "inline_keyboard": [[
             {"text": "✅ 批准部署", "callback_data": f"infra_approve:{deploy_id}"},
@@ -553,6 +572,52 @@ def release_lock(project_id: str):
         print(f"Released lock for {project_id}")
     except Exception as e:
         print(f"Error releasing lock for {project_id}: {e}")
+
+
+def _format_resource_changes(resource_changes: list) -> str:
+    """Format CFN resource changes for display in Telegram notification.
+
+    Args:
+        resource_changes: List of ResourceChange dicts from CFN describe_change_set
+
+    Returns:
+        Formatted string with resource details, or empty string if no changes
+    """
+    if not resource_changes:
+        return ""
+
+    lines = []
+    max_display = 5
+
+    for change in resource_changes[:max_display]:
+        resource_change = change.get('ResourceChange', {})
+        logical_id = resource_change.get('LogicalResourceId', 'Unknown')
+        action = resource_change.get('Action', 'Unknown')
+        replacement = resource_change.get('Replacement', '')
+
+        # Format the line
+        if action == 'Add':
+            line = f"• {logical_id}: Add"
+        elif action == 'Remove':
+            line = f"• {logical_id}: Remove"
+        elif action == 'Modify':
+            if replacement == 'True':
+                line = f"• {logical_id}: Modify ⚠️ (Replacement)"
+            elif replacement == 'Conditional':
+                line = f"• {logical_id}: Modify ⚠️ (Conditional Replacement)"
+            else:
+                line = f"• {logical_id}: Modify"
+        else:
+            line = f"• {logical_id}: {action}"
+
+        lines.append(line)
+
+    # Add overflow indicator if there are more changes
+    remaining = len(resource_changes) - max_display
+    if remaining > 0:
+        lines.append(f"...還有 {remaining} 項")
+
+    return "\n".join(lines)
 
 
 def format_duration(seconds: int) -> str:
