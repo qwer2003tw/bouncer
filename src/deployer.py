@@ -966,63 +966,48 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
 
     # Auto-approve 分析（若 project 啟用）
     auto_approve_enabled = project.get('auto_approve_deploy', False)
-    template_s3_url = project.get('template_s3_url', '').strip()
-    stack_name = project.get('stack_name', '')
 
-    if auto_approve_enabled and template_s3_url and stack_name:
-        from changeset_analyzer import (
-            create_dry_run_changeset, analyze_changeset,
-            cleanup_changeset, is_code_only_change,
-        )
-        changeset_name = None
-        cfn = _get_cfn_client()
-        try:
-            changeset_name = create_dry_run_changeset(cfn, stack_name, template_s3_url)
-            analysis = analyze_changeset(cfn, stack_name, changeset_name)
+    if auto_approve_enabled:
+        from template_diff_analyzer import analyze_template_diff
+        git_repo = project.get('git_repo', '')
+        github_pat_secret = project.get('github_pat_secret', 'sam-deployer/github-pat')
 
-            if is_code_only_change(analysis):
-                # Code-only → auto-approve，直接 start_deploy
-                deploy_result = start_deploy(
-                    project_id,
-                    branch or project.get('default_branch', 'master'),
-                    source or 'auto-approve',
-                    reason,
-                )
-                # 發靜默通知
-                from notifications import send_auto_approve_deploy_notification
-                send_auto_approve_deploy_notification(
-                    project_id=project_id,
-                    deploy_id=deploy_result.get('deploy_id', ''),
-                    source=source,
-                    reason=reason,
-                )
-                return mcp_result(req_id, {
-                    'content': [{'type': 'text', 'text': json.dumps({
-                        'status': 'started',
-                        'deploy_id': deploy_result.get('deploy_id', ''),
-                        'project_id': project_id,
-                        'auto_approved': True,
-                        'message': '純 code 變更，已自動批准並啟動部署',
-                    }, ensure_ascii=False)}]
-                })
-            else:
-                # Infra change or error → 繼續走審批，附加 changeset summary
-                if analysis.error:
-                    context = f"[changeset 分析失敗: {analysis.error}] {context or ''}"
-                else:
-                    changed = [c.get('ResourceChange', {}).get('LogicalResourceId', '') for c in analysis.resource_changes]
-                    context = f"[需審批：infra 變更 {changed}] {context or ''}"
-        except Exception as e:  # noqa: BLE001 — fail-safe: any error → human approval
-            logger.warning(
-                "auto-approve changeset analysis failed, fallback to human approval",
-                extra={"src_module": "deployer", "operation": "auto_approve_analysis", "error": str(e)},
+        diff_result = analyze_template_diff(git_repo, branch or project.get('default_branch', 'master'), github_pat_secret)
+
+        if diff_result.is_safe:
+            # Auto-approve: start deploy directly
+            deploy_result = start_deploy(
+                project_id,
+                branch or project.get('default_branch', 'master'),
+                source or 'auto-approve',
+                reason,
             )
-        finally:
-            if changeset_name:
-                try:
-                    cleanup_changeset(cfn, stack_name, changeset_name)
-                except Exception:  # noqa: BLE001 — cleanup is best-effort
-                    pass
+            from notifications import send_auto_approve_deploy_notification
+            send_auto_approve_deploy_notification(
+                project_id=project_id,
+                deploy_id=deploy_result.get('deploy_id', ''),
+                source=source,
+                reason=reason,
+            )
+            return mcp_result(req_id, {
+                'content': [{'type': 'text', 'text': json.dumps({
+                    'status': 'started',
+                    'deploy_id': deploy_result.get('deploy_id', ''),
+                    'project_id': project_id,
+                    'auto_approved': True,
+                    'message': diff_result.diff_summary,
+                }, ensure_ascii=False)}]
+            })
+        else:
+            # High-risk or analysis error → human approval with context
+            if diff_result.error:
+                context = f"[changeset 分析失敗: {diff_result.error}] {context or ''}"
+            elif diff_result.high_risk_findings:
+                findings_str = "; ".join(diff_result.high_risk_findings[:3])
+                context = f"[需審批：高風險 infra 變更 — {findings_str}] {context or ''}"
+            else:
+                context = f"[需審批：{diff_result.diff_summary}] {context or ''}"
+            # Fall through to normal approval flow below
 
     # 建立審批請求
     request_id = generate_request_id(f"deploy:{project_id}")
