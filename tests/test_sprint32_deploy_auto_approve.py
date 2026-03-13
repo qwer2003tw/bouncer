@@ -81,7 +81,7 @@ def _make_project(auto_approve=True, template_s3_url="s3://my-bucket/template.ya
         "default_branch": "master",
         "git_repo": "https://github.com/org/repo",
         "target_account": "123456789012",
-        "auto_approve_deploy": auto_approve,
+        "auto_approve_code_only": auto_approve,
         "template_s3_url": template_s3_url,
         "enabled": True,
     }
@@ -141,7 +141,8 @@ def test_tc01_auto_approve_code_only_start_deploy():
          patch("changeset_analyzer.cleanup_changeset") as mock_cleanup, \
          patch.object(deployer, "start_deploy", return_value=deploy_result) as mock_start, \
          patch("notifications.send_auto_approve_deploy_notification") as mock_notify, \
-         patch.object(deployer, "_get_cfn_client", return_value=MagicMock()):
+         patch.object(deployer, "_get_cfn_client", return_value=MagicMock()), \
+         patch.object(deployer._db, "table", MagicMock()):
 
         result = _call_mcp_tool_deploy()
 
