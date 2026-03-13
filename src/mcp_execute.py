@@ -843,7 +843,7 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
         )
         if not notified.ok:
             raise RuntimeError("Telegram notification returned failure (ok=False or empty response)")
-    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as tg_err:
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, RuntimeError, Exception) as tg_err:
         # Cleanup DDB to prevent orphan pending record
         try:
             table.delete_item(Key={'request_id': request_id})
