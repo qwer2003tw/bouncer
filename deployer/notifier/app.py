@@ -15,6 +15,8 @@ TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
 MESSAGE_THREAD_ID = os.environ.get('MESSAGE_THREAD_ID', '')
 HISTORY_TABLE = os.environ.get('HISTORY_TABLE', 'bouncer-deploy-history')
 LOCKS_TABLE = os.environ.get('LOCKS_TABLE', 'bouncer-deploy-locks')
+ARTIFACTS_BUCKET = os.environ.get('ARTIFACTS_BUCKET', '')
+DEPLOYS_TABLE = os.environ.get('DEPLOYS_TABLE', 'bouncer-deploys')
 
 # DynamoDB
 dynamodb = boto3.resource('dynamodb')
@@ -36,6 +38,10 @@ def lambda_handler(event, context):
         return handle_success(event)
     elif action == 'failure':
         return handle_failure(event)
+    elif action == 'analyze':
+        return handle_analyze(event)
+    elif action == 'infra_approval_request':
+        return handle_infra_approval_request(event)
     else:
         return {'error': f'Unknown action: {action}'}
 
@@ -233,6 +239,151 @@ def handle_failure(event):
     release_lock(project_id)
 
     return {'status': 'failed'}
+
+
+def handle_analyze(event):
+    """Handle AnalyzeChangeset SFN state.
+
+    Called by Step Functions AnalyzeChangeset state after CodeBuild sends
+    taskToken via SendTaskSuccess. Performs dry-run changeset analysis on
+    the freshly packaged template.
+
+    Security: task_token is used in-memory only, never logged.
+    """
+    from changeset_analyzer import (
+        create_dry_run_changeset,
+        analyze_changeset,
+        cleanup_changeset,
+        is_code_only_change,
+    )
+
+    deploy_id = event.get('deploy_id', '')
+    project_id = event.get('project_id', '')
+    template_s3_key = event.get('template_s3_key', '')
+    task_token = event.get('task_token', '')
+
+    # Reconstruct template S3 URL
+    template_s3_url = f"https://{ARTIFACTS_BUCKET}.s3.amazonaws.com/{template_s3_key}"
+
+    # Get stack name from DDB (deploy record) or env
+    stack_name = _get_stack_name(deploy_id)
+    if not stack_name:
+        print(f"Error: Cannot determine stack_name for deploy_id={deploy_id}")
+        # Fail-safe: send failure to SFN
+        try:
+            sfn = boto3.client('stepfunctions', region_name='us-east-1')
+            sfn.send_task_failure(
+                taskToken=task_token,
+                error='MissingStackName',
+                cause=f'Cannot determine stack_name for deploy_id={deploy_id}',
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        return {'status': 'error', 'error': 'Missing stack_name'}
+
+    sfn = boto3.client('stepfunctions', region_name='us-east-1')
+    cfn = boto3.client('cloudformation', region_name='us-east-1')
+
+    changeset_name = None
+    try:
+        changeset_name = create_dry_run_changeset(cfn, stack_name, template_s3_url)
+        analysis = analyze_changeset(cfn, stack_name, changeset_name)
+
+        is_code_only = is_code_only_change(analysis)
+
+        # Send result back to SFN
+        sfn.send_task_success(
+            taskToken=task_token,
+            output=json.dumps({
+                'is_code_only': is_code_only,
+                'deploy_id': deploy_id,
+                'project_id': project_id,
+                'change_count': len(analysis.resource_changes),
+                'analysis_error': analysis.error,
+            })
+        )
+        return {'status': 'analyzed', 'is_code_only': is_code_only}
+
+    except Exception as exc:  # noqa: BLE001 — fail-safe
+        # Analysis failed → send failure to SFN (will go to NotifyFailure)
+        # Fallback: could also send success with is_code_only=False to require human approval
+        try:
+            sfn.send_task_failure(
+                taskToken=task_token,
+                error='AnalysisFailed',
+                cause=str(exc)[:256],
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        return {'status': 'error', 'error': str(exc)}
+    finally:
+        if changeset_name:
+            try:
+                cleanup_changeset(cfn, stack_name, changeset_name)
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def _get_stack_name(deploy_id: str) -> str:
+    """Get stack_name from DDB deploy record."""
+    if not deploy_id:
+        return ''
+
+    try:
+        ddb = boto3.resource('dynamodb', region_name='us-east-1')
+        table = ddb.Table(DEPLOYS_TABLE)
+        result = table.get_item(Key={'deploy_id': deploy_id})
+        item = result.get('Item', {})
+        return item.get('stack_name', '')
+    except Exception as e:
+        print(f"Error getting stack_name from DDB: {e}")
+        return ''
+
+
+def handle_infra_approval_request(event):
+    """Handle WaitForInfraApproval — notify Steven and wait for human approval.
+
+    Stores task_token in DDB (history table with infra_approval_token field).
+    Steven approves/denies via Telegram callback.
+
+    Security: task_token is stored encrypted at rest in DDB (AWS-managed encryption).
+    """
+    deploy_id = event.get('deploy_id', '')
+    project_id = event.get('project_id', '')
+    task_token = event.get('task_token', '')
+    change_count = event.get('change_count', 0)
+
+    # Get deploy details from history
+    history = get_history(deploy_id)
+    branch = history.get('branch', 'master') if history else 'master'
+
+    # Store task_token in DDB with TTL (24h from now)
+    ttl = int(time.time()) + 86400
+    update_history(deploy_id, {
+        'infra_approval_token': task_token,
+        'infra_approval_token_ttl': ttl,
+        'infra_approval_status': 'PENDING',
+    })
+
+    # Send Telegram notification
+    text = (
+        f"⚠️ *Infrastructure Changes Detected*\n\n"
+        f"📦 *專案：* {project_id}\n"
+        f"🌿 *分支：* {branch}\n"
+        f"🆔 *ID：* `{deploy_id}`\n\n"
+        f"🔧 *變更數量：* {change_count}\n\n"
+        f"⚡ *需要人工審批*\n"
+        f"請透過 Telegram callback 審批或拒絕此部署。"
+    )
+
+    message_id = send_telegram_message(text)
+
+    # Update history with notification message_id
+    update_history(deploy_id, {
+        'infra_approval_message_id': message_id,
+    })
+
+    return {'status': 'approval_requested', 'message_id': message_id}
 
 
 def send_telegram_message(text: str) -> int:
