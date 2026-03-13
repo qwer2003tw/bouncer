@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.35.0] - 2026-03-13
+
+### Fixed
+- `src/mcp_execute.py` — `_submit_for_approval()`: catch `RuntimeError` and `Exception` in Telegram failure handler to properly cleanup DDB orphan records (#s35-002)
+
+### Added
+- `deployer/template.yaml` — Step Functions: `StartBuild.waitForTaskToken` → `AnalyzeChangeset` → `CheckChangesetResult(Choice)` → `SamDeploy` / `WaitForInfraApproval.waitForTaskToken` post-package changeset analysis flow (#122 S35-001a)
+- `deployer/scripts/sam_deploy.py` — `_notify_sfn_package_complete()`: send SFN `SendTaskSuccess` with `template_s3_key` after `sam package`; `SKIP_PACKAGE` env var support for SamDeploy state (#122 S35-001b)
+- `deployer/notifier/app.py` — `handle_analyze()`: dry-run changeset analysis on fresh template → `send_task_success(is_code_only)`; `handle_infra_approval_request()`: store taskToken + Telegram notification for human approval (#122 S35-001c)
+- `deployer/notifier/changeset_analyzer.py` — copy of `src/changeset_analyzer.py` for use in notifier Lambda (#122 S35-001c)
+- `src/scheduler_service.py` — `create_expiry_warning_schedule()`, `delete_warning_schedule()`: EventBridge Scheduler integration for approval timeout notifications (#31 S35-003)
+- `src/notifications.py` — `send_expiry_warning_notification()`: ⏰ Telegram warning 60s before approval request expires (#31 S35-003)
+- `src/mcp_execute.py` — call `create_expiry_warning_schedule()` after approval request created; `src/callbacks.py` — delete schedule on approve/deny (#31 S35-003)
+
+### Infrastructure
+- `deployer/template.yaml` — IAM: `NotifierLambdaRole` + `CodeBuildRole` granted `states:SendTaskSuccess`, `states:SendTaskFailure`, `states:SendTaskHeartbeat` (#122 S35-001a)
+
+### Tests
+- 9 new tests in `deployer/tests/test_notifier_analyze.py` (S35-001c)
+- 8 new tests in `deployer/tests/test_sam_deploy.py` (S35-001b)
+- 2 pre-existing `TestOrphanApprovalCleanup` failures resolved (S35-002)
+
 ## [3.34.0] - 2026-03-12
 
 ### Fixed
