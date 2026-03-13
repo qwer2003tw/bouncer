@@ -52,10 +52,13 @@ def scan_upload(filename: str, content_bytes: bytes, content_type: str = '') -> 
             )
 
         # Check if scannable
+        # Handle files like .env, .gitignore that have no extension
+        basename = os.path.basename(filename.lower())
         is_text = (
             content_type.startswith('text/') or
             any(ct in content_type for ct in SCANNABLE_CONTENT_TYPES) or
-            ext in {'.yaml', '.yml', '.json', '.txt', '.csv', '.xml', '.js', '.ts', '.py', '.env', '.conf', '.cfg', '.ini'}
+            ext in {'.yaml', '.yml', '.json', '.txt', '.csv', '.xml', '.js', '.ts', '.py', '.env', '.conf', '.cfg', '.ini'} or
+            basename in {'.env', '.gitignore', '.dockerignore', '.npmrc', '.pypirc'}
         )
 
         if not is_text or len(content_bytes) > MAX_SCAN_SIZE:
