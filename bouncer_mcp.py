@@ -485,6 +485,58 @@ TOOLS = [
             },
             'required': ['grant_id']
         }
+    },
+    {
+        'name': 'bouncer_deploy_frontend',
+        'description': '一鍵前端部署：staging → 一次審批 → S3 copy + CloudFront invalidation。支援專案：ztp-files',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'project': {
+                    'type': 'string',
+                    'description': '專案名稱（例如：ztp-files）'
+                },
+                'files': {
+                    'type': 'array',
+                    'description': '要部署的檔案清單 [{filename, content(base64), content_type?}]'
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': '部署原因'
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '請求來源標識'
+                },
+                'trust_scope': {
+                    'type': 'string',
+                    'description': '信任範圍識別符'
+                }
+            },
+            'required': ['project', 'files', 'reason', 'source', 'trust_scope']
+        }
+    },
+    {
+        'name': 'bouncer_grant_execute',
+        'description': '在已批准的 Grant Session 內執行命令（精確匹配）',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'grant_id': {
+                    'type': 'string',
+                    'description': 'Grant Session ID'
+                },
+                'command': {
+                    'type': 'string',
+                    'description': 'AWS CLI 命令（必須精確匹配授權清單中的命令）'
+                },
+                'trust_scope': {
+                    'type': 'string',
+                    'description': '信任範圍識別符'
+                }
+            },
+            'required': ['grant_id', 'command', 'trust_scope']
+        }
     }
 ]
 
@@ -1032,6 +1084,44 @@ def tool_grant_status(arguments: dict) -> dict:
     return parse_mcp_result(result) or result
 
 
+def tool_deploy_frontend(arguments: dict) -> dict:
+    """前端部署：staging → 一次審批 → S3 copy + CloudFront invalidation"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'deploy_frontend',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_deploy_frontend',
+            'arguments': arguments
+        }
+    }
+
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
+def tool_grant_execute(arguments: dict) -> dict:
+    """在已批准的 Grant Session 內執行命令（精確匹配）"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'grant_execute',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_grant_execute',
+            'arguments': arguments
+        }
+    }
+
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
 def tool_revoke_grant(arguments: dict) -> dict:
     """撤銷 Grant Session"""
     if not SECRET:
@@ -1145,6 +1235,12 @@ def handle_request(request: dict) -> dict:
             result = tool_grant_status(arguments)
         elif tool_name == 'bouncer_revoke_grant':
             result = tool_revoke_grant(arguments)
+        # Frontend deploy
+        elif tool_name == 'bouncer_deploy_frontend':
+            result = tool_deploy_frontend(arguments)
+        # Grant execute
+        elif tool_name == 'bouncer_grant_execute':
+            result = tool_grant_execute(arguments)
         else:
             return error_response(req_id, -32602, f'Unknown tool: {tool_name}')
 
