@@ -634,7 +634,7 @@ Resources:
           
           StartBuild:
             Type: Task
-            Resource: "arn:aws:states:::codebuild:startBuild.waitForTaskToken"
+            Resource: "arn:aws:states:::codebuild:startBuild.sync"
             Parameters:
               ProjectName: sam-deployer
               EnvironmentVariablesOverride:
@@ -668,14 +668,7 @@ Resources:
                 - Name: PROJECT_ID
                   Type: PLAINTEXT
                   Value.$: $.project_id
-                - Name: SFN_TASK_TOKEN
-                  Type: PLAINTEXT
-                  Value.$: $$.Task.Token
-                - Name: SFN_EXECUTION_ARN
-                  Type: PLAINTEXT
-                  Value.$: $$.Execution.Id
-            HeartbeatSeconds: 900
-            ResultPath: $.package_result
+            ResultPath: $.build_result
             Next: AnalyzeChangeset
             Catch:
               - ErrorEquals: ["States.ALL"]
@@ -689,8 +682,6 @@ Resources:
               action: analyze
               deploy_id.$: $.deploy_id
               project_id.$: $.project_id
-              template_s3_key.$: $.package_result.template_s3_key
-              task_token.$: $$.Task.Token
             ResultPath: $.analyze_result
             Next: CheckChangesetResult
             Catch:

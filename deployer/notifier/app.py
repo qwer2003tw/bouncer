@@ -244,11 +244,12 @@ def handle_failure(event):
 def handle_analyze(event):
     """Handle AnalyzeChangeset SFN state.
 
-    Called by Step Functions AnalyzeChangeset state after CodeBuild sends
-    taskToken via SendTaskSuccess. Performs dry-run changeset analysis on
-    the freshly packaged template.
+    Called directly by Step Functions as a normal Task (not waitForTaskToken).
+    CodeBuild (.sync) finishes first, then SFN calls this Lambda to analyze
+    the freshly packaged template stored in S3 (URL retrieved from DDB).
 
-    Security: task_token is used in-memory only, never logged.
+    Returns dict with is_code_only + metadata for CheckChangesetResult Choice state.
+    On error → returns is_code_only=False (fail-safe: routes to WaitForInfraApproval).
     """
     from changeset_analyzer import (
         create_dry_run_changeset,
@@ -259,69 +260,69 @@ def handle_analyze(event):
 
     deploy_id = event.get('deploy_id', '')
     project_id = event.get('project_id', '')
-    template_s3_key = event.get('template_s3_key', '')
-    task_token = event.get('task_token', '')
 
-    # Reconstruct template S3 URL
-    template_s3_url = f"https://{ARTIFACTS_BUCKET}.s3.amazonaws.com/{template_s3_key}"
-
-    # Get stack name from DDB (deploy record) or env
+    # Get stack_name and template_s3_url from DDB deploy record
+    # sam_deploy.py already calls update_template_s3_url() which stores the fresh URL
     stack_name = _get_stack_name(deploy_id)
-    if not stack_name:
-        print(f"Error: Cannot determine stack_name for deploy_id={deploy_id}")
-        # Fail-safe: send failure to SFN
-        try:
-            sfn = boto3.client('stepfunctions', region_name='us-east-1')
-            sfn.send_task_failure(
-                taskToken=task_token,
-                error='MissingStackName',
-                cause=f'Cannot determine stack_name for deploy_id={deploy_id}',
-            )
-        except Exception:  # noqa: BLE001
-            pass
-        return {'status': 'error', 'error': 'Missing stack_name'}
+    template_s3_url = _get_template_s3_url(project_id)
 
-    sfn = boto3.client('stepfunctions', region_name='us-east-1')
+    if not stack_name or not template_s3_url:
+        print(f"Error: Missing stack_name={stack_name!r} or template_s3_url={template_s3_url!r} for deploy_id={deploy_id}")
+        # Fail-safe: return is_code_only=False so WaitForInfraApproval handles it
+        return {
+            'is_code_only': False,
+            'deploy_id': deploy_id,
+            'project_id': project_id,
+            'change_count': 0,
+            'analysis_error': 'Missing stack_name or template_s3_url',
+        }
+
     cfn = boto3.client('cloudformation', region_name='us-east-1')
 
     changeset_name = None
     try:
         changeset_name = create_dry_run_changeset(cfn, stack_name, template_s3_url)
         analysis = analyze_changeset(cfn, stack_name, changeset_name)
-
         is_code_only = is_code_only_change(analysis)
 
-        # Send result back to SFN
-        sfn.send_task_success(
-            taskToken=task_token,
-            output=json.dumps({
-                'is_code_only': is_code_only,
-                'deploy_id': deploy_id,
-                'project_id': project_id,
-                'change_count': len(analysis.resource_changes),
-                'analysis_error': analysis.error,
-            })
-        )
-        return {'status': 'analyzed', 'is_code_only': is_code_only}
+        return {
+            'is_code_only': is_code_only,
+            'deploy_id': deploy_id,
+            'project_id': project_id,
+            'change_count': len(analysis.resource_changes),
+            'analysis_error': analysis.error,
+        }
 
-    except Exception as exc:  # noqa: BLE001 — fail-safe
-        # Analysis failed → send failure to SFN (will go to NotifyFailure)
-        # Fallback: could also send success with is_code_only=False to require human approval
-        try:
-            sfn.send_task_failure(
-                taskToken=task_token,
-                error='AnalysisFailed',
-                cause=str(exc)[:256],
-            )
-        except Exception:  # noqa: BLE001
-            pass
-        return {'status': 'error', 'error': str(exc)}
+    except Exception as exc:  # noqa: BLE001 — fail-safe: route to WaitForInfraApproval
+        print(f"[analyze] Changeset analysis failed: {exc}")
+        return {
+            'is_code_only': False,
+            'deploy_id': deploy_id,
+            'project_id': project_id,
+            'change_count': 0,
+            'analysis_error': str(exc)[:256],
+        }
     finally:
         if changeset_name:
             try:
                 cleanup_changeset(cfn, stack_name, changeset_name)
             except Exception:  # noqa: BLE001
                 pass
+
+
+def _get_template_s3_url(project_id: str) -> str:
+    """Get template_s3_url from DDB projects table (set by sam_deploy.py after package)."""
+    if not project_id:
+        return ''
+    try:
+        projects_table_name = os.environ.get('PROJECTS_TABLE', 'bouncer-projects')
+        ddb = boto3.resource('dynamodb', region_name='us-east-1')
+        table = ddb.Table(projects_table_name)
+        item = table.get_item(Key={'project_id': project_id}).get('Item', {})
+        return item.get('template_s3_url', '')
+    except Exception as e:  # noqa: BLE001
+        print(f"Error getting template_s3_url from DDB: {e}")
+        return 
 
 
 def _get_stack_name(deploy_id: str) -> str:
