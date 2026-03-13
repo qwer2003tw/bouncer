@@ -853,6 +853,40 @@ def handle_telegram_webhook(event: dict) -> dict:
             answer_callback(callback['id'], '❌ 無效分頁請求')
             return response(400, {'error': 'Invalid show_page data'})
 
+    # 特殊處理：infra deploy approval（WaitForInfraApproval SFN state）
+    if action in ('infra_approve', 'infra_deny'):
+        from deployer import get_deploy_record, update_deploy_record
+        import boto3 as _boto3
+        import json as _json
+        deploy_id = request_id
+        deploy_record = get_deploy_record(deploy_id)
+        task_token = deploy_record.get('infra_approval_token', '') if deploy_record else ''
+        msg_id = callback.get('message', {}).get('message_id')
+
+        if not task_token:
+            answer_callback(callback['id'], '❌ 找不到 task token，可能已過期')
+            return response(200, {'ok': True})
+
+        sfn = _boto3.client('stepfunctions', region_name='us-east-1')
+        if action == 'infra_approve':
+            sfn.send_task_success(
+                taskToken=task_token,
+                output=_json.dumps({'approved': True, 'deploy_id': deploy_id}),
+            )
+            update_deploy_record(deploy_id, {'infra_approval_status': 'APPROVED'})
+            answer_callback(callback['id'], '✅ 已批准，繼續部署')
+            update_message(msg_id, '✅ *Infra 變更已批准*\n\n`' + deploy_id + '`\n\n正在繼續部署...', remove_buttons=True)
+        else:
+            sfn.send_task_failure(
+                taskToken=task_token,
+                error='InfraDenied',
+                cause=f'Denied by {user_id}',
+            )
+            update_deploy_record(deploy_id, {'infra_approval_status': 'DENIED'})
+            answer_callback(callback['id'], '❌ 已拒絕部署')
+            update_message(msg_id, '❌ *Infra 變更已拒絕*\n\n`' + deploy_id + '`', remove_buttons=True)
+        return response(200, {'ok': True})
+
     # 特殊處理：撤銷信任時段
     if action == 'revoke_trust':
         emit_metric('Bouncer', 'ApprovalAction', 1, dimensions={'Action': action})
