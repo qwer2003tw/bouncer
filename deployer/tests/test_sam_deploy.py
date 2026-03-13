@@ -22,12 +22,8 @@ from __future__ import annotations
 
 import json
 import sys
-import os
-import importlib
-import types
 from pathlib import Path
-from typing import List
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 import subprocess
 
 import pytest
@@ -39,8 +35,7 @@ import pytest
 SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-import sam_deploy  # noqa: E402
-from sam_deploy import (
+from sam_deploy import (  # noqa: E402
     CloudFormationImporter,
     ConflictResource,
     DeployResult,
@@ -48,6 +43,7 @@ from sam_deploy import (
     _build_sam_cmd,
     _build_suggest_import_json,
     _EARLY_VALIDATION_RE,
+    _notify_sfn_package_complete,
     _physical_id_to_identifier,
     _print_early_validation_hint,
     _run_deploy,
@@ -1167,7 +1163,7 @@ class TestSuggestImportJsonOutput:
 
         with patch("sam_deploy.subprocess.Popen", return_value=first_call), \
              patch("sam_deploy.boto3.client", return_value=mock_cfn_client):
-            with pytest.raises(SystemExit) as exc:
+            with pytest.raises(SystemExit):
                 main(["--suggest-import"])
 
         captured = capsys.readouterr()
@@ -1188,7 +1184,7 @@ class TestSuggestImportJsonOutput:
         first_call = self._make_proc(1, stdout=EARLY_VALIDATION_OUTPUT)
 
         with patch("sam_deploy.subprocess.Popen", return_value=first_call):
-            with pytest.raises(SystemExit) as exc:
+            with pytest.raises(SystemExit):
                 main(["--suggest-import"])
 
         captured = capsys.readouterr()
@@ -1196,3 +1192,201 @@ class TestSuggestImportJsonOutput:
         assert "[SUGGEST-IMPORT]" in captured.err
         # No parseable resources → fallback message
         assert "describe-stack-events" in captured.err or "Could not parse" in captured.err
+
+# ---------------------------------------------------------------------------
+# Tests for SFN taskToken callback (S35-001b)
+# ---------------------------------------------------------------------------
+
+class TestSfnNotification:
+    """Tests for _notify_sfn_package_complete and SKIP_PACKAGE env var."""
+
+    def test_notify_sfn_package_complete_with_token(self, monkeypatch, capsys):
+        """SFN_TASK_TOKEN set → send_task_success called with correct params."""
+        monkeypatch.setenv("SFN_TASK_TOKEN", "test-task-token-abc123")
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "us-west-2")
+
+        mock_sfn = MagicMock()
+        with patch("sam_deploy.boto3.client", return_value=mock_sfn) as mock_client:
+            _notify_sfn_package_complete("my-project", "my-artifacts-bucket")
+
+        # Verify boto3.client was called with correct service
+        mock_client.assert_called_once_with("stepfunctions", region_name="us-west-2")
+
+        # Verify send_task_success was called
+        mock_sfn.send_task_success.assert_called_once()
+        call_kwargs = mock_sfn.send_task_success.call_args[1]
+        assert call_kwargs["taskToken"] == "test-task-token-abc123"
+
+        # Verify output JSON structure
+        output_data = json.loads(call_kwargs["output"])
+        assert output_data["template_s3_key"] == "my-project/packaged-template.yaml"
+        assert output_data["project_id"] == "my-project"
+        assert output_data["artifacts_bucket"] == "my-artifacts-bucket"
+
+        # Verify success message printed (but NOT the token itself)
+        captured = capsys.readouterr()
+        assert "[sfn] SendTaskSuccess" in captured.out
+        assert "template_s3_key=my-project/packaged-template.yaml" in captured.out
+        # Security check: token MUST NOT appear in output
+        assert "test-task-token-abc123" not in captured.out
+
+    def test_notify_sfn_package_complete_without_token(self, monkeypatch, capsys):
+        """SFN_TASK_TOKEN not set → no sfn call, prints skip message."""
+        monkeypatch.delenv("SFN_TASK_TOKEN", raising=False)
+
+        mock_sfn = MagicMock()
+        with patch("sam_deploy.boto3.client", return_value=mock_sfn):
+            _notify_sfn_package_complete("my-project", "my-artifacts-bucket")
+
+        # No boto3.client call should occur
+        mock_sfn.send_task_success.assert_not_called()
+
+        # Verify skip message printed
+        captured = capsys.readouterr()
+        assert "[sfn] SFN_TASK_TOKEN not set" in captured.out
+        assert "skipping SendTaskSuccess" in captured.out
+
+    def test_notify_sfn_package_complete_with_empty_token(self, monkeypatch, capsys):
+        """SFN_TASK_TOKEN set but empty → no sfn call."""
+        monkeypatch.setenv("SFN_TASK_TOKEN", "   ")  # whitespace only
+
+        mock_sfn = MagicMock()
+        with patch("sam_deploy.boto3.client", return_value=mock_sfn):
+            _notify_sfn_package_complete("my-project", "my-artifacts-bucket")
+
+        mock_sfn.send_task_success.assert_not_called()
+        captured = capsys.readouterr()
+        assert "skipping SendTaskSuccess" in captured.out
+
+    def test_notify_sfn_package_complete_send_task_success_fails(self, monkeypatch, capsys):
+        """send_task_success fails → exception caught, warning printed, no raise."""
+        monkeypatch.setenv("SFN_TASK_TOKEN", "test-token")
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+
+        mock_sfn = MagicMock()
+        mock_sfn.send_task_success.side_effect = Exception("Network error")
+
+        with patch("sam_deploy.boto3.client", return_value=mock_sfn):
+            # Should NOT raise — function is fail-safe
+            _notify_sfn_package_complete("my-project", "my-bucket")
+
+        # Verify warning message
+        captured = capsys.readouterr()
+        assert "[sfn] Warning: SendTaskSuccess failed" in captured.out
+        assert "Network error" in captured.out
+
+    def test_main_skip_package_true(self, monkeypatch, capsys):
+        """SKIP_PACKAGE=true → _run_sam_package not called, skip message printed."""
+        monkeypatch.setenv("STACK_NAME", STACK)
+        monkeypatch.setenv("SKIP_PACKAGE", "true")
+        monkeypatch.setenv("ARTIFACTS_BUCKET", "my-bucket")
+        monkeypatch.setenv("PROJECT_ID", "my-project")
+        monkeypatch.delenv("SAM_PARAMS", raising=False)
+        monkeypatch.delenv("CFN_ROLE_ARN", raising=False)
+        monkeypatch.delenv("TARGET_ROLE_ARN", raising=False)
+        monkeypatch.delenv("SFN_TASK_TOKEN", raising=False)
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = iter(["Deploy successful\n"])
+        mock_proc.wait.return_value = None
+
+        with patch("sam_deploy.subprocess.run") as mock_run, \
+             patch("sam_deploy.subprocess.Popen", return_value=mock_proc):
+            with pytest.raises(SystemExit) as exc:
+                main([])
+            assert exc.value.code == 0
+
+        # Verify sam package was NOT called
+        mock_run.assert_not_called()
+
+        # Verify skip message printed
+        captured = capsys.readouterr()
+        assert "[package] SKIP_PACKAGE=true" in captured.out
+        assert "skipping sam package step" in captured.out
+
+    def test_main_skip_package_false(self, monkeypatch, capsys):
+        """SKIP_PACKAGE=false → _run_sam_package IS called."""
+        monkeypatch.setenv("STACK_NAME", STACK)
+        monkeypatch.setenv("SKIP_PACKAGE", "false")
+        monkeypatch.setenv("ARTIFACTS_BUCKET", "my-bucket")
+        monkeypatch.setenv("PROJECT_ID", "my-project")
+        monkeypatch.delenv("SAM_PARAMS", raising=False)
+        monkeypatch.delenv("CFN_ROLE_ARN", raising=False)
+        monkeypatch.delenv("TARGET_ROLE_ARN", raising=False)
+        monkeypatch.delenv("SFN_TASK_TOKEN", raising=False)
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = iter(["Deploy successful\n"])
+        mock_proc.wait.return_value = None
+
+        with patch("sam_deploy.subprocess.run") as mock_run, \
+             patch("sam_deploy.subprocess.Popen", return_value=mock_proc), \
+             patch("sam_deploy.update_template_s3_url"), \
+             patch("sam_deploy._notify_sfn_package_complete") as mock_notify:
+            with pytest.raises(SystemExit) as exc:
+                main([])
+            assert exc.value.code == 0
+
+        # Verify sam package WAS called
+        mock_run.assert_called_once()
+        assert mock_run.call_args[0][0][0:2] == ["sam", "package"]
+
+        # Verify _notify_sfn_package_complete was called
+        mock_notify.assert_called_once_with("my-project", "my-bucket")
+
+    def test_main_skip_package_not_set(self, monkeypatch):
+        """SKIP_PACKAGE not set (default) → _run_sam_package IS called."""
+        monkeypatch.setenv("STACK_NAME", STACK)
+        monkeypatch.delenv("SKIP_PACKAGE", raising=False)
+        monkeypatch.setenv("ARTIFACTS_BUCKET", "my-bucket")
+        monkeypatch.setenv("PROJECT_ID", "my-project")
+        monkeypatch.delenv("SAM_PARAMS", raising=False)
+        monkeypatch.delenv("CFN_ROLE_ARN", raising=False)
+        monkeypatch.delenv("TARGET_ROLE_ARN", raising=False)
+        monkeypatch.delenv("SFN_TASK_TOKEN", raising=False)
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = iter(["Deploy successful\n"])
+        mock_proc.wait.return_value = None
+
+        with patch("sam_deploy.subprocess.run") as mock_run, \
+             patch("sam_deploy.subprocess.Popen", return_value=mock_proc), \
+             patch("sam_deploy.update_template_s3_url"), \
+             patch("sam_deploy._notify_sfn_package_complete"):
+            with pytest.raises(SystemExit) as exc:
+                main([])
+            assert exc.value.code == 0
+
+        # Verify sam package WAS called
+        mock_run.assert_called_once()
+        assert mock_run.call_args[0][0][0:2] == ["sam", "package"]
+
+    def test_main_with_sfn_token_calls_notify(self, monkeypatch):
+        """main() with SFN_TASK_TOKEN → _notify_sfn_package_complete called."""
+        monkeypatch.setenv("STACK_NAME", STACK)
+        monkeypatch.setenv("ARTIFACTS_BUCKET", "my-bucket")
+        monkeypatch.setenv("PROJECT_ID", "my-project")
+        monkeypatch.setenv("SFN_TASK_TOKEN", "test-token-xyz")
+        monkeypatch.delenv("SAM_PARAMS", raising=False)
+        monkeypatch.delenv("CFN_ROLE_ARN", raising=False)
+        monkeypatch.delenv("TARGET_ROLE_ARN", raising=False)
+        monkeypatch.delenv("SKIP_PACKAGE", raising=False)
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = iter(["Deploy successful\n"])
+        mock_proc.wait.return_value = None
+
+        with patch("sam_deploy.subprocess.run"), \
+             patch("sam_deploy.subprocess.Popen", return_value=mock_proc), \
+             patch("sam_deploy.update_template_s3_url"), \
+             patch("sam_deploy._notify_sfn_package_complete") as mock_notify:
+            with pytest.raises(SystemExit) as exc:
+                main([])
+            assert exc.value.code == 0
+
+        # Verify _notify_sfn_package_complete was called
+        mock_notify.assert_called_once_with("my-project", "my-bucket")

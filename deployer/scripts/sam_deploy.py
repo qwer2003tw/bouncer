@@ -441,6 +441,41 @@ def _run_sam_package(artifacts_bucket: str, project_id: str) -> None:
         # Non-fatal
 
 
+def _notify_sfn_package_complete(project_id: str, artifacts_bucket: str) -> None:
+    """Notify Step Functions that sam package is complete.
+
+    Called after _run_sam_package() succeeds. Sends taskToken back to SFN
+    so the AnalyzeChangeset state can proceed.
+
+    Security: taskToken is read from env var and used in-memory only.
+    It is NEVER logged or persisted.
+    """
+    task_token = os.environ.get("SFN_TASK_TOKEN", "").strip()
+    if not task_token:
+        print("[sfn] SFN_TASK_TOKEN not set — skipping SendTaskSuccess (non-SFN deploy mode)")
+        return
+
+    template_s3_key = f"{project_id}/packaged-template.yaml"
+
+    try:
+        import boto3 as _boto3_sfn
+        import json as _json
+        sfn = _boto3_sfn.client("stepfunctions", region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
+        sfn.send_task_success(
+            taskToken=task_token,
+            output=_json.dumps({
+                "template_s3_key": template_s3_key,
+                "project_id": project_id,
+                "artifacts_bucket": artifacts_bucket,
+            })
+        )
+        print(f"[sfn] SendTaskSuccess — package complete, template_s3_key={template_s3_key}")
+    except Exception as exc:  # noqa: BLE001
+        # Fail-safe: if SendTaskSuccess fails, SFN will timeout via HeartbeatSeconds
+        # Do NOT raise — let CodeBuild exit cleanly
+        print(f"[sfn] Warning: SendTaskSuccess failed: {exc}")
+
+
 def update_template_s3_url(project_id: str, artifacts_bucket: str) -> None:
     """Persist the packaged template S3 URL into the bouncer-projects DDB table.
 
@@ -609,17 +644,24 @@ def main(argv: Optional[List[str]] = None) -> None:
     target_role = os.environ.get("TARGET_ROLE_ARN", "").strip()
     artifacts_bucket = os.environ.get("ARTIFACTS_BUCKET", "").strip()
     project_id = os.environ.get("PROJECT_ID", "").strip()
+    skip_package = os.environ.get("SKIP_PACKAGE", "").lower() == "true"
 
     # --- sam package: upload Lambda artifacts + produce packaged template ---
     # Must run BEFORE any cross-account assume-role so the S3 upload uses the
     # original CodeBuild IAM credentials (main account).
-    _run_sam_package(artifacts_bucket, project_id)
+    # SamDeploy state may set SKIP_PACKAGE=true to skip this (reusing prior packaged template).
+    if not skip_package:
+        _run_sam_package(artifacts_bucket, project_id)
+        # Notify Step Functions that package is complete
+        _notify_sfn_package_complete(project_id, artifacts_bucket)
 
-    # --- Update template_s3_url in DDB (before assume-role) ---
-    # After assume-role the env-var credentials are overwritten with the
-    # cross-account role creds; DDB is in the main account, so we must call
-    # this before the role switch.
-    update_template_s3_url(project_id, artifacts_bucket)
+        # --- Update template_s3_url in DDB (before assume-role) ---
+        # After assume-role the env-var credentials are overwritten with the
+        # cross-account role creds; DDB is in the main account, so we must call
+        # this before the role switch.
+        update_template_s3_url(project_id, artifacts_bucket)
+    else:
+        print("[package] SKIP_PACKAGE=true — skipping sam package step")
 
     cmd = _build_sam_cmd(stack, params_raw, cfn_role, target_role)
     sys.stdout.flush()
