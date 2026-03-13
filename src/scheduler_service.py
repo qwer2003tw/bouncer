@@ -13,6 +13,7 @@ Design goals (Aggressive approach):
 
 import json
 import os
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -41,6 +42,16 @@ def schedule_name(request_id: str) -> str:
     """
     safe = "".join(c if c.isalnum() or c in ("-", "_") else "-" for c in request_id)
     return f"bouncer-expire-{safe}"[:64]
+
+
+def warning_schedule_name(request_id: str) -> str:
+    """Return the schedule name for expiry *warning* (60s before expiry).
+
+    This is distinct from the cleanup schedule (``schedule_name``) so both
+    can coexist and be cancelled independently when a request is approved/denied.
+    """
+    safe = "".join(c if c.isalnum() or c in ("-", "_") else "-" for c in request_id)
+    return f"bouncer-warn-{safe}"[:64]
 
 
 def _format_schedule_time(expires_at_ts: int) -> str:
@@ -169,6 +180,84 @@ class SchedulerService:
             )
             return False
 
+    def create_expiry_warning_schedule(
+        self,
+        request_id: str,
+        expires_at: int,
+        *,
+        command_preview: str = '',
+        source: str = '',
+    ) -> bool:
+        """Create a one-time EventBridge Scheduler schedule that fires 60 seconds
+        *before* *expires_at* and sends a Telegram warning notification.
+
+        This is distinct from the cleanup schedule (which fires *at* expires_at).
+        Both schedules can coexist and are cancelled when the request is approved/denied.
+
+        Args:
+            request_id:      Bouncer request ID (DynamoDB primary key).
+            expires_at:      Unix timestamp when the request expires.
+            command_preview: First ~100 chars of the command for the notification.
+            source:          Optional source string (e.g., 'ztp-files').
+
+        Returns:
+            ``True`` on success, ``False`` on any failure (non-raising).
+        """
+        if not self._enabled:
+            logger.debug("Disabled — skipping warning schedule for %s", request_id, extra={"src_module": "scheduler", "operation": "create_expiry_warning_schedule", "request_id": request_id})
+            return False
+
+        if not self._lambda_arn or not self._role_arn:
+            logger.warning(
+                "Missing LAMBDA_ARN or ROLE_ARN — cannot schedule warning for %s",
+                request_id,
+                extra={"src_module": "scheduler", "operation": "create_expiry_warning_schedule", "request_id": request_id},
+            )
+            return False
+
+        # Fire 60 seconds *before* expiry
+        warning_time = expires_at - 60
+        if warning_time <= int(time.time()):
+            # Already past the warning time (e.g., TTL < 60s) — skip
+            logger.debug("Warning time already past for %s — skipping", request_id, extra={"src_module": "scheduler", "operation": "create_expiry_warning_schedule", "request_id": request_id})
+            return False
+
+        try:
+            client = self._get_client()
+            name = warning_schedule_name(request_id)
+            at_expr = _format_schedule_time(warning_time)
+
+            payload = {
+                "source": "bouncer-scheduler",
+                "action": "expiry_warning",
+                "request_id": request_id,
+                "command_preview": command_preview,
+                "source_field": source,  # renamed to avoid collision with top-level 'source'
+            }
+
+            client.create_schedule(
+                Name=name,
+                GroupName=self._group_name,
+                ScheduleExpression=at_expr,
+                ScheduleExpressionTimezone="UTC",
+                FlexibleTimeWindow={"Mode": "OFF"},
+                ActionAfterCompletion="DELETE",
+                Target={
+                    "Arn": self._lambda_arn,
+                    "RoleArn": self._role_arn,
+                    "Input": json.dumps(payload),
+                },
+            )
+            logger.info("Created warning schedule '%s' for request %s at %s", name, request_id, at_expr, extra={"src_module": "scheduler", "operation": "create_expiry_warning_schedule", "request_id": request_id, "schedule_name": name})
+            return True
+
+        except ClientError as exc:
+            logger.error(
+                "Failed to create warning schedule for %s: %s", request_id, exc,
+                extra={"src_module": "scheduler", "operation": "create_expiry_warning_schedule", "request_id": request_id, "error": str(exc)},
+            )
+            return False
+
     def delete_schedule(self, request_id: str) -> bool:
         """Delete the expiry schedule for *request_id* (e.g. after approval).
 
@@ -189,6 +278,27 @@ class SchedulerService:
             return True
         except ClientError as exc:
             logger.error("Failed to delete schedule for %s: %s", request_id, exc, extra={"src_module": "scheduler", "operation": "delete_schedule", "request_id": request_id, "error": str(exc)})
+            return False
+
+    def delete_warning_schedule(self, request_id: str) -> bool:
+        """Delete the expiry *warning* schedule for *request_id*.
+
+        Returns:
+            ``True`` on success or if schedule did not exist, ``False`` on error.
+        """
+        if not self._enabled:
+            return False
+
+        try:
+            client = self._get_client()
+            name = warning_schedule_name(request_id)
+            client.delete_schedule(Name=name, GroupName=self._group_name)
+            logger.info("Deleted warning schedule '%s' for request %s", name, request_id, extra={"src_module": "scheduler", "operation": "delete_warning_schedule", "request_id": request_id, "schedule_name": name})
+            return True
+        except client.exceptions.ResourceNotFoundException:  # type: ignore[attr-defined]
+            return True
+        except ClientError as exc:
+            logger.error("Failed to delete warning schedule for %s: %s", request_id, exc, extra={"src_module": "scheduler", "operation": "delete_warning_schedule", "request_id": request_id, "error": str(exc)})
             return False
 
     # ── private helpers ───────────────────────────────────────────────────────

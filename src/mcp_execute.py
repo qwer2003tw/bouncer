@@ -862,7 +862,7 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
             'isError': True,
         })
 
-    # Post-notification: store telegram_message_id + schedule expiry cleanup
+    # Post-notification: store telegram_message_id + schedule expiry cleanup + warning
     if notified.message_id:
         from notifications import post_notification_setup
         post_notification_setup(
@@ -870,6 +870,19 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
             telegram_message_id=notified.message_id,
             expires_at=ttl,
         )
+
+        # S35-003: Schedule expiry warning (60s before TTL) — best-effort, never block approval flow
+        try:
+            from scheduler_service import get_scheduler_service
+            svc = get_scheduler_service()
+            svc.create_expiry_warning_schedule(
+                request_id=request_id,
+                expires_at=ttl,
+                command_preview=ctx.command[:100],
+                source=ctx.source or '',
+            )
+        except Exception:  # noqa: BLE001 — best-effort, never block approval flow
+            pass
 
     # 一律異步返回：讓 client 用 bouncer_status 輪詢結果。
     # sync long-polling 已移除（Lambda 60s timeout + API Gateway 29s timeout 使其無意義）。

@@ -195,6 +195,15 @@ def _update_request_status(table, request_id: str, status: str, approver: str, e
         ExpressionAttributeValues=expr_values,
     )
 
+    # S35-003: Delete both cleanup and warning schedules (best-effort cleanup)
+    try:
+        from scheduler_service import get_scheduler_service
+        svc = get_scheduler_service()
+        svc.delete_schedule(request_id)  # cleanup schedule
+        svc.delete_warning_schedule(request_id)  # warning schedule
+    except Exception:  # noqa: BLE001 — best-effort cleanup
+        pass
+
 
 def _send_status_update(message_id: int, status_emoji: str, title: str, item: dict, extra_lines: str = '') -> None:
     """更新 Telegram 訊息

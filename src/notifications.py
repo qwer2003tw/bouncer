@@ -958,3 +958,30 @@ def send_auto_approve_deploy_notification(
                 "error": str(e),
             },
         )
+
+
+# ============================================================================
+# Approval Expiry Warning Notification (sprint35-003)
+# ============================================================================
+
+def send_expiry_warning_notification(request_id: str, command_preview: str, source: str = '') -> None:
+    """Send ⏰ warning when approval request is about to expire (60s remaining).
+
+    Args:
+        request_id:       The Bouncer request ID (DynamoDB primary key).
+        command_preview:  A preview of the command (first 100 chars).
+        source:           Optional request source (e.g., 'ztp-files').
+    """
+    try:
+        mb = MessageBuilder()
+        mb.text("⏰ ").bold("審批請求即將過期").newline()
+        mb.text("📋 ").code(request_id).newline()
+        mb.text("💻 ").code(command_preview).newline()
+        if source:
+            mb.text(f"🤖 {source}").newline()
+        mb.text("請在 60 秒內審批，否則請求將自動過期。")
+
+        text, entities = mb.build()
+        _telegram.send_message_with_entities(text, entities)
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
+        logger.error("send_expiry_warning_notification error: %s", e, extra={"src_module": "notifications", "operation": "send_expiry_warning_notification", "error": str(e)})

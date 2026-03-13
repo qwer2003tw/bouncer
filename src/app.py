@@ -406,6 +406,16 @@ def lambda_handler(event: dict, context) -> dict:
     if event.get('source') == 'bouncer-scheduler' and event.get('action') == 'trust_expiry':
         return handle_trust_expiry(event)
 
+    # EventBridge Scheduler approval expiry warning (sprint35-003)
+    if event.get('source') == 'bouncer-scheduler' and event.get('action') == 'expiry_warning':
+        from notifications import send_expiry_warning_notification
+        send_expiry_warning_notification(
+            request_id=event.get('request_id', ''),
+            command_preview=event.get('command_preview', ''),
+            source=event.get('source_field', ''),
+        )
+        return {'statusCode': 200, 'body': json.dumps({'status': 'ok'})}
+
     # 支援 Function URL (rawPath) 和 API Gateway (path)
     path = event.get('rawPath') or event.get('path') or '/'
 
