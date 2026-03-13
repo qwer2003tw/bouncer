@@ -227,6 +227,24 @@ def analyze_changeset(
             return result
 
         if status == "FAILED":
+            # "No updates are to be performed." = SAM skipped deployment because
+            # template + code hash unchanged → treat as code-only (safe no-op)
+            if status_reason and "No updates are to be performed" in status_reason:
+                logger.info(
+                    "changeset_no_updates",
+                    extra={
+                        "src_module": "changeset_analyzer",
+                        "stack_name": stack_name,
+                        "changeset_name": changeset_name,
+                        "status_reason": status_reason,
+                    },
+                )
+                return AnalysisResult(
+                    is_code_only=True,
+                    resource_changes=[],
+                    error=None,
+                )
+            # other FAILED reasons → conservative: require human approval
             logger.warning(
                 "changeset_creation_failed",
                 extra={

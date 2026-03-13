@@ -212,15 +212,16 @@ def test_tc08_cleanup_changeset_not_found():
 
 
 # ---------------------------------------------------------------------------
-# TC09 — analyze_changeset FAILED status → AnalysisResult.error populated
+# TC09 — analyze_changeset FAILED status (non-no-updates) → AnalysisResult.error populated
 # ---------------------------------------------------------------------------
 
 
 def test_tc09_analyze_changeset_failed_status():
+    """FAILED status with non-no-updates reason should return error and is_code_only=False"""
     mock_cfn = MagicMock()
     mock_cfn.describe_change_set.return_value = {
         "Status": "FAILED",
-        "StatusReason": "No updates are to be performed.",
+        "StatusReason": "Template validation error",
         "Changes": [],
     }
 
@@ -233,7 +234,7 @@ def test_tc09_analyze_changeset_failed_status():
     )
 
     assert result.error is not None
-    assert "No updates" in result.error
+    assert "Template validation error" in result.error
     assert result.is_code_only is False
     assert result.resource_changes == []
 
@@ -347,3 +348,52 @@ def test_tc12_version_add_with_ddb_modify_is_false():
         ],
     )
     assert is_code_only_change(result) is False
+
+
+# ---------------------------------------------------------------------------
+# Sprint 37 — #124: FAILED status "No updates are to be performed." should be code-only
+# ---------------------------------------------------------------------------
+
+
+def test_no_updates_returns_code_only():
+    """FAILED + 'No updates are to be performed.' → is_code_only=True, error=None"""
+    mock_cfn = MagicMock()
+    mock_cfn.describe_change_set.return_value = {
+        "Status": "FAILED",
+        "StatusReason": "No updates are to be performed.",
+        "Changes": [],
+    }
+
+    result = analyze_changeset(
+        mock_cfn,
+        "my-stack",
+        "bouncer-dryrun-noop",
+        max_wait=10,
+        poll_interval=2,
+    )
+
+    assert result.is_code_only is True
+    assert result.error is None
+    assert result.resource_changes == []
+
+
+def test_other_failed_reason_returns_not_code_only():
+    """FAILED + other reason → is_code_only=False, error populated"""
+    mock_cfn = MagicMock()
+    mock_cfn.describe_change_set.return_value = {
+        "Status": "FAILED",
+        "StatusReason": "Insufficient permissions to access S3 bucket.",
+        "Changes": [],
+    }
+
+    result = analyze_changeset(
+        mock_cfn,
+        "my-stack",
+        "bouncer-dryrun-fail",
+        max_wait=10,
+        poll_interval=2,
+    )
+
+    assert result.is_code_only is False
+    assert result.error == "Insufficient permissions to access S3 bucket."
+    assert result.resource_changes == []
