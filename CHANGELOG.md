@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.36.0] - 2026-03-13
+
+### Added
+- `src/template_diff_analyzer.py` — `analyze_template_diff()`: GitHub compare API + regex scan of template.yaml diff for high-risk patterns (Principal:*, AuthType:NONE, S3 public access); fail-safe: any error → human approval (#123 S36-001)
+- `src/deployer.py` — replace CFN changeset analysis with git diff template scan; code-only or no high-risk → auto-approve; high-risk findings attached to approval context (#123 S36-001)
+- `src/upload_scanner.py` — `scan_upload()`: block dangerous file extensions (.exe/.sh/.bat etc.); detect secret patterns (AWS keys, GitHub PAT, private keys, hardcoded credentials); fail-open design (#smart-phase5 S36-002)
+- `src/mcp_upload.py` — integrate `scan_upload()` in single upload + batch upload; blocked files rejected before approval; high-risk findings shown in Telegram approval notification (#smart-phase5 S36-002)
+
+### Tests
+- 10 new tests in `tests/test_template_diff_analyzer.py` (S36-001)
+- 26 new tests in `tests/test_upload_scanner.py` (S36-002)
+
 ## [3.35.0] - 2026-03-13
 
 ### Fixed
