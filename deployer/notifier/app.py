@@ -355,7 +355,7 @@ def _get_stack_name(project_id: str) -> str:
 
     try:
         ddb = boto3.resource('dynamodb', region_name='us-east-1')
-        table = ddb.Table(PROJECTS_TABLE)  # bouncer-projects — NotifierRole has GetItem
+        table = ddb.Table(os.environ.get('PROJECTS_TABLE', 'bouncer-projects'))  # bouncer-projects — NotifierRole has GetItem
         result = table.get_item(Key={'project_id': project_id})
         item = result.get('Item', {})
         return item.get('stack_name', '')
