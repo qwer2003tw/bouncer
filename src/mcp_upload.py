@@ -413,7 +413,7 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
         if scan_result.risk_level in ('high', 'medium'):
             ctx.reason = f"[⚠️ 安全掃描警告: {scan_result.summary}] {ctx.reason}"
 
-    except ClientError as e:
+    except Exception as e:  # noqa: BLE001
         return mcp_result(ctx.req_id, {
             'content': [{'type': 'text', 'text': json.dumps({
                 'status': 'error',
