@@ -821,8 +821,9 @@ class TestCoverage80Sprint:
     def test_mcp_upload_with_legacy_bucket(self, mock_telegram, app_module):
         """上傳使用舊版 bucket/key 參數"""
         import base64
+        mock_telegram.return_value = {'ok': True, 'result': {'message_id': 12347}}
         content = base64.b64encode(b'test').decode()
-        
+
         result = app_module.mcp_tool_upload('test-1', {
             'bucket': 'legacy-bucket',
             'key': 'legacy/key.txt',

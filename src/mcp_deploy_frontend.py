@@ -568,9 +568,9 @@ def _execute_deploy_frontend_approved(
                 MetadataDirective="REPLACE",
             )
             deployed.append(filename)
-            logger.info("Trust deploy file %s -> %s", filename, frontend_bucket, extra={"src_module": "deploy_frontend", "operation": "trust_deploy_file", "filename": filename, "bucket": frontend_bucket})
+            logger.info("Trust deploy file %s -> %s", filename, frontend_bucket, extra={"src_module": "deploy_frontend", "operation": "trust_deploy_file", "file_name": filename, "bucket": frontend_bucket})
         except ClientError as exc:
-            logger.error("Trust deploy failed for %s: %s", filename, exc, extra={"src_module": "deploy_frontend", "operation": "trust_deploy_file", "filename": filename, "error": str(exc)})
+            logger.error("Trust deploy failed for %s: %s", filename, exc, extra={"src_module": "deploy_frontend", "operation": "trust_deploy_file", "file_name": filename, "error": str(exc)})
             failed.append({"filename": filename, "reason": str(exc)})
 
     # 5. CloudFront invalidation

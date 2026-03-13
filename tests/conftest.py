@@ -131,7 +131,23 @@ def app_module(mock_dynamodb):
     os.environ['TELEGRAM_BOT_TOKEN'] = 'test-token'
     os.environ['APPROVED_CHAT_ID'] = '999999999'
     os.environ['MCP_MAX_WAIT'] = '5'  # 測試用短時間
-    
+
+    # Workaround for boto3 + moto + Python 3.12 deepcopy RecursionError
+    import copy
+    _original_deepcopy = copy.deepcopy
+    def _safe_deepcopy(x, memo=None, _nil=[]):
+        try:
+            return _original_deepcopy(x, memo, _nil)
+        except RecursionError:
+            # Return shallow copy as fallback (test environment only)
+            import warnings
+            warnings.warn("deepcopy RecursionError, using shallow copy", RuntimeWarning)
+            try:
+                return copy.copy(x)
+            except:
+                return x
+    copy.deepcopy = _safe_deepcopy
+
     # 重新載入模組（包括新模組）
     for mod in ['app', 'telegram', 'paging', 'trust', 'commands', 'notifications', 'db',
                 'callbacks', 'mcp_tools', 'mcp_execute', 'mcp_upload', 'mcp_admin',
@@ -174,6 +190,9 @@ def app_module(mock_dynamodb):
         _tg.send_message_with_entities = _orig_smwe
     elif hasattr(_tg, 'send_message_with_entities'):
         del _tg.send_message_with_entities
+
+    # Restore original deepcopy
+    copy.deepcopy = _original_deepcopy
 
 
 _ALL_TABLE_KEYS = {
