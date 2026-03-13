@@ -74,7 +74,7 @@ def _verify_upload(s3_client, bucket: str, key: str, filename: str) -> UploadVer
             verified=True,
             s3_size=s3_size,
         )
-    except ClientError as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.warning(
             "head_object failed for %s: %s",
             s3_uri,
@@ -894,12 +894,12 @@ def _submit_batch_for_approval(
                 Body=pf['content_bytes'], ContentType=pf['content_type'],
             )
             staged_keys.append(s3_key)
-        except ClientError as e:
+        except Exception as e:  # noqa: BLE001
             # Rollback staged objects
             for rk in staged_keys:
                 try:
                     s3_staging.delete_object(Bucket=staging_bucket, Key=rk)
-                except ClientError:
+                except Exception:  # noqa: BLE001
                     logger.warning("[UPLOAD-BATCH] Rollback cleanup failed for key=%s", rk, extra={"src_module": "upload", "operation": "rollback_cleanup", "s3_key": rk})
             return mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({

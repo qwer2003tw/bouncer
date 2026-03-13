@@ -91,7 +91,7 @@ def _list_batch_keys(bucket: str, prefix: str) -> "tuple[set[str], str | None]":
         code = exc.response.get("Error", {}).get("Code", "Unknown")
         msg = exc.response.get("Error", {}).get("Message", str(exc))
         return set(), f"S3 error [{code}]: {msg}"
-    except ClientError as exc:
+    except Exception as exc:  # noqa: BLE001
         return set(), f"Failed to list objects: {exc}"
 
     return found_keys, None

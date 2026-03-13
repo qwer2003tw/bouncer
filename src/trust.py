@@ -478,7 +478,7 @@ def track_command_executed(trust_id: str, command: str, success: bool) -> None:
                 ':cmd': [entry],
             },
         )
-    except ClientError as exc:
+    except Exception as exc:  # noqa: BLE001 — swallow errors, best-effort tracking
         logger.error('track_command_executed failed for %s: %s', trust_id, exc, extra={"src_module": "trust", "operation": "track_command_executed", "trust_id": trust_id, "error": str(exc)})
 
 

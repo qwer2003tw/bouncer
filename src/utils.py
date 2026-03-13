@@ -377,5 +377,5 @@ def record_execution_error(table, request_id: str, exit_code: int,
                 ':ea': int(time.time()),
             },
         )
-    except ClientError as e:
+    except Exception as e:  # noqa: BLE001
         logger.error("Failed to record execution error for %s: %s", request_id, e, extra={"src_module": "utils", "operation": "record_execution_error", "request_id": request_id, "error": str(e)})

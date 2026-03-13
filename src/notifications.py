@@ -131,7 +131,7 @@ def post_notification_setup(
             ExpressionAttributeValues={":mid": telegram_message_id},
         )
         logger.info("Stored telegram_message_id=%s for request %s", telegram_message_id, request_id, extra={"src_module": "notifications", "operation": "post_notification_setup", "request_id": request_id, "message_id": telegram_message_id})
-    except ClientError as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.error("Failed to store telegram_message_id for %s: %s", request_id, exc, extra={"src_module": "notifications", "operation": "post_notification_setup", "request_id": request_id, "error": str(exc)})
 
     # 2. Schedule EventBridge expiry trigger (embed telegram_message_id as fallback)
@@ -602,7 +602,7 @@ def send_blocked_notification(
         text, entities = mb.build()
         _telegram.send_message_with_entities(text, entities, silent=True)
 
-    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
+    except Exception as e:  # noqa: BLE001 — fire-and-forget
         logger.error("send_blocked_notification error: %s", e, extra={"src_module": "notifications", "operation": "send_blocked_notification", "error": str(e)})
 
 # ============================================================================
@@ -845,7 +845,7 @@ def send_trust_session_summary(trust_item: dict, end_reason: str = 'revoke') -> 
         text, entities = mb.build()
         _telegram.send_message_with_entities(text, entities, silent=True)
 
-    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as exc:
+    except Exception as exc:  # noqa: BLE001 — fire-and-forget
         logger.error('send_trust_session_summary error: %s', exc, extra={"src_module": "notifications", "operation": "send_trust_session_summary", "error": str(exc)})
 # Deploy Frontend Notification (sprint9-003)
 # ============================================================================

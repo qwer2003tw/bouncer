@@ -201,8 +201,8 @@ def _update_request_status(table, request_id: str, status: str, approver: str, e
         svc = get_scheduler_service()
         svc.delete_schedule(request_id)  # cleanup schedule
         svc.delete_warning_schedule(request_id)  # warning schedule
-    except Exception:  # noqa: BLE001 — best-effort cleanup
-        pass
+    except Exception as _e:  # noqa: BLE001 — best-effort cleanup
+        logger.debug("schedule cleanup ignored error: %s", _e, extra={"src_module": "callbacks", "operation": "cleanup_schedule"})
 
 
 def _send_status_update(message_id: int, status_emoji: str, title: str, item: dict, extra_lines: str = '') -> None:
@@ -593,8 +593,8 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         # 執行命令並存入結果
         try:
             send_chat_action('typing')
-        except Exception:
-            pass
+        except Exception as _e:  # noqa: BLE001 — fire-and-forget
+            logger.debug("send_chat_action ignored: %s", _e, extra={"src_module": "callbacks", "operation": "send_chat_action"})
         exec_result = _execute_and_store_result(
             command, assume_role, request_id, item, user_id, source_ip, action
         )
@@ -1022,7 +1022,7 @@ def _execute_callback_upload_batch(
                 'verified': vr.verified,
                 's3_size': vr.s3_size,
             })
-        except (ClientError, ValueError, OSError) as e:
+        except Exception as e:  # noqa: BLE001
             errors.append({'filename': fname, 'reason': str(e)[:120]})
 
         # Update progress every 5 files
@@ -1265,7 +1265,7 @@ def _write_frontend_deploy_history(
         history_item = {k: v for k, v in history_item.items() if v is not None}
         _get_history_table().put_item(Item=history_item)
         logger.info("deploy_history written deploy_id=frontend-%s project=%s status=%s", request_id, project, history_status, extra={"src_module": "callbacks", "operation": "write_deploy_history", "request_id": request_id, "project": project, "status": history_status})
-    except ClientError as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.error("Failed to write deploy_history for %s: %s", request_id, exc, extra={"src_module": "callbacks", "operation": "write_deploy_history", "request_id": request_id, "error": str(exc)})
 
 
@@ -1427,7 +1427,7 @@ def _deploy_files_to_frontend(files_manifest: list, s3_staging, s3_target, reque
             )
             deployed.append({'filename': filename, 's3_key': filename})
             logger.info("uploaded file=%s size=%d content_type=%s request_id=%s project=%s", filename, len(body), content_type, request_id, project, extra={"src_module": "callbacks", "operation": "deploy_frontend_upload", "file_name": filename, "request_id": request_id, "project": project})
-        except ClientError as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("upload_failed file=%s error=%s request_id=%s project=%s", filename, str(e)[:200], request_id, project, extra={"src_module": "callbacks", "operation": "deploy_frontend_upload", "file_name": filename, "request_id": request_id, "project": project, "error": str(e)[:200]})
             failed.append({'filename': filename, 'reason': str(e)[:200]})
 
@@ -1760,8 +1760,8 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
         # 執行命令
         try:
             send_chat_action('typing')
-        except Exception:
-            pass
+        except Exception as _e:  # noqa: BLE001 — fire-and-forget
+            logger.debug("send_chat_action ignored: %s", _e, extra={"src_module": "callbacks", "operation": "send_chat_action"})
         result = execute_command(cmd, item_assume_role)
         cmd_status = 'failed' if _is_execute_failed(result) else 'success'
         emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'trust_callback'})

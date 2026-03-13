@@ -13,6 +13,7 @@ from unittest.mock import patch, MagicMock, call
 import pytest
 import boto3
 from moto import mock_aws
+from botocore.exceptions import ClientError
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
@@ -337,7 +338,7 @@ class TestBatchUploadDDBFix:
             if call_count[0] > 1:
                 raise Exception('S3 put_object failed')
 
-        with patch('aws_clients.get_s3_client') as mock_get_s3:
+        with patch('mcp_upload.get_s3_client') as mock_get_s3:
             mock_s3_client = MagicMock()
             mock_s3_client.put_object.side_effect = Exception('S3 unavailable')
             mock_get_s3.return_value = mock_s3_client

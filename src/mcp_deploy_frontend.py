@@ -104,7 +104,7 @@ def _get_frontend_config(project_id: str) -> Optional[dict]:
             'region': region,
             'deploy_role_arn': deploy_role_arn,
         }
-    except ClientError as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.warning(
             "DDB config lookup failed for %s: %s",
             project_id, exc,

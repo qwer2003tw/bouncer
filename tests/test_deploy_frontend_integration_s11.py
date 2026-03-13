@@ -18,6 +18,7 @@ import pytest
 import importlib
 import sys
 from unittest.mock import patch, MagicMock, call
+from botocore.exceptions import ClientError
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
@@ -319,7 +320,7 @@ class TestCFInvalidationCmdFormat:
         """CF invalidation must NOT be called when all S3 copies fail"""
         # Simulate all get_object calls failing (so no files are deployed)
         _, _, mock_cf, *_ = _run_approve(
-            get_object_side_effect=Exception('AccessDenied: s3:GetObject'),
+            get_object_side_effect=ClientError({'Error': {'Code': 'AccessDenied', 'Message': 'AccessDenied: s3:GetObject'}}, 'GetObject'),
         )
         mock_cf.create_invalidation.assert_not_called()
 
@@ -375,8 +376,9 @@ class TestIsExecuteFailedAWSCLIFormat:
     def test_aws_cli_error_detected_and_file_marked_failed(self):
         """When boto3 get_object raises, file goes into failed list"""
         result, mock_s3, mock_cf, _, mock_update_status, _ = _run_approve(
-            get_object_side_effect=Exception(
-                'An error occurred (NoSuchBucket): The specified bucket does not exist'
+            get_object_side_effect=ClientError(
+                {'Error': {'Code': 'NoSuchBucket', 'Message': 'An error occurred (NoSuchBucket): The specified bucket does not exist'}},
+                'GetObject'
             ),
         )
 
