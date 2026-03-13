@@ -1426,9 +1426,9 @@ def _deploy_files_to_frontend(files_manifest: list, s3_staging, s3_target, reque
                 CacheControl=cache_control,
             )
             deployed.append({'filename': filename, 's3_key': filename})
-            logger.info("uploaded file=%s size=%d content_type=%s request_id=%s project=%s", filename, len(body), content_type, request_id, project, extra={"src_module": "callbacks", "operation": "deploy_frontend_upload", "filename": filename, "request_id": request_id, "project": project})
+            logger.info("uploaded file=%s size=%d content_type=%s request_id=%s project=%s", filename, len(body), content_type, request_id, project, extra={"src_module": "callbacks", "operation": "deploy_frontend_upload", "file_name": filename, "request_id": request_id, "project": project})
         except ClientError as e:
-            logger.error("upload_failed file=%s error=%s request_id=%s project=%s", filename, str(e)[:200], request_id, project, extra={"src_module": "callbacks", "operation": "deploy_frontend_upload", "filename": filename, "request_id": request_id, "project": project, "error": str(e)[:200]})
+            logger.error("upload_failed file=%s error=%s request_id=%s project=%s", filename, str(e)[:200], request_id, project, extra={"src_module": "callbacks", "operation": "deploy_frontend_upload", "file_name": filename, "request_id": request_id, "project": project, "error": str(e)[:200]})
             failed.append({'filename': filename, 'reason': str(e)[:200]})
 
         # Progress update every 5 files

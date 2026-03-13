@@ -83,6 +83,23 @@ def upload_module(mock_aws_resources):
     os.environ['TELEGRAM_BOT_TOKEN'] = 'test-token'
     os.environ['APPROVED_CHAT_ID'] = '999999999'
 
+    # Workaround for boto3 + moto + Python 3.12 deepcopy RecursionError
+    # Patch copy.deepcopy to catch RecursionError during DynamoDB operations
+    import copy
+    _original_deepcopy = copy.deepcopy
+    def _safe_deepcopy(x, memo=None, _nil=[]):
+        try:
+            return _original_deepcopy(x, memo, _nil)
+        except RecursionError:
+            # Return shallow copy as fallback (test environment only)
+            import warnings
+            warnings.warn("deepcopy RecursionError, using shallow copy", RuntimeWarning)
+            try:
+                return copy.copy(x)
+            except:
+                return x
+    copy.deepcopy = _safe_deepcopy
+
     # Clear cached modules
     for mod in list(sys.modules.keys()):
         if mod in ('mcp_upload', 'db', 'accounts', 'trust', 'rate_limit',
@@ -98,6 +115,9 @@ def upload_module(mock_aws_resources):
 
     yield mcp_upload, mock_aws_resources['table'], mock_aws_resources['s3']
 
+    # Restore original
+    copy.deepcopy = _original_deepcopy
+
 
 @pytest.fixture
 def callbacks_module(mock_aws_resources):
@@ -107,6 +127,22 @@ def callbacks_module(mock_aws_resources):
     os.environ['REQUEST_SECRET'] = 'test-secret'
     os.environ['TELEGRAM_BOT_TOKEN'] = 'test-token'
     os.environ['APPROVED_CHAT_ID'] = '999999999'
+
+    # Workaround for boto3 + moto + Python 3.12 deepcopy RecursionError
+    import copy
+    _original_deepcopy = copy.deepcopy
+    def _safe_deepcopy(x, memo=None, _nil=[]):
+        try:
+            return _original_deepcopy(x, memo, _nil)
+        except RecursionError:
+            # Return shallow copy as fallback (test environment only)
+            import warnings
+            warnings.warn("deepcopy RecursionError, using shallow copy", RuntimeWarning)
+            try:
+                return copy.copy(x)
+            except:
+                return x
+    copy.deepcopy = _safe_deepcopy
 
     for mod in list(sys.modules.keys()):
         if mod in ('callbacks', 'mcp_upload', 'db', 'accounts', 'trust',
@@ -125,6 +161,9 @@ def callbacks_module(mock_aws_resources):
     callbacks._db.table = mock_aws_resources['table']
 
     yield callbacks, mcp_upload, mock_aws_resources['table'], mock_aws_resources['s3']
+
+    # Restore original
+    copy.deepcopy = _original_deepcopy
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +185,7 @@ class TestSingleUploadDDBFix:
     def test_ddb_item_has_no_content_field(self, mock_tg, upload_module):
         """DDB item 不含 content，含 content_s3_key"""
         mcp_upload, table, s3 = upload_module
+        mock_tg.return_value = {'ok': True, 'result': {'message_id': 12345}}
 
         result = mcp_upload.mcp_tool_upload('req-1', {
             'filename': 'hello.txt',
@@ -168,6 +208,7 @@ class TestSingleUploadDDBFix:
     def test_content_staged_to_s3(self, mock_tg, upload_module):
         """Content 已上傳到 S3 pending/ 路徑"""
         mcp_upload, table, s3 = upload_module
+        mock_tg.return_value = {'ok': True, 'result': {'message_id': 12346}}
         content_text = 'hello world content'
 
         result = mcp_upload.mcp_tool_upload('req-2', {
@@ -192,10 +233,10 @@ class TestSingleUploadDDBFix:
         """S3 upload 失敗 → DDB 不寫，回 error"""
         mcp_upload, table, s3 = upload_module
 
-        with patch('boto3.client') as mock_boto:
+        with patch('aws_clients.get_s3_client') as mock_get_s3:
             mock_s3_client = MagicMock()
             mock_s3_client.put_object.side_effect = Exception('S3 connection refused')
-            mock_boto.return_value = mock_s3_client
+            mock_get_s3.return_value = mock_s3_client
 
             result = mcp_upload.mcp_tool_upload('req-3', {
                 'filename': 'fail.txt',
@@ -296,10 +337,10 @@ class TestBatchUploadDDBFix:
             if call_count[0] > 1:
                 raise Exception('S3 put_object failed')
 
-        with patch('boto3.client') as mock_boto:
+        with patch('aws_clients.get_s3_client') as mock_get_s3:
             mock_s3_client = MagicMock()
             mock_s3_client.put_object.side_effect = Exception('S3 unavailable')
-            mock_boto.return_value = mock_s3_client
+            mock_get_s3.return_value = mock_s3_client
 
             result = mcp_upload.mcp_tool_upload_batch('req-batch-fail', {
                 'files': files,
