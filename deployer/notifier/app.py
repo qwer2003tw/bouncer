@@ -283,8 +283,19 @@ def handle_analyze(event):
     try:
         changeset_name = create_dry_run_changeset(cfn, stack_name, template_s3_url)
         analysis = analyze_changeset(cfn, stack_name, changeset_name)
-        is_code_only = is_code_only_change(analysis)
 
+        # Special case: "No updates" means stack is already at latest → treat as code-only
+        if analysis.error and 'No updates are to be performed' in analysis.error:
+            print(f"[analyze] No updates to stack {stack_name!r} — treating as code-only (auto-approve)")
+            return {
+                'is_code_only': True,
+                'deploy_id': deploy_id,
+                'project_id': project_id,
+                'change_count': 0,
+                'analysis_error': None,
+            }
+
+        is_code_only = is_code_only_change(analysis)
         return {
             'is_code_only': is_code_only,
             'deploy_id': deploy_id,
@@ -366,18 +377,23 @@ def handle_infra_approval_request(event):
         'infra_approval_status': 'PENDING',
     })
 
-    # Send Telegram notification
+    # Send Telegram notification with Approve/Deny buttons
     text = (
         f"⚠️ *Infrastructure Changes Detected*\n\n"
         f"📦 *專案：* {project_id}\n"
         f"🌿 *分支：* {branch}\n"
         f"🆔 *ID：* `{deploy_id}`\n\n"
         f"🔧 *變更數量：* {change_count}\n\n"
-        f"⚡ *需要人工審批*\n"
-        f"請透過 Telegram callback 審批或拒絕此部署。"
+        f"⚡ 偵測到 infra 變更，需要人工確認才能繼續部署。"
     )
+    keyboard = {
+        "inline_keyboard": [[
+            {"text": "✅ 批准部署", "callback_data": f"infra_approve:{deploy_id}"},
+            {"text": "❌ 拒絕部署", "callback_data": f"infra_deny:{deploy_id}"},
+        ]]
+    }
 
-    message_id = send_telegram_message(text)
+    message_id = send_telegram_message(text, reply_markup=keyboard)
 
     # Update history with notification message_id
     update_history(deploy_id, {
@@ -387,8 +403,8 @@ def handle_infra_approval_request(event):
     return {'status': 'approval_requested', 'message_id': message_id}
 
 
-def send_telegram_message(text: str) -> int:
-    """發送 Telegram 訊息，返回 message_id"""
+def send_telegram_message(text: str, reply_markup: dict = None) -> int:
+    """發送 Telegram 訊息，返回 message_id。reply_markup 可傳 inline keyboard。"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("Telegram not configured")
         return 0
@@ -401,6 +417,8 @@ def send_telegram_message(text: str) -> int:
     }
     if MESSAGE_THREAD_ID:
         data['message_thread_id'] = MESSAGE_THREAD_ID
+    if reply_markup:
+        data['reply_markup'] = json.dumps(reply_markup)
 
     try:
         req = urllib.request.Request(
