@@ -263,7 +263,7 @@ def handle_analyze(event):
 
     # Get stack_name and template_s3_url from DDB deploy record
     # sam_deploy.py already calls update_template_s3_url() which stores the fresh URL
-    stack_name = _get_stack_name(deploy_id)
+    stack_name = _get_stack_name(project_id)  # use project_id to query bouncer-projects
     template_s3_url = _get_template_s3_url(project_id)
 
     # Special case: bouncer-deployer updates itself — always treat as safe (infra changes are intentional)
@@ -348,15 +348,15 @@ def _get_template_s3_url(project_id: str) -> str:
         return 
 
 
-def _get_stack_name(deploy_id: str) -> str:
-    """Get stack_name from DDB deploy record."""
-    if not deploy_id:
+def _get_stack_name(project_id: str) -> str:
+    """Get stack_name from DDB projects table (bouncer-projects)."""
+    if not project_id:
         return ''
 
     try:
         ddb = boto3.resource('dynamodb', region_name='us-east-1')
-        table = ddb.Table(DEPLOYS_TABLE)
-        result = table.get_item(Key={'deploy_id': deploy_id})
+        table = ddb.Table(PROJECTS_TABLE)  # bouncer-projects — NotifierRole has GetItem
+        result = table.get_item(Key={'project_id': project_id})
         item = result.get('Item', {})
         return item.get('stack_name', '')
     except Exception as e:
