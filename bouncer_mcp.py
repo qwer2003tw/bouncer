@@ -1319,6 +1319,13 @@ def handle_request(request: dict) -> dict:
         tool_name = params.get('name', '')
         arguments = params.get('arguments', {})
 
+        # Track tool usage via CloudWatch EMF
+        try:
+            from metrics import emit_metric
+            emit_metric('Bouncer', 'ToolCall', 1, dimensions={'ToolName': tool_name})
+        except Exception:  # noqa: BLE001 — metrics are best-effort, never block tool execution
+            pass
+
         if tool_name == 'bouncer_execute':
             result = tool_execute(arguments)
         elif tool_name == 'bouncer_status':
