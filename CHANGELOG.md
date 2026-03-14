@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.44.0] - 2026-03-14
+
+### Fixed
+- `src/notifications.py` — `send_account_approval_request` 加 try-except，防止 Telegram 失敗導致 Lambda crash (#s44-004)
+- `src/telegram.py` — Telegram API 失敗改 `logger.error` + emit `NotificationFailure` CloudWatch metric (#s44-005)
+- `deployer/notifier/app.py` — `cleanup_changeset` silent `except: pass` 改為 print warning (#s44-006)
+- `src/deployer.py` — deploy 審批請求 TTL 從 360s 延長到 7 天，方便查歷史記錄 (#s44-001)
+- `src/changeset_analyzer.py` — `create_dry_run_changeset` 改用 `TemplateURL`（不再下載 TemplateBody），修復 ZTP Files YAML quote ValidationError (#s44-009)
+- `deployer/template.yaml` — `NotifySuccess` SFN state `build_id` 改為空字串，修復 infra approval 路徑 unpin 不觸發 (#s44-002)
+
+### Added
+- `src/notifications.py` — `send_approval_request` 成功時將通知文字 snapshot 存入 DDB，供 UIUX 分析使用 (#s44-008)
+
+### Tests
+- 7 new tests in `tests/test_sprint44_fixes.py`
+
 ## [3.43.0] - 2026-03-14
 
 ### Fixed
