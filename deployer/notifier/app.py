@@ -419,8 +419,8 @@ def handle_infra_approval_request(event):
 
     keyboard = {
         "inline_keyboard": [[
-            {"text": "✅ 批准部署", "callback_data": f"infra_approve:{deploy_id}"},
-            {"text": "❌ 拒絕部署", "callback_data": f"infra_deny:{deploy_id}"},
+            {"text": "✅ Approve Deploy", "callback_data": f"infra_approve:{deploy_id}", "style": "success"},
+            {"text": "❌ Reject Deploy", "callback_data": f"infra_deny:{deploy_id}", "style": "danger"},
         ]]
     }
 
