@@ -64,7 +64,8 @@ def test_request_presigned_success(mock_get_project_config, mock_get_s3_client):
         ],
     }
 
-    result = _call_presigned(args)
+    with patch('mcp_deploy_frontend.DEFAULT_ACCOUNT_ID', '190825685292'):
+        result = _call_presigned(args)
 
     assert result['status'] == 'ready'
     assert 'request_id' in result
