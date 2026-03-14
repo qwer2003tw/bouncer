@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.43.0] - 2026-03-14
+
+### Fixed
+- `src/grant.py` — `bouncer_request_grant` 新增 `project` 參數，自動從 `bouncer-projects` DDB 查詢 `deploy_role_arn`，存入 grant record (#127)
+- `src/mcp_execute.py` — `_check_grant_session` 使用 `grant.assume_role_arn` 執行命令，有效解決 S3/CloudFront AccessDenied 問題
+- `src/notifications.py` — grant 審批通知顯示專案名稱和 role 資訊
+
+### Security
+- Role ARN 永遠從 DDB project config 取得，不接受 user input
+
+### Tests
+- 6 new regression tests in `tests/test_grant_assume_role_s43.py`
+
 ## [3.42.0] - 2026-03-14
 
 ### Added
