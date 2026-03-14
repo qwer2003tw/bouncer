@@ -102,13 +102,33 @@ def handle_progress(event):
 
     # 根據 phase 建立進度顯示
     phases = {
-        'INITIALIZING': ('🔄', '⏳', '⏳', '⏳'),
-        'SCANNING': ('✅', '🔄', '⏳', '⏳'),
-        'BUILDING': ('✅', '✅', '🔄', '⏳'),
-        'DEPLOYING': ('✅', '✅', '✅', '🔄'),
+        'INITIALIZING': ('🔄', '⏳', '⏳', '⏳', '⏳'),
+        'ANALYZING':    ('✅', '🔄', '⏳', '⏳', '⏳'),
+        'SCANNING':     ('✅', '✅', '🔄', '⏳', '⏳'),
+        'BUILDING':     ('✅', '✅', '✅', '🔄', '⏳'),
+        'DEPLOYING':    ('✅', '✅', '✅', '✅', '🔄'),
     }
 
-    icons = phases.get(phase, ('⏳', '⏳', '⏳', '⏳'))
+    icons = list(phases.get(phase, ('⏳', '⏳', '⏳', '⏳', '⏳')))
+
+    # Calculate elapsed time and append to current phase
+    started_at = history.get('started_at') or history.get('created_at')
+    elapsed = ''
+    if started_at:
+        try:
+            elapsed_secs = int(time.time()) - int(started_at)
+            if elapsed_secs > 0:
+                elapsed = f"（已 {elapsed_secs}s）"
+        except (ValueError, TypeError):
+            pass
+
+    # Append elapsed to the currently-active phase (the one with 🔄)
+    for i, icon in enumerate(icons):
+        if icon == '🔄':
+            icons[i] = f'🔄{elapsed}'
+            break
+
+    icons = tuple(icons)
 
     text = (
         f"⏳ *部署進行中*\n\n"
@@ -117,9 +137,10 @@ def handle_progress(event):
         f"🆔 *ID：* `{deploy_id}`\n\n"
         f"📊 *進度：*\n"
         f"├── {icons[0]} 初始化\n"
-        f"├── {icons[1]} Template 掃描\n"
-        f"├── {icons[2]} sam build\n"
-        f"└── {icons[3]} sam deploy\n\n"
+        f"├── {icons[1]} Changeset 分析\n"
+        f"├── {icons[2]} Template 掃描\n"
+        f"├── {icons[3]} sam build\n"
+        f"└── {icons[4]} sam deploy\n\n"
         f"⏱️ *已執行：* {format_duration(elapsed_seconds)}"
     )
 
@@ -258,6 +279,13 @@ def handle_analyze(event):
 
     deploy_id = event.get('deploy_id', '')
     project_id = event.get('project_id', '')
+
+    # Update progress: now analyzing changeset
+    update_history(deploy_id, {'phase': 'ANALYZING'})
+    # Try to send a progress update message
+    history = get_history(deploy_id)
+    if history.get('telegram_message_id'):
+        handle_progress({'deploy_id': deploy_id, 'phase': 'ANALYZING'})
 
     # Get stack_name and template_s3_url from DDB deploy record
     # sam_deploy.py already calls update_template_s3_url() which stores the fresh URL

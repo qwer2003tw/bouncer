@@ -258,7 +258,14 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
 
     # ID and expiry
     mb.text("🆔 ").bold("ID：").text(" ").code(request_id).newline()
-    mb.text("⏰ ").bold(f"{timeout_str}後過期")
+
+    # Calculate absolute expiry time
+    import datetime as _dt
+    expires_at = int(time.time()) + timeout
+    expires_dt = _dt.datetime.fromtimestamp(expires_at, tz=_dt.timezone.utc)
+    expires_str = expires_dt.strftime("%Y-%m-%d %H:%M")
+
+    mb.text("⏰ ").bold(f"{timeout_str}後過期").text(" (").date_time(expires_str).text(")")
 
     text, entities = mb.build()
 
@@ -936,6 +943,7 @@ def send_auto_approve_deploy_notification(
     deploy_id: str,
     source: Optional[str] = None,
     reason: str = '',
+    changes_summary: str = '',
 ) -> None:
     """自動批准 deploy 的靜默通知（Steven 知道但不需要互動）"""
     try:
@@ -946,6 +954,12 @@ def send_auto_approve_deploy_notification(
         mb.text("🤖 ").bold("來源：").text(f" {source or 'auto-approve'}").newline()
         mb.text("📝 ").bold("原因：").text(f" {reason}").newline(2)
         mb.text("_純 code 變更，CFN changeset 分析通過_")
+        if changes_summary:
+            mb.newline()
+            mb.text("📋 ").bold("變更：").text(f" {changes_summary}")
+        else:
+            mb.newline()
+            mb.italic("_(無變更明細)_")
 
         text, entities = mb.build()
         _telegram.send_message_with_entities(text, entities, silent=True)

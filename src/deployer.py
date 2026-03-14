@@ -96,6 +96,31 @@ def _get_secretsmanager_client():
 
 
 # ============================================================================
+# Changeset Utilities
+# ============================================================================
+
+def _format_changeset_summary(resource_changes: list) -> str:
+    """Format CFN changeset resource_changes into a readable summary.
+
+    Example output: "Lambda::Function: ApprovalFunction (Modify), S3::Bucket: Bucket1 (Add)"
+    Max 3 resources shown, remainder as "+N more".
+    """
+    if not resource_changes:
+        return ''
+    parts = []
+    for change in resource_changes[:3]:
+        rc = change.get('ResourceChange', {})
+        rtype = rc.get('ResourceType', '').replace('AWS::', '')  # e.g. Lambda::Function → Lambda::Function
+        logical_id = rc.get('LogicalResourceId', '')
+        action = rc.get('Action', 'Modify')
+        parts.append(f"{rtype}: {logical_id} ({action})")
+    summary = ', '.join(parts)
+    if len(resource_changes) > 3:
+        summary += f" +{len(resource_changes) - 3} more"
+    return summary
+
+
+# ============================================================================
 # Git Utilities
 # ============================================================================
 
@@ -990,6 +1015,7 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
                 deploy_id=deploy_result.get('deploy_id', ''),
                 source=source,
                 reason=reason,
+                changes_summary=diff_result.diff_summary or '',
             )
             return mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
@@ -1063,6 +1089,7 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
                         deploy_id=deploy_result.get('deploy_id', ''),
                         source=source,
                         reason=reason,
+                        changes_summary=_format_changeset_summary(changeset_result.resource_changes),
                     )
                     return mcp_result(req_id, {
                         'content': [{'type': 'text', 'text': json.dumps({
