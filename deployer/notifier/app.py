@@ -360,8 +360,8 @@ def handle_analyze(event):
         if changeset_name:
             try:
                 cleanup_changeset(cfn, stack_name, changeset_name)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _ce:  # noqa: BLE001
+                print(f"[analyze] cleanup_changeset failed (non-critical): {_ce}")
 
 
 def _get_template_s3_url(project_id: str) -> str:

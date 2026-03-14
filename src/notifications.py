@@ -148,6 +148,29 @@ def post_notification_setup(
         logger.error("Failed to create expiry schedule for %s: %s", request_id, exc, extra={"src_module": "notifications", "operation": "post_notification_setup", "request_id": request_id, "error": str(exc)})
 
 
+def _store_notification_snapshot(request_id: str, text: str, message_id: int) -> None:
+    """Store Telegram notification text snapshot for UIUX analysis.
+
+    Allows future analysis of: notification clarity, approve rate by text length,
+    information density vs response time.
+
+    Non-fatal: failures are silently swallowed.
+    """
+    from db import table as _table
+    try:
+        _table.update_item(
+            Key={'request_id': request_id},
+            UpdateExpression='SET notification_text = :t, notification_length = :l, notification_message_id = :m',
+            ExpressionAttributeValues={
+                ':t': text[:2000],  # truncate for DDB item size
+                ':l': len(text),
+                ':m': message_id or 0,
+            },
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def send_approval_request(request_id: str, command: str, reason: str, timeout: int = COMMAND_APPROVAL_TIMEOUT,
                           source: str = None, account_id: str = None, account_name: str = None,
                           assume_role: str = None, context: str = None,
@@ -288,43 +311,58 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
     message_id: Optional[int] = None
     if ok:
         message_id = result.get('result', {}).get('message_id')
+        # Store notification snapshot for UIUX analysis (best-effort, non-fatal)
+        try:
+            _store_notification_snapshot(request_id, text, message_id)
+        except Exception:  # noqa: BLE001
+            pass
     return NotificationResult(ok=ok, message_id=message_id)
 
 def send_account_approval_request(request_id: str, action: str, account_id: str, name: str, role_arn: str, source: str, context: str = None):
     """發送帳號管理的 Telegram 審批請求（entities 模式，無 parse_mode）"""
-    mb = MessageBuilder()
+    try:
+        mb = MessageBuilder()
 
-    if action == 'add':
-        mb.text("🔐 ").bold("新增 AWS 帳號請求").newline(2)
-    else:
-        mb.text("🔐 ").bold("移除 AWS 帳號請求").newline(2)
+        if action == 'add':
+            mb.text("🔐 ").bold("新增 AWS 帳號請求").newline(2)
+        else:
+            mb.text("🔐 ").bold("移除 AWS 帳號請求").newline(2)
 
-    # Source / context (no escape needed in entities mode)
-    if source:
-        mb.text("🤖 ").bold("來源：").text(f" {source}").newline()
-    if context:
-        mb.text("📝 ").bold("任務：").text(f" {context}").newline()
+        # Source / context (no escape needed in entities mode)
+        if source:
+            mb.text("🤖 ").bold("來源：").text(f" {source}").newline()
+        if context:
+            mb.text("📝 ").bold("任務：").text(f" {context}").newline()
 
-    mb.text("🆔 ").bold("帳號 ID：").text(" ").code(account_id).newline()
-    mb.text("📛 ").bold("名稱：").text(f" {name or ''}").newline()
+        mb.text("🆔 ").bold("帳號 ID：").text(" ").code(account_id).newline()
+        mb.text("📛 ").bold("名稱：").text(f" {name or ''}").newline()
 
-    if action == 'add' and role_arn:
-        mb.text("🔗 ").bold("Role：").text(" ").code(role_arn).newline()
+        if action == 'add' and role_arn:
+            mb.text("🔗 ").bold("Role：").text(" ").code(role_arn).newline()
 
-    mb.newline()
-    mb.text("📋 ").bold("請求 ID：").text(" ").code(request_id).newline()
-    mb.text("⏰ ").bold("5 分鐘後過期")
+        mb.newline()
+        mb.text("📋 ").bold("請求 ID：").text(" ").code(request_id).newline()
+        mb.text("⏰ ").bold("5 分鐘後過期")
 
-    text, entities = mb.build()
+        text, entities = mb.build()
 
-    keyboard = {
-        'inline_keyboard': [[
-            {'text': '✅ Approve', 'callback_data': f'approve:{request_id}', 'style': 'success'},
-            {'text': '❌ Reject', 'callback_data': f'deny:{request_id}', 'style': 'danger'}
-        ]]
-    }
+        keyboard = {
+            'inline_keyboard': [[
+                {'text': '✅ Approve', 'callback_data': f'approve:{request_id}', 'style': 'success'},
+                {'text': '❌ Reject', 'callback_data': f'deny:{request_id}', 'style': 'danger'}
+            ]]
+        }
 
-    _telegram.send_message_with_entities(text, entities, reply_markup=keyboard)
+        result = _telegram.send_message_with_entities(text, entities, reply_markup=keyboard)
+        return bool(result and result.get('ok'))
+    except Exception as e:  # noqa: BLE001
+        logger.error("send_account_approval_request failed: %s", e, extra={
+            "src_module": "notifications",
+            "operation": "send_account_approval_request",
+            "request_id": request_id,
+            "error": str(e),
+        })
+        return False
 
 def send_trust_auto_approve_notification(command: str, trust_id: str, remaining: str, count: int,
                                          result: str = None, source: str = None, reason: str = None):

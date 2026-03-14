@@ -1131,7 +1131,7 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
 
     # 建立審批請求
     request_id = generate_request_id(f"deploy:{project_id}")
-    ttl = int(time.time()) + 300 + 60
+    ttl = int(time.time()) + 7 * 24 * 3600  # 7 days for history lookup
 
     item = {
         'request_id': request_id,
