@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.39.0] - 2026-03-14
+
+### Added
+- `src/notifications.py` — `send_auto_approve_deploy_notification` 加 `changes_summary` 參數，顯示 git diff 摘要或 CFN changeset 資源清單（#s39-001）
+- `src/deployer.py` — `_format_changeset_summary()` helper，格式化 resource_changes 為可讀字串
+- `deployer/notifier/app.py` — Deploy checklist 新增 `ANALYZING` phase（Changeset 分析中）+ elapsed time 顯示（#43）
+- `src/notifications.py` — 審批通知加上絕對過期時間（`date_time` MessageEntity，Telegram 自動轉本地時區）（#42）
+
+### Tests
+- 8 new tests: `tests/test_sprint39_ux.py` (6) + `deployer/tests/test_notifier.py` (2)
+
 ## [3.38.0] - 2026-03-14
 
 ### Added
