@@ -226,6 +226,7 @@ def create_grant_request(
     account_id: str,
     ttl_minutes: int = None,
     allow_repeat: bool = False,
+    approval_timeout: int = None,
 ) -> Dict[str, Any]:
     """建立 Grant 請求
 
@@ -239,6 +240,7 @@ def create_grant_request(
         account_id: AWS 帳號 ID
         ttl_minutes: TTL（分鐘），預設 30，最大 60
         allow_repeat: 是否允許重複執行同一命令
+        approval_timeout: 審批等待時間（秒），預設 300（5分鐘），最大 900（15分鐘）
 
     Returns:
         dict with grant_id, summary, commands_detail, etc.
@@ -262,6 +264,12 @@ def create_grant_request(
             ttl_minutes = GRANT_DEFAULT_TTL_MINUTES
         ttl_minutes = max(1, min(ttl_minutes, GRANT_MAX_TTL_MINUTES))
 
+        # approval_timeout 驗證
+        GRANT_MAX_APPROVAL_TIMEOUT = 900  # 15 minutes
+        if approval_timeout is None:
+            approval_timeout = GRANT_APPROVAL_TIMEOUT  # default 300s
+        approval_timeout = max(60, min(approval_timeout, GRANT_MAX_APPROVAL_TIMEOUT))
+
         # 生成 grant_id
         grant_id = f"grant_{secrets.token_hex(16)}"
 
@@ -276,7 +284,7 @@ def create_grant_request(
             summary[detail['category']] += 1
 
         now = int(time.time())
-        approval_timeout_at = now + GRANT_APPROVAL_TIMEOUT
+        approval_timeout_at = now + approval_timeout
 
         # 存入 DynamoDB
         item = {
@@ -288,6 +296,7 @@ def create_grant_request(
             'account_id': account_id,
             'reason': reason,
             'ttl_minutes': ttl_minutes,
+            'approval_timeout': approval_timeout,  # NEW: store for visibility
             'commands_detail': commands_detail,
             'granted_commands': [],  # 批准後才填
             'used_commands': {},
@@ -307,7 +316,8 @@ def create_grant_request(
             'commands_detail': commands_detail,
             'ttl_minutes': ttl_minutes,
             'allow_repeat': allow_repeat,
-            'expires_in': GRANT_APPROVAL_TIMEOUT,
+            'approval_timeout': approval_timeout,  # NEW: show in response
+            'expires_in': approval_timeout,  # keep backward compat
         }
 
     except ValueError:
