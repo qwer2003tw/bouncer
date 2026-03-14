@@ -348,3 +348,100 @@ class TestHandleStartPin:
 
             # Should return None message_id
             assert result['message_id'] is None
+
+
+class TestSprint39UX:
+    """Test Sprint 39 UX improvements (s39-002: ANALYZING phase + elapsed time)"""
+
+    def test_handle_progress_analyzing_phase(self, mock_env, mock_dynamodb):
+        """Test that ANALYZING phase shows correct icons in progress."""
+        mock_history, mock_locks = mock_dynamodb
+        mock_history.get_item.return_value = {
+            'Item': {
+                'deploy_id': 'test-deploy-123',
+                'telegram_message_id': 789,
+                'started_at': 1000000,
+                'created_at': 1000000,
+            }
+        }
+
+        with patch('app.update_telegram_message') as mock_update, \
+             patch('app.format_duration') as mock_format_duration, \
+             patch('time.time', return_value=1000010):  # 10 seconds elapsed
+
+            mock_format_duration.return_value = '10s'
+
+            event = {
+                'deploy_id': 'test-deploy-123',
+                'project_id': 'test-project',
+                'branch': 'main',
+                'phase': 'ANALYZING',
+            }
+
+            result = app.handle_progress(event)
+
+            # Should update message
+            assert mock_update.called
+            text = mock_update.call_args[0][1]
+
+            # Should have 5 phases with ANALYZING as current (second phase)
+            assert '✅ 初始化' in text
+            assert '🔄' in text  # Current phase icon
+            assert 'Changeset 分析' in text
+            assert '⏳ Template 掃描' in text
+            assert '⏳ sam build' in text
+            assert '⏳ sam deploy' in text
+
+            # Should include elapsed time in current phase
+            assert '（已 10s）' in text
+
+    def test_handle_analyze_updates_phase_to_analyzing(self, mock_env, mock_dynamodb):
+        """Test that handle_analyze sets phase=ANALYZING at the start."""
+        mock_history, mock_locks = mock_dynamodb
+
+        # Mock get_history to return a history with telegram_message_id
+        mock_history.get_item.return_value = {
+            'Item': {
+                'deploy_id': 'test-deploy-123',
+                'telegram_message_id': 789,
+            }
+        }
+
+        with patch('app.update_history') as mock_update_history, \
+             patch('app.handle_progress') as mock_handle_progress, \
+             patch('app._get_stack_name', return_value='test-stack'), \
+             patch('app._get_template_s3_url', return_value='https://s3.example.com/template.yaml'), \
+             patch('boto3.client') as mock_boto3_client:
+
+            # Mock CFN client
+            mock_cfn = mock_boto3_client.return_value
+
+            # Mock changeset_analyzer imports (patch from changeset_analyzer module)
+            with patch('changeset_analyzer.create_dry_run_changeset', return_value='changeset-123'), \
+                 patch('changeset_analyzer.analyze_changeset') as mock_analyze, \
+                 patch('changeset_analyzer.is_code_only_change', return_value=True), \
+                 patch('changeset_analyzer.cleanup_changeset'):
+
+                mock_analyze.return_value = type('obj', (object,), {
+                    'resource_changes': [],
+                    'error': None,
+                })
+
+                event = {
+                    'deploy_id': 'test-deploy-123',
+                    'project_id': 'test-project',
+                }
+
+                result = app.handle_analyze(event)
+
+                # Should update history with phase=ANALYZING
+                assert mock_update_history.called
+                update_call = mock_update_history.call_args_list[0]
+                assert update_call[0][0] == 'test-deploy-123'
+                assert update_call[0][1] == {'phase': 'ANALYZING'}
+
+                # Should call handle_progress to update the message
+                assert mock_handle_progress.called
+                progress_event = mock_handle_progress.call_args[0][0]
+                assert progress_event['deploy_id'] == 'test-deploy-123'
+                assert progress_event['phase'] == 'ANALYZING'
