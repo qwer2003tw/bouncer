@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.40.1] - 2026-03-14
+
+### Fixed
+- `template.yaml` — add `states:SendTaskSuccess` + `states:SendTaskFailure` to `ApprovalFunctionRole` IAM policy. Required for ZTP Files infra approval SFN callback; missing permissions caused all Telegram approval notifications to fail
+- `src/notifications.py` — remove `date_time` entity from approval notifications. Telegram Bot API `date_time` MessageEntity requires `{unix_time: int}`, incompatible with `MessageBuilder` offset/length pattern. Caused 400 Bad Request on all approval requests (Sprint 39 regression)
+
 ## [3.40.0] - 2026-03-14
 
 ### Fixed
