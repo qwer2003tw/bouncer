@@ -18,7 +18,7 @@ from deployer import _format_changeset_summary
 
 def test_auto_approve_notification_with_changes_summary():
     """Test that changes_summary appears in auto-approve notification."""
-    with patch('telegram.send_message_with_entities') as mock_send:
+    with patch('notifications._telegram.send_message_with_entities') as mock_send:
         mock_send.return_value = {'ok': True}
 
         send_auto_approve_deploy_notification(
@@ -38,7 +38,7 @@ def test_auto_approve_notification_with_changes_summary():
 
 def test_auto_approve_notification_without_summary():
     """Test that _(無變更明細)_ appears when no changes_summary."""
-    with patch('telegram.send_message_with_entities') as mock_send:
+    with patch('notifications._telegram.send_message_with_entities') as mock_send:
         mock_send.return_value = {'ok': True}
 
         send_auto_approve_deploy_notification(
