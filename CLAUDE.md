@@ -32,6 +32,18 @@ Full test suite is run by GitHub CI after push. Do NOT run it locally.
 - Format: `feat|fix|refactor|test|docs[(scope)]: description`
 - Bug fix: must include `test_regression_<description>`
 
+### Phase 5 (Close Sprint) — STRICTLY FORBIDDEN for Claude Code
+**NEVER do any of the following:**
+- Version bump (`src/constants.py VERSION` or `pyproject.toml`)
+- Update `CHANGELOG.md`
+- `git push` to remote
+- Create git tags (`git tag`)
+- Close sprint state
+- Update `MEMORY.md`
+
+Phase 5 is **main-session only**. Your job ends at `git commit --no-verify` + report commit hash.
+If you see yourself about to do any of the above — **stop immediately and report to main session**.
+
 ### Deploy
 - Use `bouncer_deploy` MCP tool (not direct AWS)
 - After deploy request: write `pendingDeployId` to sprint-state
