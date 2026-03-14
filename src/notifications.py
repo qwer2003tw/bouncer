@@ -408,6 +408,7 @@ def send_grant_request_notification(
     account_id: str,
     ttl_minutes: int,
     allow_repeat: bool = False,
+    project: str = None,
 ) -> None:
     """發送 Grant Session 審批請求通知（entities 模式，無 parse_mode）
 
@@ -419,6 +420,7 @@ def send_grant_request_notification(
         account_id: AWS 帳號 ID
         ttl_minutes: TTL（分鐘）
         allow_repeat: 是否允許重複
+        project: 專案名稱（如 ztp-files）
     """
     try:
         mode_str = '可重複' if allow_repeat else '一次性'
@@ -433,6 +435,9 @@ def send_grant_request_notification(
         mb = MessageBuilder()
         mb.text("🔑 ").bold("批次權限申請").newline(2)
         mb.text("🤖 ").bold("來源：").text(f" {source or 'Unknown'}").newline()
+        if project:
+            mb.text("📦 ").bold("專案：").text(f" {project}").newline()
+            mb.italic(f"_(以 {project} deploy role 執行)_").newline()
         mb.text("💬 ").bold("原因：").text(f" {reason or ''}").newline()
         mb.text("🏦 ").bold("帳號：").text(" ").code(str(account_id)).newline()
         mb.text("⏱ ").bold("TTL：").text(f" {ttl_minutes} 分鐘 | 模式：{mode_str}")

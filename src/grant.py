@@ -227,6 +227,7 @@ def create_grant_request(
     ttl_minutes: int = None,
     allow_repeat: bool = False,
     approval_timeout: int = None,
+    project: str = None,
 ) -> Dict[str, Any]:
     """建立 Grant 請求
 
@@ -241,6 +242,7 @@ def create_grant_request(
         ttl_minutes: TTL（分鐘），預設 30，最大 60
         allow_repeat: 是否允許重複執行同一命令
         approval_timeout: 審批等待時間（秒），預設 300（5分鐘），最大 900（15分鐘）
+        project: 專案名稱（如 ztp-files）。指定後會從 bouncer-projects 查詢 deploy_role_arn
 
     Returns:
         dict with grant_id, summary, commands_detail, etc.
@@ -269,6 +271,28 @@ def create_grant_request(
         if approval_timeout is None:
             approval_timeout = GRANT_APPROVAL_TIMEOUT  # default 300s
         approval_timeout = max(60, min(approval_timeout, GRANT_MAX_APPROVAL_TIMEOUT))
+
+        # Lookup assume_role_arn from project config (security: never from user input)
+        assume_role_arn = None
+        if project:
+            try:
+                import boto3 as _boto3_ddb
+                import os
+                projects_table_name = os.environ.get('PROJECTS_TABLE', 'bouncer-projects')
+                ddb = _boto3_ddb.resource('dynamodb', region_name=os.environ.get('AWS_DEFAULT_REGION', 'us-east-1'))
+                projects_table = ddb.Table(projects_table_name)
+                resp = projects_table.get_item(Key={'project_id': project})
+                item = resp.get('Item', {})
+                assume_role_arn = item.get('deploy_role_arn') or item.get('frontend_deploy_role_arn')
+                if assume_role_arn:
+                    logger.info("[GRANT] project=%s → assume_role_arn=%s", project, assume_role_arn,
+                                extra={"src_module": "grant", "operation": "create_grant_request", "project": project})
+                else:
+                    logger.warning("[GRANT] project=%s has no deploy_role_arn in bouncer-projects", project,
+                                   extra={"src_module": "grant", "operation": "create_grant_request", "project": project})
+            except Exception as e:  # noqa: BLE001
+                logger.error("[GRANT] Failed to lookup project config for %s: %s", project, e,
+                             extra={"src_module": "grant", "operation": "create_grant_request", "project": project, "error": str(e)})
 
         # 生成 grant_id
         grant_id = f"grant_{secrets.token_hex(16)}"
@@ -303,6 +327,8 @@ def create_grant_request(
             'total_executions': 0,
             'max_total_executions': GRANT_MAX_TOTAL_EXECUTIONS,
             'allow_repeat': allow_repeat,
+            'project': project or '',  # NEW: project name
+            'assume_role_arn': assume_role_arn or '',  # NEW: deploy role ARN from bouncer-projects
             'created_at': now,
             'ttl': approval_timeout_at,  # DynamoDB TTL: 審批超時就過期
         }
@@ -318,6 +344,8 @@ def create_grant_request(
             'allow_repeat': allow_repeat,
             'approval_timeout': approval_timeout,  # NEW: show in response
             'expires_in': approval_timeout,  # keep backward compat
+            'project': project or '',
+            'assume_role_arn': assume_role_arn or '',
         }
 
     except ValueError:
