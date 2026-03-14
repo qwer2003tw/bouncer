@@ -404,6 +404,8 @@ Resources:
                 - states:StartExecution
                 - states:DescribeExecution
                 - states:StopExecution
+                - states:SendTaskSuccess
+                - states:SendTaskFailure
               Resource: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:sam-deployer-workflow'
             # Sprint 32: Dry-run changeset analysis for smart auto-approve
             - Sid: ChangesetDryRunAccess
