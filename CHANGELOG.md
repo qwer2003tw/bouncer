@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.40.0] - 2026-03-14
+
+### Fixed
+- `src/mcp_execute.py` — Trust session now bypasses rate limit: `_check_trust_session` moved before `_check_rate_limit` in execution pipeline. Trust sessions are already protected by MAX_COMMANDS=20, TTL=10min, and IP binding (#31)
+
+### Added
+- `src/grant.py` + `bouncer_mcp.py` — `bouncer_request_grant` 新增 `approval_timeout` 參數（預設 300s，最大 900s=15分鐘），允許多步驟操作有更長的審批等待時間 (#29)
+
+### Tests
+- 7 new regression tests: `tests/test_sprint40_trust_rate_limit.py` (2) + `tests/test_sprint40_grant_timeout.py` (5)
+
 ## [3.39.0] - 2026-03-14
 
 ### Added
