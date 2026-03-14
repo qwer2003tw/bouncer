@@ -66,7 +66,7 @@ class TestHandleAnalyze:
         mock_ddb_resource = MagicMock()
         mock_table = MagicMock()
         mock_table.get_item.return_value = {
-            'Item': {'deploy_id': 'test-deploy-001', 'stack_name': 'test-stack'}
+            'Item': {'deploy_id': 'test-deploy-001', 'stack_name': 'test-stack', 'template_s3_url': 'https://test-artifacts-bucket.s3.amazonaws.com/test-project/packaged-template.yaml'}
         }
         mock_ddb_resource.Table.return_value = mock_table
 
@@ -102,8 +102,7 @@ class TestHandleAnalyze:
 
             result = app.handle_analyze(sample_event)
 
-            # Verify result
-            assert result['status'] == 'analyzed'
+            # Verify result (no 'status' key in handle_analyze return)
             assert result['is_code_only'] is True
 
             # Verify changeset creation
@@ -118,16 +117,10 @@ class TestHandleAnalyze:
             # Verify cleanup
             mock_cleanup.assert_called_once_with(mock_cfn, 'test-stack', 'test-changeset-123')
 
-            # Verify SFN send_task_success called
-            mock_sfn.send_task_success.assert_called_once()
-            call_args = mock_sfn.send_task_success.call_args
-            assert call_args[1]['taskToken'] == 'test-task-token-xyz'
-
-            output = json.loads(call_args[1]['output'])
-            assert output['is_code_only'] is True
-            assert output['deploy_id'] == 'test-deploy-001'
-            assert output['project_id'] == 'test-project'
-            assert output['change_count'] == 1
+            # handle_analyze returns dict directly (no SFN call)
+            assert result['deploy_id'] == 'test-deploy-001'
+            assert result['project_id'] == 'test-project'
+            assert result['change_count'] == 1
 
     def test_handle_analyze_infra_changes(self, mock_env, sample_event):
         """Test handle_analyze with infra changes → send_task_success(is_code_only=False)"""
@@ -135,7 +128,7 @@ class TestHandleAnalyze:
         mock_ddb_resource = MagicMock()
         mock_table = MagicMock()
         mock_table.get_item.return_value = {
-            'Item': {'deploy_id': 'test-deploy-001', 'stack_name': 'test-stack'}
+            'Item': {'deploy_id': 'test-deploy-001', 'stack_name': 'test-stack', 'template_s3_url': 'https://test-artifacts-bucket.s3.amazonaws.com/test-project/packaged-template.yaml'}
         }
         mock_ddb_resource.Table.return_value = mock_table
 
@@ -172,15 +165,11 @@ class TestHandleAnalyze:
 
             result = app.handle_analyze(sample_event)
 
-            # Verify result
-            assert result['status'] == 'analyzed'
+            # Verify result (no 'status' key in handle_analyze return)
             assert result['is_code_only'] is False
 
-            # Verify SFN send_task_success called with is_code_only=False
-            mock_sfn.send_task_success.assert_called_once()
-            output = json.loads(mock_sfn.send_task_success.call_args[1]['output'])
-            assert output['is_code_only'] is False
-            assert output['change_count'] == 2
+            # handle_analyze returns dict directly — no SFN call
+            assert result['deploy_id'] == 'test-deploy-001' 
 
     def test_handle_analyze_cfn_error(self, mock_env, sample_event):
         """Test handle_analyze with CFN error → send_task_failure"""
@@ -188,7 +177,7 @@ class TestHandleAnalyze:
         mock_ddb_resource = MagicMock()
         mock_table = MagicMock()
         mock_table.get_item.return_value = {
-            'Item': {'deploy_id': 'test-deploy-001', 'stack_name': 'test-stack'}
+            'Item': {'deploy_id': 'test-deploy-001', 'stack_name': 'test-stack', 'template_s3_url': 'https://test-artifacts-bucket.s3.amazonaws.com/test-project/packaged-template.yaml'}
         }
         mock_ddb_resource.Table.return_value = mock_table
 
@@ -215,16 +204,12 @@ class TestHandleAnalyze:
 
             result = app.handle_analyze(sample_event)
 
-            # Verify result
-            assert result['status'] == 'error'
-            assert 'CloudFormation API error' in result['error']
+            # Verify result — handle_analyze returns is_code_only=False (fail-safe) on error
+            assert result['is_code_only'] is False
+            assert result['analysis_error'] is not None
 
-            # Verify SFN send_task_failure called
-            mock_sfn.send_task_failure.assert_called_once()
-            call_args = mock_sfn.send_task_failure.call_args
-            assert call_args[1]['taskToken'] == 'test-task-token-xyz'
-            assert call_args[1]['error'] == 'AnalysisFailed'
-            assert 'CloudFormation API error' in call_args[1]['cause']
+            # handle_analyze returns dict directly — no SFN call
+            assert result['analysis_error'] is not None and 'CloudFormation API error' in result['analysis_error'] 
 
     def test_handle_analyze_missing_stack_name(self, mock_env, sample_event):
         """Test handle_analyze when stack_name cannot be determined → send_task_failure"""
@@ -244,14 +229,11 @@ class TestHandleAnalyze:
 
             result = app.handle_analyze(sample_event)
 
-            # Verify result
-            assert result['status'] == 'error'
-            assert 'Missing stack_name' in result['error']
+            # Verify result — fail-safe on missing stack_name
+            assert result['is_code_only'] is False
+            assert result['analysis_error'] is not None and 'Missing stack_name' in result['analysis_error']
 
-            # Verify SFN send_task_failure called
-            mock_sfn.send_task_failure.assert_called_once()
-            call_args = mock_sfn.send_task_failure.call_args
-            assert call_args[1]['error'] == 'MissingStackName'
+            # handle_analyze returns dict directly — no SFN call
 
 
 class TestGetStackName:

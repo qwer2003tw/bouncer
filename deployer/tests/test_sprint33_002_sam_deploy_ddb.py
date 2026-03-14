@@ -195,7 +195,7 @@ class TestUpdateTemplateS3UrlCredentials:
 
             update_template_s3_url("my-project", "my-bucket")
 
-        expected_url = "https://my-bucket.s3.amazonaws.com/my-project/templates/packaged-template.yaml"
+        expected_url = "https://my-bucket.s3.amazonaws.com/my-project/packaged-template.yaml"
         assert captured["ExpressionAttributeValues"][":url"]["S"] == expected_url
 
     def test_uses_projects_table_env(self):

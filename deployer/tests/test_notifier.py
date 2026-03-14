@@ -292,8 +292,10 @@ class TestHandleStartPin:
     """Test handle_start calls pin correctly (Sprint 29-004)"""
 
     def test_handle_start_pins_message(self, mock_env, mock_dynamodb):
-        """Test that handle_start pins the progress message"""
+        """Test that handle_start sends message and returns message_id (#119: pin removed)"""
         mock_history, mock_locks = mock_dynamodb
+        # No existing message_id → falls through to send_telegram_message
+        mock_history.get_item.return_value = {}
 
         with patch('app.send_telegram_message') as mock_send, \
              patch('app.pin_telegram_message') as mock_pin:
@@ -312,9 +314,8 @@ class TestHandleStartPin:
             # Should send message
             assert mock_send.called
 
-            # Should pin the message
-            assert mock_pin.called
-            assert mock_pin.call_args[0][0] == 789
+            # pin was removed in Issue #119 (callbacks.py already pins at approval time)
+            assert not mock_pin.called
 
             # Should return message_id
             assert result['message_id'] == 789
@@ -322,6 +323,8 @@ class TestHandleStartPin:
     def test_handle_start_no_message_id(self, mock_env, mock_dynamodb):
         """Test handle_start with no message_id (should not crash)"""
         mock_history, mock_locks = mock_dynamodb
+        # No existing message_id → falls through to send_telegram_message
+        mock_history.get_item.return_value = {}
 
         with patch('app.send_telegram_message') as mock_send, \
              patch('app.pin_telegram_message') as mock_pin:
