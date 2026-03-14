@@ -18,10 +18,15 @@ from deployer import _format_changeset_summary
 
 def test_auto_approve_notification_with_changes_summary():
     """Test that changes_summary appears in auto-approve notification."""
-    with patch('notifications._telegram.send_message_with_entities') as mock_send:
+    import sys, importlib, telegram as _telegram_mod
+    with patch.object(_telegram_mod, 'send_message_with_entities') as mock_send:
         mock_send.return_value = {'ok': True}
+        # Force reload so notifications._telegram picks up our mock
+        if 'notifications' in sys.modules:
+            importlib.reload(sys.modules['notifications'])
+        from notifications import send_auto_approve_deploy_notification as _fn
 
-        send_auto_approve_deploy_notification(
+        _fn(
             project_id='test-project',
             deploy_id='d123',
             source='auto',
@@ -38,10 +43,14 @@ def test_auto_approve_notification_with_changes_summary():
 
 def test_auto_approve_notification_without_summary():
     """Test that _(無變更明細)_ appears when no changes_summary."""
-    with patch('notifications._telegram.send_message_with_entities') as mock_send:
+    import sys, importlib, telegram as _telegram_mod
+    with patch.object(_telegram_mod, 'send_message_with_entities') as mock_send:
         mock_send.return_value = {'ok': True}
+        if 'notifications' in sys.modules:
+            importlib.reload(sys.modules['notifications'])
+        from notifications import send_auto_approve_deploy_notification as _fn
 
-        send_auto_approve_deploy_notification(
+        _fn(
             project_id='test-project',
             deploy_id='d123',
             source='auto',
