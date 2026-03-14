@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.41.0] - 2026-03-14
+
+### Fixed
+- `deployer/scripts/sam_deploy.py` — add `_notify_progress()` helper, invoke NotifierLambda async at SCANNING/BUILDING/DEPLOYING phases. Fixes deploy progress message stuck at INITIALIZING (#s41-001)
+- `deployer/template.yaml` — pass `NOTIFIER_LAMBDA_ARN` to CodeBuild environment variables
+
+### Tests
+- 3 new regression tests in `deployer/tests/test_notify_progress_s41.py`
+
 ## [3.40.1] - 2026-03-14
 
 ### Fixed
