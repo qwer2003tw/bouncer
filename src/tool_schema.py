@@ -315,6 +315,10 @@ MCP_TOOLS = {
                     'type': 'boolean',
                     'description': '是否允許重複執行同一命令，預設 false',
                     'default': False
+                },
+                'project': {
+                    'type': 'string',
+                    'description': '專案名稱（如 ztp-files）。指定後自動以該專案的 deploy_role_arn 執行命令，無需手動傳入 ARN。'
                 }
             },
             'required': ['commands', 'reason', 'source']

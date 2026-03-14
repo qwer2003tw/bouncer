@@ -534,9 +534,10 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
         if not success:
             return None  # 已用過或並發衝突 → fallthrough
 
-        # 執行命令
+        # 執行命令 (使用 grant 的 assume_role_arn，fallback 到 account role)
         grant_req_id = generate_request_id(ctx.command)
-        result = execute_command(ctx.command, ctx.assume_role)
+        grant_assume_role = grant.get('assume_role_arn') or ctx.assume_role
+        result = execute_command(ctx.command, grant_assume_role)
         _exit_code = extract_exit_code(result)
         is_failed = _exit_code is not None and _exit_code != 0
         cmd_status = 'error' if is_failed else 'success'
@@ -1088,6 +1089,7 @@ def mcp_tool_request_grant(req_id: str, arguments: dict) -> dict:
         ttl_minutes = arguments.get('ttl_minutes', None)
         allow_repeat = arguments.get('allow_repeat', False)
         approval_timeout = arguments.get('approval_timeout', None)
+        project = arguments.get('project', None)
 
         if not commands:
             return mcp_error(req_id, -32602, 'Missing required parameter: commands')
@@ -1129,6 +1131,7 @@ def mcp_tool_request_grant(req_id: str, arguments: dict) -> dict:
             ttl_minutes=ttl_minutes,
             allow_repeat=allow_repeat,
             approval_timeout=approval_timeout,
+            project=project,
         )
 
         # 發送 Telegram 審批通知
@@ -1141,6 +1144,7 @@ def mcp_tool_request_grant(req_id: str, arguments: dict) -> dict:
                 account_id=account_id,
                 ttl_minutes=result['ttl_minutes'],
                 allow_repeat=allow_repeat,
+                project=project,
             )
         except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
             logger.error(f"[GRANT] Failed to send notification: {e}", extra={"src_module": "grant", "operation": "send_notification", "error": str(e)})
