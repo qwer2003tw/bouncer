@@ -1051,8 +1051,8 @@ def mcp_tool_execute(req_id: str, arguments: dict) -> dict:
             or _check_blocked(ctx)
             or _check_grant_session(ctx)
             or _check_auto_approve(ctx)
-            or _check_rate_limit(ctx)
             or _check_trust_session(ctx)
+            or _check_rate_limit(ctx)
             or _submit_for_approval(ctx)
         )
 
@@ -1087,6 +1087,7 @@ def mcp_tool_request_grant(req_id: str, arguments: dict) -> dict:
         account_id = arguments.get('account', None)
         ttl_minutes = arguments.get('ttl_minutes', None)
         allow_repeat = arguments.get('allow_repeat', False)
+        approval_timeout = arguments.get('approval_timeout', None)
 
         if not commands:
             return mcp_error(req_id, -32602, 'Missing required parameter: commands')
@@ -1117,6 +1118,9 @@ def mcp_tool_request_grant(req_id: str, arguments: dict) -> dict:
         if ttl_minutes is not None:
             ttl_minutes = int(ttl_minutes)
 
+        if approval_timeout is not None:
+            approval_timeout = int(approval_timeout)
+
         result = create_grant_request(
             commands=commands,
             reason=reason,
@@ -1124,6 +1128,7 @@ def mcp_tool_request_grant(req_id: str, arguments: dict) -> dict:
             account_id=account_id,
             ttl_minutes=ttl_minutes,
             allow_repeat=allow_repeat,
+            approval_timeout=approval_timeout,
         )
 
         # 發送 Telegram 審批通知

@@ -446,6 +446,12 @@ TOOLS = [
                     'type': 'boolean',
                     'description': '是否允許同一命令重複執行，預設 false'
                 },
+                'approval_timeout': {
+                    'type': 'integer',
+                    'description': '審批等待時間（秒），預設 300（5分鐘），最大 900（15分鐘）。多步驟操作建議設 600-900。',
+                    'minimum': 60,
+                    'maximum': 900
+                },
                 'account': {
                     'type': 'string',
                     'description': '目標 AWS 帳號 ID'
