@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.38.0] - 2026-03-14
+
+### Added
+- `bouncer_request_frontend_presigned`: Step 1 of new frontend deploy flow — generate S3 presigned PUT URLs, bypassing API Gateway 6MB payload limit (#126)
+- `bouncer_confirm_frontend_deploy`: Step 2 — verify all files uploaded via head_object, create approval request (#126)
+- Staging key format: `frontend/{project}/{request_id}/{filename}`, presigned URL expiry 300s
+
+### Fixed
+- `deployer/notifier/app.py` — infra approval buttons localized to English + style colors: "✅ Approve Deploy" (green), "❌ Reject Deploy" (red) (#41 #46)
+
+### Tests
+- 10 new tests in `tests/test_mcp_deploy_frontend_presigned_s38.py`
+
 ## [3.37.0] - 2026-03-13
 
 ### Added
