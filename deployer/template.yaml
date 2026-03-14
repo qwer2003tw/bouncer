@@ -804,7 +804,7 @@ Resources:
               action: success
               deploy_id.$: $.deploy_id
               project_id.$: $.project_id
-              build_id.$: $.build_result.Build.Id
+              build_id: ""
             End: true
           
           NotifyFailure:
