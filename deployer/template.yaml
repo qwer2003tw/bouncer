@@ -700,6 +700,9 @@ Resources:
                 - Name: PROJECT_ID
                   Type: PLAINTEXT
                   Value.$: $.project_id
+                - Name: NOTIFIER_LAMBDA_ARN
+                  Type: PLAINTEXT
+                  Value: !GetAtt NotifierLambda.Arn
             ResultPath: $.build_result
             Next: AnalyzeChangeset
             Catch:

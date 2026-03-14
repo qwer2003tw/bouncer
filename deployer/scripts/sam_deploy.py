@@ -476,6 +476,41 @@ def _notify_sfn_package_complete(project_id: str, artifacts_bucket: str) -> None
         print(f"[sfn] Warning: SendTaskSuccess failed: {exc}")
 
 
+def _notify_progress(deploy_id: str, project_id: str, phase: str) -> None:
+    """Invoke NotifierLambda to update deploy progress message.
+
+    Non-fatal: exceptions are caught and printed; deploy continues regardless.
+
+    Args:
+        deploy_id: Deploy ID
+        project_id: Project ID
+        phase: Phase name — SCANNING, BUILDING, or DEPLOYING
+    """
+    notifier_arn = os.environ.get('NOTIFIER_LAMBDA_ARN', '')
+    if not notifier_arn:
+        print(f"[progress] NOTIFIER_LAMBDA_ARN not set — skipping progress update ({phase})")
+        return
+
+    try:
+        import boto3 as _boto3_lambda
+        import json as _json
+        lambda_client = _boto3_lambda.client('lambda', region_name=os.environ.get('AWS_DEFAULT_REGION', 'us-east-1'))
+        payload = {
+            'action': 'progress',
+            'deploy_id': deploy_id,
+            'project_id': project_id,
+            'phase': phase,
+        }
+        lambda_client.invoke(
+            FunctionName=notifier_arn,
+            InvocationType='Event',  # async, fire-and-forget
+            Payload=_json.dumps(payload).encode(),
+        )
+        print(f"[progress] Notified phase={phase}")
+    except Exception as e:  # noqa: BLE001 — non-fatal
+        print(f"[progress] Failed to notify phase={phase}: {e}")
+
+
 def update_template_s3_url(project_id: str, artifacts_bucket: str) -> None:
     """Persist the packaged template S3 URL into the bouncer-projects DDB table.
 
@@ -649,6 +684,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     target_role = os.environ.get("TARGET_ROLE_ARN", "").strip()
     artifacts_bucket = os.environ.get("ARTIFACTS_BUCKET", "").strip()
     project_id = os.environ.get("PROJECT_ID", "").strip()
+    deploy_id = os.environ.get("DEPLOY_ID", "").strip()
     skip_package = os.environ.get("SKIP_PACKAGE", "").lower() == "true"
 
     # --- sam package: upload Lambda artifacts + produce packaged template ---
@@ -656,6 +692,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     # original CodeBuild IAM credentials (main account).
     # SamDeploy state may set SKIP_PACKAGE=true to skip this (reusing prior packaged template).
     if not skip_package:
+        _notify_progress(deploy_id, project_id, 'SCANNING')
         _run_sam_package(artifacts_bucket, project_id)
         # Notify Step Functions that package is complete
         _notify_sfn_package_complete(project_id, artifacts_bucket)
@@ -684,10 +721,12 @@ def main(argv: Optional[List[str]] = None) -> None:
             print("ERROR: SKIP_PACKAGE=true but ARTIFACTS_BUCKET or PROJECT_ID not set", file=sys.stderr)
             sys.exit(1)
 
+    _notify_progress(deploy_id, project_id, 'BUILDING')
     cmd = _build_sam_cmd(stack, params_raw, cfn_role, target_role, artifacts_bucket)
     sys.stdout.flush()
 
     # --- First deploy attempt ---
+    _notify_progress(deploy_id, project_id, 'DEPLOYING')
     deploy_result = _run_deploy(cmd)
 
     if deploy_result.succeeded:
