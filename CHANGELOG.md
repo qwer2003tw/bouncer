@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.42.0] - 2026-03-14
+
+### Added
+- `bouncer_mcp.py` — emit `ToolCall` CloudWatch EMF metric with `ToolName` dimension at `tools/call` dispatcher. Enables usage tracking for all MCP tools via CloudWatch Metrics Insights (#bouncer-usage-tracking)
+
+### Tests
+- 2 new tests in `tests/test_tool_usage_tracking_s42.py`
+
 ## [3.41.0] - 2026-03-14
 
 ### Fixed
