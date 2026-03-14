@@ -259,13 +259,7 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
     # ID and expiry
     mb.text("🆔 ").bold("ID：").text(" ").code(request_id).newline()
 
-    # Calculate absolute expiry time
-    import datetime as _dt
-    expires_at = int(time.time()) + timeout
-    expires_dt = _dt.datetime.fromtimestamp(expires_at, tz=_dt.timezone.utc)
-    expires_str = expires_dt.strftime("%Y-%m-%d %H:%M")
-
-    mb.text("⏰ ").bold(f"{timeout_str}後過期").text(" (").date_time(expires_str).text(")")
+    mb.text("⏰ ").bold(f"{timeout_str}後過期")
 
     text, entities = mb.build()
 

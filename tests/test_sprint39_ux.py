@@ -22,6 +22,7 @@ def test_auto_approve_notification_with_changes_summary():
     with patch.object(_telegram_mod, 'send_message_with_entities') as mock_send:
         mock_send.return_value = {'ok': True}
         # Force reload so notifications._telegram picks up our mock
+        import importlib
         if 'notifications' in sys.modules:
             importlib.reload(sys.modules['notifications'])
         from notifications import send_auto_approve_deploy_notification as _fn
@@ -46,6 +47,7 @@ def test_auto_approve_notification_without_summary():
     import sys, importlib, telegram as _telegram_mod
     with patch.object(_telegram_mod, 'send_message_with_entities') as mock_send:
         mock_send.return_value = {'ok': True}
+        import importlib
         if 'notifications' in sys.modules:
             importlib.reload(sys.modules['notifications'])
         from notifications import send_auto_approve_deploy_notification as _fn
@@ -126,13 +128,16 @@ def test_format_changeset_summary_empty():
 
 
 def test_datetime_entity_in_approval_notification():
-    """Test that date_time entity is present in approval notification."""
-    from notifications import send_approval_request
-
-    with patch('telegram.send_message_with_entities') as mock_send:
+    """Test that approval notification contains expiry info (date_time entity removed — Telegram requires unix_time format which is incompatible with MessageBuilder offset/length pattern)."""
+    import telegram as _telegram_mod
+    with patch.object(_telegram_mod, 'send_message_with_entities') as mock_send:
         mock_send.return_value = {'ok': True, 'result': {'message_id': 123}}
+        import importlib
+        if 'notifications' in sys.modules:
+            importlib.reload(sys.modules['notifications'])
+        from notifications import send_approval_request as _fn
 
-        send_approval_request(
+        _fn(
             request_id='req123',
             command='aws s3 ls',
             reason='test',
@@ -141,11 +146,5 @@ def test_datetime_entity_in_approval_notification():
 
         assert mock_send.called
         text, entities = mock_send.call_args[0]
-
-        # Check that date_time entity exists
-        date_time_entities = [e for e in entities if e['type'] == 'date_time']
-        assert len(date_time_entities) == 1, "Expected 1 date_time entity in approval request"
-
-        # Check that the text contains the expiry time format (YYYY-MM-DD HH:MM)
-        import re
-        assert re.search(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}', text), "Expected datetime format in text"
+        # Expiry shown as relative time (e.g. "5 分鐘後過期")
+        assert '後過期' in text, "Expected relative expiry in text"
