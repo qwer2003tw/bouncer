@@ -746,3 +746,191 @@ def mcp_tool_deploy_frontend(req_id: str, arguments: dict) -> dict:
     return _submit_deploy_frontend_approval(
         req_id, files, project, project_config, reason, source, trust_scope
     )
+
+
+# ---------------------------------------------------------------------------
+# Presigned URL Flow - Step 1: Request presigned URLs
+# ---------------------------------------------------------------------------
+
+def mcp_tool_request_frontend_presigned(req_id: str, arguments: dict) -> dict:
+    """Step 1 of presigned deploy: validate metadata, return presigned PUT URLs.
+    No DDB write, no Telegram notification, no approval needed.
+    Agent uploads files directly to S3, then calls bouncer_confirm_frontend_deploy.
+    """
+    files = arguments.get("files", [])  # [{filename, content_type}] — NO content
+    project = str(arguments.get("project", "")).strip()
+    _source = arguments.get("source", None)  # noqa: F841 — reserved for future use
+    _trust_scope = str(arguments.get("trust_scope", "")).strip()  # noqa: F841 — reserved for future use
+    account_id = str(arguments.get("account_id", DEFAULT_ACCOUNT_ID)).strip()
+
+    if not project:
+        return mcp_result(req_id, {"content": [{"type": "text", "text": json.dumps({"status": "error", "error": "project is required"})}], "isError": True})
+
+    project_config = _get_project_config(project)
+    if not project_config:
+        available = _list_known_projects()
+        return mcp_result(req_id, {"content": [{"type": "text", "text": json.dumps({"status": "error", "error": f"Unknown project: {project}", "available_projects": available})}], "isError": True})
+
+    if not files:
+        return mcp_result(req_id, {"content": [{"type": "text", "text": json.dumps({"status": "error", "error": "files is required"})}], "isError": True})
+
+    # Validate file metadata only (no base64 content to decode)
+    filenames = set()
+    for fm in files:
+        fname = fm.get("filename", "")
+        if not fname:
+            return mcp_result(req_id, {"content": [{"type": "text", "text": json.dumps({"status": "error", "error": "filename is required for each file"})}], "isError": True})
+        if _has_blocked_extension(fname):
+            return mcp_result(req_id, {"content": [{"type": "text", "text": json.dumps({"status": "error", "error": f"Blocked file extension: {fname}"})}], "isError": True})
+        if fname in filenames:
+            return mcp_result(req_id, {"content": [{"type": "text", "text": json.dumps({"status": "error", "error": f"Duplicate filename: {fname}"})}], "isError": True})
+        filenames.add(fname)
+
+    # Generate request_id for staging key grouping
+    request_id = generate_request_id(f"fepre:{project}")
+    staging_bucket = f"bouncer-uploads-{account_id}"
+    expires_in = 300  # 5 minutes
+
+    presigned_urls = []
+    s3 = get_s3_client()
+
+    for fm in files:
+        fname = fm.get("filename", "")
+        content_type = _get_content_type(fname, fm.get("content_type"))
+        s3_key = f"frontend/{project}/{request_id}/{fname}"
+
+        try:
+            url = s3.generate_presigned_url(
+                "put_object",
+                Params={"Bucket": staging_bucket, "Key": s3_key, "ContentType": content_type},
+                ExpiresIn=expires_in,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return mcp_result(req_id, {"content": [{"type": "text", "text": json.dumps({"status": "error", "error": f"Failed to generate presigned URL for {fname}: {exc}"})}], "isError": True})
+
+        presigned_urls.append({
+            "filename": fname,
+            "presigned_url": url,
+            "s3_key": s3_key,
+            "content_type": content_type,
+        })
+
+    import datetime
+    expires_at = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=expires_in)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    return mcp_result(req_id, {"content": [{"type": "text", "text": json.dumps({
+        "status": "ready",
+        "request_id": request_id,
+        "presigned_urls": presigned_urls,
+        "expires_at": expires_at,
+        "staging_bucket": staging_bucket,
+        "instructions": "Upload each file via HTTP PUT to its presigned_url, then call bouncer_confirm_frontend_deploy with request_id and files metadata.",
+    })}]})
+
+
+# ---------------------------------------------------------------------------
+# Presigned URL Flow - Step 2: Confirm deployment
+# ---------------------------------------------------------------------------
+
+def mcp_tool_confirm_frontend_deploy(req_id: str, arguments: dict) -> dict:
+    """Step 2 of presigned deploy: verify uploads, create approval request.
+    Verifies all files exist in staging via head_object, then creates DDB approval record.
+    """
+    request_id = str(arguments.get("request_id", "")).strip()
+    files = arguments.get("files", [])  # [{filename, content_type, cache_control}]
+    project = str(arguments.get("project", "")).strip()
+    reason = str(arguments.get("reason", "No reason provided")).strip()
+    source = arguments.get("source", None)
+    _trust_scope = str(arguments.get("trust_scope", "")).strip()  # noqa: F841 — reserved for future use
+    account_id = str(arguments.get("account_id", DEFAULT_ACCOUNT_ID)).strip()
+
+    if not request_id or not project or not files:
+        return mcp_result(req_id, {"content": [{"type": "text", "text": json.dumps({"status": "error", "error": "request_id, project, and files are required"})}], "isError": True})
+
+    project_config = _get_project_config(project)
+    if not project_config:
+        return mcp_result(req_id, {"content": [{"type": "text", "text": json.dumps({"status": "error", "error": f"Unknown project: {project}"})}], "isError": True})
+
+    frontend_config = _get_frontend_config(project)
+    if not frontend_config:
+        return mcp_result(req_id, {"content": [{"type": "text", "text": json.dumps({"status": "error", "error": f"No frontend config for project: {project}"})}], "isError": True})
+
+    staging_bucket = f"bouncer-uploads-{account_id}"
+    s3 = get_s3_client()
+
+    # Verify all files exist in staging
+    missing = []
+    files_manifest = []
+    for fm in files:
+        fname = fm.get("filename", "")
+        s3_key = f"frontend/{project}/{request_id}/{fname}"
+        try:
+            head = s3.head_object(Bucket=staging_bucket, Key=s3_key)
+            size = head.get("ContentLength", 0)
+        except Exception:  # noqa: BLE001
+            missing.append(fname)
+            continue
+
+        content_type = _get_content_type(fname, fm.get("content_type"))
+        cache_control = _get_cache_control(fname)
+        files_manifest.append({
+            "filename": fname,
+            "s3_key": s3_key,
+            "content_type": content_type,
+            "cache_control": cache_control,
+            "size": size,
+        })
+
+    if missing:
+        return mcp_result(req_id, {"content": [{"type": "text", "text": json.dumps({"status": "error", "error": f"Missing files in staging: {missing}. Upload them first using presigned URLs."})}], "isError": True})
+
+    # Build approval record (same structure as _submit_deploy_frontend_approval)
+    now = int(time.time())
+    confirm_request_id = generate_request_id(f"deploy_frontend:{project}")
+
+    item = {
+        "request_id": confirm_request_id,
+        "action": "deploy_frontend",
+        "status": "pending_approval",
+        "project": project,
+        "reason": reason,
+        "source": source or "unknown",
+        "mode": "mcp",
+        "files": json.dumps(files_manifest),
+        "frontend_bucket": frontend_config["frontend_bucket"],
+        "distribution_id": frontend_config["distribution_id"],
+        "region": frontend_config.get("region", "us-east-1"),
+        "deploy_role_arn": frontend_config.get("deploy_role_arn") or project_config.get("deploy_role_arn"),
+        "staging_bucket": staging_bucket,
+        "file_count": len(files_manifest),
+        "created_at": now,
+        "ttl": now + APPROVAL_TTL_BUFFER,
+    }
+
+    try:
+        table.put_item(Item=item)
+    except Exception as exc:  # noqa: BLE001
+        return mcp_result(req_id, {"content": [{"type": "text", "text": json.dumps({"status": "error", "error": f"Failed to create approval record: {exc}"})}], "isError": True})
+
+    # Send Telegram notification (reuse existing function)
+    try:
+        send_deploy_frontend_notification(
+            request_id=confirm_request_id,
+            project=project,
+            file_count=len(files_manifest),
+            reason=reason,
+            source=source or "unknown",
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Non-fatal: approval record already exists, user can still approve
+        logger.warning("Failed to send notification for %s: %s", confirm_request_id, exc,
+                       extra={"src_module": "deploy_frontend", "operation": "confirm_notify", "request_id": confirm_request_id})
+        table.delete_item(Key={"request_id": confirm_request_id})
+        return mcp_result(req_id, {"content": [{"type": "text", "text": json.dumps({"status": "error", "error": f"Failed to send notification: {exc}"})}], "isError": True})
+
+    return mcp_result(req_id, {"content": [{"type": "text", "text": json.dumps({
+        "status": "pending_approval",
+        "request_id": confirm_request_id,
+        "file_count": len(files_manifest),
+        "message": "Deploy approval request sent. Use bouncer_status to check.",
+    })}]})

@@ -144,6 +144,8 @@ from constants import (  # noqa: F401
 # --- Deploy Frontend (sprint9-003) ---
 from mcp_deploy_frontend import (  # noqa: F401
     mcp_tool_deploy_frontend,
+    mcp_tool_request_frontend_presigned,
+    mcp_tool_confirm_frontend_deploy,
     _get_cache_control,
     _get_content_type,
     _has_blocked_extension,

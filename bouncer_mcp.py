@@ -517,6 +517,94 @@ TOOLS = [
         }
     },
     {
+        'name': 'bouncer_request_frontend_presigned',
+        'description': '前端部署 Step 1：生成 presigned PUT URL，繞過 API GW 6MB 限制。Agent 用 presigned URL 直接 PUT 檔案到 S3，然後呼叫 bouncer_confirm_frontend_deploy。',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'files': {
+                    'type': 'array',
+                    'description': '檔案 metadata 清單（不含 content）',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'filename': {'type': 'string'},
+                            'content_type': {'type': 'string'}
+                        },
+                        'required': ['filename']
+                    }
+                },
+                'project': {
+                    'type': 'string',
+                    'description': '專案名稱（如 ztp-files）'
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': '部署原因'
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '來源'
+                },
+                'trust_scope': {
+                    'type': 'string',
+                    'description': '信任範圍識別符'
+                },
+                'account_id': {
+                    'type': 'string',
+                    'description': 'AWS 帳號 ID（選填）'
+                }
+            },
+            'required': ['files', 'project']
+        }
+    },
+    {
+        'name': 'bouncer_confirm_frontend_deploy',
+        'description': '前端部署 Step 2：確認所有檔案已上傳，建立人工審批請求。先呼叫 bouncer_request_frontend_presigned 取得 presigned URLs，上傳後再呼叫此 tool。',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'request_id': {
+                    'type': 'string',
+                    'description': 'Step 1 回傳的 request_id'
+                },
+                'files': {
+                    'type': 'array',
+                    'description': '與 Step 1 相同的檔案 metadata 清單',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'filename': {'type': 'string'},
+                            'content_type': {'type': 'string'}
+                        },
+                        'required': ['filename']
+                    }
+                },
+                'project': {
+                    'type': 'string',
+                    'description': '專案名稱'
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': '部署原因'
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '來源'
+                },
+                'trust_scope': {
+                    'type': 'string',
+                    'description': '信任範圍識別符'
+                },
+                'account_id': {
+                    'type': 'string',
+                    'description': 'AWS 帳號 ID（選填）'
+                }
+            },
+            'required': ['request_id', 'files', 'project']
+        }
+    },
+    {
         'name': 'bouncer_grant_execute',
         'description': '在已批准的 Grant Session 內執行命令（精確匹配）',
         'inputSchema': {
@@ -1103,6 +1191,44 @@ def tool_deploy_frontend(arguments: dict) -> dict:
     return parse_mcp_result(result) or result
 
 
+def tool_request_frontend_presigned(arguments: dict) -> dict:
+    """前端部署 Step 1：生成 presigned PUT URLs"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'request_frontend_presigned',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_request_frontend_presigned',
+            'arguments': arguments
+        }
+    }
+
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
+def tool_confirm_frontend_deploy(arguments: dict) -> dict:
+    """前端部署 Step 2：確認上傳 + 建立審批請求"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'confirm_frontend_deploy',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_confirm_frontend_deploy',
+            'arguments': arguments
+        }
+    }
+
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
 def tool_grant_execute(arguments: dict) -> dict:
     """在已批准的 Grant Session 內執行命令（精確匹配）"""
     if not SECRET:
@@ -1238,6 +1364,10 @@ def handle_request(request: dict) -> dict:
         # Frontend deploy
         elif tool_name == 'bouncer_deploy_frontend':
             result = tool_deploy_frontend(arguments)
+        elif tool_name == 'bouncer_request_frontend_presigned':
+            result = tool_request_frontend_presigned(arguments)
+        elif tool_name == 'bouncer_confirm_frontend_deploy':
+            result = tool_confirm_frontend_deploy(arguments)
         # Grant execute
         elif tool_name == 'bouncer_grant_execute':
             result = tool_grant_execute(arguments)
