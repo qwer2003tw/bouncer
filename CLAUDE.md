@@ -21,7 +21,27 @@ Your job as Claude Code:
 
 Full test suite is run by GitHub CI after push. Do NOT run it locally.
 
-### CI
+### UI Testing — Use Playwright (NOT browser tool)
+
+The OpenClaw `browser` tool's snapshot/act/navigate commands timeout on this machine (CDP not responding). Use Python Playwright instead for all UI verification.
+
+```python
+from playwright.sync_api import sync_playwright
+with sync_playwright() as p:
+    browser = p.chromium.launch(
+        headless=True,
+        executable_path='/home/ec2-user/.cache/ms-playwright/chromium-1208/chrome-linux/chrome',
+        args=['--no-sandbox', '--disable-setuid-sandbox']
+    )
+    page = browser.new_page()
+    page.goto('https://files-dev.ztp.one', timeout=15000)
+    page.screenshot(path='/tmp/ui_test.png')
+    browser.close()
+```
+
+Never use `browser(action="snapshot")`, `browser(action="act")`, `browser(action="navigate")` — they will timeout.
+
+## CI
 - After every push: check `gh run list --limit 1`
 - CI failure = P0 blocker — fix immediately, never leave CI red
 - CI runs full suite: pytest + coverage + typos + security
