@@ -125,10 +125,7 @@ def create_dry_run_changeset(
         raise ValueError(f"Cannot parse S3 URL: {template_s3_url!r}")
 
     bucket, key = m.group(1), m.group(2)
-    s3 = boto3.client("s3")
-    obj = s3.get_object(Bucket=bucket, Key=key)
-    template_body = obj["Body"].read().decode("utf-8")
-
+    # Use TemplateURL directly — avoids YAML quote validation errors with TemplateBody
     changeset_name = f"bouncer-dryrun-{str(uuid.uuid4())[:12]}"
 
     # Query existing stack parameters so we can pass UsePreviousValue=True
@@ -145,7 +142,7 @@ def create_dry_run_changeset(
 
     cfn_client.create_change_set(
         StackName=stack_name,
-        TemplateBody=template_body,
+        TemplateURL=template_s3_url,
         ChangeSetName=changeset_name,
         ChangeSetType="UPDATE",
         Parameters=reuse_params,
