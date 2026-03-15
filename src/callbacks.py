@@ -567,6 +567,18 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
     # 格式化顯示資訊
     info = _format_command_info(parsed)
 
+    # SEC: verify approval has not expired
+    import time as _time
+    _item_ttl = int(item.get('ttl', 0))
+    if _item_ttl and int(_time.time()) > _item_ttl and action in ('approve', 'approve_trust'):
+        logger.warning("callback rejected: approval expired for %s", request_id, extra={"src_module": "callbacks", "operation": "ttl_check", "request_id": request_id})
+        answer_callback(callback_id, '❌ 審批已過期，請重新發起請求')
+        try:
+            update_message(message_id, '❌ *審批已過期*\n\n`' + request_id + '`', remove_buttons=True)
+        except Exception:  # noqa: BLE001
+            pass
+        return response(200, {'ok': True})
+
     if action in ('approve', 'approve_trust'):
         if is_dangerous(command):
             answer_callback(callback_id, '⚠️ 高危操作確認：正在執行...', show_alert=True)
@@ -742,6 +754,18 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
 
     source_line = build_info_lines(source=source, context=context)
 
+    # SEC: verify approval has not expired
+    import time as _time
+    _item_ttl = int(item.get('ttl', 0))
+    if _item_ttl and int(_time.time()) > _item_ttl and action == 'approve':
+        logger.warning("deploy_callback rejected: approval expired for %s", request_id, extra={"src_module": "callbacks", "operation": "ttl_check", "request_id": request_id})
+        answer_callback(callback_id, '❌ 審批已過期，請重新發起部署')
+        try:
+            update_message(message_id, '❌ *審批已過期*\n\n`' + request_id + '`', remove_buttons=True)
+        except Exception:  # noqa: BLE001
+            pass
+        return response(200, {'ok': True})
+
     if action == 'approve':
         answer_callback(callback_id, '🚀 啟動部署中...')
         _update_request_status(table, request_id, 'approved', user_id)
@@ -859,6 +883,18 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
 
     size_str = format_size_human(content_size)
     safe_reason = escape_markdown(reason)
+
+    # SEC: verify approval has not expired
+    import time as _time
+    _item_ttl = int(item.get('ttl', 0))
+    if _item_ttl and int(_time.time()) > _item_ttl and action == 'approve':
+        logger.warning("upload_callback rejected: approval expired for %s", request_id, extra={"src_module": "callbacks", "operation": "ttl_check", "request_id": request_id})
+        answer_callback(callback_id, '❌ 審批已過期，請重新上傳')
+        try:
+            update_message(message_id, '❌ *審批已過期*\n\n`' + request_id + '`', remove_buttons=True)
+        except Exception:  # noqa: BLE001
+            pass
+        return response(200, {'ok': True})
 
     if action == 'approve':
         # 執行上傳
