@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.45.1] - 2026-03-15
+
+### Fixed
+- `src/notifications.py` — 移除 entities 模式下 italic 文字的 Markdown 底線（`_text_` → `mb.italic("text")`），修復 auto-approve 通知顯示多餘底線的問題
+
 ## [3.45.0] - 2026-03-15
 
 ### Fixed
