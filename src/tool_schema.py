@@ -726,7 +726,7 @@ MCP_TOOLS['bouncer_deploy_frontend'] = {
 
 MCP_TOOLS['bouncer_request_frontend_presigned'] = {
     'description': '前端部署 Step 1：生成 presigned PUT URL，繞過 API GW 6MB 限制。Agent 用 presigned URL 直接 PUT 檔案到 S3，然後呼叫 bouncer_confirm_frontend_deploy。',
-    'inputSchema': {
+    'parameters': {
         'type': 'object',
         'properties': {
             'files': {
@@ -753,7 +753,7 @@ MCP_TOOLS['bouncer_request_frontend_presigned'] = {
 
 MCP_TOOLS['bouncer_confirm_frontend_deploy'] = {
     'description': '前端部署 Step 2：確認所有檔案已上傳，建立人工審批請求。先呼叫 bouncer_request_frontend_presigned 取得 presigned URLs，上傳後再呼叫此 tool。',
-    'inputSchema': {
+    'parameters': {
         'type': 'object',
         'properties': {
             'request_id': {'type': 'string', 'description': 'Step 1 回傳的 request_id'},
