@@ -1600,6 +1600,15 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
         return _handle_deploy_frontend_deny(table, request_id, callback_id, message_id, user_id, params)
 
     # action == 'approve'
+    # SEC: verify approval has not expired
+    import time as _time
+    item_ttl = int(item.get('ttl', 0))
+    if item_ttl and int(_time.time()) > item_ttl:
+        logger.warning("deploy_frontend_callback rejected: approval expired for %s", request_id, extra={"src_module": "callbacks", "operation": "handle_deploy_frontend_callback", "request_id": request_id})
+        answer_callback(callback_id, '❌ 審批已過期，請重新發起前端部署')
+        update_message(message_id, '❌ *審批已過期*\n\n`' + request_id + '`\n\n請重新呼叫 bouncer_confirm_frontend_deploy。', remove_buttons=True)
+        return response(200, {'ok': True})
+
     try:
         files_manifest = _json.loads(params['files_json'])
     except _json.JSONDecodeError as e:
