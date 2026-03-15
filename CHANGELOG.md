@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.46.0] - 2026-03-15
+
+### Security
+- `src/app.py` — `infra_approve` callback 現在驗證 `infra_approval_token_ttl`，過期的審批請求會被拒絕，防止舊按鈕繼續觸發部署 (#s46-001)
+
 ## [3.45.1] - 2026-03-15
 
 ### Fixed
