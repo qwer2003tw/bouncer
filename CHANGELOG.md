@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.44.1] - 2026-03-15
+
+### Fixed
+- `src/app.py` + `src/tool_schema.py` — register `bouncer_request_frontend_presigned` and `bouncer_confirm_frontend_deploy` in Lambda handler. Sprint 38 added these tools but forgot to register them in the actual Lambda endpoint, causing "Unknown tool" errors.
+
 ## [3.44.0] - 2026-03-14
 
 ### Fixed
