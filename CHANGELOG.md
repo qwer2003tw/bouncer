@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.46.1] - 2026-03-15
+
+### Security
+- `src/callbacks.py` — 所有 callback handlers（command/deploy/upload/batch/account）加上 TTL 過期驗證，防止過期審批按鈕繼續執行操作
+
 ## [3.46.0] - 2026-03-15
 
 ### Security
