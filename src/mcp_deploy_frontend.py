@@ -916,8 +916,13 @@ def mcp_tool_confirm_frontend_deploy(req_id: str, arguments: dict) -> dict:
     try:
         send_deploy_frontend_notification(
             request_id=confirm_request_id,
+            files_summary=files_manifest,
+            target_info={
+                "frontend_bucket": frontend_config["frontend_bucket"],
+                "distribution_id": frontend_config["distribution_id"],
+                "region": frontend_config.get("region", "us-east-1"),
+            },
             project=project,
-            file_count=len(files_manifest),
             reason=reason,
             source=source or "unknown",
         )
