@@ -723,3 +723,57 @@ MCP_TOOLS['bouncer_deploy_frontend'] = {
         'required': ['project', 'files', 'source', 'trust_scope'],
     },
 }
+
+MCP_TOOLS['bouncer_request_frontend_presigned'] = {
+    'description': '前端部署 Step 1：生成 presigned PUT URL，繞過 API GW 6MB 限制。Agent 用 presigned URL 直接 PUT 檔案到 S3，然後呼叫 bouncer_confirm_frontend_deploy。',
+    'inputSchema': {
+        'type': 'object',
+        'properties': {
+            'files': {
+                'type': 'array',
+                'description': '檔案 metadata 清單（不含 content）',
+                'items': {
+                    'type': 'object',
+                    'properties': {
+                        'filename': {'type': 'string'},
+                        'content_type': {'type': 'string'},
+                    },
+                    'required': ['filename'],
+                },
+            },
+            'project': {'type': 'string', 'description': '專案名稱（如 ztp-files）'},
+            'reason': {'type': 'string'},
+            'source': {'type': 'string'},
+            'trust_scope': {'type': 'string'},
+            'account_id': {'type': 'string'},
+        },
+        'required': ['files', 'project'],
+    },
+}
+
+MCP_TOOLS['bouncer_confirm_frontend_deploy'] = {
+    'description': '前端部署 Step 2：確認所有檔案已上傳，建立人工審批請求。先呼叫 bouncer_request_frontend_presigned 取得 presigned URLs，上傳後再呼叫此 tool。',
+    'inputSchema': {
+        'type': 'object',
+        'properties': {
+            'request_id': {'type': 'string', 'description': 'Step 1 回傳的 request_id'},
+            'files': {
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'properties': {
+                        'filename': {'type': 'string'},
+                        'content_type': {'type': 'string'},
+                    },
+                    'required': ['filename'],
+                },
+            },
+            'project': {'type': 'string'},
+            'reason': {'type': 'string'},
+            'source': {'type': 'string'},
+            'trust_scope': {'type': 'string'},
+            'account_id': {'type': 'string'},
+        },
+        'required': ['request_id', 'files', 'project'],
+    },
+}
