@@ -32,6 +32,22 @@ Full test suite is run by GitHub CI after push. Do NOT run it locally.
 - Format: `feat|fix|refactor|test|docs[(scope)]: description`
 - Bug fix: must include `test_regression_<description>`
 
+### Bouncer Dual-Stack Architecture
+
+Bouncer has TWO separate Lambda stacks:
+- **bouncer stack** (`src/`) — main approval Lambda, `bouncer_mcp.py`, `template.yaml`
+- **bouncer-deployer stack** (`deployer/notifier/`, `deployer/template.yaml`) — NotifierLambda, CodeBuild workflow
+
+**Some files exist in BOTH stacks** with independent copies:
+- `changeset_analyzer.py` → `src/changeset_analyzer.py` AND `deployer/notifier/changeset_analyzer.py`
+
+**When fixing a bug: always search BOTH `src/` AND `deployer/notifier/`** to avoid fixing only one copy.
+```bash
+grep -rn "the_function_or_pattern" src/ deployer/notifier/
+```
+
+---
+
 ### Adding a New MCP Tool — Checklist (MUST do all 4)
 
 When adding a new MCP tool (e.g. `bouncer_foo`), you MUST update ALL 4 files:
