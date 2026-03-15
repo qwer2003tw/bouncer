@@ -62,7 +62,7 @@ def test_auto_approve_notification_without_summary():
 
         assert mock_send.called
         text, entities = mock_send.call_args[0]
-        assert '_(無變更明細)_' in text
+        assert '(無變更明細)' in text
 
 
 def test_format_changeset_summary_3_items():

@@ -475,7 +475,7 @@ def send_grant_request_notification(
         mb.text("🤖 ").bold("來源：").text(f" {source or 'Unknown'}").newline()
         if project:
             mb.text("📦 ").bold("專案：").text(f" {project}").newline()
-            mb.italic(f"_(以 {project} deploy role 執行)_").newline()
+            mb.italic(f"(以 {project} deploy role 執行)").newline()
         mb.text("💬 ").bold("原因：").text(f" {reason or ''}").newline()
         mb.text("🏦 ").bold("帳號：").text(" ").code(str(account_id)).newline()
         mb.text("⏱ ").bold("TTL：").text(f" {ttl_minutes} 分鐘 | 模式：{mode_str}")
@@ -990,13 +990,13 @@ def send_auto_approve_deploy_notification(
         mb.text("🆔 ").bold("Deploy ID：").text(" ").code(deploy_id).newline()
         mb.text("🤖 ").bold("來源：").text(f" {source or 'auto-approve'}").newline()
         mb.text("📝 ").bold("原因：").text(f" {reason}").newline(2)
-        mb.text("_純 code 變更，CFN changeset 分析通過_")
+        mb.italic("純 code 變更，CFN changeset 分析通過")
         if changes_summary:
             mb.newline()
             mb.text("📋 ").bold("變更：").text(f" {changes_summary}")
         else:
             mb.newline()
-            mb.italic("_(無變更明細)_")
+            mb.italic("(無變更明細)")
 
         text, entities = mb.build()
         _telegram.send_message_with_entities(text, entities, silent=True)
