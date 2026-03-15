@@ -575,8 +575,8 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         answer_callback(callback_id, '❌ 審批已過期，請重新發起請求')
         try:
             update_message(message_id, '❌ *審批已過期*\n\n`' + request_id + '`', remove_buttons=True)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _ue:  # noqa: BLE001 — best-effort
+            logger.debug("TTL check update_message failed (non-critical): %s", _ue, extra={"src_module": "callbacks", "operation": "ttl_check", "request_id": request_id})
         return response(200, {'ok': True})
 
     if action in ('approve', 'approve_trust'):
@@ -655,8 +655,8 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
         answer_callback(callback_id, '❌ 審批已過期，請重新發起請求')
         try:
             update_message(message_id, '❌ *審批已過期*\n\n`' + request_id + '`', remove_buttons=True)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _ue:  # noqa: BLE001 — best-effort
+            logger.debug("TTL check update_message failed (non-critical): %s", _ue, extra={"src_module": "callbacks", "operation": "ttl_check", "request_id": request_id})
         return response(200, {'ok': True})
 
     if action == 'approve':
@@ -725,8 +725,8 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
         answer_callback(callback_id, '❌ 審批已過期，請重新發起請求')
         try:
             update_message(message_id, '❌ *審批已過期*\n\n`' + request_id + '`', remove_buttons=True)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _ue:  # noqa: BLE001 — best-effort
+            logger.debug("TTL check update_message failed (non-critical): %s", _ue, extra={"src_module": "callbacks", "operation": "ttl_check", "request_id": request_id})
         return response(200, {'ok': True})
 
     if action == 'approve':
@@ -786,8 +786,8 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
         answer_callback(callback_id, '❌ 審批已過期，請重新發起部署')
         try:
             update_message(message_id, '❌ *審批已過期*\n\n`' + request_id + '`', remove_buttons=True)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _ue:  # noqa: BLE001 — best-effort
+            logger.debug("TTL check update_message failed (non-critical): %s", _ue, extra={"src_module": "callbacks", "operation": "ttl_check", "request_id": request_id})
         return response(200, {'ok': True})
 
     if action == 'approve':
@@ -916,8 +916,8 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
         answer_callback(callback_id, '❌ 審批已過期，請重新上傳')
         try:
             update_message(message_id, '❌ *審批已過期*\n\n`' + request_id + '`', remove_buttons=True)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _ue:  # noqa: BLE001 — best-effort
+            logger.debug("TTL check update_message failed (non-critical): %s", _ue, extra={"src_module": "callbacks", "operation": "ttl_check", "request_id": request_id})
         return response(200, {'ok': True})
 
     if action == 'approve':
@@ -1200,8 +1200,8 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
         answer_callback(callback_id, '❌ 審批已過期，請重新發起請求')
         try:
             update_message(message_id, '❌ *審批已過期*\n\n`' + request_id + '`', remove_buttons=True)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _ue:  # noqa: BLE001 — best-effort
+            logger.debug("TTL check update_message failed (non-critical): %s", _ue, extra={"src_module": "callbacks", "operation": "ttl_check", "request_id": request_id})
         return response(200, {'ok': True})
 
     if action in ('approve', 'approve_trust'):
