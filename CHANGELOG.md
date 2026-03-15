@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.45.0] - 2026-03-15
+
+### Fixed
+- `src/mcp_deploy_frontend.py` — `bouncer_confirm_frontend_deploy` 修正 `send_deploy_frontend_notification()` 呼叫參數：改用正確的 `files_summary` + `target_info` 取代不存在的 `file_count` (#128)
+- `src/tool_schema.py` + `src/app.py` — 補上 `bouncer_request_frontend_presigned` + `bouncer_confirm_frontend_deploy` 在 Lambda handler 的路由，修復 "Unknown tool" 錯誤（Sprint 38 遺漏）
+- `CLAUDE.md` — 新增新增 MCP tool 必須更新 4 個檔案的 checklist + Hotfix 不能跳過測試的規則
+
 ## [3.44.1] - 2026-03-15
 
 ### Fixed
