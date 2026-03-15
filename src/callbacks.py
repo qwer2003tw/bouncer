@@ -647,6 +647,18 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
         f"📛 *名稱：* {account_name}"
     )
 
+    # SEC: verify approval has not expired
+    import time as _time
+    _item_ttl = int(item.get('ttl', 0))
+    if _item_ttl and int(_time.time()) > _item_ttl and action == 'approve':
+        logger.warning("callback rejected: approval expired for %s", request_id, extra={"src_module": "callbacks", "operation": "ttl_check", "request_id": request_id})
+        answer_callback(callback_id, '❌ 審批已過期，請重新發起請求')
+        try:
+            update_message(message_id, '❌ *審批已過期*\n\n`' + request_id + '`', remove_buttons=True)
+        except Exception:  # noqa: BLE001
+            pass
+        return response(200, {'ok': True})
+
     if action == 'approve':
         # 寫入帳號配置
         answer_callback(callback_id, '✅ 處理中...')
@@ -704,6 +716,18 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
         f"🆔 *帳號 ID：* `{account_id}`\n"
         f"📛 *名稱：* {account_name}"
     )
+
+    # SEC: verify approval has not expired
+    import time as _time
+    _item_ttl = int(item.get('ttl', 0))
+    if _item_ttl and int(_time.time()) > _item_ttl and action == 'approve':
+        logger.warning("callback rejected: approval expired for %s", request_id, extra={"src_module": "callbacks", "operation": "ttl_check", "request_id": request_id})
+        answer_callback(callback_id, '❌ 審批已過期，請重新發起請求')
+        try:
+            update_message(message_id, '❌ *審批已過期*\n\n`' + request_id + '`', remove_buttons=True)
+        except Exception:  # noqa: BLE001
+            pass
+        return response(200, {'ok': True})
 
     if action == 'approve':
         answer_callback(callback_id, '✅ 處理中...')
@@ -1167,6 +1191,18 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
     source_line = build_info_lines(
         source=source, account_name=account_name, account_id=account_id,
     )
+
+    # SEC: verify approval has not expired
+    import time as _time
+    _item_ttl = int(item.get('ttl', 0))
+    if _item_ttl and int(_time.time()) > _item_ttl and action == 'approve':
+        logger.warning("callback rejected: approval expired for %s", request_id, extra={"src_module": "callbacks", "operation": "ttl_check", "request_id": request_id})
+        answer_callback(callback_id, '❌ 審批已過期，請重新發起請求')
+        try:
+            update_message(message_id, '❌ *審批已過期*\n\n`' + request_id + '`', remove_buttons=True)
+        except Exception:  # noqa: BLE001
+            pass
+        return response(200, {'ok': True})
 
     if action in ('approve', 'approve_trust'):
         # Parse files manifest
