@@ -32,7 +32,18 @@ Full test suite is run by GitHub CI after push. Do NOT run it locally.
 - Format: `feat|fix|refactor|test|docs[(scope)]: description`
 - Bug fix: must include `test_regression_<description>`
 
-### Phase 5 (Close Sprint) — STRICTLY FORBIDDEN for Claude Code
+### Adding a New MCP Tool — Checklist (MUST do all 4)
+
+When adding a new MCP tool (e.g. `bouncer_foo`), you MUST update ALL 4 files:
+
+1. **`src/mcp_*.py`** — implement the tool function `mcp_tool_foo(req_id, arguments)`
+2. **`src/tool_schema.py`** — add `MCP_TOOLS['bouncer_foo'] = { 'description': ..., 'inputSchema': ... }`
+3. **`src/app.py`** — import the function + add to `TOOL_HANDLERS = { 'bouncer_foo': mcp_tool_foo, ... }`
+4. **`bouncer_mcp.py`** — add tool schema to `TOOLS` list + handler function + dispatcher `elif` case
+
+Missing ANY of these = the tool will work locally (mcporter list) but fail on Lambda ("Unknown tool").
+
+
 **NEVER do any of the following:**
 - Version bump (`src/constants.py VERSION` or `pyproject.toml`)
 - Update `CHANGELOG.md`
