@@ -55,6 +55,13 @@ Missing ANY of these = the tool will work locally (mcporter list) but fail on La
 Phase 5 is **main-session only**. Your job ends at `git commit --no-verify` + report commit hash.
 If you see yourself about to do any of the above — **stop immediately and report to main session**.
 
+### Hotfix Rule — No Shortcuts
+
+Even for urgent hotfixes:
+1. **Before pushing**: run `ruff check src/` + `python3 -m pytest tests/test_app.py tests/test_mcp_execute.py -x -q`
+2. **Before copying a code pattern**: read ONE existing entry in the same file to verify key names and structure match
+3. **Time pressure ≠ skip verification** — a broken hotfix is worse than a delayed one
+
 ### Deploy
 - Use `bouncer_deploy` MCP tool (not direct AWS)
 - After deploy request: write `pendingDeployId` to sprint-state
