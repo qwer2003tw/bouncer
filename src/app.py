@@ -873,6 +873,15 @@ def handle_telegram_webhook(event: dict) -> dict:
             answer_callback(callback['id'], '❌ 找不到 task token，可能已過期')
             return response(200, {'ok': True})
 
+        # SEC: verify token TTL has not expired
+        import time as _time
+        token_ttl = int(deploy_record.get('infra_approval_token_ttl', 0)) if deploy_record else 0
+        if token_ttl and int(_time.time()) > token_ttl:
+            logger.warning("infra_approve rejected: token expired for %s", deploy_id, extra={"src_module": "app", "operation": "infra_approve", "deploy_id": deploy_id, "token_ttl": token_ttl})
+            answer_callback(callback['id'], '❌ 審批已過期，請重新發起部署')
+            update_message(msg_id, '❌ *審批已過期*\n\n`' + deploy_id + '`\n\n請重新呼叫 bouncer_deploy。', remove_buttons=True)
+            return response(200, {'ok': True})
+
         sfn = _boto3.client('stepfunctions', region_name='us-east-1')
         if action == 'infra_approve':
             sfn.send_task_success(
