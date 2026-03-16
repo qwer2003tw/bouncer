@@ -189,6 +189,7 @@ class ExecuteContext:
     mode: str = 'mcp'
     grant_id: Optional[str] = None
     template_scan_result: Optional[dict] = None  # Layer 2.5 template scan result
+    cli_input_json: Optional[dict] = None
 
 
 def _parse_execute_request(req_id, arguments: dict) -> 'dict | ExecuteContext':
@@ -277,6 +278,7 @@ def _parse_execute_request(req_id, arguments: dict) -> 'dict | ExecuteContext':
         timeout=timeout,
         sync_mode=sync_mode,
         grant_id=arguments.get('grant_id', None),
+        cli_input_json=arguments.get('cli_input_json') or None,
     )
 
 
@@ -537,7 +539,7 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
         # 執行命令 (使用 grant 的 assume_role_arn，fallback 到 account role)
         grant_req_id = generate_request_id(ctx.command)
         grant_assume_role = grant.get('assume_role_arn') or ctx.assume_role
-        result = execute_command(ctx.command, grant_assume_role)
+        result = execute_command(ctx.command, grant_assume_role, cli_input_json=ctx.cli_input_json)
         _exit_code = extract_exit_code(result)
         is_failed = _exit_code is not None and _exit_code != 0
         cmd_status = 'error' if is_failed else 'success'
@@ -615,7 +617,7 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
         return None
 
     request_id = generate_request_id(ctx.command)
-    result = execute_command(ctx.command, ctx.assume_role)
+    result = execute_command(ctx.command, ctx.assume_role, cli_input_json=ctx.cli_input_json)
     _exit_code = extract_exit_code(result)
     is_failed = _exit_code is not None and _exit_code != 0
     cmd_status = 'error' if is_failed else 'success'
@@ -737,7 +739,7 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
 
     # 執行命令
     request_id = generate_request_id(ctx.command)
-    result = execute_command(ctx.command, ctx.assume_role)
+    result = execute_command(ctx.command, ctx.assume_role, cli_input_json=ctx.cli_input_json)
     _exit_code = extract_exit_code(result)
     is_failed = _exit_code is not None and _exit_code != 0
     cmd_status = 'error' if is_failed else 'success'
@@ -1239,6 +1241,7 @@ def mcp_tool_grant_execute(req_id: str, arguments: dict) -> dict:
         source = str(arguments.get('source', '')).strip()
         reason = str(arguments.get('reason', 'Grant execute')).strip()
         account_param = str(arguments.get('account', '')).strip() if arguments.get('account') else None
+        cli_input_json = arguments.get('cli_input_json') or None
 
         if not grant_id or not command or not source:
             return mcp_error(req_id, -32602, 'Missing required parameter: grant_id, command, source')
@@ -1421,7 +1424,7 @@ def mcp_tool_grant_execute(req_id: str, arguments: dict) -> dict:
 
         # 13. 執行命令
         assume_role = account.get('role_arn') if account and account_id != DEFAULT_ACCOUNT_ID else None
-        result = execute_command(normalized_cmd, assume_role_arn=assume_role)
+        result = execute_command(normalized_cmd, assume_role_arn=assume_role, cli_input_json=cli_input_json)
 
         # 14. 分頁輸出（大輸出時）
         paged = store_paged_output(req_id, result)

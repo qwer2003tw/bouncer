@@ -69,6 +69,10 @@ TOOLS = [
                 'grant_id': {
                     'type': 'string',
                     'description': 'Grant Session ID — 帶此參數時，命令在授權清單內會自動執行'
+                },
+                'cli_input_json': {
+                    'type': 'object',
+                    'description': '可選。將此 dict 寫入 tempfile 並以 --cli-input-json file:// 傳入 AWS CLI。用於含特殊字元（中文、換行、巢狀引號）的 JSON 值，完全繞過 shell 引號問題'
                 }
             },
             'required': ['command', 'reason', 'trust_scope']
@@ -627,6 +631,10 @@ TOOLS = [
                 'trust_scope': {
                     'type': 'string',
                     'description': '信任範圍識別符'
+                },
+                'cli_input_json': {
+                    'type': 'object',
+                    'description': '可選。將此 dict 寫入 tempfile 並以 --cli-input-json file:// 傳入 AWS CLI。用於含特殊字元（中文、換行、巢狀引號）的 JSON 值，完全繞過 shell 引號問題'
                 }
             },
             'required': ['grant_id', 'command', 'trust_scope']
@@ -700,6 +708,8 @@ def tool_execute(arguments: dict) -> dict:
         mcp_args['account'] = account
     if arguments.get('grant_id'):
         mcp_args['grant_id'] = arguments['grant_id']
+    if arguments.get('cli_input_json'):
+        mcp_args['cli_input_json'] = arguments['cli_input_json']
 
     payload = {
         'jsonrpc': '2.0',
