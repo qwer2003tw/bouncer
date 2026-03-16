@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.47.0] - 2026-03-16
+
+### Added
+- `src/telegram_entities.py` — `date_time()` 加 `unix_timestamp` 參數，生成正確的 `{unix_time: N}` entity 讓 Telegram 客戶端自動轉換時區 (#s44-003)
+- `src/trust.py` + `src/grant.py` — Session lifecycle 加 `logger.info`：trust/grant 建立、批准、拒絕、撤銷都有 structured audit log (#s44-007)
+- `.github/workflows/ci.yaml` — 加 `-n auto --dist=loadfile` 啟用 pytest-xdist 並行跑 tests（pytest-xdist 已在 requirements-dev.txt）(#s47-001)
+
+### Tests
+- 5 new tests in `tests/test_sprint47.py`
+
 ## [3.46.1] - 2026-03-15
 
 ### Security
