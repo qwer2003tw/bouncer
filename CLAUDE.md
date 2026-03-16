@@ -94,7 +94,7 @@ If you see yourself about to do any of the above — **stop immediately and repo
 ### Hotfix Rule — No Shortcuts
 
 Even for urgent hotfixes:
-1. **Before pushing**: run `ruff check src/` + `python3 -m pytest tests/test_app.py tests/test_mcp_execute.py -x -q`
+1. **Before pushing**: run `ruff check src/` + `typos src/` + `python3 -m pytest tests/test_app.py tests/test_mcp_execute.py -x -q`
 2. **Before copying a code pattern**: read ONE existing entry in the same file to verify key names and structure match
 3. **Time pressure ≠ skip verification** — a broken hotfix is worse than a delayed one
 
