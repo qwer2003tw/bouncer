@@ -200,7 +200,7 @@ jobs:
           PYEOF2
 
       - name: Run pytest (src tests)
-        run: pytest tests/ -v --tb=short --cov=src --cov-report=term-missing --cov-fail-under=75 -n auto --dist=loadscope
+        run: pytest tests/ -v --tb=short --cov=src --cov-report=term-missing --cov-fail-under=75 -n auto --dist=loadgroup
 
       - name: Run pytest (mcp_server tests)
         run: python3 -m pytest mcp_server/test_mcp_server.py -v --tb=short

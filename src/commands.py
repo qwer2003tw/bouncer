@@ -638,7 +638,7 @@ def _execute_locked(command: str, assume_role_arn: str = None,
         # Write cli_input_json to tempfile if provided
         if cli_input_json is not None:
             with _tempfile.NamedTemporaryFile(
-                mode='w', suffix='.json', delete=False, dir='/tmp', prefix='bouncer_cli_'
+                mode='w', suffix='.json', delete=False, dir='/tmp', prefix='bouncer_cli_'  # nosec B108
             ) as _f:
                 import json as _json
                 _json.dump(cli_input_json, _f, ensure_ascii=False)

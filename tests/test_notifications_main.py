@@ -14,6 +14,8 @@ from moto import mock_aws
 import boto3
 from botocore.exceptions import ClientError
 
+pytestmark = pytest.mark.xdist_group("notifications")
+
 
 def _make_client_error(code='TestError', message='Test error'):
     return ClientError({'Error': {'Code': code, 'Message': message}}, 'TestOperation')
@@ -138,6 +140,7 @@ class TestGenerateDisplaySummary:
 # Display Summary In Items 測試
 # ============================================================================
 
+@pytest.mark.xdist_group("app_module")
 class TestDisplaySummaryInItems:
     """Tests that display_summary is written to DynamoDB items"""
 
