@@ -8,6 +8,8 @@ import json
 import os
 import shutil
 import pytest
+import pytest
+pytestmark = pytest.mark.xdist_group("rate_limited")
 
 SCRIPT = os.path.abspath(os.path.join(
     os.path.dirname(__file__), '..', 'skills', 'bouncer-exec', 'scripts', 'bouncer_exec.sh'
