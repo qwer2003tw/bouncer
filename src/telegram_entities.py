@@ -52,6 +52,7 @@ class MessageBuilder:
 
     def __init__(self):
         self._parts: list[tuple[str, Optional[str]]] = []
+        self._date_time_timestamps: dict[int, int] = {}  # part_index → unix_time
 
     # ------------------------------------------------------------------
     # Fluent API
@@ -102,9 +103,20 @@ class MessageBuilder:
         self._parts.append((str(content), 'spoiler'))
         return self
 
-    def date_time(self, content) -> "MessageBuilder":
-        """Add date/time text with date_time entity (custom hint)."""
-        self._parts.append((str(content), 'date_time'))
+    def date_time(self, display_text: str, unix_timestamp: int) -> "MessageBuilder":
+        """Add a date_time entity with timezone conversion support.
+
+        Args:
+            display_text: The text to display (e.g., "2024-03-16 10:00 UTC")
+            unix_timestamp: Unix timestamp for Telegram to enable timezone conversion
+
+        Note:
+            Telegram will convert the timestamp to the user's local timezone
+            when displaying the message.
+        """
+        part_index = len(self._parts)
+        self._parts.append((str(display_text), 'date_time'))
+        self._date_time_timestamps[part_index] = unix_timestamp
         return self
 
     def newline(self, count: int = 1) -> "MessageBuilder":
@@ -123,21 +135,28 @@ class MessageBuilder:
             text:     The concatenated plain text string.
             entities: List of Telegram entity dicts with
                       {'type': ..., 'offset': ..., 'length': ...}.
+                      date_time entities also include 'unix_time' field.
         """
         text_parts = []
         entities = []
         offset = 0  # UTF-16 code unit offset
 
-        for content, entity_type in self._parts:
+        for part_idx, (content, entity_type) in enumerate(self._parts):
             content_str = str(content)
             utf16_length = _utf16_len(content_str)
 
             if entity_type and utf16_length > 0:
-                entities.append({
+                entity_dict = {
                     'type': entity_type,
                     'offset': offset,
                     'length': utf16_length,
-                })
+                }
+
+                # Add unix_time for date_time entities
+                if entity_type == 'date_time' and part_idx in self._date_time_timestamps:
+                    entity_dict['unix_time'] = self._date_time_timestamps[part_idx]
+
+                entities.append(entity_dict)
 
             text_parts.append(content_str)
             offset += utf16_length

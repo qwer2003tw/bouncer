@@ -269,6 +269,12 @@ def create_trust_session(
 
     _get_table().put_item(Item=item)
 
+    logger.info("Trust session created", extra={
+        "src_module": "trust", "operation": "create_trust_session",
+        "trust_id": trust_id, "source": source, "trust_scope": trust_scope,
+        "approved_by": approved_by, "duration_seconds": TRUST_SESSION_DURATION,
+    })
+
     # Schedule expiry notification (best-effort, non-raising)
     try:
         from scheduler_service import get_trust_expiry_notifier
@@ -290,6 +296,11 @@ def revoke_trust_session(trust_id: str) -> bool:
     """
     try:
         _get_table().delete_item(Key={'request_id': trust_id})
+
+        logger.info("Trust session revoked", extra={
+            "src_module": "trust", "operation": "revoke_trust_session",
+            "trust_id": trust_id,
+        })
 
         # Cancel the EventBridge expiry schedule (best-effort, non-raising)
         try:
