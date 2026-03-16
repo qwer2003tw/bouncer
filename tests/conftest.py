@@ -151,18 +151,17 @@ def app_module(mock_dynamodb):
                 return x
     copy.deepcopy = _safe_deepcopy
 
-    # 重新載入模組（包括新模組）
-    for mod in ['app', 'telegram', 'paging', 'trust', 'commands', 'notifications', 'db',
-                'callbacks', 'mcp_tools', 'mcp_execute', 'mcp_upload', 'mcp_admin',
-                'accounts', 'rate_limit', 'smart_approval',
-                'constants', 'utils', 'risk_scorer', 'template_scanner',
-                'scheduler_service',
-                'src.app', 'src.telegram', 'src.paging', 'src.trust', 'src.commands']:
-        if mod in sys.modules:
-            del sys.modules[mod]
-    
+    # Reload core modules to pick up environment variables
+    # (safer than del sys.modules — avoids xdist race conditions)
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+    # Import app (will trigger imports of dependencies)
     import app
+
+    # Reload key modules that depend on environment variables
+    for mod_name in ['db', 'accounts', 'app']:
+        if mod_name in sys.modules:
+            importlib.reload(sys.modules[mod_name])
     
     # 注入 mock table
     import db
