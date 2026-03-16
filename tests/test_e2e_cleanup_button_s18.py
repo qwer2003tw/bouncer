@@ -20,6 +20,8 @@ import os
 import time
 import pytest
 from unittest.mock import MagicMock, patch, call
+import pytest
+pytestmark = pytest.mark.xdist_group("e2e_cleanup")
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
