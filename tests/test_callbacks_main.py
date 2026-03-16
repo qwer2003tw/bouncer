@@ -13,7 +13,6 @@ from decimal import Decimal
 from moto import mock_aws
 import boto3
 
-pytestmark = pytest.mark.xdist_group("callbacks")
 
 
 # ============================================================================

@@ -38,12 +38,30 @@ def _mock_entities_send():
     mock_msg_id = 99999
     mock_response = {'ok': True, 'result': {'message_id': mock_msg_id}}
 
-    # Use patch.object for thread-safe mocking (handles restore automatically)
-    with patch.object(_tg, 'send_message_with_entities',
-                      MagicMock(return_value=mock_response)) as mock_entities, \
-         patch.object(_tg, 'send_telegram_message',
-                      MagicMock(return_value=mock_response)) as mock_send:
-        yield mock_entities
+    # Save originals
+    orig_entities = getattr(_tg, 'send_message_with_entities', None)
+    orig_send = getattr(_tg, 'send_telegram_message', None)
+
+    # Replace both so assertions on either work
+    mock_entities = MagicMock(return_value=mock_response)
+    mock_send_fn = MagicMock(return_value=mock_response)
+    _tg.send_message_with_entities = mock_entities
+    _tg.send_telegram_message = mock_send_fn
+
+    # Reload notifications so it picks up the mocks
+    import importlib
+    if 'notifications' in sys.modules:
+        importlib.reload(sys.modules['notifications'])
+
+    yield mock_entities
+
+    # Restore
+    if orig_entities is not None:
+        _tg.send_message_with_entities = orig_entities
+    elif hasattr(_tg, 'send_message_with_entities'):
+        delattr(_tg, 'send_message_with_entities')
+    if orig_send is not None:
+        _tg.send_telegram_message = orig_send
 
 
 class TestGenerateDisplaySummary:

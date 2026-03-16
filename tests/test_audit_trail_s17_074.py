@@ -20,7 +20,6 @@ import time
 import pytest
 from unittest.mock import patch, MagicMock
 
-pytestmark = pytest.mark.xdist_group("app_module")
 
 
 def _make_webhook_event(callback_data, user_id=999999999,
