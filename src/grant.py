@@ -335,6 +335,12 @@ def create_grant_request(
 
         table.put_item(Item=item)
 
+        logger.info("[GRANT] Grant session created", extra={
+            "src_module": "grant", "operation": "create_grant_request",
+            "grant_id": grant_id, "source": source, "command_count": len(commands),
+            "ttl_minutes": ttl_minutes,
+        })
+
         return {
             'grant_id': grant_id,
             'status': 'pending_approval',
@@ -506,6 +512,12 @@ def approve_grant(grant_id: str, approved_by: str, mode: str = 'all') -> Optiona
                 ':ttl_val': expires_at,  # DynamoDB TTL: 到期自動清理
             },
         )
+
+        logger.info("[GRANT] Grant session approved", extra={
+            "src_module": "grant", "operation": "approve_grant",
+            "grant_id": grant_id, "approved_by": approved_by, "mode": mode,
+            "granted_count": len(granted),
+        })
 
         # 回傳更新後的資訊
         grant['status'] = 'active'

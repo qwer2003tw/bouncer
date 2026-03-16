@@ -13,6 +13,7 @@ sprint24-003:
   - Deduplicate consecutive auto_approved notifications to reduce spam
 """
 
+import datetime
 import os
 import time
 import urllib.error
@@ -282,7 +283,10 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
     # ID and expiry
     mb.text("🆔 ").bold("ID：").text(" ").code(request_id).newline()
 
-    mb.text("⏰ ").bold(f"{timeout_str}後過期")
+    # Calculate expiry timestamp and format for display
+    expires_ts = int(time.time()) + timeout
+    expires_str = datetime.datetime.fromtimestamp(expires_ts, tz=datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    mb.text("⏰ ").bold(f"{timeout_str}後過期").text(" (").date_time(expires_str, expires_ts).text(")")
 
     text, entities = mb.build()
 
