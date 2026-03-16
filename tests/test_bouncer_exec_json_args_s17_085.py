@@ -12,6 +12,8 @@ import subprocess
 import json
 import os
 import pytest
+import pytest
+pytestmark = pytest.mark.xdist_group("json_args_s17")
 
 SCRIPT = os.path.abspath(os.path.join(
     os.path.dirname(__file__), '..', 'skills', 'bouncer-exec', 'scripts', 'bouncer_exec.sh'
