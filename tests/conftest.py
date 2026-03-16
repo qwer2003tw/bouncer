@@ -24,9 +24,9 @@ import boto3
 # Fixtures
 # ============================================================================
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="function")
 def mock_dynamodb():
-    """建立 mock DynamoDB 表（含 GSI）- module scope，只建立一次"""
+    """建立 mock DynamoDB 表（含 GSI）- function scope，每個測試獨立隔離"""
     with mock_aws():
         dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
         # Main approval-requests table
@@ -123,9 +123,9 @@ def mock_dynamodb():
         yield dynamodb
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="function")
 def app_module(mock_dynamodb):
-    """載入 app 模組並注入 mock - module scope，只載入一次"""
+    """載入 app 模組並注入 mock - function scope，每個測試獨立隔離"""
     # 設定環境變數
     os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'
     os.environ['DEFAULT_ACCOUNT_ID'] = '111111111111'
