@@ -165,7 +165,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r src/requirements.txt
-          pip install moto pytest pytest-cov==7.0.0
+          pip install moto pytest pytest-cov==7.0.0 pytest-xdist==3.5.0 pytest-randomly==4.0.1
           
       - name: Check entities migration mock consistency
         run: |
