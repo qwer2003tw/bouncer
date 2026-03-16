@@ -415,7 +415,12 @@ Resources:
                 - cloudformation:DescribeChangeSet
                 - cloudformation:DeleteChangeSet
                 - cloudformation:DescribeStacks
-              Resource: "*"  # TODO Sprint 33: 收窄到 arn:aws:cloudformation:*:*:stack/{stack-pattern}/*
+              Resource:
+                - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/clawdbot-bouncer/*"
+                - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/bouncer-deployer/*"
+                - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/ztp-files-dev/*"
+                - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/bouncer-dev/*"
+                # Add new projects here when onboarding
             # SEC-004b: Allow Lambda to generate presigned URLs and write audit metadata for staging bucket
             - Sid: StagingBucketPresignedAccess
               Effect: Allow
