@@ -497,36 +497,6 @@ TOOLS = [
         }
     },
     {
-        'name': 'bouncer_deploy_frontend',
-        'description': '一鍵前端部署：staging → 一次審批 → S3 copy + CloudFront invalidation。支援專案：ztp-files',
-        'inputSchema': {
-            'type': 'object',
-            'properties': {
-                'project': {
-                    'type': 'string',
-                    'description': '專案名稱（例如：ztp-files）'
-                },
-                'files': {
-                    'type': 'array',
-                    'description': '要部署的檔案清單 [{filename, content(base64), content_type?}]'
-                },
-                'reason': {
-                    'type': 'string',
-                    'description': '部署原因'
-                },
-                'source': {
-                    'type': 'string',
-                    'description': '請求來源標識'
-                },
-                'trust_scope': {
-                    'type': 'string',
-                    'description': '信任範圍識別符'
-                }
-            },
-            'required': ['project', 'files', 'reason', 'source', 'trust_scope']
-        }
-    },
-    {
         'name': 'bouncer_request_frontend_presigned',
         'description': '前端部署 Step 1：生成 presigned PUT URL，繞過 API GW 6MB 限制。Agent 用 presigned URL 直接 PUT 檔案到 S3，然後呼叫 bouncer_confirm_frontend_deploy。',
         'inputSchema': {
@@ -1188,25 +1158,6 @@ def tool_grant_status(arguments: dict) -> dict:
     return parse_mcp_result(result) or result
 
 
-def tool_deploy_frontend(arguments: dict) -> dict:
-    """前端部署：staging → 一次審批 → S3 copy + CloudFront invalidation"""
-    if not SECRET:
-        return {'error': 'BOUNCER_SECRET not configured'}
-
-    payload = {
-        'jsonrpc': '2.0',
-        'id': 'deploy_frontend',
-        'method': 'tools/call',
-        'params': {
-            'name': 'bouncer_deploy_frontend',
-            'arguments': arguments
-        }
-    }
-
-    result = http_request('POST', '/mcp', payload)
-    return parse_mcp_result(result) or result
-
-
 def tool_request_frontend_presigned(arguments: dict) -> dict:
     """前端部署 Step 1：生成 presigned PUT URLs"""
     if not SECRET:
@@ -1385,8 +1336,6 @@ def handle_request(request: dict) -> dict:
         elif tool_name == 'bouncer_revoke_grant':
             result = tool_revoke_grant(arguments)
         # Frontend deploy
-        elif tool_name == 'bouncer_deploy_frontend':
-            result = tool_deploy_frontend(arguments)
         elif tool_name == 'bouncer_request_frontend_presigned':
             result = tool_request_frontend_presigned(arguments)
         elif tool_name == 'bouncer_confirm_frontend_deploy':

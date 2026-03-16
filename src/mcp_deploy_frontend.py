@@ -687,6 +687,9 @@ def _execute_deploy_frontend_approved(
 def mcp_tool_deploy_frontend(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_deploy_frontend
 
+    ⚠️ DEPRECATED since Sprint 38 — Use bouncer_request_frontend_presigned + bouncer_confirm_frontend_deploy instead.
+    This function is retained for backward compatibility with existing DDB callback records (action=deploy_frontend).
+
     Phase A: validate -> check trust -> route to approval or execution.
     """
 
