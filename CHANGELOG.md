@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.51.0] - 2026-03-16
+
+### Security
+- `template.yaml` — CloudFormation IAM 範圍從 `Resource: "*"` 縮窄到指定 stack ARN（Sprint 33 遺留 TODO）
+- Backlog 新增 6 個 `template_diff_analyzer` 安全偵測項目（IAM 變更、Security Group、Trust relationship、KMS、Lambda secret、VPC 公開 IP）
+
+### Fixed
+- `tests/test_e2e_cleanup_button_s18.py` — 加 `xdist_group` 隔離，修復 xdist 並行時 flaky
+
 ## [3.50.0] - 2026-03-16
 
 ### Changed
