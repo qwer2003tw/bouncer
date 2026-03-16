@@ -175,10 +175,10 @@ def test_check_grant_session_uses_grant_assume_role(mock_dynamodb):
 
         # Verify execute_command was called with grant's assume_role_arn
         assert result is not None
-        mock_execute.assert_called_once_with(
-            'aws s3 ls s3://test-bucket',
-            'arn:aws:iam::190825685292:role/ztp-files-deploy-role'
-        )
+        mock_execute.assert_called_once()
+        call_args = mock_execute.call_args
+        assert call_args[0][0] == 'aws s3 ls s3://test-bucket'
+        assert call_args[0][1] == 'arn:aws:iam::190825685292:role/ztp-files-deploy-role'
 
 
 def test_check_grant_session_fallback_to_ctx_assume_role(mock_dynamodb):
@@ -233,7 +233,7 @@ def test_check_grant_session_fallback_to_ctx_assume_role(mock_dynamodb):
 
         # Verify execute_command was called with ctx.assume_role
         assert result is not None
-        mock_execute.assert_called_once_with(
-            'aws s3 ls s3://test-bucket',
-            'arn:aws:iam::123456789012:role/default-role'
-        )
+        mock_execute.assert_called_once()
+        call_args = mock_execute.call_args
+        assert call_args[0][0] == 'aws s3 ls s3://test-bucket'
+        assert call_args[0][1] == 'arn:aws:iam::123456789012:role/default-role'

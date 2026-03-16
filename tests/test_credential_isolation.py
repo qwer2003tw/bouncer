@@ -48,7 +48,7 @@ class TestCredentialIsolation:
 
         original_locked = commands_mod._execute_locked
 
-        def spy_locked(command, assume_role_arn=None):
+        def spy_locked(command, assume_role_arn=None, cli_input_json=None):
             lock_acquired.append(commands_mod._execute_lock.locked())
             return original_locked(command, assume_role_arn)
 
@@ -110,7 +110,7 @@ class TestCredentialIsolation:
 
         original_locked = commands_mod._execute_locked
 
-        def slow_locked(command, assume_role_arn=None):
+        def slow_locked(command, assume_role_arn=None, cli_input_json=None):
             with lock:
                 concurrent_count['current'] += 1
                 if concurrent_count['current'] > concurrent_count['max']:
