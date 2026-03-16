@@ -103,7 +103,7 @@ class MessageBuilder:
         self._parts.append((str(content), 'spoiler'))
         return self
 
-    def date_time(self, display_text: str, unix_timestamp: int) -> "MessageBuilder":
+    def date_time(self, display_text: str, unix_timestamp: int = 0) -> "MessageBuilder":
         """Add a date_time entity with timezone conversion support.
 
         Args:

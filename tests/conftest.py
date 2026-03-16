@@ -8,6 +8,9 @@ import sys
 import os
 import time
 import pytest
+
+# Ensure src/ is in path for all workers (required for pytest-xdist)
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../src'))
 import importlib
 from unittest.mock import patch, MagicMock
 from decimal import Decimal
