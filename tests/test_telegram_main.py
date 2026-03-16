@@ -12,6 +12,8 @@ from unittest.mock import patch, MagicMock
 from decimal import Decimal
 from moto import mock_aws
 import boto3
+import pytest
+pytestmark = pytest.mark.xdist_group("telegram_main")
 
 
 # ============================================================================
