@@ -46,11 +46,20 @@ Never use `browser(action="snapshot")`, `browser(action="act")`, `browser(action
 - CI failure = P0 blocker — fix immediately, never leave CI red
 - CI runs full suite: pytest + coverage + typos + security
 
-### Commits
+### Commits & Merge (PR Required)
 - Branch: `feat/{name}`, `fix/{desc}`, `refactor/{scope}`
-- Never commit to master directly
+- **Never push to master directly** — branch protection enforced
 - Format: `feat|fix|refactor|test|docs[(scope)]: description`
 - Bug fix: must include `test_regression_<description>`
+
+**After `git commit --no-verify` on feature branch:**
+```bash
+git push origin {branch}
+gh pr create --title "description" --body "" --base master --head {branch}
+# CI runs automatically. Check: gh pr checks {number} --watch
+# After CI passes, merge:
+gh pr merge {number} --squash --delete-branch
+```
 
 ### Bouncer Dual-Stack Architecture
 
