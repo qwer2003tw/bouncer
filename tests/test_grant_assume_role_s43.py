@@ -5,6 +5,8 @@ Test coverage:
 - grant.create_grant_request with project=None sets assume_role_arn=''
 - _check_grant_session uses grant's assume_role_arn when present
 """
+import pytest
+pytestmark = pytest.mark.xdist_group("grant_s43")
 
 import pytest
 from unittest.mock import patch, MagicMock
