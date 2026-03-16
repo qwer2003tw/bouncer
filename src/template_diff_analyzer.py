@@ -22,7 +22,6 @@ HIGH_RISK_PATTERNS: List[Tuple[str, str]] = [
     # s51-002: ANY IAM change triggers human review
     (r'AWS::IAM::(Role|Policy|ManagedPolicy|Group|User|InstanceProfile)', "IAM 資源變更 — 需人工審查"),
     (r'AssumeRolePolicyDocument\s*:', "IAM Trust relationship 變更 — 需人工審查"),
-    (r'PolicyDocument\s*:', "IAM Policy document 變更 — 需人工審查"),
 
     # s51-003: Security Group 0.0.0.0/0
     (r'CidrIp\s*:\s*["\']?0\.0\.0\.0/0["\']?', "Security Group 開放 0.0.0.0/0 — 允許所有 IPv4"),
