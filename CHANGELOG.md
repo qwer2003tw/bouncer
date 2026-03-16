@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.50.0] - 2026-03-16
+
+### Changed
+- `tests/conftest.py` — `app_module` + `mock_dynamodb` 從 `scope="module"` 改為 `scope="function"`，每個 test 獨立 DynamoDB + 模組狀態，消除 ordering 污染
+- `.github/workflows/ci.yaml` — 改用 `-n auto --dist=loadgroup` 並行跑 tests，移除 `-p no:randomly`
+
+### Tests
+- CI 從 serial 6 分鐘 → parallel 約 4 分鐘
+
 ## [3.49.0] - 2026-03-16
 
 ### Fixed
