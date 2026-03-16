@@ -259,3 +259,300 @@ class TestTemplateDiffAnalyzer:
         first_call_url = mock_github_api.call_args_list[0][0][0]
         assert '/repos/owner/repo/' in first_call_url
         assert '/repos/owner/repo.git/' not in first_call_url
+
+    @patch('template_diff_analyzer._get_github_pat')
+    @patch('template_diff_analyzer._github_api')
+    def test_iam_role_addition(self, mock_github_api, mock_get_pat):
+        """新增 IAM Role → is_safe=False (s51-002)"""
+        mock_get_pat.return_value = 'test-pat'
+
+        template_patch = """@@ -10,3 +10,8 @@
+ Resources:
+   MyFunction:
+     Type: AWS::Lambda::Function
++  MyRole:
++    Type: AWS::IAM::Role
++    Properties:
++      RoleName: MyLambdaRole"""
+
+        mock_github_api.side_effect = [
+            {
+                'sha': 'head123',
+                'parents': [{'sha': 'base456'}]
+            },
+            {
+                'files': [
+                    {'filename': 'template.yaml', 'patch': template_patch}
+                ]
+            }
+        ]
+
+        result = analyze_template_diff('owner/repo', 'main', 'test-secret')
+
+        assert result.is_safe is False
+        assert result.has_template_changes is True
+        assert len(result.high_risk_findings) >= 1
+        assert any('IAM 資源變更' in f for f in result.high_risk_findings)
+
+    @patch('template_diff_analyzer._get_github_pat')
+    @patch('template_diff_analyzer._github_api')
+    def test_iam_assume_role_policy(self, mock_github_api, mock_get_pat):
+        """新增 AssumeRolePolicyDocument → is_safe=False (s51-002)"""
+        mock_get_pat.return_value = 'test-pat'
+
+        template_patch = """@@ -10,3 +10,5 @@
+ Resources:
+   MyRole:
+     Properties:
++      AssumeRolePolicyDocument:
++        Version: '2012-10-17'"""
+
+        mock_github_api.side_effect = [
+            {
+                'sha': 'head123',
+                'parents': [{'sha': 'base456'}]
+            },
+            {
+                'files': [
+                    {'filename': 'template.yaml', 'patch': template_patch}
+                ]
+            }
+        ]
+
+        result = analyze_template_diff('owner/repo', 'main', 'test-secret')
+
+        assert result.is_safe is False
+        assert result.has_template_changes is True
+        assert any('IAM Trust relationship' in f for f in result.high_risk_findings)
+
+    @patch('template_diff_analyzer._get_github_pat')
+    @patch('template_diff_analyzer._github_api')
+    def test_security_group_open_ipv4(self, mock_github_api, mock_get_pat):
+        """Security Group 開放 0.0.0.0/0 → is_safe=False (s51-003)"""
+        mock_get_pat.return_value = 'test-pat'
+
+        template_patch = """@@ -10,3 +10,7 @@
+ Resources:
+   MySecurityGroup:
+     Type: AWS::EC2::SecurityGroup
++    Properties:
++      SecurityGroupIngress:
++        - IpProtocol: tcp
++          CidrIp: 0.0.0.0/0"""
+
+        mock_github_api.side_effect = [
+            {
+                'sha': 'head123',
+                'parents': [{'sha': 'base456'}]
+            },
+            {
+                'files': [
+                    {'filename': 'template.yaml', 'patch': template_patch}
+                ]
+            }
+        ]
+
+        result = analyze_template_diff('owner/repo', 'main', 'test-secret')
+
+        assert result.is_safe is False
+        assert result.has_template_changes is True
+        assert any('0.0.0.0/0' in f for f in result.high_risk_findings)
+
+    @patch('template_diff_analyzer._get_github_pat')
+    @patch('template_diff_analyzer._github_api')
+    def test_security_group_open_ipv6(self, mock_github_api, mock_get_pat):
+        """Security Group 開放 ::/0 → is_safe=False (s51-003)"""
+        mock_get_pat.return_value = 'test-pat'
+
+        template_patch = """@@ -10,3 +10,5 @@
+ Resources:
+   MySecurityGroup:
+     Properties:
++      SecurityGroupIngress:
++        - CidrIpv6: "::/0" """
+
+        mock_github_api.side_effect = [
+            {
+                'sha': 'head123',
+                'parents': [{'sha': 'base456'}]
+            },
+            {
+                'files': [
+                    {'filename': 'template.yaml', 'patch': template_patch}
+                ]
+            }
+        ]
+
+        result = analyze_template_diff('owner/repo', 'main', 'test-secret')
+
+        assert result.is_safe is False
+        assert result.has_template_changes is True
+        assert any('::/0' in f for f in result.high_risk_findings)
+
+    @patch('template_diff_analyzer._get_github_pat')
+    @patch('template_diff_analyzer._github_api')
+    def test_kms_key_addition(self, mock_github_api, mock_get_pat):
+        """新增 KMS Key → is_safe=False (s51-005)"""
+        mock_get_pat.return_value = 'test-pat'
+
+        template_patch = """@@ -10,3 +10,7 @@
+ Resources:
+   MyFunction:
+     Type: AWS::Lambda::Function
++  MyKey:
++    Type: AWS::KMS::Key
++    Properties:
++      Description: My encryption key"""
+
+        mock_github_api.side_effect = [
+            {
+                'sha': 'head123',
+                'parents': [{'sha': 'base456'}]
+            },
+            {
+                'files': [
+                    {'filename': 'template.yaml', 'patch': template_patch}
+                ]
+            }
+        ]
+
+        result = analyze_template_diff('owner/repo', 'main', 'test-secret')
+
+        assert result.is_safe is False
+        assert result.has_template_changes is True
+        assert any('KMS Key' in f for f in result.high_risk_findings)
+
+    @patch('template_diff_analyzer._get_github_pat')
+    @patch('template_diff_analyzer._github_api')
+    def test_lambda_env_secret_pattern(self, mock_github_api, mock_get_pat):
+        """Lambda env 疑似明文 secret → is_safe=False (s51-006)"""
+        mock_get_pat.return_value = 'test-pat'
+
+        template_patch = """@@ -10,3 +10,6 @@
+ Resources:
+   MyFunction:
+     Properties:
++      Environment:
++        Variables:
++          API_KEY: sk-1234567890abcdef"""
+
+        mock_github_api.side_effect = [
+            {
+                'sha': 'head123',
+                'parents': [{'sha': 'base456'}]
+            },
+            {
+                'files': [
+                    {'filename': 'template.yaml', 'patch': template_patch}
+                ]
+            }
+        ]
+
+        result = analyze_template_diff('owner/repo', 'main', 'test-secret')
+
+        assert result.is_safe is False
+        assert result.has_template_changes is True
+        assert any('疑似明文 secret' in f for f in result.high_risk_findings)
+
+    @patch('template_diff_analyzer._get_github_pat')
+    @patch('template_diff_analyzer._github_api')
+    def test_ec2_public_ip_enabled(self, mock_github_api, mock_get_pat):
+        """EC2 分配公開 IP → is_safe=False (s51-007)"""
+        mock_get_pat.return_value = 'test-pat'
+
+        template_patch = """@@ -10,3 +10,6 @@
+ Resources:
+   MyInstance:
+     Type: AWS::EC2::Instance
++    Properties:
++      NetworkInterfaces:
++        - AssociatePublicIpAddress: true"""
+
+        mock_github_api.side_effect = [
+            {
+                'sha': 'head123',
+                'parents': [{'sha': 'base456'}]
+            },
+            {
+                'files': [
+                    {'filename': 'template.yaml', 'patch': template_patch}
+                ]
+            }
+        ]
+
+        result = analyze_template_diff('owner/repo', 'main', 'test-secret')
+
+        assert result.is_safe is False
+        assert result.has_template_changes is True
+        assert any('分配公開 IP' in f for f in result.high_risk_findings)
+
+    @patch('template_diff_analyzer._get_github_pat')
+    @patch('template_diff_analyzer._github_api')
+    def test_subnet_auto_public_ip(self, mock_github_api, mock_get_pat):
+        """Subnet 自動分配公開 IP → is_safe=False (s51-007)"""
+        mock_get_pat.return_value = 'test-pat'
+
+        template_patch = """@@ -10,3 +10,5 @@
+ Resources:
+   MySubnet:
+     Type: AWS::EC2::Subnet
++    Properties:
++      MapPublicIpOnLaunch: true"""
+
+        mock_github_api.side_effect = [
+            {
+                'sha': 'head123',
+                'parents': [{'sha': 'base456'}]
+            },
+            {
+                'files': [
+                    {'filename': 'template.yaml', 'patch': template_patch}
+                ]
+            }
+        ]
+
+        result = analyze_template_diff('owner/repo', 'main', 'test-secret')
+
+        assert result.is_safe is False
+        assert result.has_template_changes is True
+        assert any('自動分配公開 IP' in f for f in result.high_risk_findings)
+
+    @patch('template_diff_analyzer._get_github_pat')
+    @patch('template_diff_analyzer._github_api')
+    def test_existing_patterns_still_work(self, mock_github_api, mock_get_pat):
+        """Verify existing patterns (Principal:*, AuthType:NONE, S3 public) still work after adding new ones"""
+        mock_get_pat.return_value = 'test-pat'
+
+        template_patch = """@@ -10,3 +10,10 @@
+ Resources:
+   MyFunctionUrl:
+     Properties:
++      Principal: "*"
++      AuthType: NONE
++  MyBucket:
++    Type: AWS::S3::Bucket
++    Properties:
++      PublicAccessBlockConfiguration:
++        BlockPublicAcls: false"""
+
+        mock_github_api.side_effect = [
+            {
+                'sha': 'head123',
+                'parents': [{'sha': 'base456'}]
+            },
+            {
+                'files': [
+                    {'filename': 'template.yaml', 'patch': template_patch}
+                ]
+            }
+        ]
+
+        result = analyze_template_diff('owner/repo', 'main', 'test-secret')
+
+        assert result.is_safe is False
+        assert result.has_template_changes is True
+        # Should detect all 3 patterns
+        assert len(result.high_risk_findings) == 3
+        assert any('Principal:*' in f for f in result.high_risk_findings)
+        assert any('AuthType:NONE' in f for f in result.high_risk_findings)
+        assert any('BlockPublicAcls' in f for f in result.high_risk_findings)

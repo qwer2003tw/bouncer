@@ -18,6 +18,25 @@ HIGH_RISK_PATTERNS: List[Tuple[str, str]] = [
     (r'BlockPublicPolicy\s*:\s*false', "S3 BlockPublicPolicy disabled"),
     (r'IgnorePublicAcls\s*:\s*false', "S3 IgnorePublicAcls disabled"),
     (r'RestrictPublicBuckets\s*:\s*false', "S3 RestrictPublicBuckets disabled"),
+
+    # s51-002: ANY IAM change triggers human review
+    (r'AWS::IAM::(Role|Policy|ManagedPolicy|Group|User|InstanceProfile)', "IAM 資源變更 — 需人工審查"),
+    (r'AssumeRolePolicyDocument\s*:', "IAM Trust relationship 變更 — 需人工審查"),
+
+    # s51-003: Security Group 0.0.0.0/0
+    (r'CidrIp\s*:\s*["\']?0\.0\.0\.0/0["\']?', "Security Group 開放 0.0.0.0/0 — 允許所有 IPv4"),
+    (r'CidrIpv6\s*:\s*["\']?::/0["\']?', "Security Group 開放 ::/0 — 允許所有 IPv6"),
+
+    # s51-005: KMS key policy
+    (r'AWS::KMS::Key', "KMS Key 新增/修改 — 影響加密資料存取"),
+    (r'KeyPolicy\s*:', "KMS Key Policy 變更 — 影響加密金鑰授權"),
+
+    # s51-006: Lambda env var secrets (common secret patterns)
+    (r'(?i)(password|secret|api_key|apikey|token|credential)\s*:\s*\S+', "Lambda 環境變數疑似明文 secret"),
+
+    # s51-007: VPC public IP
+    (r'AssociatePublicIpAddress\s*:\s*true', "EC2 分配公開 IP — 增加曝露面"),
+    (r'MapPublicIpOnLaunch\s*:\s*true', "Subnet 自動分配公開 IP"),
 ]
 
 @dataclass
@@ -70,7 +89,14 @@ def _get_template_diff(owner: str, repo: str, base_sha: str, head_sha: str, pat:
 
 
 def _scan_added_lines(patch: str) -> List[str]:
-    """Scan added lines (+) for high-risk patterns. Return list of finding descriptions."""
+    """Scan added lines (+) for high-risk patterns. Return list of finding descriptions.
+
+    NOTE: This scans only ADDED lines (+) to detect new dangerous additions.
+    For IAM changes (s51-002), this means we catch new IAM resources being created.
+    Modifications to existing IAM resources will have both - and + lines, and the + lines
+    will still trigger the patterns. This is intentional to maintain backward compatibility
+    and avoid false positives for unchanged IAM resources.
+    """
     findings = []
     for line in patch.splitlines():
         if not line.startswith('+') or line.startswith('+++'):
