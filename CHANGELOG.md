@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.52.0] - 2026-03-16
+
+### Security
+- `src/template_diff_analyzer.py` — 新增 10 個高風險 pattern 偵測：
+  - IAM 資源新增（AWS::IAM::Role/Policy/ManagedPolicy 等）
+  - Trust relationship 變更（AssumeRolePolicyDocument）
+  - Security Group `0.0.0.0/0` / `::/0` 開放
+  - KMS Key 及 KeyPolicy 變更
+  - Lambda 環境變數疑似明文 secret（password/token/api_key 等）
+  - VPC/Subnet 公開 IP 設定（AssociatePublicIpAddress/MapPublicIpOnLaunch）
+
+### Tests
+- 19 tests in `tests/test_template_diff_analyzer.py`
+
 ## [3.51.0] - 2026-03-16
 
 ### Security
