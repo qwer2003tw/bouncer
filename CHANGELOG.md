@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.48.0] - 2026-03-16
+
+### Added
+- `src/commands.py` + `src/mcp_execute.py` + `src/tool_schema.py` + `bouncer_mcp.py` — `bouncer_execute` 新增 `cli_input_json` 參數，將 dict 寫入 tempfile 並以 `--cli-input-json file://` 傳給 AWS CLI，完全繞過 shell 引號問題。支援含中文、換行、巢狀引號的 JSON 值 (#129 #130)
+
+### Tests
+- 8 new tests in `tests/test_cli_input_json_s48.py`
+
 ## [3.47.0] - 2026-03-16
 
 ### Added
