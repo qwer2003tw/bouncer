@@ -1001,7 +1001,7 @@ class TestExecuteCommandChain:
         outputs = ['output1', 'output2']
         call_log = []
 
-        def fake_executor(cmd, role):
+        def fake_executor(cmd, role, cli_input_json=None):
             call_log.append(cmd)
             return outputs.pop(0)
 
@@ -1017,7 +1017,7 @@ class TestExecuteCommandChain:
 
         call_log = []
 
-        def fake_executor(cmd, role):
+        def fake_executor(cmd, role, cli_input_json=None):
             call_log.append(cmd)
             if 'fail' in cmd:
                 return 'error output\n\n(exit code: 1)'
@@ -1035,7 +1035,7 @@ class TestExecuteCommandChain:
 
         call_log = []
 
-        def fake_executor(cmd, role):
+        def fake_executor(cmd, role, cli_input_json=None):
             call_log.append(cmd)
             if cmd == 'aws s3 ls':
                 return '❌ 只能執行 aws CLI 命令'
@@ -1052,7 +1052,7 @@ class TestExecuteCommandChain:
 
         call_log = []
 
-        def fake_executor(cmd, role):
+        def fake_executor(cmd, role, cli_input_json=None):
             call_log.append(cmd)
             if 'middle' in cmd:
                 return 'middle failed\n\n(exit code: 2)'
@@ -1071,7 +1071,7 @@ class TestExecuteCommandChain:
 
         role_log = []
 
-        def fake_executor(cmd, role):
+        def fake_executor(cmd, role, cli_input_json=None):
             role_log.append(role)
             return 'ok'
 
@@ -1107,7 +1107,7 @@ class TestExecuteCommandChain:
 
         call_log = []
 
-        def mock_execute_locked(command, assume_role_arn=None):
+        def mock_execute_locked(command, assume_role_arn=None, cli_input_json=None):
             call_log.append(command)
             if command.strip().startswith('aws iam create-user'):
                 return '❌ 只能執行 aws CLI 命令'
@@ -1129,7 +1129,7 @@ class TestExecuteCommandChain:
             'aws sts get-caller-identity': '{"Account":"123456789012"}',
         }
 
-        def mock_execute_locked(command, assume_role_arn=None):
+        def mock_execute_locked(command, assume_role_arn=None, cli_input_json=None):
             return outputs.get(command.strip(), '✅ 命令執行成功（無輸出）')
 
         with patch.object(cmd_mod, '_execute_locked', side_effect=mock_execute_locked):
@@ -1144,7 +1144,7 @@ class TestExecuteCommandChain:
 
         call_log = []
 
-        def mock_execute_locked(command, assume_role_arn=None):
+        def mock_execute_locked(command, assume_role_arn=None, cli_input_json=None):
             call_log.append(command.strip())
             if 'failing-cmd' in command:
                 return 'An error occurred (AccessDenied)\n\n(exit code: 255)'
@@ -1163,7 +1163,7 @@ class TestExecuteCommandChain:
         """Single command (no &&) follows exactly the same path as before."""
         import commands as cmd_mod
 
-        def mock_execute_locked(command, assume_role_arn=None):
+        def mock_execute_locked(command, assume_role_arn=None, cli_input_json=None):
             return 'single-cmd-output'
 
         with patch.object(cmd_mod, '_execute_locked', side_effect=mock_execute_locked):

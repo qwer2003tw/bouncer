@@ -522,7 +522,8 @@ def aws_cli_split(command: str) -> list:
 
 
 def execute_command(command: str, assume_role_arn: str = None,
-                    _executor: Optional[Callable] = None) -> str:
+                    _executor: Optional[Callable] = None,
+                    cli_input_json: dict = None) -> str:
     """執行 AWS CLI 命令，支援 && 串接（thread-safe via _execute_lock）
 
     Args:
@@ -531,6 +532,7 @@ def execute_command(command: str, assume_role_arn: str = None,
         _executor: 可選，用於測試的子命令執行器
                    callable(sub_cmd, assume_role_arn) -> str
                    預設為 None（使用 _execute_locked）
+        cli_input_json: 可選，將此 dict 寫入 tempfile 並以 --cli-input-json file:// 傳入 AWS CLI
 
     Returns:
         命令輸出（成功或錯誤訊息）。
@@ -546,11 +548,11 @@ def execute_command(command: str, assume_role_arn: str = None,
     if len(sub_cmds) == 1:
         with _execute_lock:
             if _executor is not None:
-                return _executor(sub_cmds[0], assume_role_arn)
-            return _execute_locked(sub_cmds[0], assume_role_arn)
+                return _executor(sub_cmds[0], assume_role_arn, cli_input_json)
+            return _execute_locked(sub_cmds[0], assume_role_arn, cli_input_json=cli_input_json)
 
     # Multi-command chain: execute sequentially, stop at first failure
-    chain_result = _execute_chain(sub_cmds, assume_role_arn, _executor)
+    chain_result = _execute_chain(sub_cmds, assume_role_arn, _executor, cli_input_json)
     return chain_result.combined_output if chain_result.all_succeeded else _chain_failure_output(chain_result)
 
 
@@ -591,16 +593,17 @@ def _chain_failure_output(chain_result: CommandChainResult) -> str:
 
 
 def _execute_chain(sub_cmds: List[str], assume_role_arn: Optional[str],
-                   _executor: Optional[Callable] = None) -> CommandChainResult:
+                   _executor: Optional[Callable] = None,
+                   cli_input_json: dict = None) -> CommandChainResult:
     """Execute a list of sub-commands sequentially with && semantics."""
     chain = CommandChainResult()
 
     for idx, cmd in enumerate(sub_cmds):
         with _execute_lock:
             if _executor is not None:
-                output = _executor(cmd, assume_role_arn)
+                output = _executor(cmd, assume_role_arn, cli_input_json)
             else:
-                output = _execute_locked(cmd, assume_role_arn)
+                output = _execute_locked(cmd, assume_role_arn, cli_input_json=cli_input_json)
 
         failed = _is_failed_output(output)
         exit_code = 1 if failed else 0
@@ -625,9 +628,23 @@ def _execute_chain(sub_cmds: List[str], assume_role_arn: Optional[str],
     return chain
 
 
-def _execute_locked(command: str, assume_role_arn: str = None) -> str:
+def _execute_locked(command: str, assume_role_arn: str = None,
+                    cli_input_json: dict = None) -> str:
     """execute_command 的實作，必須在 _execute_lock 持有時呼叫。"""
+    import tempfile as _tempfile
+
+    _cli_input_tmp = None
     try:
+        # Write cli_input_json to tempfile if provided
+        if cli_input_json is not None:
+            with _tempfile.NamedTemporaryFile(
+                mode='w', suffix='.json', delete=False, dir='/tmp', prefix='bouncer_cli_'
+            ) as _f:
+                import json as _json
+                _json.dump(cli_input_json, _f, ensure_ascii=False)
+                _cli_input_tmp = _f.name
+            command = command + f' --cli-input-json file://{_cli_input_tmp}'
+
         # 解析命令字串為 argv list
         args = aws_cli_split(command)
 
@@ -714,3 +731,11 @@ def _execute_locked(command: str, assume_role_arn: str = None) -> str:
         return f'❌ 命令格式錯誤: {str(e)}'
     except Exception as e:  # noqa: BLE001 — fail-closed AWS CLI execution wrapper
         return f'❌ 執行錯誤: {str(e)}'
+    finally:
+        # Cleanup tempfile
+        if _cli_input_tmp:
+            try:
+                import os as _os
+                _os.unlink(_cli_input_tmp)
+            except Exception:  # noqa: BLE001
+                pass

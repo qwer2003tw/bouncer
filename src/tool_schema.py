@@ -42,6 +42,14 @@ MCP_TOOLS = {
                 'grant_id': {
                     'type': 'string',
                     'description': 'Grant Session ID（如果有有效的 grant session，命令將自動執行）'
+                },
+                'cli_input_json': {
+                    'type': 'object',
+                    'description': (
+                        '可選。將此 dict 寫入 tempfile 並以 --cli-input-json file:// 傳入 AWS CLI。'
+                        '用於含特殊字元（中文、換行、巢狀引號）的 JSON 值，完全繞過 shell 引號問題。'
+                        '格式：AWS CLI --cli-input-json 接受的完整請求 JSON object。'
+                    )
                 }
             },
             'required': ['command', 'trust_scope']
@@ -379,6 +387,14 @@ MCP_TOOLS = {
                     'type': 'string',
                     'description': '執行原因（用於 audit log）',
                     'default': 'Grant execute'
+                },
+                'cli_input_json': {
+                    'type': 'object',
+                    'description': (
+                        '可選。將此 dict 寫入 tempfile 並以 --cli-input-json file:// 傳入 AWS CLI。'
+                        '用於含特殊字元（中文、換行、巢狀引號）的 JSON 值，完全繞過 shell 引號問題。'
+                        '格式：AWS CLI --cli-input-json 接受的完整請求 JSON object。'
+                    )
                 }
             },
             'required': ['grant_id', 'command', 'source']
