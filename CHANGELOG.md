@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.49.0] - 2026-03-16
+
+### Fixed
+- `tests/conftest.py` — 移除 `del sys.modules` 迴圈，改用 `importlib.reload` 針對性 reload，減少 xdist worker 競爭
+- `tests/test_notifications_main.py` — `_mock_entities_send` fixture 改用 `mock.patch.object`，thread-safe mock，修復 xdist 並行時 module state 污染問題
+
+### Tests
+- `pytest -n auto --dist=loadscope` 穩定通過（從 flaky 到穩定）
+
 ## [3.48.0] - 2026-03-16
 
 ### Added
