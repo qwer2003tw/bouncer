@@ -867,6 +867,10 @@ def get_deploy_status(deploy_id: str) -> dict:
                         logger.warning("Failed to unpin message (ignored): %s", e, extra={"src_module": "deployer", "operation": "unpin_message", "error": str(e)})
 
         except ClientError as e:
+            # Release lock on ClientError to prevent permanent lockout
+            project_id = record.get('project_id')
+            if project_id:
+                release_lock(project_id)
             logger.error("Error getting execution status: %s", e, extra={"src_module": "deployer", "operation": "get_execution_status", "deploy_id": deploy_id, "error": str(e)})
 
     # Add timing fields to response

@@ -862,3 +862,59 @@ class TestAutoApproveSilentNotification:
         # Command is not on safelist → returns None, no notification
         assert result is None
         mock_silent.assert_not_called()
+
+    @patch('mcp_execute.send_telegram_message_silent')
+    @patch('mcp_execute.execute_command', return_value='Command output')
+    @patch('mcp_execute.extract_exit_code', return_value=0)
+    def test_success_notification_shows_checkmark(self, mock_exit, mock_exec, mock_silent, app_module):
+        """s54-003: Successful command shows ✅ in notification."""
+        from mcp_execute import ExecuteContext, _check_auto_approve
+        ctx = ExecuteContext(
+            req_id='test-req-success',
+            command='aws ec2 describe-instances',
+            reason='test',
+            source='test-bot',
+            account_id='111111111111',
+            account_name='Default',
+            assume_role=None,
+            trust_scope='test-scope',
+            context=None,
+            timeout=30,
+            sync_mode=False,
+            smart_decision=None,
+        )
+        result = _check_auto_approve(ctx)
+        assert result is not None
+        mock_silent.assert_called_once()
+        call_text = mock_silent.call_args[0][0]
+        # Should contain checkmark for success
+        assert '✅' in call_text
+        assert '❌' not in call_text
+
+    @patch('mcp_execute.send_telegram_message_silent')
+    @patch('mcp_execute.execute_command', return_value='Error: command failed')
+    @patch('mcp_execute.extract_exit_code', return_value=1)
+    def test_failed_notification_shows_x_mark(self, mock_exit, mock_exec, mock_silent, app_module):
+        """s54-003: Failed command shows ❌ in notification."""
+        from mcp_execute import ExecuteContext, _check_auto_approve
+        ctx = ExecuteContext(
+            req_id='test-req-failure',
+            command='aws ec2 describe-instances',
+            reason='test',
+            source='test-bot',
+            account_id='111111111111',
+            account_name='Default',
+            assume_role=None,
+            trust_scope='test-scope',
+            context=None,
+            timeout=30,
+            sync_mode=False,
+            smart_decision=None,
+        )
+        result = _check_auto_approve(ctx)
+        assert result is not None
+        mock_silent.assert_called_once()
+        call_text = mock_silent.call_args[0][0]
+        # Should contain X mark for failure
+        assert '❌' in call_text
+        assert '✅' not in call_text
