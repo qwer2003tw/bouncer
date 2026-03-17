@@ -633,13 +633,14 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
                 f"\U0001f3e6 *帳號：* `{ctx.account_id}` ({escape_markdown(ctx.account_name or '')})\n"
                 if ctx.account_id else ""
             )
+            result_emoji = "❌" if is_failed else "✅"
             _notif_text = (
                 f"\u26a1 *自動執行*\n\n"
                 f"\U0001f916 *來源：* {escape_markdown(ctx.source or '(unknown)')}\n"
                 f"{account_line}"
                 f"{reason_line}"
                 f"\U0001f4cb *命令：*\n```\n{ctx.command[:300]}\n```\n\n"
-                f"\u2705 *結果：*\n```\n{result_preview}\n```"
+                f"{result_emoji} *結果：*\n```\n{result_preview}\n```"
             )
             send_telegram_message_silent(_notif_text)
         except Exception:  # noqa: BLE001 — notification is best-effort
