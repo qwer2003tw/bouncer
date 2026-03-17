@@ -172,7 +172,7 @@ class TestTelegramCallbackHandlers:
     
     @patch('app.answer_callback')
     @patch('app.update_message')
-    @patch('callbacks.execute_command')
+    @patch('callbacks_command.execute_command')
     def test_callback_approve_trust(self, mock_execute, mock_update, mock_answer, app_module):
         """批准並建立信任時段"""
         mock_execute.return_value = 'Instance started'
@@ -210,8 +210,8 @@ class TestTelegramCallbackHandlers:
         assert item['status'] == 'approved'
 
     @patch('app.answer_callback')
-    @patch('callbacks.update_message')
-    @patch('callbacks.execute_command')
+    @patch('callbacks_command.update_message')
+    @patch('callbacks_command.execute_command')
     def test_callback_execute_immediate_feedback(self, mock_execute, mock_update, mock_answer, app_module):
         """執行 callback 應在 execute_command 前立即更新訊息 (#117)"""
         mock_execute.return_value = 'Command executed successfully'

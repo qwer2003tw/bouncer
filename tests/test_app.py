@@ -773,7 +773,7 @@ class TestCoverage80Sprint:
     
     @patch('app.update_message')
     @patch('app.answer_callback')
-    @patch('callbacks.execute_command')
+    @patch('callbacks_command.execute_command')
     def test_callback_approve_with_paged_result(self, mock_execute, mock_answer, mock_update, app_module):
         """批准命令並返回分頁結果"""
         # 返回長輸出

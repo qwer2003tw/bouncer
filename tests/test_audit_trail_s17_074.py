@@ -65,11 +65,11 @@ def _put_pending_command(table, request_id, command='aws s3 ls',
 
 class TestAuditTrailApprove:
 
-    @patch('callbacks.execute_command', return_value='s3://bucket/key\n')
-    @patch('callbacks.store_paged_output', return_value={'result': 'ok', 'paged': False})
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
-    @patch('callbacks.send_telegram_message_silent')
+    @patch('callbacks_command.execute_command', return_value='s3://bucket/key\n')
+    @patch('callbacks_command.store_paged_output', return_value={'result': 'ok', 'paged': False})
+    @patch('callbacks_command.answer_callback')
+    @patch('callbacks_command.update_message')
+    @patch('callbacks_command.send_telegram_message_silent')
     def test_approve_writes_audit_fields(
         self, mock_send, mock_update, mock_answer, mock_paged, mock_exec,
         app_module,
@@ -95,11 +95,11 @@ class TestAuditTrailApprove:
         assert 'duration_ms' in item, 'duration_ms missing'
         assert int(item['duration_ms']) >= 0, 'duration_ms should be >= 0: %s' % item['duration_ms']
 
-    @patch('callbacks.execute_command', return_value='output\n')
-    @patch('callbacks.store_paged_output', return_value={'result': 'ok', 'paged': False})
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
-    @patch('callbacks.send_telegram_message_silent')
+    @patch('callbacks_command.execute_command', return_value='output\n')
+    @patch('callbacks_command.store_paged_output', return_value={'result': 'ok', 'paged': False})
+    @patch('callbacks_command.answer_callback')
+    @patch('callbacks_command.update_message')
+    @patch('callbacks_command.send_telegram_message_silent')
     def test_approve_source_ip_empty_when_missing(
         self, mock_send, mock_update, mock_answer, mock_paged, mock_exec,
         app_module,
@@ -135,11 +135,11 @@ class TestAuditTrailApprove:
 
 class TestAuditTrailApprove_FunctionURL:
 
-    @patch('callbacks.execute_command', return_value='result\n')
-    @patch('callbacks.store_paged_output', return_value={'result': 'ok', 'paged': False})
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
-    @patch('callbacks.send_telegram_message_silent')
+    @patch('callbacks_command.execute_command', return_value='result\n')
+    @patch('callbacks_command.store_paged_output', return_value={'result': 'ok', 'paged': False})
+    @patch('callbacks_command.answer_callback')
+    @patch('callbacks_command.update_message')
+    @patch('callbacks_command.send_telegram_message_silent')
     def test_approve_source_ip_function_url_format(
         self, mock_send, mock_update, mock_answer, mock_paged, mock_exec,
         app_module,
@@ -178,8 +178,8 @@ class TestAuditTrailApprove_FunctionURL:
 
 class TestAuditTrailDeny:
 
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
+    @patch('callbacks_command.answer_callback')
+    @patch('callbacks_command.update_message')
     def test_deny_does_not_write_approved_by(
         self, mock_update, mock_answer, app_module,
     ):
@@ -204,11 +204,11 @@ class TestAuditTrailDeny:
 
 class TestAuditTrailDurationMs:
 
-    @patch('callbacks.execute_command', return_value='output\n')
-    @patch('callbacks.store_paged_output', return_value={'result': 'ok', 'paged': False})
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
-    @patch('callbacks.send_telegram_message_silent')
+    @patch('callbacks_command.execute_command', return_value='output\n')
+    @patch('callbacks_command.store_paged_output', return_value={'result': 'ok', 'paged': False})
+    @patch('callbacks_command.answer_callback')
+    @patch('callbacks_command.update_message')
+    @patch('callbacks_command.send_telegram_message_silent')
     def test_duration_ms_is_positive_and_reasonable(
         self, mock_send, mock_update, mock_answer, mock_paged, mock_exec,
         app_module,
@@ -230,11 +230,11 @@ class TestAuditTrailDurationMs:
 
 class TestHandleCommandCallbackDirectly:
 
-    @patch('callbacks.execute_command', return_value='aws output\n')
-    @patch('callbacks.store_paged_output', return_value={'result': 'ok', 'paged': False})
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
-    @patch('callbacks.send_telegram_message_silent')
+    @patch('callbacks_command.execute_command', return_value='aws output\n')
+    @patch('callbacks_command.store_paged_output', return_value={'result': 'ok', 'paged': False})
+    @patch('callbacks_command.answer_callback')
+    @patch('callbacks_command.update_message')
+    @patch('callbacks_command.send_telegram_message_silent')
     def test_source_ip_stored_via_kwarg(
         self, mock_send, mock_update, mock_answer, mock_paged, mock_exec,
         app_module,
@@ -258,11 +258,11 @@ class TestHandleCommandCallbackDirectly:
         assert stored.get('source_ip') == source_ip
         assert str(stored.get('approved_by')) == '999999999'
 
-    @patch('callbacks.execute_command', return_value='output\n')
-    @patch('callbacks.store_paged_output', return_value={'result': 'ok', 'paged': False})
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
-    @patch('callbacks.send_telegram_message_silent')
+    @patch('callbacks_command.execute_command', return_value='output\n')
+    @patch('callbacks_command.store_paged_output', return_value={'result': 'ok', 'paged': False})
+    @patch('callbacks_command.answer_callback')
+    @patch('callbacks_command.update_message')
+    @patch('callbacks_command.send_telegram_message_silent')
     def test_source_ip_default_empty(
         self, mock_send, mock_update, mock_answer, mock_paged, mock_exec,
         app_module,

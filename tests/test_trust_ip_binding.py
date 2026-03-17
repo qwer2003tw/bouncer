@@ -137,11 +137,12 @@ class TestShouldTrustApproveIPMismatch:
         assert len(ip_warnings) == 0
 
     def test_ip_mismatch_emits_warning_but_still_approves(self):
-        """When IPs differ, warning is logged but session is NOT blocked."""
+        """When IPs differ, warning is logged but session is NOT blocked (in warn mode)."""
         import trust as _trust_module
         item = _make_session_item(creator_ip='203.0.113.1')
         with patch.object(_trust_module, 'logger') as mock_logger, \
-             patch('metrics.emit_metric', MagicMock()):
+             patch('metrics.emit_metric', MagicMock()), \
+             patch.object(_trust_module, 'TRUST_IP_BINDING_MODE', 'warn'):
             should_approve, _, _ = _run_should_trust(item, caller_ip='10.4.150.40')
 
         assert should_approve is True
@@ -150,7 +151,7 @@ class TestShouldTrustApproveIPMismatch:
         assert len(ip_warnings) >= 1
 
     def test_ip_mismatch_emits_metric(self):
-        """When IPs differ, TrustIPMismatch metric is emitted."""
+        """When IPs differ, TrustIPMismatch metric is emitted (in warn mode)."""
         import trust as _trust_module
         item = _make_session_item(creator_ip='203.0.113.1')
 
@@ -158,7 +159,8 @@ class TestShouldTrustApproveIPMismatch:
         def capture(*args, **kwargs):
             emitted.append({'args': args, 'kwargs': kwargs})
 
-        with patch('metrics.emit_metric', side_effect=capture):
+        with patch('metrics.emit_metric', side_effect=capture), \
+             patch.object(_trust_module, 'TRUST_IP_BINDING_MODE', 'warn'):
             should_approve, _, _ = _run_should_trust(item, caller_ip='10.4.150.40')
 
         assert should_approve is True
@@ -281,3 +283,47 @@ class TestTrustIPBindingModes:
 
         # Should behave like warn mode: allow the request
         assert should_approve is True
+
+
+# ---------------------------------------------------------------------------
+# Test: s54-002 regression - _check_trust_session passes caller_ip
+# ---------------------------------------------------------------------------
+
+class TestTrustSessionPassesCallerIP:
+    """Regression test for s54-002: verify caller_ip is passed to should_trust_approve."""
+
+    def test_check_trust_session_passes_caller_ip(self):
+        """_check_trust_session should pass ctx.caller_ip to should_trust_approve."""
+        import mcp_execute
+        from mcp_execute import ExecuteContext, _check_trust_session
+
+        # Create ExecuteContext with caller_ip
+        ctx = ExecuteContext(
+            req_id='test-req-001',
+            command='aws s3 ls',
+            reason='test',
+            source='Private Bot',
+            trust_scope='private-bot-main',
+            context=None,
+            account_id='190825685292',
+            account_name='Default',
+            assume_role=None,
+            timeout=120,
+            sync_mode=False,
+            caller_ip='10.0.0.1',
+        )
+
+        # Mock should_trust_approve to capture its arguments
+        mock_should_trust_approve = MagicMock(return_value=(False, None, 'not trusted'))
+
+        with patch.object(mcp_execute, 'should_trust_approve', mock_should_trust_approve):
+            _check_trust_session(ctx)
+
+        # Verify should_trust_approve was called with caller_ip
+        mock_should_trust_approve.assert_called_once()
+        call_args = mock_should_trust_approve.call_args
+        assert call_args[0][0] == 'aws s3 ls'  # command
+        assert call_args[0][1] == 'private-bot-main'  # trust_scope
+        assert call_args[0][2] == '190825685292'  # account_id
+        assert call_args[1]['source'] == 'Private Bot'  # source kwarg
+        assert call_args[1]['caller_ip'] == '10.0.0.1'  # caller_ip kwarg

@@ -56,7 +56,7 @@ class TestTelegramWebhook:
     
     @patch('app.update_message')
     @patch('app.answer_callback')
-    @patch('callbacks.execute_command')
+    @patch('callbacks_command.execute_command')
     def test_approve_callback(self, mock_execute, mock_answer, mock_update, app_module):
         """測試審批通過 callback"""
         mock_execute.return_value = 'Done'
@@ -600,11 +600,11 @@ class TestHandleCommandCallbackShowAlert:
             'created_at': int(_time.time()),
         })
 
-        with patch('callbacks.answer_callback') as mock_answer, \
-             patch('callbacks.update_message'), \
-             patch('callbacks.execute_command') as mock_exec, \
-             patch('callbacks.store_paged_output') as mock_paged, \
-             patch('callbacks.emit_metric'):
+        with patch('callbacks_command.answer_callback') as mock_answer, \
+             patch('callbacks_command.update_message'), \
+             patch('callbacks_command.execute_command') as mock_exec, \
+             patch('callbacks_command.store_paged_output') as mock_paged, \
+             patch('callbacks_command.emit_metric'):
             mock_exec.return_value = 'Role deleted'
             from paging import PaginatedOutput
             mock_paged.return_value = PaginatedOutput(
@@ -647,11 +647,11 @@ class TestHandleCommandCallbackShowAlert:
             'created_at': int(_time.time()),
         })
 
-        with patch('callbacks.answer_callback') as mock_answer, \
-             patch('callbacks.update_message'), \
-             patch('callbacks.execute_command') as mock_exec, \
-             patch('callbacks.store_paged_output') as mock_paged, \
-             patch('callbacks.emit_metric'):
+        with patch('callbacks_command.answer_callback') as mock_answer, \
+             patch('callbacks_command.update_message'), \
+             patch('callbacks_command.execute_command') as mock_exec, \
+             patch('callbacks_command.store_paged_output') as mock_paged, \
+             patch('callbacks_command.emit_metric'):
             mock_exec.return_value = 'bucket-list'
             from paging import PaginatedOutput
             mock_paged.return_value = PaginatedOutput(
