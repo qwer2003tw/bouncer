@@ -184,7 +184,7 @@ class TestOTPCommandCallback:
             'risk_score': 20,  # Low risk
         })
 
-        with patch('callbacks_command.execute_command', return_value='s3://bucket') as mock_exec, \
+        with patch('callbacks_command._execute_and_store_result', return_value={'result': 's3://bucket', 'paged': {'paged': False}}) as mock_exec, \
              patch('callbacks_command.store_paged_output', return_value={'paged': False, 'result': 's3://bucket', 'page': 1, 'total_pages': 1, 'output_length': 12}), \
              patch('callbacks_command.answer_callback'), \
              patch('callbacks_command.update_message'), \
