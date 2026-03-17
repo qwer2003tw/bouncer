@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.55.0] - 2026-03-17
+
+### Security
+- `src/otp.py` — 新增 OTP 二次驗證模組（6位數，5分鐘TTL，3次失敗鎖定）
+- `src/callbacks_command.py` — risk_score ≥ 66 的命令審批前要求 OTP 確認
+- `src/telegram_commands.py` — 新增 `/otp {code}` 指令
+
+### Refactored
+- `src/callbacks_upload.py` — 從 callbacks.py 抽出 upload callbacks（Phase 3）；callbacks.py 1294 → 910 行
+
 ## [3.54.1] - 2026-03-17
 
 ### Fixed
