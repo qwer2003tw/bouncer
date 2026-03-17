@@ -185,6 +185,7 @@ class ExecuteContext:
     assume_role: Optional[str]
     timeout: int
     sync_mode: bool
+    caller_ip: str = ''  # IP address of the caller (from Lambda event)
     smart_decision: object = None  # smart_approval result (or None)
     mode: str = 'mcp'
     grant_id: Optional[str] = None
@@ -277,6 +278,7 @@ def _parse_execute_request(req_id, arguments: dict) -> 'dict | ExecuteContext':
         assume_role=assume_role,
         timeout=timeout,
         sync_mode=sync_mode,
+        caller_ip=arguments.get('caller_ip', ''),
         grant_id=arguments.get('grant_id', None),
         cli_input_json=arguments.get('cli_input_json') or None,
     )
@@ -730,7 +732,7 @@ def _check_rate_limit(ctx: ExecuteContext) -> Optional[dict]:
 def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
     """Trust session auto-approve — execute if trusted."""
     should_trust, trust_session, trust_reason = should_trust_approve(
-        ctx.command, ctx.trust_scope, ctx.account_id
+        ctx.command, ctx.trust_scope, ctx.account_id, source=ctx.source or '', caller_ip=ctx.caller_ip
     )
     if not (should_trust and trust_session):
         return None

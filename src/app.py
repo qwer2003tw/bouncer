@@ -465,6 +465,13 @@ def handle_mcp_request(event) -> dict:
     if get_header(headers, 'x-approval-secret') != REQUEST_SECRET:
         return mcp_error(None, -32600, 'Invalid secret')
 
+    # Extract caller_ip from API Gateway event for trust session IP binding
+    caller_ip = (
+        event.get('requestContext', {}).get('identity', {}).get('sourceIp', '')
+        or event.get('requestContext', {}).get('http', {}).get('sourceIp', '')
+        or ''
+    )
+
     # 解析 JSON-RPC
     try:
         body = json.loads(event.get('body', '{}'))
@@ -506,7 +513,7 @@ def handle_mcp_request(event) -> dict:
     elif method == 'tools/call':
         tool_name = params.get('name', '')
         arguments = params.get('arguments', {})
-        return handle_mcp_tool_call(req_id, tool_name, arguments)
+        return handle_mcp_tool_call(req_id, tool_name, arguments, caller_ip)
 
     else:
         return mcp_error(req_id, -32601, f'Method not found: {method}')
@@ -565,10 +572,14 @@ def _get_deployer_handler(tool_name: str):
     }[tool_name]
 
 
-def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict) -> dict:
+def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict, caller_ip: str = '') -> dict:
     """處理 MCP tool 呼叫"""
     emit_metric('Bouncer', 'ToolCall', 1, dimensions={'ToolName': tool_name})
     send_chat_action('typing')
+
+    # Inject caller_ip into arguments for trust session IP binding
+    if caller_ip:
+        arguments = {**arguments, 'caller_ip': caller_ip}
 
     # Standard tool handlers
     handler = TOOL_HANDLERS.get(tool_name)

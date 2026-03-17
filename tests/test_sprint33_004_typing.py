@@ -115,12 +115,12 @@ class TestTypingOnApprove:
 
             cb_mod = _reload_callbacks(table)
 
-            with patch('callbacks.send_chat_action') as mock_typing, \
-                 patch('callbacks.answer_callback'), \
-                 patch('callbacks.update_message'), \
-                 patch('callbacks.execute_command', return_value='result') as mock_exec, \
-                 patch('callbacks.store_paged_output', return_value=_make_paged_output()), \
-                 patch('callbacks.emit_metric'):
+            with patch('callbacks_command.send_chat_action') as mock_typing, \
+                 patch('callbacks_command.answer_callback'), \
+                 patch('callbacks_command.update_message'), \
+                 patch('callbacks_command.execute_command', return_value='result') as mock_exec, \
+                 patch('callbacks_command.store_paged_output', return_value=_make_paged_output()), \
+                 patch('callbacks_command.emit_metric'):
 
                 cb_mod.handle_command_callback(
                     'approve', req_id,
@@ -145,13 +145,13 @@ class TestTypingOnApprove:
 
             cb_mod = _reload_callbacks(table)
 
-            with patch('callbacks.send_chat_action') as mock_typing, \
-                 patch('callbacks.answer_callback'), \
-                 patch('callbacks.update_message'), \
-                 patch('callbacks.execute_command', return_value='result') as mock_exec, \
-                 patch('callbacks.store_paged_output', return_value=_make_paged_output()), \
-                 patch('callbacks.emit_metric'), \
-                 patch('callbacks._handle_trust_session', return_value=''):
+            with patch('callbacks_command.send_chat_action') as mock_typing, \
+                 patch('callbacks_command.answer_callback'), \
+                 patch('callbacks_command.update_message'), \
+                 patch('callbacks_command.execute_command', return_value='result') as mock_exec, \
+                 patch('callbacks_command.store_paged_output', return_value=_make_paged_output()), \
+                 patch('callbacks_command.emit_metric'), \
+                 patch('callbacks_command._handle_trust_session', return_value=''):
 
                 cb_mod.handle_command_callback(
                     'approve_trust', req_id,
@@ -181,11 +181,11 @@ class TestNoTypingOnDeny:
 
             cb_mod = _reload_callbacks(table)
 
-            with patch('callbacks.send_chat_action') as mock_typing, \
-                 patch('callbacks.answer_callback'), \
-                 patch('callbacks.update_message'), \
-                 patch('callbacks.execute_command') as mock_exec, \
-                 patch('callbacks.emit_metric'):
+            with patch('callbacks_command.send_chat_action') as mock_typing, \
+                 patch('callbacks_command.answer_callback'), \
+                 patch('callbacks_command.update_message'), \
+                 patch('callbacks_command.execute_command') as mock_exec, \
+                 patch('callbacks_command.emit_metric'):
 
                 cb_mod.handle_command_callback(
                     'deny', req_id,
@@ -217,12 +217,12 @@ class TestTypingExceptionIsBestEffort:
 
             cb_mod = _reload_callbacks(table)
 
-            with patch('callbacks.send_chat_action', side_effect=Exception('Telegram unavailable')) as mock_typing, \
-                 patch('callbacks.answer_callback'), \
-                 patch('callbacks.update_message'), \
-                 patch('callbacks.execute_command', return_value='result') as mock_exec, \
-                 patch('callbacks.store_paged_output', return_value=_make_paged_output()), \
-                 patch('callbacks.emit_metric'):
+            with patch('callbacks_command.send_chat_action', side_effect=Exception('Telegram unavailable')) as mock_typing, \
+                 patch('callbacks_command.answer_callback'), \
+                 patch('callbacks_command.update_message'), \
+                 patch('callbacks_command.execute_command', return_value='result') as mock_exec, \
+                 patch('callbacks_command.store_paged_output', return_value=_make_paged_output()), \
+                 patch('callbacks_command.emit_metric'):
 
                 # Should not raise
                 cb_mod.handle_command_callback(
