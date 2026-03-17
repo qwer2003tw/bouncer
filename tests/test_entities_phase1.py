@@ -24,6 +24,9 @@ from unittest.mock import patch, MagicMock, call
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 import pytest
 
+import pytest
+pytestmark = pytest.mark.xdist_group("app_module")
+
 
 os.environ.setdefault('TELEGRAM_BOT_TOKEN', 'test-token')
 os.environ.setdefault('TELEGRAM_CHAT_ID', '-1234567890')
