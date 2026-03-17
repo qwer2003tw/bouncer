@@ -151,7 +151,7 @@ def analyze_changeset(
     cfn_client,
     stack_name: str,
     changeset_name: str,
-    max_wait: int = 60,
+    max_wait: int = 120,
     poll_interval: int = 2,
 ) -> AnalysisResult:
     """Poll DescribeChangeSet until CREATE_COMPLETE, FAILED, or timeout.
