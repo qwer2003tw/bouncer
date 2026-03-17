@@ -18,7 +18,7 @@ os.environ.setdefault('TELEGRAM_CHAT_ID', '-1234567890')
 os.environ.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
 
 import pytest
-pytestmark = pytest.mark.xdist_group("app_module")
+pytestmark = pytest.mark.xdist_group("otp")
 
 
 def _create_mock_table(dynamodb):
