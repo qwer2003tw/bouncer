@@ -17,6 +17,9 @@ import boto3
 import pytest
 from moto import mock_aws
 
+import pytest
+pytestmark = pytest.mark.xdist_group("app_module")
+
 # Set required env vars BEFORE importing any src modules
 os.environ.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
 os.environ.setdefault('DEFAULT_ACCOUNT_ID', '190825685292')

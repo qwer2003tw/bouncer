@@ -8,6 +8,9 @@ from decimal import Decimal
 from moto import mock_aws
 import boto3
 
+import pytest
+pytestmark = pytest.mark.xdist_group("app_module")
+
 
 
 
