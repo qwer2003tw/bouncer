@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.54.0] - 2026-03-17
+
+### Fixed
+- `src/deployer.py` — deploy lock 在 `get_execution_status` ClientError 時未釋放，導致後續所有 deploy 被卡住（s54-001）
+- `src/mcp_execute.py` — `_check_auto_approve` 通知永遠顯示 ✅，改為根據 exit code 顯示 ❌/✅（s54-003）
+
+### Security
+- `src/constants.py` + `src/mcp_execute.py` — Trust Session IP binding：`_check_trust_session` 現在傳遞 `caller_ip` 給 `should_trust_approve()`；`TRUST_IP_BINDING_MODE` 預設從 `warn` 改為 `strict`（s54-002）
+
+### Refactored
+- `src/callbacks_command.py` 新建：從 `callbacks.py` 抽出 `handle_command_callback` 及 7 個輔助函數（Phase 2 拆分）；callbacks.py 從 1804 → 1294 行（s54-005）
+- `src/aws_clients.py` — 確認無 raw `boto3.client('s3')` 殘留於 aws_clients.py 外（s54-004）
+
 ## [3.53.0] - 2026-03-17
 
 ### Changed
