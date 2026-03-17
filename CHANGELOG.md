@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.53.0] - 2026-03-17
+
+### Changed
+- `src/tool_schema.py` + `src/app.py` + `bouncer_mcp.py` — 移除已 deprecated 的 `bouncer_deploy_frontend` tool（由 `bouncer_request_frontend_presigned` + `bouncer_confirm_frontend_deploy` 取代）
+- `src/callbacks_grant.py` — 新建，從 `callbacks.py` 抽出 `handle_grant_approve/deny` 函數（Phase 1 拆分）
+- `src/callbacks.py` — 從 1900 行縮減至 1804 行
+
 ## [3.52.0] - 2026-03-16
 
 ### Security
