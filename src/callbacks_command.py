@@ -18,7 +18,7 @@ from paging import store_paged_output
 from trust import create_trust_session, track_command_executed, increment_trust_command_count
 from telegram import escape_markdown, update_message, answer_callback, send_telegram_message_silent, send_chat_action
 from notifications import send_trust_auto_approve_notification
-from constants import DEFAULT_ACCOUNT_ID, RESULT_TTL, TRUST_SESSION_MAX_UPLOADS, TRUST_SESSION_MAX_COMMANDS
+from constants import DEFAULT_ACCOUNT_ID, RESULT_TTL, TRUST_SESSION_MAX_UPLOADS, TRUST_SESSION_MAX_COMMANDS, OTP_RISK_THRESHOLD
 from metrics import emit_metric
 
 # DynamoDB tables from db.py (no circular dependency)
@@ -533,6 +533,44 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         return response(200, {'ok': True})
 
     if action in ('approve', 'approve_trust'):
+        # Check if OTP required (risk_score >= threshold, non-trust approve only, not already verified)
+        if action == 'approve' and not item.get('otp_verified'):
+            risk_score = int(item.get('risk_score', 0))
+            if risk_score >= OTP_RISK_THRESHOLD:
+                from otp import generate_otp, create_otp_record
+                from telegram import send_telegram_message_to
+
+                otp_code = generate_otp()
+                create_otp_record(request_id, user_id, otp_code, message_id)
+
+                try:
+                    send_telegram_message_to(
+                        user_id,
+                        f"🔐 *Bouncer OTP 驗證碼*\n\n"
+                        f"命令：`{command[:100]}`\n\n"
+                        f"驗證碼：`{otp_code}`\n\n"
+                        f"⏰ 有效期：5 分鐘\n"
+                        f"輸入：`/otp {otp_code}` 確認執行",
+                        parse_mode='Markdown'
+                    )
+                except Exception as e:
+                    logger.warning("Failed to send OTP DM: %s", e)
+                    # If can't send DM, abort and inform
+                    answer_callback(callback_id, '❌ 無法發送 OTP，請確認 Bot DM 未被封鎖')
+                    update_message(message_id, f"❌ *OTP 發送失敗*\n\n`{request_id}`\n\n請確認已開啟 Bot DM，然後重新審批", remove_buttons=True)
+                    return response(200, {'ok': True})
+
+                answer_callback(callback_id, '🔐 OTP 已發送至 DM，請在 5 分鐘內確認')
+                update_message(
+                    message_id,
+                    f"⏳ *等待 OTP 驗證*\n\n"
+                    f"📋 *請求 ID：* `{request_id}`\n"
+                    f"🔐 *OTP 已發送至 DM*\n\n"
+                    f"請輸入：`/otp XXXXXX`",
+                    remove_buttons=True,
+                )
+                return response(200, {'ok': True})
+
         if is_dangerous(command):
             answer_callback(callback_id, '⚠️ 高危操作確認：正在執行...', show_alert=True)
         elif action == 'approve_trust':
