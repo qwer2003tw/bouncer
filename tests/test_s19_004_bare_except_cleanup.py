@@ -126,18 +126,18 @@ class TestLoggingPresentAfterRefactor:
     """Verify logging calls are present in the fixed locations."""
 
     def test_callbacks_staging_cleanup_uses_logger(self):
-        """logger.warning call present in callbacks.py after staging cleanup."""
-        with open(_src('callbacks.py')) as f:
+        """logger.warning call present in callbacks_upload.py after staging cleanup."""
+        with open(_src('callbacks_upload.py')) as f:
             content = f.read()
         assert 'UPLOAD-BATCH] Staging cleanup failed' in content, \
-            "Expected logger.warning for staging cleanup in callbacks.py"
+            "Expected logger.warning for staging cleanup in callbacks_upload.py"
 
     def test_callbacks_upload_batch_progress_uses_logger(self):
-        """logger.warning call present in callbacks.py after upload-batch progress failure."""
-        with open(_src('callbacks.py')) as f:
+        """logger.warning call present in callbacks_upload.py after upload-batch progress failure."""
+        with open(_src('callbacks_upload.py')) as f:
             content = f.read()
         assert 'UPLOAD-BATCH] Progress update failed at step' in content, \
-            "Expected logger.warning for progress update failure in callbacks.py"
+            "Expected logger.warning for progress update failure in callbacks_upload.py"
 
     def test_callbacks_deploy_frontend_progress_uses_logger(self):
         """logger.warning call present in callbacks.py after deploy-frontend progress failure."""
