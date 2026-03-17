@@ -626,11 +626,11 @@ class TestNoPaginationAutoPush:
 
         large_output = 'EC2 instance\n' * 1000  # large output
 
-        with patch('callbacks.answer_callback'), \
-             patch('callbacks.update_message'), \
-             patch('callbacks.execute_command') as mock_exec, \
-             patch('callbacks.emit_metric'), \
-             patch('callbacks.send_telegram_message_silent') as mock_silent:
+        with patch('callbacks_command.answer_callback'), \
+             patch('callbacks_command.update_message'), \
+             patch('callbacks_command.execute_command') as mock_exec, \
+             patch('callbacks_command.emit_metric'), \
+             patch('callbacks_command.send_telegram_message_silent') as mock_silent:
             mock_exec.return_value = large_output
 
             from callbacks import handle_command_callback

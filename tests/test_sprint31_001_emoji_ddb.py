@@ -41,9 +41,9 @@ class TestFormatApprovalResponseEmoji:
         """When _is_execute_failed returns True, title should contain ❌."""
         failed_output = "usage: aws s3 ls <S3Uri>"  # exit code 2
 
-        with patch('callbacks.send_telegram_message_silent') as mock_send, \
-             patch('callbacks.update_message') as mock_update:
-            from callbacks import _format_approval_response
+        with patch('callbacks_command.send_telegram_message_silent') as mock_send, \
+             patch('callbacks_command.update_message') as mock_update:
+            from callbacks_command import _format_approval_response
             _format_approval_response(
                 action='approve',
                 result=failed_output,
@@ -66,9 +66,9 @@ class TestFormatApprovalResponseEmoji:
         """When _is_execute_failed returns False, title should contain ✅."""
         success_output = "s3://bucket1\ns3://bucket2"
 
-        with patch('callbacks.send_telegram_message_silent') as mock_send, \
-             patch('callbacks.update_message') as mock_update:
-            from callbacks import _format_approval_response
+        with patch('callbacks_command.send_telegram_message_silent') as mock_send, \
+             patch('callbacks_command.update_message') as mock_update:
+            from callbacks_command import _format_approval_response
             _format_approval_response(
                 action='approve',
                 result=success_output,
@@ -91,9 +91,9 @@ class TestFormatApprovalResponseEmoji:
         """approve_trust action with failed command → title has ❌ + 🔓."""
         failed_output = "❌ Access Denied (exit code: 1)"
 
-        with patch('callbacks.send_telegram_message_silent') as mock_send, \
-             patch('callbacks.update_message') as mock_update:
-            from callbacks import _format_approval_response
+        with patch('callbacks_command.send_telegram_message_silent') as mock_send, \
+             patch('callbacks_command.update_message') as mock_update:
+            from callbacks_command import _format_approval_response
             _format_approval_response(
                 action='approve_trust',
                 result=failed_output,
@@ -131,11 +131,11 @@ class TestExecuteAndStoreResultCommandStatus:
         mock_table, mock_paged = self._setup_mocks()
         failed_output = "Command failed (exit code: 2)"
 
-        with patch('callbacks._get_table', return_value=mock_table), \
-             patch('callbacks.execute_command', return_value=failed_output), \
-             patch('callbacks.store_paged_output', return_value=mock_paged), \
-             patch('callbacks.emit_metric'):
-            from callbacks import _execute_and_store_result
+        with patch('callbacks_command._get_table', return_value=mock_table), \
+             patch('callbacks_command.execute_command', return_value=failed_output), \
+             patch('callbacks_command.store_paged_output', return_value=mock_paged), \
+             patch('callbacks_command.emit_metric'):
+            from callbacks_command import _execute_and_store_result
             result = _execute_and_store_result(
                 command='aws s3 ls bad-syntax',
                 assume_role='',
@@ -158,11 +158,11 @@ class TestExecuteAndStoreResultCommandStatus:
         mock_table, mock_paged = self._setup_mocks()
         success_output = "s3://my-bucket\n"
 
-        with patch('callbacks._get_table', return_value=mock_table), \
-             patch('callbacks.execute_command', return_value=success_output), \
-             patch('callbacks.store_paged_output', return_value=mock_paged), \
-             patch('callbacks.emit_metric'):
-            from callbacks import _execute_and_store_result
+        with patch('callbacks_command._get_table', return_value=mock_table), \
+             patch('callbacks_command.execute_command', return_value=success_output), \
+             patch('callbacks_command.store_paged_output', return_value=mock_paged), \
+             patch('callbacks_command.emit_metric'):
+            from callbacks_command import _execute_and_store_result
             _execute_and_store_result(
                 command='aws s3 ls',
                 assume_role='',
@@ -189,7 +189,7 @@ class TestTrustCallbackCommandStatus:
         """The trust_callback DDB update_item must include command_status = :cs."""
         import re
         # Read the callbacks source and verify the UpdateExpression includes command_status
-        src_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'callbacks.py')
+        src_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'callbacks_command.py')
         with open(src_path) as f:
             source = f.read()
 

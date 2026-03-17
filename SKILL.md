@@ -942,3 +942,7 @@ mcporter call bouncer bouncer_help command="batch-deploy"
 ## CloudFormation Stacks
 - `clawdbot-bouncer` - 主要 Bouncer
 - `bouncer-deployer` - SAM Deployer 基礎建設
+
+## Sprint 54 변경사항 (2026-03-17)
+- Trust Session IP binding: `TRUST_IP_BINDING_MODE` 기본값 `warn` → `strict`. `_check_trust_session()`에서 `caller_ip` 전달됨
+- `src/callbacks_command.py` 생성: `handle_command_callback` + 관련 함수들 이동 (callbacks.py Phase 2 리팩토링)

@@ -33,10 +33,11 @@ def _get_table():
 
 def _is_execute_failed(output: str) -> bool:
     """判斷 execute_command 輸出是否代表失敗。
-
-    透過檢查輸出是否包含錯誤標記 "An error occurred" 來判定。
+    支援：❌ prefix（Bouncer 格式）和 (exit code: N) 格式（AWS CLI 直接輸出）。
     """
-    return 'An error occurred' in output
+    from utils import extract_exit_code
+    code = extract_exit_code(output)
+    return code is not None and code != 0
 
 
 def _update_request_status(table, request_id: str, status: str, approver: str, extra_attrs: dict = None) -> None:
