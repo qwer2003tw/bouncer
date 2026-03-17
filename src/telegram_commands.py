@@ -58,6 +58,16 @@ def handle_telegram_command(message: dict) -> dict:
                 pass
         return handle_stats_command(chat_id, hours=hours)
 
+    # /otp {code} - OTP 驗證
+    if text.startswith('/otp ') or text.startswith('/otp@'):
+        parts = text.split()
+        if len(parts) >= 2:
+            code = parts[1].strip()
+            return handle_otp_command(chat_id, user_id, code)
+        else:
+            send_telegram_message_to(chat_id, "❌ 用法：/otp {驗證碼}\n範例：/otp 123456")
+            return response(200, {'ok': True})
+
     # /help - 顯示指令列表
     if text == '/help' or text.startswith('/help@') or text == '/start' or text.startswith('/start@'):
         return handle_help_command(chat_id)
@@ -251,6 +261,61 @@ def handle_stats_command(chat_id: str, hours: int = 24) -> dict:
     return response(200, {'ok': True})
 
 
+def handle_otp_command(chat_id: str, user_id: str, provided_code: str) -> dict:
+    """處理 /otp {code} 指令 — OTP 二次驗證"""
+    from otp import get_pending_otp, validate_otp
+
+    # Find pending OTP for this user
+    otp_record = get_pending_otp(user_id)
+    if not otp_record:
+        send_telegram_message_to(chat_id, "❌ 沒有待驗證的 OTP，或 OTP 已過期")
+        return response(200, {'ok': True})
+
+    # Extract original request_id (strip 'otp#' prefix)
+    full_key = otp_record['request_id']
+    original_request_id = otp_record.get('original_request_id') or full_key[len('otp#'):]
+
+    success, msg = validate_otp(original_request_id, provided_code)
+
+    if not success:
+        send_telegram_message_to(chat_id, f"❌ {msg}")
+        return response(200, {'ok': True})
+
+    # OTP valid - retrieve original request and execute
+    send_telegram_message_to(chat_id, f"✅ {msg}，正在執行命令...")
+
+    # Get the original pending item from DDB
+    table = _get_table()
+    try:
+        item = table.get_item(Key={'request_id': original_request_id}).get('Item')
+    except Exception as e:
+        logger.error("Failed to get original request: %s", e, extra={"src_module": "telegram_commands", "operation": "handle_otp", "request_id": original_request_id})
+        send_telegram_message_to(chat_id, f"❌ 找不到原始請求：{original_request_id}")
+        return response(200, {'ok': True})
+
+    if not item:
+        send_telegram_message_to(chat_id, "❌ 原始審批請求已過期")
+        return response(200, {'ok': True})
+
+    # Mark item as OTP verified and re-invoke handle_command_callback
+    item['otp_verified'] = True
+
+    from callbacks_command import handle_command_callback
+    message_id = int(otp_record.get('message_id', 0))
+
+    # Execute the command by calling handle_command_callback with otp_verified=True
+    handle_command_callback(
+        action='approve',
+        request_id=original_request_id,
+        item=item,
+        message_id=message_id,
+        callback_id='',  # No callback_id for /otp command path
+        user_id=user_id,
+    )
+
+    return response(200, {'ok': True})
+
+
 def handle_help_command(chat_id: str) -> dict:
     """處理 /help 指令"""
     text = """🔐 Bouncer Commands
@@ -259,6 +324,7 @@ def handle_help_command(chat_id: str) -> dict:
 /trust - 列出信任時段
 /pending - 列出待審批請求
 /stats [hours] - 統計資訊（預設 24h）
+/otp {code} - OTP 二次驗證（用於高風險命令）
 /help - 顯示此說明"""
 
     send_telegram_message_to(chat_id, text, parse_mode=None)
