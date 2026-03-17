@@ -30,15 +30,19 @@ from callbacks_grant import (  # noqa: F401
 )
 
 # Command callbacks extracted to separate module (Sprint 54 Phase 2)
-from callbacks_command import (  # noqa: F401
+from callbacks_command import (  # noqa: F401,F811
     handle_command_callback,
     _parse_command_callback_request,
     _format_command_info,
     _execute_and_store_result,
+    _auto_execute_pending_requests,
     _handle_trust_session,
     _format_approval_response,
     _handle_deny_callback,
 )
+# Re-export for backward compat with tests patching callbacks.X
+from commands import execute_command  # noqa: F401
+from paging import store_paged_output  # noqa: F401
 
 
 # DynamoDB tables from db.py (no circular dependency)

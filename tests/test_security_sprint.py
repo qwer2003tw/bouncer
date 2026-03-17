@@ -578,18 +578,21 @@ class TestSEC013AutoExecutePendingCompliance:
 
             import importlib
             import src.callbacks as cb_mod
+            import src.callbacks_command as cb_cmd_mod
             import src.db as db_mod
             importlib.reload(cb_mod)
+            importlib.reload(cb_cmd_mod)
             db_mod.table = table
             cb_mod._db.table = table
+            cb_cmd_mod._db.table = table
 
-            with patch('src.callbacks.execute_command', return_value='OK output') as mock_exec, \
-                 patch('src.callbacks.store_paged_output', return_value={'result': 'OK', 'paged': False}), \
-                 patch('src.trust.increment_trust_command_count', return_value=1), \
+            with patch('src.callbacks_command.execute_command', return_value='OK output') as mock_exec, \
+                 patch('src.callbacks_command.store_paged_output', return_value={'result': 'OK', 'paged': False}), \
+                 patch('src.callbacks_command.increment_trust_command_count', return_value=1), \
                  patch('src.utils.log_decision'), \
-                 patch('src.callbacks.send_trust_auto_approve_notification'), \
-                 patch('src.callbacks.emit_metric'):
-                cb_mod._auto_execute_pending_requests(
+                 patch('src.callbacks_command.send_trust_auto_approve_notification'), \
+                 patch('src.callbacks_command.emit_metric'):
+                cb_cmd_mod._auto_execute_pending_requests(
                     'test-scope', '123456789012', None, 'trust-001', 'test-agent'
                 )
                 mock_exec.assert_called_once()
@@ -616,13 +619,16 @@ class TestSEC013AutoExecutePendingCompliance:
 
             import importlib
             import src.callbacks as cb_mod
+            import src.callbacks_command as cb_cmd_mod
             import src.db as db_mod
             importlib.reload(cb_mod)
+            importlib.reload(cb_cmd_mod)
             db_mod.table = table
             cb_mod._db.table = table
+            cb_cmd_mod._db.table = table
 
-            with patch('src.callbacks.execute_command') as mock_exec, \
-                 patch('src.callbacks.emit_metric'):
+            with patch('src.callbacks_command.execute_command') as mock_exec, \
+                 patch('src.callbacks_command.emit_metric'):
                 cb_mod._auto_execute_pending_requests(
                     'test-scope-bad', '123456789012', None, 'trust-002', 'test-agent'
                 )
@@ -641,10 +647,13 @@ class TestSEC013AutoExecutePendingCompliance:
 
             import importlib
             import src.callbacks as cb_mod
+            import src.callbacks_command as cb_cmd_mod
             import src.db as db_mod
             importlib.reload(cb_mod)
+            importlib.reload(cb_cmd_mod)
             db_mod.table = table
             cb_mod._db.table = table
+            cb_cmd_mod._db.table = table
 
             # 應不拋例外
             cb_mod._auto_execute_pending_requests(
