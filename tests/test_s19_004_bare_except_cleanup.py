@@ -147,11 +147,11 @@ class TestLoggingPresentAfterRefactor:
             "Expected logger.warning for deploy-frontend progress failure in callbacks.py"
 
     def test_callbacks_trust_pending_query_uses_logger(self):
-        """logger.warning call present in callbacks.py after trust pending query failure."""
-        with open(_src('callbacks.py')) as f:
+        """logger.warning call present in callbacks_command.py after trust pending query failure."""
+        with open(_src('callbacks_command.py')) as f:
             content = f.read()
         assert 'TRUST] Failed to query pending items' in content, \
-            "Expected logger.warning for trust pending query failure in callbacks.py"
+            "Expected logger.warning for trust pending query failure in callbacks_command.py"
 
     def test_app_grant_expiry_ddb_update_uses_logger(self):
         """logger.warning present in app.py after DDB update for grant timeout."""

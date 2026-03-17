@@ -44,13 +44,12 @@ def _update_request_status(table, request_id: str, status: str, approver: str, e
     """更新 DynamoDB 請求狀態"""
     now = int(time.time())
 
-    update_expr = 'SET #s = :s, approved_at = :t, approver = :a, approved_by = :aby, #ttl = :ttl'
+    update_expr = 'SET #s = :s, approved_at = :t, approver = :a, #ttl = :ttl'
     expr_names = {'#s': 'status', '#ttl': 'ttl'}
     expr_values = {
         ':s': status,
         ':t': now,
         ':a': approver,
-        ':aby': approver,
         ':ttl': now + RESULT_TTL
     }
 
