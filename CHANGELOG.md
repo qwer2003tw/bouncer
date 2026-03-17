@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.54.1] - 2026-03-17
+
+### Fixed
+- `src/changeset_analyzer.py` — 增加 changeset max_wait 從 60s 至 120s，避免 timeout 被誤判為失敗（#137）
+
 ## [3.54.0] - 2026-03-17
 
 ### Fixed
