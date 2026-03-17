@@ -579,8 +579,8 @@ class TestBatchUploadCallback:
             'mode': 'mcp',
         })
 
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
+    @patch('callbacks_upload.answer_callback')
+    @patch('callbacks_upload.update_message')
     def test_deny_batch(self, mock_update, mock_answer, app_module):
         from callbacks import handle_upload_batch_callback
         self._create_batch_item(app_module.table)
@@ -593,8 +593,8 @@ class TestBatchUploadCallback:
         assert updated['status'] == 'denied'
         mock_answer.assert_called_once()
 
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
+    @patch('callbacks_upload.answer_callback')
+    @patch('callbacks_upload.update_message')
     @patch('boto3.client')
     def test_approve_batch(self, mock_boto_client, mock_update, mock_answer, app_module):
         from callbacks import handle_upload_batch_callback
@@ -609,8 +609,8 @@ class TestBatchUploadCallback:
         updated = app_module.table.get_item(Key={'request_id': 'batch-approve-001'})['Item']
         assert updated['status'] == 'approved'
 
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
+    @patch('callbacks_upload.answer_callback')
+    @patch('callbacks_upload.update_message')
     @patch('boto3.client')
     def test_approve_trust_batch(self, mock_boto_client, mock_update, mock_answer, app_module):
         from callbacks import handle_upload_batch_callback
@@ -661,8 +661,8 @@ class TestBatchUploadVerification:
             'mode': 'mcp',
         })
 
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
+    @patch('callbacks_upload.answer_callback')
+    @patch('callbacks_upload.update_message')
     @patch('boto3.client')
     def test_all_succeed_status_completed(self, mock_boto_client, mock_update, mock_answer, app_module):
         """When all files pass HeadObject, upload_status = 'completed'."""
@@ -688,8 +688,8 @@ class TestBatchUploadVerification:
         failed_files = json.loads(updated['failed_files'])
         assert failed_files == []
 
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
+    @patch('callbacks_upload.answer_callback')
+    @patch('callbacks_upload.update_message')
     @patch('boto3.client')
     def test_some_fail_status_partial(self, mock_boto_client, mock_update, mock_answer, app_module):
         """When some files fail HeadObject, upload_status = 'partial' with failed list."""
@@ -723,8 +723,8 @@ class TestBatchUploadVerification:
         verification_failed = json.loads(updated.get('verification_failed', '[]'))
         assert 'bad.css' in verification_failed
 
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
+    @patch('callbacks_upload.answer_callback')
+    @patch('callbacks_upload.update_message')
     @patch('boto3.client')
     def test_all_fail_status_failed(self, mock_boto_client, mock_update, mock_answer, app_module):
         """When all files fail, upload_status = 'failed'."""
@@ -748,8 +748,8 @@ class TestBatchUploadVerification:
         failed_files = json.loads(updated['failed_files'])
         assert set(failed_files) == set(fnames)
 
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
+    @patch('callbacks_upload.answer_callback')
+    @patch('callbacks_upload.update_message')
     @patch('boto3.client')
     def test_failed_details_contain_reason(self, mock_boto_client, mock_update, mock_answer, app_module):
         """failed_details should include both filename and reason."""

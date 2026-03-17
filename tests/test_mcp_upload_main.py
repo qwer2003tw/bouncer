@@ -335,8 +335,8 @@ class TestCrossAccountUploadExecution:
 class TestCrossAccountUploadCallback:
     """Upload callback 帳號顯示測試"""
 
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
+    @patch('callbacks_upload.answer_callback')
+    @patch('callbacks_upload.update_message')
     def test_upload_callback_shows_account(self, mock_update, mock_answer, app_module):
         """上傳 callback 顯示帳號資訊"""
         import callbacks
@@ -370,8 +370,8 @@ class TestCrossAccountUploadCallback:
         assert '222222222222' in msg
         assert 'Dev' in msg
 
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
+    @patch('callbacks_upload.answer_callback')
+    @patch('callbacks_upload.update_message')
     def test_upload_callback_no_account_backward_compat(self, mock_update, mock_answer, app_module):
         """舊的 upload item（無 account_id）→ 不顯示帳號行"""
         import callbacks
@@ -409,8 +409,8 @@ class TestCrossAccountUploadCallback:
 class TestUploadDenyCallbackAccount:
     """Upload deny callback 帳號顯示測試"""
 
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
+    @patch('callbacks_upload.answer_callback')
+    @patch('callbacks_upload.update_message')
     def test_upload_deny_callback_shows_account(self, mock_update, mock_answer, app_module):
         """拒絕上傳的 callback 也顯示帳號資訊"""
         import callbacks
@@ -435,8 +435,8 @@ class TestUploadDenyCallbackAccount:
         assert 'Dev' in msg
         assert '拒絕' in msg
 
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
+    @patch('callbacks_upload.answer_callback')
+    @patch('callbacks_upload.update_message')
     def test_upload_deny_callback_no_account(self, mock_update, mock_answer, app_module):
         """舊的 upload deny item（無 account_id）→ 不顯示帳號行"""
         import callbacks
@@ -982,8 +982,8 @@ class TestUploadBatchCallbackVerification:
     """Tests for handle_upload_batch_callback S3 verification (non-blocking)."""
 
     @mock_aws
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
+    @patch('callbacks_upload.answer_callback')
+    @patch('callbacks_upload.update_message')
     def test_callback_approve_verified_fields_present(self, mock_update, mock_answer, app_module):
         """Scenario 1 & 2: approved callback → uploaded items have verified+s3_size fields."""
         import callbacks
@@ -1038,8 +1038,8 @@ class TestUploadBatchCallbackVerification:
         assert entry['verified'] is True
 
     @mock_aws
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
+    @patch('callbacks_upload.answer_callback')
+    @patch('callbacks_upload.update_message')
     def test_callback_verify_failure_non_blocking(self, mock_update, mock_answer, app_module):
         """Scenario 3: head_object fails → verification_failed list populated, upload not blocked."""
         import callbacks
@@ -1087,7 +1087,7 @@ class TestUploadBatchCallbackVerification:
             verified=False,
             error='permission denied',
         )
-        with patch('callbacks._verify_upload', return_value=failing_result):
+        with patch('callbacks_upload._verify_upload', return_value=failing_result):
             callbacks.handle_upload_batch_callback(
                 'approve', 'batch-cb-002', item, 124, 'cb-002', 'user-1'
             )
@@ -1107,8 +1107,8 @@ class TestUploadBatchCallbackVerification:
         assert uploaded_details[0]['verified'] is False
 
     @mock_aws
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
+    @patch('callbacks_upload.answer_callback')
+    @patch('callbacks_upload.update_message')
     def test_callback_verify_failure_logs_warning(
         self, mock_update, mock_answer, app_module, caplog
     ):
@@ -1164,7 +1164,7 @@ class TestUploadBatchCallbackVerification:
             )
 
         with caplog.at_level(logging.WARNING, logger='mcp_upload'):
-            with patch('callbacks._verify_upload', side_effect=warn_verify):
+            with patch('callbacks_upload._verify_upload', side_effect=warn_verify):
                 callbacks.handle_upload_batch_callback(
                     'approve', 'batch-cb-003', item, 125, 'cb-003', 'user-1'
                 )
@@ -1175,8 +1175,8 @@ class TestUploadBatchCallbackVerification:
             f"Expected warning log, got: {warning_msgs}"
 
     @mock_aws
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
+    @patch('callbacks_upload.answer_callback')
+    @patch('callbacks_upload.update_message')
     def test_callback_s3_permission_error_on_head_object(
         self, mock_update, mock_answer, app_module
     ):
@@ -1226,7 +1226,7 @@ class TestUploadBatchCallbackVerification:
             verified=False,
             error='AccessDenied',
         )
-        with patch('callbacks._verify_upload', return_value=perm_fail):
+        with patch('callbacks_upload._verify_upload', return_value=perm_fail):
             callbacks.handle_upload_batch_callback(
                 'approve', 'batch-cb-004', item, 126, 'cb-004', 'user-1'
             )
@@ -1257,8 +1257,8 @@ class TestUploadBatchCrossAccountFix:
     """
 
     @mock_aws
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
+    @patch('callbacks_upload.answer_callback')
+    @patch('callbacks_upload.update_message')
     def test_cross_account_upload_uses_staging_client_for_get_object(
         self, mock_update, mock_answer, app_module
     ):
@@ -1312,7 +1312,7 @@ class TestUploadBatchCrossAccountFix:
 
         # With @mock_aws, the assume_role call will use fake AWS creds.
         # Patch get_s3_client in callbacks module (imported at module level)
-        with patch('callbacks.get_s3_client') as mock_get_s3:
+        with patch('callbacks_upload.get_s3_client') as mock_get_s3:
             s3_staging_mock = boto3.client('s3', region_name='us-east-1')
             s3_target_mock = boto3.client('s3', region_name='us-east-1')
 
@@ -1348,8 +1348,8 @@ class TestUploadBatchCrossAccountFix:
         )
 
     @mock_aws
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
+    @patch('callbacks_upload.answer_callback')
+    @patch('callbacks_upload.update_message')
     def test_no_assume_role_uses_single_client_for_both(
         self, mock_update, mock_answer, app_module
     ):
@@ -1396,7 +1396,7 @@ class TestUploadBatchCrossAccountFix:
             # No assume_role key
         }
 
-        with patch('callbacks.get_s3_client') as mock_get_s3:
+        with patch('callbacks_upload.get_s3_client') as mock_get_s3:
             s3_client = boto3.client('s3', region_name='us-east-1')
             mock_get_s3.return_value = s3_client
 
@@ -1410,8 +1410,8 @@ class TestUploadBatchCrossAccountFix:
             assert role is None, f"Expected role_arn=None when no assume_role, got {role!r}"
 
     @mock_aws
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
+    @patch('callbacks_upload.answer_callback')
+    @patch('callbacks_upload.update_message')
     def test_file_is_actually_uploaded_to_target_bucket(
         self, mock_update, mock_answer, app_module
     ):
@@ -1482,8 +1482,8 @@ class TestUploadBatchCrossAccountFix:
         assert uploaded_details[0]['filename'] == 'upload.bin'
 
     @mock_aws
-    @patch('callbacks.answer_callback')
-    @patch('callbacks.update_message')
+    @patch('callbacks_upload.answer_callback')
+    @patch('callbacks_upload.update_message')
     def test_copy_object_not_called(self, mock_update, mock_answer, app_module):
         """Regression: copy_object must NOT be called. Fix uses get_object+put_object instead.
 
@@ -1531,7 +1531,7 @@ class TestUploadBatchCrossAccountFix:
             'status': 'pending_approval',
         }
 
-        with patch('callbacks.get_s3_client') as mock_get_s3:
+        with patch('callbacks_upload.get_s3_client') as mock_get_s3:
             mock_s3 = MagicMock()
             mock_s3.get_object.return_value = {'Body': MagicMock(read=lambda: b'data')}
             mock_get_s3.return_value = mock_s3
