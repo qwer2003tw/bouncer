@@ -54,7 +54,6 @@ from mcp_admin import (
 )
 from mcp_history import mcp_tool_history, mcp_tool_stats
 from mcp_deploy_frontend import (
-    mcp_tool_deploy_frontend,
     mcp_tool_request_frontend_presigned,
     mcp_tool_confirm_frontend_deploy,
 )
@@ -540,7 +539,6 @@ TOOL_HANDLERS = {
     'bouncer_grant_execute': mcp_tool_grant_execute,
     'bouncer_history': mcp_tool_history,
     'bouncer_stats': mcp_tool_stats,
-    'bouncer_deploy_frontend': mcp_tool_deploy_frontend,
     'bouncer_request_frontend_presigned': mcp_tool_request_frontend_presigned,
     'bouncer_confirm_frontend_deploy': mcp_tool_confirm_frontend_deploy,
 }

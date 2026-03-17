@@ -12,6 +12,8 @@ from unittest.mock import patch, MagicMock
 from decimal import Decimal
 from moto import mock_aws
 import boto3
+import pytest
+pytestmark = pytest.mark.xdist_group("app_module")
 
 
 # ============================================================================
@@ -720,9 +722,9 @@ class TestHandleGrantApproveShowAlert:
             'message': {'message_id': 123}
         }
 
-        with patch('callbacks.answer_callback') as mock_answer, \
-             patch('callbacks.update_message') as mock_update:
-            from callbacks import handle_grant_approve
+        with patch('callbacks_grant.answer_callback') as mock_answer, \
+             patch('callbacks_grant.update_message') as mock_update:
+            from callbacks_grant import handle_grant_approve
             handle_grant_approve(query, grant_id, mode='all')
 
         # answer_callback should have been called with show_alert=True
@@ -767,9 +769,9 @@ class TestHandleGrantApproveShowAlert:
             'message': {'message_id': 124}
         }
 
-        with patch('callbacks.answer_callback') as mock_answer, \
-             patch('callbacks.update_message') as mock_update:
-            from callbacks import handle_grant_approve
+        with patch('callbacks_grant.answer_callback') as mock_answer, \
+             patch('callbacks_grant.update_message') as mock_update:
+            from callbacks_grant import handle_grant_approve
             handle_grant_approve(query, grant_id, mode='all')
 
         # answer_callback should NOT have show_alert=True
@@ -810,9 +812,9 @@ class TestHandleGrantApproveShowAlert:
             'message': {'message_id': 125}
         }
 
-        with patch('callbacks.answer_callback') as mock_answer, \
-             patch('callbacks.update_message') as mock_update:
-            from callbacks import handle_grant_approve
+        with patch('callbacks_grant.answer_callback') as mock_answer, \
+             patch('callbacks_grant.update_message') as mock_update:
+            from callbacks_grant import handle_grant_approve
             handle_grant_approve(query, grant_id, mode='safe_only')
 
         # answer_callback should NOT have show_alert=True (only approving safe commands)
