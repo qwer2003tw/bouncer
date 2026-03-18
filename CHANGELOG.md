@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.56.0] - 2026-03-18
+
+### Fixed
+- `src/callbacks_command.py` — OTP 改為 callback 時重新計算 risk_score，不依賴 DDB 存的值（s56-001）
+- `src/constants.py` — `iam delete-role` 從直接 block 改為需要人工審批（s56-002）
+- `src/callbacks_command.py` — 所有 `update_message` 呼叫加 error handling，防止 400 錯誤中斷流程（s56-003）
+- `src/app.py` — Notifier 發送過期警告前先確認 DDB 狀態，已 approved 的請求不再收到警告（s56-004）
+
 ## [3.55.0] - 2026-03-17
 
 ### Security
