@@ -120,6 +120,29 @@ def _format_changeset_summary(resource_changes: list) -> str:
     return summary
 
 
+def _get_changed_files(repo_path: str = '.') -> list[str]:
+    """Get list of files changed in latest commit vs previous.
+
+    Sprint 58 s58-005: For deploy notifications, show what files changed.
+
+    Returns:
+        List of changed file paths, or empty list on error.
+    """
+    try:
+        result = subprocess.run(
+            ['git', 'diff', '--name-only', 'HEAD~1', 'HEAD'],
+            capture_output=True,
+            text=True,
+            cwd=repo_path,
+            timeout=10
+        )
+        if result.returncode == 0:
+            return [f for f in result.stdout.strip().split('\n') if f]
+    except Exception:
+        pass
+    return []
+
+
 # ============================================================================
 # Git Utilities
 # ============================================================================
@@ -1013,13 +1036,26 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
                 source or 'auto-approve',
                 reason,
             )
+
+            # Sprint 58 s58-005: Enhance changes_summary with git diff
+            base_summary = diff_result.diff_summary or 'template.yaml 無變動 → code-only'
+            changed_files = _get_changed_files()
+            if changed_files:
+                preview_files = changed_files[:3]
+                file_list = ', '.join(preview_files)
+                if len(changed_files) > 3:
+                    file_list += f' (+{len(changed_files) - 3} more)'
+                enhanced_summary = f"{base_summary}\n📁 Changed: {file_list}"
+            else:
+                enhanced_summary = base_summary
+
             from notifications import send_auto_approve_deploy_notification
             send_auto_approve_deploy_notification(
                 project_id=project_id,
                 deploy_id=deploy_result.get('deploy_id', ''),
                 source=source,
                 reason=reason,
-                changes_summary=diff_result.diff_summary or '',
+                changes_summary=enhanced_summary,
             )
             return mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
@@ -1087,13 +1123,26 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
                         source or 'auto-approve-code-only',
                         reason,
                     )
+
+                    # Sprint 58 s58-005: Enhance changes_summary with git diff
+                    base_summary = _format_changeset_summary(changeset_result.resource_changes) or 'template.yaml 無變動 → code-only'
+                    changed_files = _get_changed_files()
+                    if changed_files:
+                        preview_files = changed_files[:3]
+                        file_list = ', '.join(preview_files)
+                        if len(changed_files) > 3:
+                            file_list += f' (+{len(changed_files) - 3} more)'
+                        enhanced_summary = f"{base_summary}\n📁 Changed: {file_list}"
+                    else:
+                        enhanced_summary = base_summary
+
                     from notifications import send_auto_approve_deploy_notification
                     send_auto_approve_deploy_notification(
                         project_id=project_id,
                         deploy_id=deploy_result.get('deploy_id', ''),
                         source=source,
                         reason=reason,
-                        changes_summary=_format_changeset_summary(changeset_result.resource_changes),
+                        changes_summary=enhanced_summary,
                     )
                     return mcp_result(req_id, {
                         'content': [{'type': 'text', 'text': json.dumps({
@@ -1296,13 +1345,25 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
     info_lines = build_info_lines(source=source, context=context, reason=reason)
     account_line = f"🏦 *帳號：* `{target_account}`\n" if target_account else ""
 
+    # Sprint 58 s58-005: Add git diff summary to help approver
+    changed_files = _get_changed_files()
+    git_diff_line = ""
+    if changed_files:
+        preview_files = changed_files[:3]
+        file_list = ', '.join(preview_files)
+        if len(changed_files) > 3:
+            file_list += f' (+{len(changed_files) - 3} more)'
+        git_diff_line = f"📁 *Changed files：* {escape_markdown(file_list)}\n"
+
     text = (
         f"🚀 *SAM 部署請求*\n\n"
         f"{info_lines}"
         f"📦 *專案：* {escape_markdown(project_name)}\n"
         f"🌿 *分支：* {branch}\n"
         f"{account_line}"
-        f"📋 *Stack：* {stack_name}\n\n"
+        f"📋 *Stack：* {stack_name}\n"
+        f"{git_diff_line}"
+        f"\n"
         f"🆔 *ID：* `{request_id}`\n"
         f"⏰ *5 分鐘後過期*"
     )

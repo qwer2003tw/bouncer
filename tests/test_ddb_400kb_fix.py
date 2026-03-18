@@ -234,7 +234,7 @@ class TestSingleUploadDDBFix:
         """S3 upload 失敗 → DDB 不寫，回 error"""
         mcp_upload, table, s3 = upload_module
 
-        with patch('aws_clients.get_s3_client') as mock_get_s3:
+        with patch('mcp_upload.get_s3_client') as mock_get_s3:  # s58-003: top-level import, patch at mcp_upload
             mock_s3_client = MagicMock()
             mock_s3_client.put_object.side_effect = Exception('S3 connection refused')
             mock_get_s3.return_value = mock_s3_client

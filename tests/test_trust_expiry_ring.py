@@ -13,23 +13,15 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-
-_MODS_TO_CLEAR = [
-    'app', 'db', 'trust', 'notifications', 'callbacks',
-    'mcp_execute', 'mcp_tools', 'telegram', 'commands',
-    'mcp_upload', 'mcp_admin', 'mcp_history', 'mcp_confirm',
-    'mcp_presigned', 'accounts', 'rate_limit', 'utils',
-    'paging', 'smart_approval', 'risk_scorer', 'template_scanner',
-    'scheduler_service', 'compliance_checker', 'grant', 'deployer',
-    'constants', 'metrics', 'sequence_analyzer', 'help_command',
-    'tool_schema',
-]
+# Sprint 58 s58-001: Use centralized module list from _module_list (not conftest — xdist compat)
+from _module_list import BOUNCER_MODS
 
 
 @pytest.fixture
 def app_mod():
+    # Sprint 58 s58-001: Use centralized BOUNCER_MODS from conftest
     for mod in list(sys.modules.keys()):
-        if mod in _MODS_TO_CLEAR:
+        if mod in BOUNCER_MODS:
             del sys.modules[mod]
     os.environ.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
     os.environ.setdefault('TABLE_NAME', 'bouncer-test-010')
