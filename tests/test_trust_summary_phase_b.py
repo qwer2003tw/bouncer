@@ -96,6 +96,13 @@ def app_mod(dynamodb_table):
 
     yield app
 
+    # Reset trust module cache to avoid moto isolation issues
+    try:
+        import trust as _trust_mod
+        _trust_mod._table = None
+    except Exception:
+        pass
+
 
 @pytest.fixture
 def notifications_mod():

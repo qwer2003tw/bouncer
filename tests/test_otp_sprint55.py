@@ -153,7 +153,7 @@ class TestOTPCommandCallback:
 
         with patch('otp.generate_otp', return_value='123456'), \
              patch('otp.create_otp_record'), \
-             patch('telegram.send_telegram_message_to') as mock_dm, \
+             patch('callbacks_command.send_telegram_message_to') as mock_dm, \
              patch('telegram.answer_callback') as mock_answer, \
              patch('telegram.update_message') as mock_update:
 

@@ -630,6 +630,22 @@ class TestStatsTelegramCommand:
             if mod in ('telegram_commands', 'db'):
                 del sys.modules[mod]
 
+    def teardown_method(self):
+        """Clean up module state to prevent pollution of subsequent tests."""
+        # Reload telegram_commands and db to ensure clean state for next test
+        for mod in list(sys.modules.keys()):
+            if mod in ('telegram_commands', 'db'):
+                del sys.modules[mod]
+        # Force re-import with clean bindings
+        import importlib
+        try:
+            import db
+            import telegram_commands
+            importlib.reload(db)
+            importlib.reload(telegram_commands)
+        except Exception:
+            pass
+
     def test_handle_telegram_command_routes_stats(self):
         """handle_telegram_command routes /stats to handle_stats_command."""
         import telegram_commands as tc
