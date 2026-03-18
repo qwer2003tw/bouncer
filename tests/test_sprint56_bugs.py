@@ -57,9 +57,15 @@ class TestS56_001_OTPRiskScoreRecalculation:
             import src.db as db_mod
             db_mod.table = table
 
+            # Mock calculate_risk to return high score (>= 70) to trigger OTP
+            from unittest.mock import MagicMock
+            mock_risk_result = MagicMock()
+            mock_risk_result.score = 85
+
             with patch('callbacks_command.answer_callback') as mock_answer, \
                  patch('callbacks_command.update_message'), \
-                 patch('telegram.send_telegram_message_to') as mock_send_otp, \
+                 patch('callbacks_command.send_telegram_message_to') as mock_send_otp, \
+                 patch('risk_scorer.calculate_risk', return_value=mock_risk_result), \
                  patch('otp.generate_otp', return_value='123456'), \
                  patch('otp.create_otp_record'):
 

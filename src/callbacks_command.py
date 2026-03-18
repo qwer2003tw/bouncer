@@ -16,7 +16,7 @@ from utils import response, build_info_lines, generate_request_id, log_decision
 from commands import execute_command, is_dangerous
 from paging import store_paged_output
 from trust import create_trust_session, track_command_executed, increment_trust_command_count
-from telegram import escape_markdown, update_message, answer_callback, send_telegram_message_silent, send_chat_action
+from telegram import escape_markdown, update_message, answer_callback, send_telegram_message_silent, send_chat_action, send_telegram_message_to
 from notifications import send_trust_auto_approve_notification
 from constants import DEFAULT_ACCOUNT_ID, RESULT_TTL, TRUST_SESSION_MAX_UPLOADS, TRUST_SESSION_MAX_COMMANDS, OTP_RISK_THRESHOLD
 from metrics import emit_metric
@@ -550,7 +550,6 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             risk_score = risk_result.score if risk_result else 0
             if risk_score >= OTP_RISK_THRESHOLD:
                 from otp import generate_otp, create_otp_record
-                from telegram import send_telegram_message_to
 
                 otp_code = generate_otp()
                 create_otp_record(request_id, user_id, otp_code, message_id)
