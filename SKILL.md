@@ -946,3 +946,14 @@ mcporter call bouncer bouncer_help command="batch-deploy"
 ## Sprint 54 변경사항 (2026-03-17)
 - Trust Session IP binding: `TRUST_IP_BINDING_MODE` 기본값 `warn` → `strict`. `_check_trust_session()`에서 `caller_ip` 전달됨
 - `src/callbacks_command.py` 생성: `handle_command_callback` + 관련 함수들 이동 (callbacks.py Phase 2 리팩토링)
+
+## Sprint 59 變更 (2026-03-18)
+- **Approval Pending Reminder**: 請求發出後 `PENDING_REMINDER_MINUTES`（預設 10 分鐘）未審批，自動 re-notify
+  - `scheduler_service.py`: `create_pending_reminder_schedule()` / `delete_reminder_schedule()`
+  - `app.py`: `action == "pending_reminder"` handler（查 DDB status，仍 pending 才發通知）
+  - `constants.py`: `PENDING_REMINDER_MINUTES = 10`
+- **Trust Session Command Rate Detection**: trust session 內每分鐘命令數超過 `TRUST_RATE_LIMIT_PER_MINUTE`（預設 5）自動拒絕
+  - `trust.py`: `TrustRateExceeded` exception；`increment_trust_command_count()` 加 velocity check（`rate_window_start` / `rate_window_count` 欄位）
+  - `mcp_execute.py`, `callbacks_command.py`, `mcp_deploy_frontend.py`: catch `TrustRateExceeded`，回傳 error
+  - CloudWatch metric: `TrustRateExceeded`
+  - `constants.py`: `TRUST_RATE_LIMIT_PER_MINUTE = 5`, `TRUST_RATE_LIMIT_ENABLED = True`
