@@ -28,6 +28,7 @@ from paging import store_paged_output
 from rate_limit import RateLimitExceeded, PendingLimitExceeded, check_rate_limit
 from trust import (
     increment_trust_command_count, should_trust_approve, track_command_executed,
+    TrustRateExceeded,
 )
 from db import table
 from notifications import (
@@ -737,8 +738,17 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
     if not (should_trust and trust_session):
         return None
 
-    # 增加命令計數
-    new_count = increment_trust_command_count(trust_session['request_id'])
+    # 增加命令計數 (s59-002: catch rate exceeded)
+    try:
+        new_count = increment_trust_command_count(trust_session['request_id'])
+    except TrustRateExceeded as exc:
+        logger.warning("Trust rate exceeded: %s", exc, extra={"src_module": "mcp_execute", "operation": "trust_auto_approve", "trust_id": trust_session['request_id']})
+        emit_metric('Bouncer', 'TrustRateExceeded', 1, dimensions={'Event': 'rate_exceeded'})
+        return mcp_error(
+            ctx.req_id,
+            'TRUST_RATE_EXCEEDED',
+            f'信任時段命令速率過高，請稍候再試。{str(exc)}',
+        )
 
     # 執行命令
     request_id = generate_request_id(ctx.command)
@@ -894,6 +904,21 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
             )
         except Exception as _e:  # noqa: BLE001 — best-effort, never block approval flow
             logger.debug("post-execute notify ignored: %s", _e, extra={"src_module": "mcp_execute", "operation": "post_execute_notify"})
+
+        # S59-001: Schedule pending approval reminder — best-effort, never block approval flow
+        try:
+            from scheduler_service import get_scheduler_service
+            from constants import PENDING_REMINDER_MINUTES
+            svc = get_scheduler_service()
+            svc.create_pending_reminder_schedule(
+                request_id=request_id,
+                expires_at=ttl,
+                reminder_minutes=PENDING_REMINDER_MINUTES,
+                command_preview=ctx.command[:100],
+                source=ctx.source or '',
+            )
+        except Exception as _e:  # noqa: BLE001 — best-effort, never block approval flow
+            logger.debug("pending reminder schedule ignored: %s", _e, extra={"src_module": "mcp_execute", "operation": "create_pending_reminder"})
 
     # 一律異步返回：讓 client 用 bouncer_status 輪詢結果。
     # sync long-polling 已移除（Lambda 60s timeout + API Gateway 29s timeout 使其無意義）。

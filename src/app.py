@@ -473,6 +473,47 @@ def lambda_handler(event: dict, context) -> dict:
 
         return {'statusCode': 200, 'body': json.dumps({'status': 'ok'})}
 
+    # EventBridge Scheduler pending approval reminder (sprint59-001)
+    if event.get('source') == 'bouncer-scheduler' and event.get('action') == 'pending_reminder':
+        request_id = event.get('request_id', '')
+        from db import table as _table
+        try:
+            ddb_response = _table.get_item(Key={'request_id': request_id})
+            item = ddb_response.get('Item')
+            if not item or item.get('status') != 'pending_approval':
+                # Already approved/denied or not found, skip reminder
+                logger.info("Skipped reminder for %s (status=%s)", request_id, item.get('status') if item else 'not_found', extra={"src_module": "app", "operation": "pending_reminder", "request_id": request_id})
+                return {'statusCode': 200, 'body': json.dumps({'status': 'skipped'})}
+        except Exception as exc:
+            logger.error("Failed to check status for reminder %s: %s", request_id, exc, extra={"src_module": "app", "operation": "pending_reminder", "request_id": request_id})
+            return {'statusCode': 200, 'body': json.dumps({'status': 'error'})}
+
+        # Send Telegram reminder
+        try:
+            from telegram import send_telegram_message_silent, escape_markdown
+            command_preview = event.get('command_preview', '')[:100]
+            source_field = event.get('source_field', '')
+            expires_at = int(item.get('expires_at', 0))
+
+            # Format expires_at as human-readable
+            from datetime import datetime, timezone
+            expires_dt = datetime.fromtimestamp(expires_at, tz=timezone.utc)
+            expires_str = expires_dt.strftime('%Y-%m-%d %H:%M:%S UTC')
+
+            text = (
+                f"⏰ *尚未審批的請求*\n\n"
+                f"📋 *命令：* `{escape_markdown(command_preview)}`\n"
+                f"🤖 *來源：* {escape_markdown(source_field)}\n"
+                f"🆔 `{request_id}`\n"
+                f"⌛ *到期：* {expires_str}"
+            )
+            send_telegram_message_silent(text)
+            logger.info("Sent pending reminder for %s", request_id, extra={"src_module": "app", "operation": "pending_reminder", "request_id": request_id})
+        except Exception as exc:
+            logger.warning("Failed to send reminder for %s: %s", request_id, exc, extra={"src_module": "app", "operation": "pending_reminder", "request_id": request_id, "error": str(exc)})
+
+        return {'statusCode': 200, 'body': json.dumps({'status': 'ok'})}
+
     # 支援 Function URL (rawPath) 和 API Gateway (path)
     path = event.get('rawPath') or event.get('path') or '/'
 

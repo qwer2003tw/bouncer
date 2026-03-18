@@ -27,7 +27,7 @@ from aws_clients import get_s3_client
 from constants import DEFAULT_ACCOUNT_ID, APPROVAL_TTL_BUFFER, UPLOAD_TIMEOUT
 from db import table, deployer_projects_table, deployer_history_table
 from notifications import send_deploy_frontend_notification
-from utils import generate_request_id, mcp_result
+from utils import generate_request_id, mcp_result, mcp_error
 
 logger = Logger(service="bouncer")
 
@@ -470,7 +470,7 @@ def _execute_deploy_frontend_approved(
 
     Mirrors the callback approval flow but executes immediately without manual approval.
     """
-    from trust import increment_trust_command_count
+    from trust import increment_trust_command_count, TrustRateExceeded
     from notifications import send_trust_auto_approve_notification
     from utils import log_decision
     from aws_clients import get_cloudfront_client
@@ -591,9 +591,19 @@ def _execute_deploy_frontend_approved(
             logger.error("[DEPLOY-FRONTEND] Trust deploy CloudFront invalidation failed: %s", exc, extra={"src_module": "deploy_frontend", "operation": "cloudfront_invalidation", "distribution_id": distribution_id})
             cf_invalidation_failed = True
 
-    # 6. Increment trust command count
+    # 6. Increment trust command count (s59-002: catch rate exceeded)
     trust_id = trust_session.get("request_id", "")
-    new_count = increment_trust_command_count(trust_id)
+    try:
+        new_count = increment_trust_command_count(trust_id)
+    except TrustRateExceeded as exc:
+        logger.warning("Trust rate exceeded for frontend deploy: %s", exc, extra={"src_module": "deploy_frontend", "operation": "trust_deploy", "trust_id": trust_id})
+        from metrics import emit_metric
+        emit_metric('Bouncer', 'TrustRateExceeded', 1, dimensions={'Event': 'frontend_deploy'})
+        return mcp_error(
+            req_id,
+            'TRUST_RATE_EXCEEDED',
+            f'信任時段命令速率過高，請稍候再試。{str(exc)}',
+        )
 
     # 7. Log decision to DDB
     synthetic_command = f"bouncer_deploy_frontend project={project}"

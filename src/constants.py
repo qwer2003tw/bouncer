@@ -96,6 +96,12 @@ RATE_LIMIT_ENABLED = os.environ.get('RATE_LIMIT_ENABLED', 'true').lower() == 'tr
 # ============================================================================
 
 # ============================================================================
+# Pending Reminder - 未審批提醒
+# ============================================================================
+
+PENDING_REMINDER_MINUTES = 10  # 請求發出後 N 分鐘未審批 → 自動提醒
+
+# ============================================================================
 # Grant Session - 批次權限授予功能
 # ============================================================================
 
@@ -109,6 +115,10 @@ GRANT_APPROVAL_TIMEOUT = 300  # 5 分鐘內未審批自動過期
 TRUST_SESSION_DURATION = 600  # 10 分鐘
 TRUST_SESSION_MAX_COMMANDS = 20  # 信任時段內最多執行 20 個命令
 TRUST_SESSION_ENABLED = os.environ.get('TRUST_SESSION_ENABLED', 'true').lower() == 'true'
+
+# Trust session per-minute rate limiting (s59-002)
+TRUST_RATE_LIMIT_PER_MINUTE = 5  # 信任時段每分鐘最多執行 N 個命令
+TRUST_RATE_LIMIT_ENABLED = os.environ.get('TRUST_RATE_LIMIT_ENABLED', 'true').lower() == 'true'
 
 # IP binding mode for Trust Sessions: 'strict', 'warn', or 'disabled'
 # - 'warn' (default): IP mismatch logs warning + metric but allows the request

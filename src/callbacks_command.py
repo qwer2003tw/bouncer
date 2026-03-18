@@ -15,7 +15,7 @@ from aws_lambda_powertools import Logger
 from utils import response, build_info_lines, generate_request_id, log_decision
 from commands import execute_command, is_dangerous
 from paging import store_paged_output
-from trust import create_trust_session, track_command_executed, increment_trust_command_count
+from trust import create_trust_session, track_command_executed, increment_trust_command_count, TrustRateExceeded
 from telegram import escape_markdown, update_message, answer_callback, send_telegram_message_silent, send_chat_action, send_telegram_message_to
 from notifications import send_trust_auto_approve_notification
 from constants import DEFAULT_ACCOUNT_ID, RESULT_TTL, TRUST_SESSION_MAX_UPLOADS, TRUST_SESSION_MAX_COMMANDS, OTP_RISK_THRESHOLD
@@ -301,8 +301,15 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
             },
         )
 
-        # Trust 計數
-        new_count = increment_trust_command_count(trust_id)
+        # Trust 計數 (s59-002: catch rate exceeded)
+        try:
+            new_count = increment_trust_command_count(trust_id)
+        except TrustRateExceeded as exc:
+            logger.warning("Trust rate exceeded during auto-execute: %s", exc, extra={"src_module": "callbacks_command", "operation": "auto_execute_pending", "trust_id": trust_id, "request_id": req_id})
+            emit_metric('Bouncer', 'TrustRateExceeded', 1, dimensions={'Event': 'auto_execute'})
+            # Skip this command, continue with others
+            # Don't update status - leave as 'pending' for manual approval
+            continue
 
         # 計算剩餘時間
         remaining = "~10:00"  # 剛建的 trust session，約 10 分鐘

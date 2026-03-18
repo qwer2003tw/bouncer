@@ -121,11 +121,13 @@ def _update_request_status(table, request_id: str, status: str, approver: str, e
     )
 
     # S35-003: Delete both cleanup and warning schedules (best-effort cleanup)
+    # S59-001: Also delete reminder schedule
     try:
         from scheduler_service import get_scheduler_service
         svc = get_scheduler_service()
         svc.delete_schedule(request_id)  # cleanup schedule
         svc.delete_warning_schedule(request_id)  # warning schedule
+        svc.delete_reminder_schedule(request_id)  # reminder schedule (s59-001)
     except Exception as _e:  # noqa: BLE001 — best-effort cleanup
         logger.debug("schedule cleanup ignored error: %s", _e, extra={"src_module": "callbacks", "operation": "cleanup_schedule"})
 
