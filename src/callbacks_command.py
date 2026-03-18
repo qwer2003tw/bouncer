@@ -455,7 +455,11 @@ def _format_approval_response(
         reply_markup=next_page_button,
     )
     # Overwrite the approval message (remove buttons from it)
-    update_message(message_id, f"{result_emoji} *已執行* — 見下方結果", remove_buttons=True)
+    # s56-003: Add error handling for update_message to avoid 400 errors
+    try:
+        update_message(message_id, f"{result_emoji} *已執行* — 見下方結果", remove_buttons=True)
+    except Exception as _exc:  # noqa: BLE001 — best-effort
+        logger.debug("Post-execute update_message failed (non-critical): %s", _exc, extra={"src_module": "callbacks", "operation": "post_execute_update", "message_id": message_id})
 
 
 def _handle_deny_callback(
@@ -491,15 +495,19 @@ def _handle_deny_callback(
         'decision_latency_ms': decision_latency_ms,
     })
 
-    update_message(
-        message_id,
-        f"❌ *已拒絕*\n\n"
-        f"🆔 *ID：* `{request_id}`\n"
-        f"{info['source_line']}"
-        f"{info['account_line']}"
-        f"📋 *命令：*\n`{info['cmd_preview']}`\n\n"
-        f"💬 *原因：* {info['safe_reason']}",
-    )
+    # s56-003: Add error handling for update_message to avoid 400 errors
+    try:
+        update_message(
+            message_id,
+            f"❌ *已拒絕*\n\n"
+            f"🆔 *ID：* `{request_id}`\n"
+            f"{info['source_line']}"
+            f"{info['account_line']}"
+            f"📋 *命令：*\n`{info['cmd_preview']}`\n\n"
+            f"💬 *原因：* {info['safe_reason']}",
+        )
+    except Exception as _exc:  # noqa: BLE001 — best-effort
+        logger.debug("Deny update_message failed (non-critical): %s", _exc, extra={"src_module": "callbacks", "operation": "deny_update", "message_id": message_id})
 
 
 def handle_command_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str, *, source_ip: str = '') -> dict:
@@ -535,7 +543,11 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
     if action in ('approve', 'approve_trust'):
         # Check if OTP required (risk_score >= threshold, non-trust approve only, not already verified)
         if action == 'approve' and not item.get('otp_verified'):
-            risk_score = int(item.get('risk_score', 0))
+            # s56-001: Recalculate risk_score in callback instead of using DDB value
+            # (DDB value may be 0 if smart_decision wasn't calculated during execute)
+            from risk_scorer import calculate_risk
+            risk_result = calculate_risk(command)
+            risk_score = risk_result.score if risk_result else 0
             if risk_score >= OTP_RISK_THRESHOLD:
                 from otp import generate_otp, create_otp_record
                 from telegram import send_telegram_message_to
@@ -557,18 +569,26 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
                     logger.warning("Failed to send OTP DM: %s", e)
                     # If can't send DM, abort and inform
                     answer_callback(callback_id, '❌ 無法發送 OTP，請確認 Bot DM 未被封鎖')
-                    update_message(message_id, f"❌ *OTP 發送失敗*\n\n`{request_id}`\n\n請確認已開啟 Bot DM，然後重新審批", remove_buttons=True)
+                    # s56-003: Add error handling for update_message
+                    try:
+                        update_message(message_id, f"❌ *OTP 發送失敗*\n\n`{request_id}`\n\n請確認已開啟 Bot DM，然後重新審批", remove_buttons=True)
+                    except Exception as _exc:  # noqa: BLE001 — best-effort
+                        logger.debug("OTP fail update_message failed (non-critical): %s", _exc, extra={"src_module": "callbacks", "operation": "otp_fail_update"})
                     return response(200, {'ok': True})
 
                 answer_callback(callback_id, '🔐 OTP 已發送至 DM，請在 5 分鐘內確認')
-                update_message(
-                    message_id,
-                    f"⏳ *等待 OTP 驗證*\n\n"
-                    f"📋 *請求 ID：* `{request_id}`\n"
-                    f"🔐 *OTP 已發送至 DM*\n\n"
-                    f"請輸入：`/otp XXXXXX`",
-                    remove_buttons=True,
-                )
+                # s56-003: Add error handling for update_message
+                try:
+                    update_message(
+                        message_id,
+                        f"⏳ *等待 OTP 驗證*\n\n"
+                        f"📋 *請求 ID：* `{request_id}`\n"
+                        f"🔐 *OTP 已發送至 DM*\n\n"
+                        f"請輸入：`/otp XXXXXX`",
+                        remove_buttons=True,
+                    )
+                except Exception as _exc:  # noqa: BLE001 — best-effort
+                    logger.debug("OTP wait update_message failed (non-critical): %s", _exc, extra={"src_module": "callbacks", "operation": "otp_wait_update"})
                 return response(200, {'ok': True})
 
         if is_dangerous(command):
@@ -590,7 +610,7 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
                 f"💬 *原因：* {info['safe_reason']}",
                 remove_buttons=True,
             )
-        except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
+        except Exception as e:  # noqa: BLE001 — s56-003: catch all exceptions including 400 errors
             logger.warning(f"[execute] Immediate feedback update_message failed (non-critical): {e}")
 
         # 執行命令並存入結果

@@ -220,7 +220,7 @@ OUTPUT_TRUNCATION_NOTICE_TEMPLATE = (
 BLOCKED_PATTERNS = [
     # IAM 危險操作 - 絕對禁止
     'iam delete-user',
-    'iam delete-role',
+    # s56-002: 'iam delete-role' moved to pending_approval (not blocked)
     'iam delete-policy',
     'iam create-user',
     'iam attach-user-policy',

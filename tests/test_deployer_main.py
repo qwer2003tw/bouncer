@@ -1344,6 +1344,9 @@ import os as _os
 _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), '..', 'src'))
 from deployer import DeployErrorExtractor  # noqa: E402
 
+import pytest
+pytestmark = pytest.mark.xdist_group("app_module")
+
 
 class TestDeployErrorExtractor:
     """Unit tests for DeployErrorExtractor — all 4 acceptance scenarios + edge cases."""
