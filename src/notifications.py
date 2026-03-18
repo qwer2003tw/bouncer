@@ -25,6 +25,7 @@ from aws_lambda_powertools import Logger
 import telegram as _telegram
 from commands import is_dangerous, check_lambda_env_update
 from constants import COMMAND_APPROVAL_TIMEOUT, TRUST_SESSION_MAX_COMMANDS, UPLOAD_TIMEOUT, GRANT_APPROVAL_TIMEOUT
+from trust import is_trust_excluded
 from telegram_entities import MessageBuilder, format_command_output
 from utils import format_size_human, extract_exit_code
 
@@ -300,15 +301,26 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
             ]
         }
     else:
-        keyboard = {
-            'inline_keyboard': [
-                [
-                    {'text': '✅ Approve', 'callback_data': f'approve:{request_id}', 'style': 'success'},
-                    {'text': '🔓 Trust 10min', 'callback_data': f'approve_trust:{request_id}', 'style': 'primary'},
-                    {'text': '❌ Reject', 'callback_data': f'deny:{request_id}', 'style': 'danger'}
+        # s57-001: Hide Trust button for trust-excluded commands
+        if is_trust_excluded(command):
+            keyboard = {
+                'inline_keyboard': [
+                    [
+                        {'text': '✅ Approve', 'callback_data': f'approve:{request_id}', 'style': 'success'},
+                        {'text': '❌ Reject', 'callback_data': f'deny:{request_id}', 'style': 'danger'}
+                    ]
                 ]
-            ]
-        }
+            }
+        else:
+            keyboard = {
+                'inline_keyboard': [
+                    [
+                        {'text': '✅ Approve', 'callback_data': f'approve:{request_id}', 'style': 'success'},
+                        {'text': '🔓 Trust 10min', 'callback_data': f'approve_trust:{request_id}', 'style': 'primary'},
+                        {'text': '❌ Reject', 'callback_data': f'deny:{request_id}', 'style': 'danger'}
+                    ]
+                ]
+            }
 
     result = _telegram.send_message_with_entities(text, entities, reply_markup=keyboard)
     ok = bool(result and result.get('ok'))

@@ -426,12 +426,51 @@ def lambda_handler(event: dict, context) -> dict:
             # On error, skip warning (conservative approach)
             return {'statusCode': 200, 'body': json.dumps({'status': 'error'})}
 
-        from notifications import send_expiry_warning_notification
-        send_expiry_warning_notification(
-            request_id=request_id,
-            command_preview=event.get('command_preview', ''),
-            source=event.get('source_field', ''),
-        )
+        # s57-002: Update original message instead of sending new notification
+        telegram_message_id = item.get('telegram_message_id') or item.get('message_id')
+        if telegram_message_id:
+            try:
+                from telegram import update_message
+                command_preview = event.get('command_preview', '')
+                update_message(
+                    int(telegram_message_id),
+                    f"❌ *審批已過期*\n\n"
+                    f"📋 *請求 ID：* `{request_id}`\n"
+                    f"📋 *命令：* `{command_preview[:100]}`\n\n"
+                    f"請重新發起請求。",
+                    remove_buttons=True,
+                )
+                logger.info("Updated expired message %s", telegram_message_id, extra={"src_module": "app", "operation": "expiry_warning", "request_id": request_id})
+            except Exception as exc:
+                logger.warning("Failed to update expired message %s: %s", telegram_message_id, exc, extra={"src_module": "app", "operation": "expiry_warning", "request_id": request_id})
+                # Fallback to sending new notification
+                from notifications import send_expiry_warning_notification
+                send_expiry_warning_notification(
+                    request_id=request_id,
+                    command_preview=event.get('command_preview', ''),
+                    source=event.get('source_field', ''),
+                )
+        else:
+            # No message_id, fallback to sending new notification
+            logger.info("No telegram_message_id found for %s, sending new notification", request_id, extra={"src_module": "app", "operation": "expiry_warning", "request_id": request_id})
+            from notifications import send_expiry_warning_notification
+            send_expiry_warning_notification(
+                request_id=request_id,
+                command_preview=event.get('command_preview', ''),
+                source=event.get('source_field', ''),
+            )
+
+        # Update DDB status to expired
+        try:
+            _table.update_item(
+                Key={'request_id': request_id},
+                UpdateExpression='SET #s = :s',
+                ExpressionAttributeNames={'#s': 'status'},
+                ExpressionAttributeValues={':s': 'expired'},
+            )
+        except Exception as exc:
+            logger.warning("Failed to update DDB status for %s: %s", request_id, exc, extra={"src_module": "app", "operation": "expiry_warning", "request_id": request_id})
+
         return {'statusCode': 200, 'body': json.dumps({'status': 'ok'})}
 
     # 支援 Function URL (rawPath) 和 API Gateway (path)
