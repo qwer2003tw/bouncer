@@ -54,6 +54,16 @@ def warning_schedule_name(request_id: str) -> str:
     return f"bouncer-warn-{safe}"[:64]
 
 
+def reminder_schedule_name(request_id: str) -> str:
+    """Return the schedule name for pending approval *reminder*.
+
+    This is distinct from both cleanup and warning schedules, so all three
+    can coexist and be cancelled independently when a request is approved/denied.
+    """
+    safe = "".join(c if c.isalnum() or c in ("-", "_") else "-" for c in request_id)
+    return f"bouncer-remind-{safe}"[:64]
+
+
 def _format_schedule_time(expires_at_ts: int) -> str:
     """Convert a Unix timestamp to the ``at(...)`` expression required by
     EventBridge Scheduler.
@@ -258,6 +268,91 @@ class SchedulerService:
             )
             return False
 
+    def create_pending_reminder_schedule(
+        self,
+        request_id: str,
+        expires_at: int,
+        *,
+        reminder_minutes: int = 10,
+        command_preview: str = '',
+        source: str = '',
+    ) -> bool:
+        """Create a one-time EventBridge Scheduler schedule that fires
+        *reminder_minutes* after request creation to remind if still pending.
+
+        This is distinct from expiry_warning (which fires 60s *before* expiry).
+        The reminder fires *reminder_minutes* after creation to nudge approval.
+
+        Args:
+            request_id:       Bouncer request ID (DynamoDB primary key).
+            expires_at:       Unix timestamp when the request expires.
+            reminder_minutes: Minutes after creation to send reminder (default: 10).
+            command_preview:  First ~100 chars of the command for the notification.
+            source:           Optional source string (e.g., 'ztp-files').
+
+        Returns:
+            ``True`` on success, ``False`` on any failure (non-raising).
+        """
+        if not self._enabled:
+            logger.debug("Disabled — skipping reminder schedule for %s", request_id, extra={"src_module": "scheduler", "operation": "create_pending_reminder_schedule", "request_id": request_id})
+            return False
+
+        if not self._lambda_arn or not self._role_arn:
+            logger.warning(
+                "Missing LAMBDA_ARN or ROLE_ARN — cannot schedule reminder for %s",
+                request_id,
+                extra={"src_module": "scheduler", "operation": "create_pending_reminder_schedule", "request_id": request_id},
+            )
+            return False
+
+        now = int(time.time())
+        reminder_time = now + (reminder_minutes * 60)
+
+        # Skip if reminder would fire after or at expiry time
+        if reminder_time >= expires_at:
+            logger.debug(
+                "Reminder time >= expiry time for %s — skipping (reminder would be pointless)",
+                request_id,
+                extra={"src_module": "scheduler", "operation": "create_pending_reminder_schedule", "request_id": request_id},
+            )
+            return False
+
+        try:
+            client = self._get_client()
+            name = reminder_schedule_name(request_id)
+            at_expr = _format_schedule_time(reminder_time)
+
+            payload = {
+                "source": "bouncer-scheduler",
+                "action": "pending_reminder",
+                "request_id": request_id,
+                "command_preview": command_preview,
+                "source_field": source,
+            }
+
+            client.create_schedule(
+                Name=name,
+                GroupName=self._group_name,
+                ScheduleExpression=at_expr,
+                ScheduleExpressionTimezone="UTC",
+                FlexibleTimeWindow={"Mode": "OFF"},
+                ActionAfterCompletion="DELETE",
+                Target={
+                    "Arn": self._lambda_arn,
+                    "RoleArn": self._role_arn,
+                    "Input": json.dumps(payload),
+                },
+            )
+            logger.info("Created reminder schedule '%s' for request %s at %s", name, request_id, at_expr, extra={"src_module": "scheduler", "operation": "create_pending_reminder_schedule", "request_id": request_id, "schedule_name": name})
+            return True
+
+        except ClientError as exc:
+            logger.error(
+                "Failed to create reminder schedule for %s: %s", request_id, exc,
+                extra={"src_module": "scheduler", "operation": "create_pending_reminder_schedule", "request_id": request_id, "error": str(exc)},
+            )
+            return False
+
     def delete_schedule(self, request_id: str) -> bool:
         """Delete the expiry schedule for *request_id* (e.g. after approval).
 
@@ -299,6 +394,27 @@ class SchedulerService:
             return True
         except ClientError as exc:
             logger.error("Failed to delete warning schedule for %s: %s", request_id, exc, extra={"src_module": "scheduler", "operation": "delete_warning_schedule", "request_id": request_id, "error": str(exc)})
+            return False
+
+    def delete_reminder_schedule(self, request_id: str) -> bool:
+        """Delete the pending approval *reminder* schedule for *request_id*.
+
+        Returns:
+            ``True`` on success or if schedule did not exist, ``False`` on error.
+        """
+        if not self._enabled:
+            return False
+
+        try:
+            client = self._get_client()
+            name = reminder_schedule_name(request_id)
+            client.delete_schedule(Name=name, GroupName=self._group_name)
+            logger.info("Deleted reminder schedule '%s' for request %s", name, request_id, extra={"src_module": "scheduler", "operation": "delete_reminder_schedule", "request_id": request_id, "schedule_name": name})
+            return True
+        except client.exceptions.ResourceNotFoundException:  # type: ignore[attr-defined]
+            return True
+        except ClientError as exc:
+            logger.error("Failed to delete reminder schedule for %s: %s", request_id, exc, extra={"src_module": "scheduler", "operation": "delete_reminder_schedule", "request_id": request_id, "error": str(exc)})
             return False
 
     # ── private helpers ───────────────────────────────────────────────────────

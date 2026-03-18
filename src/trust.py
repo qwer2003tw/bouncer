@@ -25,13 +25,25 @@ from constants import (
     TRUST_UPLOAD_MAX_BYTES_PER_FILE,
     TRUST_UPLOAD_MAX_BYTES_TOTAL, TRUST_UPLOAD_BLOCKED_EXTENSIONS,
     TRUST_IP_BINDING_MODE,
+    TRUST_RATE_LIMIT_PER_MINUTE, TRUST_RATE_LIMIT_ENABLED,
 )
 from aws_lambda_powertools import Logger
 
 logger = Logger(service="bouncer")
 
+
+# ============================================================================
+# Exceptions
+# ============================================================================
+
+class TrustRateExceeded(Exception):
+    """Raised when trust session per-minute command rate limit is exceeded."""
+    pass
+
+
 __all__ = [
     'TrustSession',
+    'TrustRateExceeded',
     'get_trust_session',
     'create_trust_session',
     'revoke_trust_session',
@@ -321,11 +333,85 @@ def increment_trust_command_count(trust_id: str) -> int:
     Uses DynamoDB conditional update for concurrency safety:
     - Only increments when under limit and session is still active
     - ConditionalCheckFailedException → returns 0 (reject)
+    - S59-002: Also checks per-minute rate velocity
 
     Returns:
         New counter value, or 0 when condition is not met
+
+    Raises:
+        TrustRateExceeded: When per-minute velocity limit is exceeded
     """
     now = int(time.time())
+
+    # S59-002: Check per-minute rate velocity
+    if TRUST_RATE_LIMIT_ENABLED:
+        try:
+            # First, read current rate window state
+            item_response = _get_table().get_item(Key={'request_id': trust_id})
+            item = item_response.get('Item')
+            if item:
+                rate_window_start = int(item.get('rate_window_start', 0))
+                rate_window_count = int(item.get('rate_window_count', 0))
+
+                # Check if we're in a new window (> 60s since window start)
+                if now - rate_window_start > 60:
+                    # New window: reset count to 1 (this command)
+                    new_window_start = now
+                    new_window_count = 1
+                else:
+                    # Same window: increment count
+                    new_window_start = rate_window_start
+                    new_window_count = rate_window_count + 1
+
+                    # Check rate limit
+                    if new_window_count > TRUST_RATE_LIMIT_PER_MINUTE:
+                        logger.warning(
+                            "Trust rate exceeded for %s: %d commands in current window",
+                            trust_id, new_window_count,
+                            extra={"src_module": "trust", "operation": "increment_trust_command_count", "trust_id": trust_id, "rate_count": new_window_count}
+                        )
+                        raise TrustRateExceeded(f"Trust session rate limit exceeded: {new_window_count} commands per minute")
+
+                # Update both command_count and rate window atomically
+                response = _get_table().update_item(
+                    Key={'request_id': trust_id},
+                    UpdateExpression=(
+                        'SET command_count = if_not_exists(command_count, :zero) + :one, '
+                        'rate_window_start = :window_start, '
+                        'rate_window_count = :window_count'
+                    ),
+                    ConditionExpression='command_count < :max AND #status = :active AND expires_at > :now',
+                    ExpressionAttributeNames={
+                        '#status': 'type',  # 'type' = 'trust_session' is our status indicator
+                    },
+                    ExpressionAttributeValues={
+                        ':zero': 0,
+                        ':one': 1,
+                        ':max': TRUST_SESSION_MAX_COMMANDS,
+                        ':active': 'trust_session',
+                        ':now': now,
+                        ':window_start': new_window_start,
+                        ':window_count': new_window_count,
+                    },
+                    ReturnValues='UPDATED_NEW'
+                )
+                return int(response.get('Attributes', {}).get('command_count', 0))
+            else:
+                # Trust session not found
+                logger.warning("Trust session not found for %s", trust_id, extra={"src_module": "trust", "operation": "increment_trust_command_count", "trust_id": trust_id})
+                return 0
+
+        except TrustRateExceeded:
+            # Re-raise rate exceeded
+            raise
+        except _get_table().meta.client.exceptions.ConditionalCheckFailedException:
+            logger.warning("Trust command count conditional update failed for %s (limit or expired)", trust_id, extra={"src_module": "trust", "operation": "increment_trust_command_count", "trust_id": trust_id})
+            return 0
+        except ClientError as e:
+            logger.error("Increment trust command count error: %s", e, extra={"src_module": "trust", "operation": "increment_trust_command_count", "trust_id": trust_id, "error": str(e)})
+            return 0
+
+    # Rate limiting disabled: use original logic
     try:
         response = _get_table().update_item(
             Key={'request_id': trust_id},
