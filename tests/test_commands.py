@@ -15,7 +15,7 @@ class TestCommandClassification:
     def test_is_blocked(self, app_module):
         """測試 BLOCKED 分類"""
         assert app_module.is_blocked('aws iam create-user --user-name test')
-        assert app_module.is_blocked('aws iam delete-role --role-name admin')
+        assert not app_module.is_blocked('aws iam delete-role --role-name admin')  # s56-002: delete-role now requires approval, not blocked
         assert app_module.is_blocked('aws sts assume-role --role-arn xxx')
         # Shell metacharacters are NOT checked by is_blocked — they are handled
         # by execute_command's aws_cli_split which doesn't invoke a shell

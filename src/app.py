@@ -415,8 +415,8 @@ def lambda_handler(event: dict, context) -> dict:
         request_id = event.get('request_id', '')
         from db import table as _table
         try:
-            response = _table.get_item(Key={'request_id': request_id})
-            item = response.get('Item')
+            ddb_response = _table.get_item(Key={'request_id': request_id})
+            item = ddb_response.get('Item')
             if not item or item.get('status') != 'pending_approval':
                 # Already approved/denied or not found, skip warning
                 logger.info("Skipped expiry warning for %s (status=%s)", request_id, item.get('status') if item else 'not_found', extra={"src_module": "app", "operation": "expiry_warning", "request_id": request_id})
