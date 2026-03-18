@@ -411,9 +411,24 @@ def lambda_handler(event: dict, context) -> dict:
 
     # EventBridge Scheduler approval expiry warning (sprint35-003)
     if event.get('source') == 'bouncer-scheduler' and event.get('action') == 'expiry_warning':
+        # s56-004: Check DDB status before sending warning (skip if already approved/denied)
+        request_id = event.get('request_id', '')
+        from db import table as _table
+        try:
+            response = _table.get_item(Key={'request_id': request_id})
+            item = response.get('Item')
+            if not item or item.get('status') != 'pending_approval':
+                # Already approved/denied or not found, skip warning
+                logger.info("Skipped expiry warning for %s (status=%s)", request_id, item.get('status') if item else 'not_found', extra={"src_module": "app", "operation": "expiry_warning", "request_id": request_id})
+                return {'statusCode': 200, 'body': json.dumps({'status': 'skipped'})}
+        except Exception as exc:
+            logger.error("Failed to check status for expiry warning %s: %s", request_id, exc, extra={"src_module": "app", "operation": "expiry_warning", "request_id": request_id})
+            # On error, skip warning (conservative approach)
+            return {'statusCode': 200, 'body': json.dumps({'status': 'error'})}
+
         from notifications import send_expiry_warning_notification
         send_expiry_warning_notification(
-            request_id=event.get('request_id', ''),
+            request_id=request_id,
             command_preview=event.get('command_preview', ''),
             source=event.get('source_field', ''),
         )
