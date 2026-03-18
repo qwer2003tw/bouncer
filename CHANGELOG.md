@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.58.0] - 2026-03-18
+
+### Added
+- `tests/_module_list.py` — centralized `BOUNCER_MODS` list (source of truth for test isolation); fixes cross-batch moto pollution root cause from Sprint 57
+- `src/callbacks_command.py` — structured `session_lifecycle` audit logs for command approved/denied/trust approved
+- `src/grant.py` — structured `session_lifecycle` audit logs for grant approved/denied
+- `src/deployer.py` — `_get_changed_files()` helper; code-only deploy notifications now include git diff file list (max 3 files + count)
+
+### Refactored
+- `src/mcp_upload.py` — move `get_s3_client` imports to module top-level (was repeated in 3 functions)
+
+### Fixed
+- `tests/conftest.py` — `BOUNCER_MODS` now imported from `_module_list.py`; `tests/` added to `sys.path` for xdist worker compat
+- `tests/test_template_diff_analyzer.py` — add `xdist_group` to prevent cross-worker `GetSecretValue` pollution
+
+### Workspace
+- `skills/bouncer-exec/scripts/bouncer_exec.sh` — new `--cli-input-json` parameter to bypass shell quoting for complex JSON arguments
+
 ## [3.57.0] - 2026-03-18
 
 ### Changed
