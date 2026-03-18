@@ -543,15 +543,27 @@ def deny_grant(grant_id: str) -> bool:
         是否成功
     """
     try:
+        now = int(time.time())
         table.update_item(
             Key={'request_id': grant_id},
             UpdateExpression='SET #status = :status, denied_at = :now',
             ExpressionAttributeNames={'#status': 'status'},
             ExpressionAttributeValues={
                 ':status': 'denied',
-                ':now': int(time.time()),
+                ':now': now,
             },
         )
+
+        # Sprint 58 s58-004: Session lifecycle audit log
+        logger.info(
+            "session_lifecycle",
+            extra={
+                "src_module": "grant",
+                "operation": "grant_denied",
+                "grant_id": grant_id,
+            }
+        )
+
         return True
     except ClientError as e:
         logger.error(f"[GRANT] deny_grant error: {e}", extra={"src_module": "grant", "operation": "deny_grant", "error": str(e)})

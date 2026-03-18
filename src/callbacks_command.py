@@ -195,6 +195,20 @@ def _execute_and_store_result(
         ExpressionAttributeValues=expr_values
     )
 
+    # Sprint 58 s58-004: Session lifecycle audit log
+    logger.info(
+        "session_lifecycle",
+        extra={
+            "src_module": "callbacks",
+            "operation": "trust_approved" if action == 'approve_trust' else "command_approved",
+            "request_id": request_id,
+            "user_id": user_id,
+            "source_ip": source_ip,
+            "command": command[:100],
+            "command_status": cmd_status,
+        }
+    )
+
     return {
         'result': result,
         'paged': paged,
@@ -494,6 +508,18 @@ def _handle_deny_callback(
         'decided_at': now,
         'decision_latency_ms': decision_latency_ms,
     })
+
+    # Sprint 58 s58-004: Session lifecycle audit log
+    logger.info(
+        "session_lifecycle",
+        extra={
+            "src_module": "callbacks",
+            "operation": "command_denied",
+            "request_id": request_id,
+            "user_id": user_id,
+            "command": item.get('command', '')[:100],
+        }
+    )
 
     # s56-003: Add error handling for update_message to avoid 400 errors
     try:
