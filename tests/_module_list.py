@@ -4,8 +4,6 @@ Import this from test files instead of conftest to avoid xdist worker
 ModuleNotFoundError (conftest is not importable as a regular module).
 
 Usage:
-    from tests._module_list import BOUNCER_MODS
-    # or from within tests/ directory:
     from _module_list import BOUNCER_MODS
 """
 
@@ -19,6 +17,9 @@ BOUNCER_MODS = [
     'scheduler_service', 'compliance_checker', 'grant', 'deployer',
     'constants', 'metrics', 'sequence_analyzer', 'help_command',
     'tool_schema', 'otp', 'trust_expiry', 'telegram_commands',
-    'telegram_entities', 'changeset_analyzer', 'template_diff_analyzer',
-    'upload_scanner', 'aws_clients', 'mcp_deploy_frontend',
+    'telegram_entities', 'mcp_deploy_frontend',
+    # NOTE: template_diff_analyzer, changeset_analyzer, upload_scanner, aws_clients
+    # are intentionally excluded — they use module-level state/AWS clients and must NOT
+    # be reset between tests (resetting causes real AWS calls without mock context).
+    # Tests for these modules use their own isolation via @patch decorators.
 ]
