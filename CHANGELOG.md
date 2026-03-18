@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.57.0] - 2026-03-18
+
+### Changed
+- `src/callbacks_command.py` — Trust 相關操作的命令（`create_trust_session`、`increment_trust_upload_count` 等）不再顯示 Trust 按鈕，避免多餘操作選項（s57-001）
+- `src/app.py` — 命令請求過期時更新原始 Telegram 訊息（改為❌狀態）而非發送新通知，保持對話整潔；無 `telegram_message_id` 時 fallback 回原本行為（s57-002）
+
 ## [3.56.0] - 2026-03-18
 
 ### Fixed
