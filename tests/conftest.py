@@ -11,6 +11,10 @@ import pytest
 
 # Ensure src/ is in path for all workers (required for pytest-xdist)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../src'))
+# Ensure tests/ is in path so test files can import _module_list (Sprint 58 s58-001)
+_tests_dir = os.path.join(os.path.dirname(__file__))
+if _tests_dir not in sys.path:
+    sys.path.insert(0, _tests_dir)
 import importlib
 from unittest.mock import patch, MagicMock
 from decimal import Decimal
