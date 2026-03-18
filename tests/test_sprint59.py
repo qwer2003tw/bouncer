@@ -141,7 +141,7 @@ class TestS59_001_PendingReminder:
                 'source_field': 'test-source',
             }
 
-            with patch('app.send_telegram_message_silent') as mock_send:
+            with patch('telegram.send_telegram_message_silent') as mock_send:
                 from app import lambda_handler
                 response = lambda_handler(event, {})
 
@@ -178,7 +178,7 @@ class TestS59_001_PendingReminder:
                 'source_field': 'test-source',
             }
 
-            with patch('app.send_telegram_message_silent') as mock_send:
+            with patch('telegram.send_telegram_message_silent') as mock_send:
                 from app import lambda_handler
                 response = lambda_handler(event, {})
 
@@ -301,49 +301,34 @@ class TestS59_002_TrustRateDetection:
             assert new_count > 0
 
     def test_trust_rate_disabled(self):
-        """Test that rate limiting can be disabled."""
+        """Test that rate limiting can be disabled via TRUST_RATE_LIMIT_ENABLED=False."""
         with mock_aws():
-            # Temporarily disable rate limiting
-            old_enabled = os.environ.get('TRUST_RATE_LIMIT_ENABLED')
-            os.environ['TRUST_RATE_LIMIT_ENABLED'] = 'false'
+            dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
+            table = _create_mock_table(dynamodb)
 
-            try:
-                dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
-                table = _create_mock_table(dynamodb)
+            now = int(time.time())
+            trust_id = 'trust-test-disabled'
 
-                now = int(time.time())
-                trust_id = 'trust-test-disabled'
+            # Create trust session already at rate limit
+            table.put_item(Item={
+                'request_id': trust_id,
+                'type': 'trust_session',
+                'command_count': 5,
+                'expires_at': now + 600,
+                'rate_window_start': now,
+                'rate_window_count': 10,  # Way over limit
+            })
 
-                # Create trust session at rate limit
-                table.put_item(Item={
-                    'request_id': trust_id,
-                    'type': 'trust_session',
-                    'command_count': 5,
-                    'expires_at': now + 600,
-                    'rate_window_start': now,
-                    'rate_window_count': 10,  # Way over limit
-                })
+            import src.trust as trust_mod
+            trust_mod._table = table
 
-                import src.trust as trust_mod
-                trust_mod._table = table
+            from trust import increment_trust_command_count
 
-                # Need to reload constants after env var change
-                import importlib
-                import src.constants as constants_mod
-                importlib.reload(constants_mod)
-                importlib.reload(trust_mod)
-
-                from trust import increment_trust_command_count
-
-                # Should succeed even though rate is high
+            # Patch TRUST_RATE_LIMIT_ENABLED at the trust module level
+            # (env var reload won't work since constant is already imported)
+            with patch('trust.TRUST_RATE_LIMIT_ENABLED', False):
                 new_count = increment_trust_command_count(trust_id)
-                assert new_count > 0
-            finally:
-                # Restore original setting
-                if old_enabled is not None:
-                    os.environ['TRUST_RATE_LIMIT_ENABLED'] = old_enabled
-                else:
-                    del os.environ['TRUST_RATE_LIMIT_ENABLED']
+                assert new_count > 0, "Rate limit disabled should allow command"
 
     def test_mcp_execute_catches_rate_exceeded(self):
         """Test that mcp_execute properly catches TrustRateExceeded."""
@@ -360,7 +345,7 @@ class TestS59_002_TrustRateDetection:
             with patch('mcp_execute.increment_trust_command_count', side_effect=TrustRateExceeded('Rate exceeded')):
                 with patch('mcp_execute.should_trust_approve', return_value=(True, {'request_id': 'trust-123'}, 'ok')):
                     with patch('mcp_execute.emit_metric') as mock_metric:
-                        from mcp_execute import _check_trust_auto_approve
+                        from mcp_execute import _check_trust_session
 
                         ctx = MagicMock()
                         ctx.command = 'aws s3 ls'
@@ -370,14 +355,15 @@ class TestS59_002_TrustRateDetection:
                         ctx.source = 'test-source'
                         ctx.caller_ip = '127.0.0.1'
 
-                        result = _check_trust_auto_approve(ctx)
+                        result = _check_trust_session(ctx)
 
-                        # Should return error result
+                        # Should return MCP error result (not None)
                         assert result is not None
-                        assert 'isError' in result
-                        assert result['isError'] is True
+                        body = json.loads(result['body'])
+                        assert 'error' in body
+                        assert body['error']['code'] == 'TRUST_RATE_EXCEEDED'
 
-                        # Should emit metric
+                        # Should emit TrustRateExceeded metric
                         mock_metric.assert_called()
                         call_args = [call for call in mock_metric.call_args_list if 'TrustRateExceeded' in str(call)]
                         assert len(call_args) > 0
