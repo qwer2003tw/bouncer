@@ -100,6 +100,26 @@ def app_module(mock_dynamodb):
     m.app = app
     yield m
 
+    # Reset db._LazyTable cache to avoid moto isolation issues
+    # (db.table was overridden with a real Table object in this fixture)
+    try:
+        import db
+        # Reset only _LazyTable instances (skip real Table objects)
+        if hasattr(db.table, '_reset'):
+            db.table._reset()
+        if hasattr(db.accounts_table, '_reset'):
+            db.accounts_table._reset()
+        if hasattr(db.deployer_projects_table, '_reset'):
+            db.deployer_projects_table._reset()
+        if hasattr(db.deployer_history_table, '_reset'):
+            db.deployer_history_table._reset()
+        if hasattr(db.deployer_locks_table, '_reset'):
+            db.deployer_locks_table._reset()
+        if hasattr(db.sequence_history_table, '_reset'):
+            db.sequence_history_table._reset()
+    except Exception:
+        pass
+
     sys.path.pop(0)
 
 
