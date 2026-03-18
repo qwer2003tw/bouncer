@@ -312,8 +312,7 @@ def _check_upload_trust(ctx: UploadContext) -> Optional[dict]:
         content_bytes = base64.b64decode(ctx.content_b64)
         sha256_hash = _hashlib.sha256(content_bytes).hexdigest()
 
-        # Upload to S3
-        from aws_clients import get_s3_client
+        # Upload to S3 (Sprint 58 s58-003: use top-level import)
         s3 = get_s3_client(role_arn=ctx.assume_role, session_name='bouncer-trust-upload')
 
         s3.put_object(
@@ -400,7 +399,7 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
 
         # Use assume_role credentials if available (e.g. BouncerRole has S3 access)
         # The Lambda execution role may not have direct S3 PutObject permissions.
-        from aws_clients import get_s3_client
+        # Sprint 58 s58-003: use top-level import
         _s3 = get_s3_client(role_arn=ctx.assume_role, session_name='bouncer-upload-staging')
         _s3.put_object(
             Bucket=staging_bucket,
@@ -816,7 +815,7 @@ def _try_trust_auto_approve_batch(
     # Execute all uploads under trust
     uploaded = []
     try:
-        from aws_clients import get_s3_client
+        # Sprint 58 s58-003: use top-level import
         s3 = get_s3_client(role_arn=assume_role, session_name='bouncer-batch-trust-upload')
 
         for pf in processed_files:

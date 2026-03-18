@@ -185,3 +185,42 @@ class TestGetCloudfrontClient:
             aws_secret_access_key=FAKE_CREDS['SecretAccessKey'],
             aws_session_token=FAKE_CREDS['SessionToken'],
         )
+
+
+class TestGetS3ClientFactoryConsistency:
+    """Sprint 58 s58-003: Verify factory returns consistent client objects."""
+
+    def test_multiple_calls_create_new_clients(self):
+        """Each call to get_s3_client() should create a new boto3 client."""
+        with patch('aws_clients.boto3') as mock_boto3:
+            mock_s3_1 = MagicMock()
+            mock_s3_2 = MagicMock()
+            mock_boto3.client.side_effect = [mock_s3_1, mock_s3_2]
+
+            result1 = aws_clients.get_s3_client()
+            result2 = aws_clients.get_s3_client()
+
+        assert result1 is mock_s3_1
+        assert result2 is mock_s3_2
+        assert mock_boto3.client.call_count == 2
+
+    def test_factory_accepts_all_expected_params(self):
+        """Factory should accept role_arn, session_name, region without error."""
+        with patch('aws_clients.boto3') as mock_boto3:
+            mock_sts = MagicMock()
+            mock_sts.assume_role.return_value = {'Credentials': FAKE_CREDS}
+            mock_s3 = MagicMock()
+
+            def _factory(service, **kwargs):
+                return mock_sts if service == 'sts' else mock_s3
+
+            mock_boto3.client.side_effect = _factory
+
+            # Should not raise
+            result = aws_clients.get_s3_client(
+                role_arn=ROLE_ARN,
+                session_name='test-session',
+                region='us-east-1'
+            )
+
+        assert result is mock_s3
