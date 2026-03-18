@@ -76,7 +76,7 @@ def app_module(mock_dynamodb):
     os.environ['MCP_MAX_WAIT'] = '5'
 
     for mod in ['app', 'telegram', 'paging', 'trust', 'commands', 'notifications', 'db',
-                'callbacks', 'mcp_tools', 'mcp_execute', 'mcp_upload', 'mcp_admin', 'accounts', 'rate_limit', 'smart_approval',
+                'callbacks', 'callbacks_upload', 'mcp_tools', 'mcp_execute', 'mcp_upload', 'mcp_admin', 'accounts', 'rate_limit', 'smart_approval',
                 'tool_schema', 'constants', 'grant', 'risk_scorer',
                 'src.app', 'src.telegram', 'src.trust']:
         if mod in sys.modules:
@@ -91,6 +91,7 @@ def app_module(mock_dynamodb):
     app.table = table
     app.dynamodb = mock_dynamodb
     db.table = table
+    trust._table = table  # Inject directly to avoid stale _db reference after module reload
 
     class Module:
         pass
@@ -108,6 +109,13 @@ def app_module(mock_dynamodb):
         import db as _db_mod
         importlib.reload(_db_mod)
         _db_mod.reset_tables()
+    except Exception:
+        pass
+
+    # Also reset trust._table to avoid leaking moto reference to subsequent tests
+    try:
+        import trust as _trust_mod
+        _trust_mod._table = None
     except Exception:
         pass
 
