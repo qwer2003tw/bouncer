@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.59.0] - 2026-03-18
+
+### Added
+- `src/app.py`, `src/mcp_execute.py`, `src/callbacks.py` — Approval Pending Reminder: schedule EventBridge reminder N minutes after request creation (default: 10 min); auto-cleanup on approve/deny (s59-001)
+- `src/constants.py` — `PENDING_REMINDER_MINUTES` constant for reminder scheduling (s59-001)
+- `src/scheduler.py` — `create_pending_reminder_schedule`, `delete_reminder_schedule` methods (s59-001)
+- `src/trust.py` — per-minute velocity check for trust session commands; new constants `TRUST_RATE_LIMIT_PER_MINUTE` (default: 5), `TRUST_RATE_LIMIT_ENABLED`; new exception `TrustRateExceeded`; DDB fields `rate_window_start`, `rate_window_count` (s59-002)
+- `src/mcp_execute.py`, `src/callbacks_command.py`, `src/mcp_deploy_frontend.py` — error handling for `TrustRateExceeded` (s59-002)
+- `tests/test_sprint59.py` — comprehensive test suite covering reminder schedule creation/skip/handler, and trust rate detection scenarios
+
+### Metrics
+- CloudWatch `TrustRateExceeded` metric on rate limit trigger (s59-002)
+
 ## [3.58.0] - 2026-03-18
 
 ### Added
