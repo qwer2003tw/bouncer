@@ -300,20 +300,20 @@ def _cleanup_tables(request):
         except Exception:
             pass
 
-    # Sprint 58 s58-001: Reset module state to prevent moto isolation bugs
-    for mod_name in BOUNCER_MODS:
-        try:
-            if mod_name in sys.modules:
-                mod = sys.modules[mod_name]
-                # db module has _reset() method
-                if hasattr(mod, '_reset') and callable(getattr(mod, '_reset')):
-                    mod._reset()
-                # trust module has _table cache that needs clearing
-                if hasattr(mod, '_table'):
-                    mod._table = None
-        except Exception:
-            pass
-
+    # Sprint 58 s58-001: Reset only specific module caches that are known to cause
+    # moto isolation bugs. Do NOT iterate BOUNCER_MODS broadly — resetting modules
+    # with module-level state (mcp_deploy_frontend, template_diff_analyzer, etc.)
+    # causes them to reinitialize without mock context, breaking those tests.
+    try:
+        import db as _db
+        _db._reset() if hasattr(_db, '_reset') else None
+    except Exception:
+        pass
+    try:
+        import trust as _trust
+        _trust._table = None
+    except Exception:
+        pass
 
 
 # ============================================================================

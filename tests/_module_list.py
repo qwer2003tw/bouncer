@@ -7,6 +7,16 @@ Usage:
     from _module_list import BOUNCER_MODS
 """
 
+# Modules safe to clear between tests (no module-level AWS state).
+# These are reset in fixtures that manage their own moto context (e.g. app_mod).
+#
+# EXCLUDED (must NOT be in this list):
+#   - template_diff_analyzer: module-level caches, tests use @patch decorators
+#   - changeset_analyzer: same reason
+#   - upload_scanner: same reason
+#   - aws_clients: module-level boto3 clients
+#   - mcp_deploy_frontend: loads project config from DynamoDB at call time;
+#     clearing it causes "Unknown project" in tests that don't re-seed DynamoDB
 BOUNCER_MODS = [
     'app', 'db', 'trust', 'notifications', 'callbacks',
     'callbacks_command', 'callbacks_upload', 'callbacks_grant',
@@ -17,9 +27,5 @@ BOUNCER_MODS = [
     'scheduler_service', 'compliance_checker', 'grant', 'deployer',
     'constants', 'metrics', 'sequence_analyzer', 'help_command',
     'tool_schema', 'otp', 'trust_expiry', 'telegram_commands',
-    'telegram_entities', 'mcp_deploy_frontend',
-    # NOTE: template_diff_analyzer, changeset_analyzer, upload_scanner, aws_clients
-    # are intentionally excluded — they use module-level state/AWS clients and must NOT
-    # be reset between tests (resetting causes real AWS calls without mock context).
-    # Tests for these modules use their own isolation via @patch decorators.
+    'telegram_entities',
 ]
