@@ -273,7 +273,7 @@ def _cleanup_tables(request):
 @pytest.fixture(autouse=True)
 def reset_paging_module_bindings():
     """Reset paging module function bindings after each test.
-    
+
     paging.py uses `from telegram import send_telegram_message_silent` which
     creates a local binding. When tests patch `telegram.send_telegram_message_silent`
     at module/class level, the binding may become stale. This fixture reloads
@@ -283,5 +283,41 @@ def reset_paging_module_bindings():
     try:
         import paging
         importlib.reload(paging)
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def reset_telegram_commands_module():
+    """Reset telegram_commands module after each test to prevent cross-test pollution.
+
+    Some tests delete and re-import telegram_commands, which can leave the module
+    in an inconsistent state. This fixture ensures the module is properly reloaded
+    after each test to restore clean bindings and prevent mock pollution.
+    """
+    yield
+    try:
+        # Stop all active patches to prevent stale mocks
+        from unittest.mock import _patch
+        for p in list(_patch._active_patches):
+            try:
+                p.stop()
+            except Exception:
+                pass
+
+        # Reload telegram_commands, notifications, and related modules to ensure clean state
+        # test_sprint39_ux.py reloads notifications, which can affect telegram_commands
+        modules_to_reload = ['telegram_commands', 'notifications', 'telegram', 'constants']
+        for mod_name in modules_to_reload:
+            if mod_name in sys.modules:
+                try:
+                    mod = sys.modules[mod_name]
+                    importlib.reload(mod)
+                except Exception:
+                    # If reload fails, delete the module
+                    try:
+                        del sys.modules[mod_name]
+                    except Exception:
+                        pass
     except Exception:
         pass
