@@ -32,7 +32,7 @@ BOUNCER_MODS = [
     'app', 'db', 'trust', 'notifications', 'callbacks',
     'callbacks_command', 'callbacks_upload', 'callbacks_grant',
     'mcp_execute', 'mcp_tools', 'telegram', 'commands',
-    'mcp_upload', 'mcp_admin', 'mcp_history', 'mcp_confirm',
+    'mcp_upload', 'mcp_admin', 'mcp_grant', 'mcp_history', 'mcp_confirm',
     'mcp_presigned', 'accounts', 'rate_limit', 'utils',
     'paging', 'smart_approval', 'risk_scorer', 'template_scanner',
     'scheduler_service', 'compliance_checker', 'grant', 'deployer',
@@ -255,6 +255,22 @@ def _cleanup_tables(request):
     if 'mock_dynamodb' not in request.fixturenames:
         yield
         return
+
+    # Fix s61-001: Ensure DEFAULT_ACCOUNT_ID env var is set before any module imports
+    # to prevent parallel test workers from importing constants.py with empty DEFAULT_ACCOUNT_ID.
+    # This must happen before getfixturevalue('mock_dynamodb') to ensure app_module fixture
+    # has the correct environment when it reloads modules.
+    if 'DEFAULT_ACCOUNT_ID' not in os.environ or not os.environ['DEFAULT_ACCOUNT_ID']:
+        os.environ['DEFAULT_ACCOUNT_ID'] = '111111111111'
+
+    # If constants module is already loaded, update its DEFAULT_ACCOUNT_ID to match env var
+    # (parallel workers may have imported it before app_module fixture set the env var)
+    try:
+        import constants as _constants
+        if hasattr(_constants, 'DEFAULT_ACCOUNT_ID') and not _constants.DEFAULT_ACCOUNT_ID:
+            _constants.DEFAULT_ACCOUNT_ID = os.environ['DEFAULT_ACCOUNT_ID']
+    except Exception:
+        pass
 
     mock_dynamodb = request.getfixturevalue('mock_dynamodb')
     # Re-inject db/accounts references before each test (guard against cross-file sys.modules pollution)

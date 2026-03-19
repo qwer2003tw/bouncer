@@ -3,7 +3,7 @@ Bouncer - Template/Payload Scanner (Phase 4)
 分析 AWS CLI 命令中的 inline JSON payload，進行深度風險分析
 
 設計原則：
-1. Fail-open for extraction（JSON 解析失敗不影響分數）
+1. Fail-closed for extraction（JSON 解析失敗返回 error indicator，s61-001）
 2. Fail-closed for scoring（找到風險就加分）
 3. 獨立模組，由 risk_scorer 呼叫
 4. 所有 check 函數為純函數，易於測試
@@ -24,7 +24,11 @@ import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from aws_lambda_powertools import Logger
+from metrics import emit_metric
 from utils import RiskFactor
+
+logger = Logger(service="bouncer")
 
 __all__ = [
     'extract_json_payloads',
@@ -68,7 +72,7 @@ SECRET_KEY_PATTERN = re.compile(
 # JSON Payload Extraction
 # ============================================================================
 
-def extract_json_payloads(command: str) -> List[Tuple[str, dict]]:
+def extract_json_payloads(command: str) -> Tuple[List[Tuple[str, dict]], bool]:
     """
     從 AWS CLI 命令中提取 JSON payload
 
@@ -81,24 +85,36 @@ def extract_json_payloads(command: str) -> List[Tuple[str, dict]]:
         command: AWS CLI 命令字串
 
     Returns:
-        list of (param_name, parsed_json) tuples
-        解析失敗回傳空 list（fail-open）
+        (results, extraction_failed) tuple:
+        - results: list of (param_name, parsed_json) tuples
+        - extraction_failed: True if extraction encountered errors (fail-closed, s61-001)
     """
     if not command or not isinstance(command, str):
-        return []
+        return ([], False)
 
     results = []
+    extraction_failed = False
 
     for param in TARGET_PARAMETERS:
         try:
             payloads = _extract_param_json(command, param)
             for payload in payloads:
                 results.append((param, payload))
-        except Exception:  # noqa: BLE001
-            # Fail-open: 解析失敗跳過此參數
-            continue
+        except Exception as exc:  # noqa: BLE001
+            # Fail-closed: mark extraction failure (s61-001)
+            extraction_failed = True
+            logger.warning(
+                "template_scanner: payload extraction failed",
+                extra={
+                    "src_module": "template_scanner",
+                    "operation": "extract_json_payloads",
+                    "param": param,
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc)[:200],
+                },
+            )
 
-    return results
+    return (results, extraction_failed)
 
 
 def _extract_param_json(command: str, param: str) -> List[dict]:
@@ -646,11 +662,36 @@ def scan_command_payloads(
 
     Returns:
         (max_score, factors) — 最高風險分數和所有風險因素
+        On extraction error, returns high score + error factor (fail-closed, s61-001)
     """
     if not command or not rules:
         return (0, [])
 
-    payloads = extract_json_payloads(command)
+    payloads, extraction_failed = extract_json_payloads(command)
+
+    # Fail-closed: extraction error requires manual review (s61-001)
+    if extraction_failed:
+        logger.error(
+            "template_scanner: extraction error detected",
+            extra={
+                "src_module": "template_scanner",
+                "operation": "scan_command_payloads",
+                "command_preview": command[:100],
+            },
+        )
+        emit_metric('Bouncer', 'TemplateExtractionError', 1)
+
+        # Return error indicator as high-risk factor
+        error_factor = RiskFactor(
+            name="Template: Extraction Error",
+            category="parameter",
+            raw_score=95,
+            weighted_score=0,
+            weight=0,
+            details="Template payload extraction failed - requires manual review (s61-001)",
+        )
+        return (95, [error_factor])
+
     if not payloads:
         return (0, [])
 
