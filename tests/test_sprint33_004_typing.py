@@ -12,9 +12,11 @@ import sys
 import time
 
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import patch
 from moto import mock_aws
 import boto3
+
+pytestmark = pytest.mark.xdist_group("app_module")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -58,7 +60,6 @@ def _create_table(dynamodb):
 
 def _reload_callbacks(table):
     """Reload callbacks module with a fresh mock table injected."""
-    import importlib
     # Clear cached modules so imports inside callbacks are re-resolved
     for mod in list(sys.modules.keys()):
         if mod in ('callbacks', 'db', 'telegram', 'commands', 'trust', 'paging',
