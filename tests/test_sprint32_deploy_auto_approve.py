@@ -19,7 +19,7 @@ import sys
 import os
 
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -73,7 +73,7 @@ def _make_error_analysis():
     )
 
 
-def _make_project(auto_approve=True, template_s3_url="s3://my-bucket/template.yaml", stack_name="my-stack"):
+def _make_project(auto_approve=True, template_s3_url="https://bouncer-test.s3.us-east-1.amazonaws.com/packaged-template.yaml", stack_name="my-stack"):
     return {
         "project_id": "my-project",
         "name": "My Project",
@@ -306,15 +306,15 @@ def test_tc06_add_project_includes_auto_approve_fields():
             "name": "TC06 Project",
             "stack_name": "tc06-stack",
             "auto_approve_deploy": True,
-            "template_s3_url": "s3://my-bucket/template.yaml",
+            "template_s3_url": "https://bouncer-test.s3.us-east-1.amazonaws.com/template.yaml",
         })
 
     assert result["auto_approve_deploy"] is True
-    assert result["template_s3_url"] == "s3://my-bucket/template.yaml"
+    assert result["template_s3_url"] == "https://bouncer-test.s3.us-east-1.amazonaws.com/template.yaml"
     mock_table.put_item.assert_called_once()
     put_item_arg = mock_table.put_item.call_args[1]["Item"]
     assert put_item_arg["auto_approve_deploy"] is True
-    assert put_item_arg["template_s3_url"] == "s3://my-bucket/template.yaml"
+    assert put_item_arg["template_s3_url"] == "https://bouncer-test.s3.us-east-1.amazonaws.com/template.yaml"
 
 
 # ---------------------------------------------------------------------------
@@ -337,12 +337,12 @@ def test_tc07_update_project_config_patches_field():
 
         result = deployer.update_project_config("proj-tc07", {
             "auto_approve_deploy": True,
-            "template_s3_url": "s3://bucket/tmpl.yaml",
+            "template_s3_url": "https://bouncer-test.s3.us-east-1.amazonaws.com/tmpl.yaml",
         })
 
     # Merged dict returned
     assert result["auto_approve_deploy"] is True
-    assert result["template_s3_url"] == "s3://bucket/tmpl.yaml"
+    assert result["template_s3_url"] == "https://bouncer-test.s3.us-east-1.amazonaws.com/tmpl.yaml"
     assert result["name"] == "TC07 Project"
 
     # DDB update_item called
