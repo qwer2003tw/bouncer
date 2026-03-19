@@ -25,6 +25,7 @@ os.environ.setdefault('LOCKS_TABLE', 'bouncer-deploy-locks')
 os.environ.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
 
 import deployer
+import deploy_preflight
 
 
 @pytest.fixture
@@ -78,7 +79,7 @@ Resources:
 
 def test_preflight_check_all_secrets_valid(mock_project, mock_template_with_secrets):
     """Test preflight check passes when all secrets have AWSCURRENT"""
-    with patch.object(deployer, '_get_secretsmanager_client') as mock_sm_client_func:
+    with patch.object(deploy_preflight, '_get_secretsmanager_client') as mock_sm_client_func:
         mock_sm_client = MagicMock()
         mock_sm_client_func.return_value = mock_sm_client
 
@@ -118,7 +119,7 @@ def test_preflight_check_all_secrets_valid(mock_project, mock_template_with_secr
 
 def test_preflight_check_missing_awscurrent(mock_project, mock_template_with_secrets):
     """Test preflight check detects secrets without AWSCURRENT"""
-    with patch.object(deployer, '_get_secretsmanager_client') as mock_sm_client_func:
+    with patch.object(deploy_preflight, '_get_secretsmanager_client') as mock_sm_client_func:
         mock_sm_client = MagicMock()
         mock_sm_client_func.return_value = mock_sm_client
 
@@ -164,7 +165,7 @@ def test_preflight_check_missing_awscurrent(mock_project, mock_template_with_sec
 
 def test_preflight_check_secret_not_found(mock_project, mock_template_with_secrets):
     """Test preflight check detects non-existent secrets"""
-    with patch.object(deployer, '_get_secretsmanager_client') as mock_sm_client_func:
+    with patch.object(deploy_preflight, '_get_secretsmanager_client') as mock_sm_client_func:
         mock_sm_client = MagicMock()
         mock_sm_client_func.return_value = mock_sm_client
 
@@ -208,7 +209,7 @@ def test_preflight_check_secret_not_found(mock_project, mock_template_with_secre
 
 def test_preflight_check_git_clone_failure(mock_project):
     """Test preflight check gracefully handles git clone failure"""
-    with patch.object(deployer, '_get_secretsmanager_client') as mock_sm_client_func:
+    with patch.object(deploy_preflight, '_get_secretsmanager_client') as mock_sm_client_func:
         mock_sm_client = MagicMock()
         mock_sm_client_func.return_value = mock_sm_client
 
@@ -231,7 +232,7 @@ def test_preflight_check_git_clone_failure(mock_project):
 
 def test_preflight_check_no_template_file(mock_project):
     """Test preflight check gracefully handles missing template.yaml"""
-    with patch.object(deployer, '_get_secretsmanager_client') as mock_sm_client_func:
+    with patch.object(deploy_preflight, '_get_secretsmanager_client') as mock_sm_client_func:
         mock_sm_client = MagicMock()
         mock_sm_client_func.return_value = mock_sm_client
 
@@ -255,7 +256,7 @@ def test_preflight_check_no_template_file(mock_project):
 
 def test_preflight_check_no_secrets_in_template(mock_project, mock_template_no_secrets):
     """Test preflight check passes when template has no secrets"""
-    with patch.object(deployer, '_get_secretsmanager_client') as mock_sm_client_func:
+    with patch.object(deploy_preflight, '_get_secretsmanager_client') as mock_sm_client_func:
         mock_sm_client = MagicMock()
         mock_sm_client_func.return_value = mock_sm_client
 

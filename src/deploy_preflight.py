@@ -13,12 +13,17 @@ logger = Logger(service="bouncer")
 
 
 def _get_secretsmanager_client():
-    """Get Secrets Manager client (uses deployer module global for test compatibility)"""
-    import deployer
-    if deployer.secretsmanager_client is None:
+    """Get Secrets Manager client.
+
+    Uses deployer module global for caching and test mock compatibility.
+    Tests should patch 'deploy_preflight._get_secretsmanager_client' or
+    'deployer._get_secretsmanager_client' (re-exported from this module).
+    """
+    import deployer as _deployer
+    if _deployer.secretsmanager_client is None:
         region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
-        deployer.secretsmanager_client = boto3.client('secretsmanager', region_name=region)
-    return deployer.secretsmanager_client
+        _deployer.secretsmanager_client = boto3.client('secretsmanager', region_name=region)
+    return _deployer.secretsmanager_client
 
 
 def validate_template_s3_url(url: str) -> tuple:
@@ -95,9 +100,7 @@ def preflight_check_secrets(project: dict, branch: str) -> list:
 
     # 取得 GitHub PAT
     try:
-        # Import deployer here to allow test mocking of deployer._get_secretsmanager_client
-        import deployer
-        sm_client = deployer._get_secretsmanager_client()
+        sm_client = _get_secretsmanager_client()
         github_pat_response = sm_client.get_secret_value(SecretId='sam-deployer/github-pat')
         github_pat = github_pat_response['SecretString']
     except ClientError as e:
