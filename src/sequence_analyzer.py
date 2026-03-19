@@ -27,6 +27,7 @@ from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
 import db as _db
 from boto3.dynamodb.conditions import Key
+from metrics import emit_metric
 
 logger = Logger(service="bouncer")
 
@@ -719,6 +720,9 @@ def analyze_sequence(
         # 最差情況：沒有前置查詢
         risk_modifier = 0.20
         reason = f"🚨 未找到相關的前置查詢（建議先執行: {', '.join(safe_queries[:2])}）"
+
+    # Emit metric for monitoring
+    emit_metric('Bouncer', 'SequenceRiskModifier', risk_modifier)
 
     return SequenceAnalysis(
         has_prior_query=has_service_match,

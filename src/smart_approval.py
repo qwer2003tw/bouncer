@@ -11,6 +11,7 @@ from aws_lambda_powertools import Logger
 from risk_scorer import calculate_risk, RiskCategory, RiskResult
 from utils import RiskFactor
 from sequence_analyzer import get_sequence_risk_modifier
+from metrics import emit_metric
 
 logger = Logger(service="bouncer")
 
@@ -116,6 +117,11 @@ def evaluate_command(
             decision = ApprovalDecision.NEEDS_APPROVAL
             reason_text = f"風險分數 {final_score}，需要人工審批"
 
+        # Emit metrics for monitoring
+        emit_metric('Bouncer', 'SmartApprovalDecision', 1,
+                    dimensions=[{'Name': 'Decision', 'Value': decision}])
+        emit_metric('Bouncer', 'SmartApprovalScore', final_score)
+
         return ApprovalDecision(
             decision=decision,
             risk_result=risk_result,
@@ -127,6 +133,7 @@ def evaluate_command(
     except Exception as e:  # noqa: BLE001
         # Fail-closed: 任何錯誤都 fallback 到人工審批
         logger.error("Risk evaluation failed: %s", e, extra={"src_module": "smart_approval", "operation": "evaluate_command", "error": str(e)})
+        emit_metric('Bouncer', 'SmartApprovalError', 1)
         fallback_result = RiskResult(
             score=70,
             category=RiskCategory.MANUAL,
