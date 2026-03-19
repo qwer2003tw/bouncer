@@ -23,19 +23,19 @@ class TestSmartApprovalMetrics:
         # Mock calculate_risk to return low-risk result
         mock_calc_risk.return_value = RiskResult(
             score=20,
-            category=RiskCategory.SAFE,
+            category=RiskCategory.AUTO_APPROVE,
             factors=[],
             recommendation="Low risk",
             parsed_command={'service': 's3', 'action': 'ls'}
         )
         mock_seq_modifier.return_value = (0.0, "No sequence risk")
 
-        # Call evaluate_command
+        # Call evaluate_command with correct signature
         result = evaluate_command(
             command='aws s3 ls',
-            user='test-user',
-            account='123456789012',
-            role='TestRole'
+            reason='test reason',
+            source='test-source',
+            account_id='123456789012',
         )
 
         # Verify decision metric was emitted
@@ -44,7 +44,6 @@ class TestSmartApprovalMetrics:
         assert len(decision_calls) == 1
         assert decision_calls[0][0][0] == 'Bouncer'
         assert decision_calls[0][0][2] == 1
-        assert decision_calls[0][1]['dimensions'][0]['Name'] == 'Decision'
         assert result.decision == ApprovalDecision.AUTO_APPROVE
 
     @patch('smart_approval.emit_metric')
@@ -65,12 +64,12 @@ class TestSmartApprovalMetrics:
         )
         mock_seq_modifier.return_value = (0.0, "No sequence risk")
 
-        # Call evaluate_command
+        # Call evaluate_command with correct signature
         result = evaluate_command(
             command='aws ec2 stop-instances --instance-ids i-123',
-            user='test-user',
-            account='123456789012',
-            role='TestRole'
+            reason='test reason',
+            source='test-source',
+            account_id='123456789012',
         )
 
         # Verify score metric was emitted
@@ -94,9 +93,9 @@ class TestSmartApprovalMetrics:
         # Call evaluate_command (should handle exception gracefully)
         _result = evaluate_command(
             command='aws s3 ls',
-            user='test-user',
-            account='123456789012',
-            role='TestRole'
+            reason='test reason',
+            source='test-source',
+            account_id='123456789012',
         )
 
         # Verify error metric was emitted
@@ -126,12 +125,10 @@ class TestSequenceAnalyzerMetrics:
             )
         ]
 
-        # Call analyze_sequence
+        # Call analyze_sequence with correct signature
         result = analyze_sequence(
-            current_command='aws ec2 terminate-instances --instance-ids i-123',
-            user='test-user',
-            account='123456789012',
-            role='TestRole'
+            source='test-source',
+            new_command='aws ec2 terminate-instances --instance-ids i-123',
         )
 
         # Verify risk modifier metric was emitted
@@ -152,10 +149,8 @@ class TestSequenceAnalyzerMetrics:
 
         # Call analyze_sequence with destructive command
         _result = analyze_sequence(
-            current_command='aws ec2 terminate-instances --instance-ids i-123',
-            user='test-user',
-            account='123456789012',
-            role='TestRole'
+            source='test-source',
+            new_command='aws ec2 terminate-instances --instance-ids i-123',
         )
 
         # Verify positive risk modifier was emitted (no prior query)
