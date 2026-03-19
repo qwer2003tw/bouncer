@@ -62,16 +62,18 @@ def _reload_callbacks(table):
     """Reload callbacks module with a fresh mock table injected."""
     # Clear cached modules so imports inside callbacks are re-resolved
     for mod in list(sys.modules.keys()):
-        if mod in ('callbacks', 'db', 'telegram', 'commands', 'trust', 'paging',
+        if mod in ('callbacks', 'callbacks_command', 'db', 'telegram', 'commands', 'trust', 'paging',
                    'notifications', 'utils', 'rate_limit', 'risk_scorer',
                    'smart_approval', 'constants', 'accounts', 'template_scanner',
-                   'scheduler_service', 'src.callbacks', 'src.db'):
+                   'scheduler_service', 'src.callbacks', 'src.callbacks_command', 'src.db'):
             del sys.modules[mod]
 
     import db as db_mod
     import callbacks as cb_mod
+    import callbacks_command as cb_cmd_mod
     db_mod.table = table
     cb_mod._db.table = table
+    cb_cmd_mod._db.table = table
     return cb_mod
 
 
