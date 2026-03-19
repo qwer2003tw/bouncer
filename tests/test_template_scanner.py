@@ -92,7 +92,8 @@ class TestExtractPayloads:
             'aws iam put-role-policy --role-name test --policy-name test '
             """--policy-document '{"Statement":[{"Effect":"Allow","Action":"*","Resource":"*"}]}'"""
         )
-        results = extract_json_payloads(cmd)
+        results, extraction_failed = extract_json_payloads(cmd)
+        assert extraction_failed is False
         assert len(results) == 1
         assert results[0][0] == '--policy-document'
         assert 'Statement' in results[0][1]
@@ -102,7 +103,8 @@ class TestExtractPayloads:
             'aws iam put-role-policy --role-name test --policy-name test '
             '--policy-document {"Statement":[{"Effect":"Allow","Action":"s3:GetObject","Resource":"*"}]}'
         )
-        results = extract_json_payloads(cmd)
+        results, extraction_failed = extract_json_payloads(cmd)
+        assert extraction_failed is False
         assert len(results) == 1
         assert results[0][0] == '--policy-document'
 
@@ -111,7 +113,8 @@ class TestExtractPayloads:
             'aws ec2 authorize-security-group-ingress --group-id sg-123 '
             """--ip-permissions '[{"IpProtocol":"tcp","FromPort":22,"ToPort":22,"IpRanges":[{"CidrIp":"0.0.0.0/0"}]}]'"""
         )
-        results = extract_json_payloads(cmd)
+        results, extraction_failed = extract_json_payloads(cmd)
+        assert extraction_failed is False
         assert len(results) == 1
         assert results[0][0] == '--ip-permissions'
 
@@ -120,23 +123,30 @@ class TestExtractPayloads:
             'aws lambda update-function-configuration --function-name test '
             """--environment '{"Variables":{"SECRET_KEY":"abc123"}}'"""
         )
-        results = extract_json_payloads(cmd)
+        results, extraction_failed = extract_json_payloads(cmd)
+        assert extraction_failed is False
         assert len(results) == 1
         assert results[0][0] == '--environment'
 
     def test_no_json_in_command(self):
         cmd = 'aws ec2 describe-instances --instance-ids i-12345'
-        results = extract_json_payloads(cmd)
+        results, extraction_failed = extract_json_payloads(cmd)
+        assert extraction_failed is False
         assert results == []
 
     def test_file_reference_skipped(self):
         cmd = 'aws iam put-role-policy --role-name test --policy-document file://policy.json'
-        results = extract_json_payloads(cmd)
+        results, extraction_failed = extract_json_payloads(cmd)
+        assert extraction_failed is False
         assert results == []
 
     def test_empty_command(self):
-        assert extract_json_payloads('') == []
-        assert extract_json_payloads(None) == []
+        results, extraction_failed = extract_json_payloads('')
+        assert results == []
+        assert extraction_failed is False
+        results, extraction_failed = extract_json_payloads(None)
+        assert results == []
+        assert extraction_failed is False
 
     def test_multiple_payloads(self):
         cmd = (
@@ -144,7 +154,8 @@ class TestExtractPayloads:
             """--assume-role-policy-document '{"Statement":[{"Effect":"Allow","Principal":"*","Action":"sts:AssumeRole"}]}' """
             """--policy '{"Statement":[{"Effect":"Allow","Action":"*","Resource":"*"}]}'"""
         )
-        results = extract_json_payloads(cmd)
+        results, extraction_failed = extract_json_payloads(cmd)
+        assert extraction_failed is False
         assert len(results) == 2
         param_names = {r[0] for r in results}
         assert '--assume-role-policy-document' in param_names
@@ -651,12 +662,14 @@ class TestEdgeCases:
     def test_malformed_json_returns_empty(self):
         """Malformed JSON should not crash"""
         cmd = 'aws iam put-role-policy --policy-document {not-valid-json'
-        results = extract_json_payloads(cmd)
+        results, extraction_failed = extract_json_payloads(cmd)
         assert results == []
+        assert extraction_failed is False  # Malformed JSON is ok, just skipped
 
     def test_empty_json_object(self):
         cmd = "aws iam put-role-policy --policy-document '{}'"
-        results = extract_json_payloads(cmd)
+        results, extraction_failed = extract_json_payloads(cmd)
+        assert extraction_failed is False
         assert len(results) == 1
         # Empty policy should not trigger any checks
         rules = _make_template_rules()
@@ -726,7 +739,120 @@ class TestEdgeCases:
 
 
 # ============================================================================
-# 13. Integration Tests
+# 13. Fail-Closed Tests (s61-001)
+# ============================================================================
+
+class TestFailClosed:
+    """Test fail-closed behavior when extraction fails"""
+
+    def test_extraction_failure_is_marked(self):
+        """Extraction failure should be detected and marked"""
+        # Mock _extract_param_json to raise exception
+        import template_scanner
+        original_fn = template_scanner._extract_param_json
+
+        def mock_extract_failing(command, param):
+            if param == '--policy-document':
+                raise ValueError("Mock extraction failure")
+            return original_fn(command, param)
+
+        template_scanner._extract_param_json = mock_extract_failing
+
+        try:
+            cmd = 'aws iam put-role-policy --policy-document {}'
+            results, extraction_failed = extract_json_payloads(cmd)
+            assert extraction_failed is True
+            # Should still return results from other parameters (none in this case)
+            assert results == []
+        finally:
+            template_scanner._extract_param_json = original_fn
+
+    def test_extraction_error_emits_metric_and_high_score(self):
+        """Extraction error should emit metric and return high-risk factor"""
+        import template_scanner
+        original_fn = template_scanner._extract_param_json
+
+        def mock_extract_failing(command, param):
+            raise RuntimeError("Mock extraction failure")
+
+        template_scanner._extract_param_json = mock_extract_failing
+
+        try:
+            cmd = 'aws iam put-role-policy --policy-document {}'
+            rules = _make_template_rules()
+            score, factors = scan_command_payloads(cmd, rules)
+
+            # Should return high score indicating error
+            assert score == 95
+            assert len(factors) == 1
+            assert 'Extraction Error' in factors[0].name
+            assert 's61-001' in factors[0].details
+            assert 'manual review' in factors[0].details
+        finally:
+            template_scanner._extract_param_json = original_fn
+
+    def test_extraction_error_prevents_bypass(self):
+        """Extraction error should NOT allow bypass of security checks"""
+        import template_scanner
+        original_fn = template_scanner._extract_param_json
+
+        # Simulate attacker payload that causes extraction failure
+        def mock_extract_failing(command, param):
+            if '--policy-document' in command:
+                raise ValueError("Attacker crafted malformed payload")
+            return original_fn(command, param)
+
+        template_scanner._extract_param_json = mock_extract_failing
+
+        try:
+            # Even though command has dangerous policy, extraction fails
+            cmd = (
+                'aws iam put-role-policy --role-name admin --policy-name admin '
+                """--policy-document '{"Statement":[{"Effect":"Allow","Action":"*","Resource":"*"}]}'"""
+            )
+            rules = _make_template_rules()
+            score, factors = scan_command_payloads(cmd, rules)
+
+            # Should NOT return 0 (fail-open would allow bypass)
+            # Should return high score requiring manual review
+            assert score >= 90
+            assert len(factors) > 0
+            assert any('Extraction Error' in f.name for f in factors)
+        finally:
+            template_scanner._extract_param_json = original_fn
+
+    def test_partial_extraction_failure_still_scans_valid(self):
+        """Partial failure should scan valid payloads but still mark error"""
+        import template_scanner
+        original_fn = template_scanner._extract_param_json
+
+        def mock_extract_partial_failure(command, param):
+            if param == '--policy-document':
+                raise ValueError("Fail on policy-document")
+            return original_fn(command, param)
+
+        template_scanner._extract_param_json = mock_extract_partial_failure
+
+        try:
+            # Command with both --policy-document (will fail) and --environment (will succeed)
+            cmd = (
+                'aws lambda update-function-configuration --function-name test '
+                """--policy-document '{"Statement":[]}' """
+                """--environment '{"Variables":{"SECRET_KEY":"abc"}}'"""
+            )
+            results, extraction_failed = extract_json_payloads(cmd)
+
+            # Should mark extraction failure
+            assert extraction_failed is True
+            # But should still extract the valid --environment payload
+            assert len(results) >= 1
+            assert any(r[0] == '--environment' for r in results)
+        finally:
+            template_scanner._extract_param_json = original_fn
+
+
+# ============================================================================
+# 14. Integration Tests
 # ============================================================================
 
 class TestIntegration:
