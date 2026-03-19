@@ -687,6 +687,8 @@ def _execute_locked(command: str, assume_role_arn: str = None,
         sys.stdout = StringIO()
         sys.stderr = StringIO()
 
+        _captured_stdout = ''
+        _captured_stderr = ''
         try:
             from awscli.clidriver import create_clidriver
             driver = create_clidriver()
@@ -698,6 +700,21 @@ def _execute_locked(command: str, assume_role_arn: str = None,
 
             stdout_output = sys.stdout.getvalue()
             stderr_output = sys.stderr.getvalue()
+
+        except SystemExit as _sysexit:  # awscli driver.main() may call sys.exit() directly
+            # Capture output BEFORE finally restores sys.stdout/stderr
+            try:
+                _captured_stdout = sys.stdout.getvalue()
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                _captured_stderr = sys.stderr.getvalue()
+            except Exception:  # noqa: BLE001
+                pass
+            _exit_code = _sysexit.code if _sysexit.code is not None else 1
+            _output_text = (_captured_stdout or _captured_stderr or '').strip()
+            # Re-raise with a wrapper so outer except SystemExit can access captured output
+            raise _sysexit.__class__(_exit_code) from None
 
         finally:
             sys.stdout = old_stdout
@@ -725,21 +742,17 @@ def _execute_locked(command: str, assume_role_arn: str = None,
 
         return output  # 不截斷，讓呼叫端用 store_paged_output 處理
 
-    except SystemExit as e:  # awscli driver.main() may call sys.exit() directly
+    except SystemExit as e:  # awscli driver.main() called sys.exit(); output was captured before finally
         exit_code = e.code if e.code is not None else 1
-        captured_out = ''
+        # _captured_stdout/_captured_stderr were set in the inner except SystemExit before finally restored sys.stdout
         try:
-            captured_out = sys.stdout.getvalue() if hasattr(sys.stdout, 'getvalue') else ''
-        except Exception:  # noqa: BLE001
-            pass
-        if not captured_out:
-            try:
-                captured_out = sys.stderr.getvalue() if hasattr(sys.stderr, 'getvalue') else ''
-            except Exception:  # noqa: BLE001
-                pass
-        output_text = captured_out.strip() if captured_out else ''
+            output_text = (_captured_stdout or _captured_stderr or '').strip()  # noqa: F821
+        except NameError:
+            output_text = ''
         if exit_code == 0:
-            return output_text or '✅ 命令執行成功（無輸出）'
+            if not output_text:
+                return '⚠️ 命令執行完成（無輸出，請確認結果）'
+            return output_text
         return f'{output_text}\n\n(exit code: {exit_code})' if output_text else f'(exit code: {exit_code})'
     except ImportError:
         return '❌ awscli 模組未安裝'
