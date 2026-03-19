@@ -99,7 +99,7 @@ RATE_LIMIT_ENABLED = os.environ.get('RATE_LIMIT_ENABLED', 'true').lower() == 'tr
 # Pending Reminder - 未審批提醒
 # ============================================================================
 
-PENDING_REMINDER_MINUTES = 10  # 請求發出後 N 分鐘未審批 → 自動提醒
+PENDING_REMINDER_MINUTES = int(os.environ.get('PENDING_REMINDER_MINUTES', '10'))  # 請求發出後 N 分鐘未審批 → 自動提醒
 
 # ============================================================================
 # Grant Session - 批次權限授予功能

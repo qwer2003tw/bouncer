@@ -64,6 +64,16 @@ def reminder_schedule_name(request_id: str) -> str:
     return f"bouncer-remind-{safe}"[:64]
 
 
+def escalation_schedule_name(request_id: str) -> str:
+    """Return the schedule name for pending approval *escalation* (2nd reminder).
+
+    This is distinct from the initial reminder schedule, so both can coexist
+    and be cancelled independently when a request is approved/denied.
+    """
+    safe = "".join(c if c.isalnum() or c in ("-", "_") else "-" for c in request_id)
+    return f"bouncer-escalation-{safe}"[:64]
+
+
 def _format_schedule_time(expires_at_ts: int) -> str:
     """Convert a Unix timestamp to the ``at(...)`` expression required by
     EventBridge Scheduler.
@@ -344,6 +354,53 @@ class SchedulerService:
                 },
             )
             logger.info("Created reminder schedule '%s' for request %s at %s", name, request_id, at_expr, extra={"src_module": "scheduler", "operation": "create_pending_reminder_schedule", "request_id": request_id, "schedule_name": name})
+
+            # Create escalation schedule (2nd reminder at reminder_minutes * 3)
+            escalation_minutes = reminder_minutes * 3
+            escalation_time = now + (escalation_minutes * 60)
+
+            # Only create escalation if it would fire before expiry
+            if escalation_time < expires_at:
+                escalation_name = escalation_schedule_name(request_id)
+                escalation_at_expr = _format_schedule_time(escalation_time)
+                escalation_payload = {
+                    "source": "bouncer-scheduler",
+                    "action": "pending_reminder",
+                    "request_id": request_id,
+                    "command_preview": command_preview,
+                    "source_field": source,
+                    "escalation": True,  # Mark as escalation (2nd reminder)
+                }
+
+                try:
+                    client.create_schedule(
+                        Name=escalation_name,
+                        GroupName=self._group_name,
+                        ScheduleExpression=escalation_at_expr,
+                        ScheduleExpressionTimezone="UTC",
+                        FlexibleTimeWindow={"Mode": "OFF"},
+                        ActionAfterCompletion="DELETE",
+                        Target={
+                            "Arn": self._lambda_arn,
+                            "RoleArn": self._role_arn,
+                            "Input": json.dumps(escalation_payload),
+                        },
+                    )
+                    logger.info("Created escalation schedule '%s' for request %s at %s", escalation_name, request_id, escalation_at_expr, extra={"src_module": "scheduler", "operation": "create_pending_reminder_schedule", "request_id": request_id, "schedule_name": escalation_name})
+                except ClientError as exc:
+                    logger.warning(
+                        "Failed to create escalation schedule for %s: %s (first reminder created successfully)",
+                        request_id, exc,
+                        extra={"src_module": "scheduler", "operation": "create_pending_reminder_schedule", "request_id": request_id, "error": str(exc)},
+                    )
+                    # Don't fail overall operation if escalation fails
+            else:
+                logger.debug(
+                    "Escalation time >= expiry time for %s — skipping escalation (would be pointless)",
+                    request_id,
+                    extra={"src_module": "scheduler", "operation": "create_pending_reminder_schedule", "request_id": request_id},
+                )
+
             return True
 
         except ClientError as exc:
@@ -415,6 +472,27 @@ class SchedulerService:
             return True
         except ClientError as exc:
             logger.error("Failed to delete reminder schedule for %s: %s", request_id, exc, extra={"src_module": "scheduler", "operation": "delete_reminder_schedule", "request_id": request_id, "error": str(exc)})
+            return False
+
+    def delete_escalation_schedule(self, request_id: str) -> bool:
+        """Delete the pending approval *escalation* schedule (2nd reminder) for *request_id*.
+
+        Returns:
+            ``True`` on success or if schedule did not exist, ``False`` on error.
+        """
+        if not self._enabled:
+            return False
+
+        try:
+            client = self._get_client()
+            name = escalation_schedule_name(request_id)
+            client.delete_schedule(Name=name, GroupName=self._group_name)
+            logger.info("Deleted escalation schedule '%s' for request %s", name, request_id, extra={"src_module": "scheduler", "operation": "delete_escalation_schedule", "request_id": request_id, "schedule_name": name})
+            return True
+        except client.exceptions.ResourceNotFoundException:  # type: ignore[attr-defined]
+            return True
+        except ClientError as exc:
+            logger.error("Failed to delete escalation schedule for %s: %s", request_id, exc, extra={"src_module": "scheduler", "operation": "delete_escalation_schedule", "request_id": request_id, "error": str(exc)})
             return False
 
     # ── private helpers ───────────────────────────────────────────────────────
