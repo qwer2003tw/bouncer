@@ -25,6 +25,7 @@ BOUNCER_MODS = [
     'mcp_presigned', 'accounts', 'rate_limit', 'utils',
     'paging', 'smart_approval', 'risk_scorer', 'template_scanner',
     'scheduler_service', 'compliance_checker', 'grant', 'deployer',
+    'deploy_db', 'deploy_preflight',
     'constants', 'metrics', 'sequence_analyzer', 'help_command',
     'tool_schema', 'otp', 'trust_expiry', 'telegram_commands',
     'telegram_entities', 'webhook_router',
