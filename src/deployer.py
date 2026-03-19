@@ -104,8 +104,13 @@ def validate_template_s3_url(url: str) -> tuple:
 
     Rules:
     - Must start with https://
-    - Must contain S3 domain (.s3. or .s3-)
+    - Must contain amazonaws.com or S3 domain markers (.s3. or .s3-)
     - Max length 1024 (CloudFormation TemplateURL limit)
+
+    Supports all S3 URL formats:
+    - Virtual-hosted-style: https://bucket.s3.region.amazonaws.com/key
+    - Path-style: https://s3.amazonaws.com/bucket/key
+    - Dash-region: https://s3-region.amazonaws.com/bucket/key
 
     Returns:
         (is_valid: bool, reason: str) — reason is empty when valid.
@@ -116,8 +121,9 @@ def validate_template_s3_url(url: str) -> tuple:
         return False, f"URL too long ({len(url)} > 1024)"
     if not url.startswith('https://'):
         return False, "URL does not start with https://"
-    if '.s3.' not in url and '.s3-' not in url:
-        return False, "URL does not contain S3 domain (.s3. or .s3-)"
+    # S3 URLs contain amazonaws.com or at least s3 domain markers
+    if 'amazonaws.com' not in url and '.s3.' not in url and '.s3-' not in url:
+        return False, "URL does not appear to be an S3 URL (no amazonaws.com or S3 domain)"
     return True, ""
 
 
