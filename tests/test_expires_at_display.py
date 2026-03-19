@@ -216,8 +216,8 @@ class TestGrantNotificationExpiry:
 class TestGrantExpiredCallback:
     """過期 grant 點擊按鈕應回「⏰ 此請求已過期」"""
 
-    @patch('app.answer_callback')
-    @patch('app.update_message')
+    @patch('webhook_router.answer_callback')
+    @patch('webhook_router.update_message')
     def test_expired_grant_approve_all_returns_expired(
         self, mock_update, mock_answer, app_module
     ):
@@ -252,8 +252,8 @@ class TestGrantExpiredCallback:
         assert result['statusCode'] == 200
         mock_answer.assert_called_with('cb-grant-exp-001', '⏰ 此請求已過期')
 
-    @patch('app.answer_callback')
-    @patch('app.update_message')
+    @patch('webhook_router.answer_callback')
+    @patch('webhook_router.update_message')
     def test_expired_grant_approve_safe_returns_expired(
         self, mock_update, mock_answer, app_module
     ):
@@ -288,8 +288,8 @@ class TestGrantExpiredCallback:
         assert result['statusCode'] == 200
         mock_answer.assert_called_with('cb-grant-exp-002', '⏰ 此請求已過期')
 
-    @patch('app.answer_callback')
-    @patch('app.update_message')
+    @patch('webhook_router.answer_callback')
+    @patch('webhook_router.update_message')
     def test_expired_grant_deny_returns_expired(
         self, mock_update, mock_answer, app_module
     ):
@@ -324,8 +324,8 @@ class TestGrantExpiredCallback:
         assert result['statusCode'] == 200
         mock_answer.assert_called_with('cb-grant-exp-003', '⏰ 此請求已過期')
 
-    @patch('app.handle_grant_approve_all')
-    @patch('app.answer_callback')
+    @patch('webhook_router.handle_grant_approve_all')
+    @patch('webhook_router.answer_callback')
     def test_non_expired_grant_proceeds_to_handler(
         self, mock_answer, mock_handler, app_module
     ):
@@ -367,8 +367,8 @@ class TestGrantExpiredCallback:
         # Handler should have been called
         mock_handler.assert_called_once()
 
-    @patch('app.answer_callback')
-    @patch('app.update_message')
+    @patch('webhook_router.answer_callback')
+    @patch('webhook_router.update_message')
     def test_expired_grant_updates_message(
         self, mock_update, mock_answer, app_module
     ):
