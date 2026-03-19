@@ -21,11 +21,11 @@ BOUNCER_MODS = [
     'app', 'db', 'trust', 'notifications', 'callbacks',
     'callbacks_command', 'callbacks_upload', 'callbacks_grant',
     'mcp_execute', 'mcp_tools', 'telegram', 'commands',
-    'mcp_upload', 'mcp_admin', 'mcp_history', 'mcp_confirm',
+    'mcp_upload', 'mcp_admin', 'mcp_grant', 'mcp_history', 'mcp_confirm',
     'mcp_presigned', 'accounts', 'rate_limit', 'utils',
     'paging', 'smart_approval', 'risk_scorer', 'template_scanner',
     'scheduler_service', 'compliance_checker', 'grant', 'deployer',
     'constants', 'metrics', 'sequence_analyzer', 'help_command',
     'tool_schema', 'otp', 'trust_expiry', 'telegram_commands',
-    'telegram_entities',
+    'telegram_entities', 'webhook_router',
 ]
