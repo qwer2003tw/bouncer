@@ -409,7 +409,10 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
         )
 
         # Add scan warnings to context for approval notification
-        if scan_result.risk_level in ('high', 'medium'):
+        if scan_result.risk_level == 'error':
+            # Scanner error — treat as needs manual review (s60-001 fail-closed)
+            ctx.reason = f"[⚠️ Scanner error: {scan_result.summary}] {ctx.reason}"
+        elif scan_result.risk_level in ('high', 'medium'):
             ctx.reason = f"[⚠️ 安全掃描警告: {scan_result.summary}] {ctx.reason}"
 
     except Exception as e:  # noqa: BLE001
@@ -759,7 +762,11 @@ def _preprocess_upload_files(req_id: str, files: list) -> tuple:
             'sha256': _hashlib.sha256(content_bytes).hexdigest(),
         }
         # Add scan results for notification purposes
-        if scan_result.risk_level in ('high', 'medium'):
+        if scan_result.risk_level == 'error':
+            # Scanner error — treat as needs manual review (s60-001 fail-closed)
+            file_metadata['scan_warning'] = f'⚠️ Scanner error: {scan_result.summary}'
+            file_metadata['scan_findings'] = scan_result.findings
+        elif scan_result.risk_level in ('high', 'medium'):
             file_metadata['scan_warning'] = scan_result.summary
             file_metadata['scan_findings'] = scan_result.findings
         processed_files.append(file_metadata)
