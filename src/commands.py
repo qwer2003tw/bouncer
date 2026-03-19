@@ -725,6 +725,22 @@ def _execute_locked(command: str, assume_role_arn: str = None,
 
         return output  # 不截斷，讓呼叫端用 store_paged_output 處理
 
+    except SystemExit as e:  # awscli driver.main() may call sys.exit() directly
+        exit_code = e.code if e.code is not None else 1
+        captured_out = ''
+        try:
+            captured_out = sys.stdout.getvalue() if hasattr(sys.stdout, 'getvalue') else ''
+        except Exception:  # noqa: BLE001
+            pass
+        if not captured_out:
+            try:
+                captured_out = sys.stderr.getvalue() if hasattr(sys.stderr, 'getvalue') else ''
+            except Exception:  # noqa: BLE001
+                pass
+        output_text = captured_out.strip() if captured_out else ''
+        if exit_code == 0:
+            return output_text or '✅ 命令執行成功（無輸出）'
+        return f'{output_text}\n\n(exit code: {exit_code})' if output_text else f'(exit code: {exit_code})'
     except ImportError:
         return '❌ awscli 模組未安裝'
     except ValueError as e:
