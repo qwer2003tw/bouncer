@@ -716,3 +716,8 @@ All notable changes to this project will be documented in this file.
 
 ### Tests
 - Backend: 886 passed (+18 regression tests) / coverage 81.52%
+
+## [3.61.1] - 2026-03-19
+
+### Fixed
+- `src/commands.py` — `execute_command` 現在明確捕捉 `SystemExit`（`BaseException` 子類，不被 `except Exception` 捕捉）；`awscli driver.main()` 在某些命令（如 `eks create-cluster`）後呼叫 `sys.exit()` 導致 Lambda `Runtime.ExitError`（hotfix for production incident）
