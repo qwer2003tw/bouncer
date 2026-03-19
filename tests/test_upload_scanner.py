@@ -1,6 +1,9 @@
 """Tests for upload file scanner security screening (#smart-phase5)."""
+import pytest
 from unittest.mock import patch
 from src.upload_scanner import scan_upload, UploadScanResult
+
+pytestmark = pytest.mark.xdist_group("upload_scanner")
 
 
 class TestBlockedExtensions:
