@@ -99,6 +99,28 @@ def _get_secretsmanager_client():
 # Changeset Utilities
 # ============================================================================
 
+def validate_template_s3_url(url: str) -> tuple:
+    """Validate template_s3_url format before passing to CloudFormation.
+
+    Rules:
+    - Must start with https://
+    - Must contain S3 domain (.s3. or .s3-)
+    - Max length 1024 (CloudFormation TemplateURL limit)
+
+    Returns:
+        (is_valid: bool, reason: str) — reason is empty when valid.
+    """
+    if not url:
+        return False, "URL is empty"
+    if len(url) > 1024:
+        return False, f"URL too long ({len(url)} > 1024)"
+    if not url.startswith('https://'):
+        return False, "URL does not start with https://"
+    if '.s3.' not in url and '.s3-' not in url:
+        return False, "URL does not contain S3 domain (.s3. or .s3-)"
+    return True, ""
+
+
 def _format_changeset_summary(resource_changes: list) -> str:
     """Format CFN changeset resource_changes into a readable summary.
 
@@ -1099,88 +1121,101 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
             context = f"[auto_approve_code_only: template_s3_url 未設定] {context or ''}"
             # Fall through to human approval
         else:
-            changeset_name = None
-            try:
-                # Create dry-run changeset
-                changeset_name = create_dry_run_changeset(
-                    _get_cfn_client(),
-                    stack_name,
-                    template_s3_url,
-                )
-
-                # Analyze changeset
-                changeset_result = analyze_changeset(
-                    _get_cfn_client(),
-                    stack_name,
-                    changeset_name,
-                )
-
-                if changeset_result.is_code_only:
-                    # Auto-approve: start deploy directly
-                    deploy_result = start_deploy(
-                        project_id,
-                        branch or project.get('default_branch', 'master'),
-                        source or 'auto-approve-code-only',
-                        reason,
-                    )
-
-                    # Sprint 58 s58-005: Enhance changes_summary with git diff
-                    base_summary = _format_changeset_summary(changeset_result.resource_changes) or 'template.yaml 無變動 → code-only'
-                    changed_files = _get_changed_files()
-                    if changed_files:
-                        preview_files = changed_files[:3]
-                        file_list = ', '.join(preview_files)
-                        if len(changed_files) > 3:
-                            file_list += f' (+{len(changed_files) - 3} more)'
-                        enhanced_summary = f"{base_summary}\n📁 Changed: {file_list}"
-                    else:
-                        enhanced_summary = base_summary
-
-                    from notifications import send_auto_approve_deploy_notification
-                    send_auto_approve_deploy_notification(
-                        project_id=project_id,
-                        deploy_id=deploy_result.get('deploy_id', ''),
-                        source=source,
-                        reason=reason,
-                        changes_summary=enhanced_summary,
-                    )
-                    return mcp_result(req_id, {
-                        'content': [{'type': 'text', 'text': json.dumps({
-                            'status': 'started',
-                            'deploy_id': deploy_result.get('deploy_id', ''),
-                            'project_id': project_id,
-                            'auto_approved': True,
-                            'auto_approve_type': 'code_only',
-                            'message': f'Code-only 變更（{len(changeset_result.resource_changes)} resources）→ auto-approved',
-                        }, ensure_ascii=False)}]
-                    })
-                else:
-                    # Infrastructure changes detected → human approval with context
-                    if changeset_result.error:
-                        context = f"[changeset 分析失敗: {changeset_result.error}] {context or ''}"
-                    else:
-                        context = f"[需審批：檢測到 infra 變更（{len(changeset_result.resource_changes)} resources）] {context or ''}"
-                    # Fall through to normal approval flow below
-
-            except Exception as e:  # noqa: BLE001 — fail-safe: route to human approval
-                logger.exception("auto_approve_code_only changeset analysis failed", extra={
+            # Validate template_s3_url format
+            is_valid, validation_reason = validate_template_s3_url(template_s3_url)
+            if not is_valid:
+                logger.warning("auto_approve_code_only: invalid template_s3_url", extra={
                     "src_module": "deployer",
+                    "operation": "validate_template_url",
                     "project_id": project_id,
-                    "stack_name": stack_name,
+                    "invalid_url": template_s3_url[:100],
+                    "validation_reason": validation_reason,
                 })
-                context = f"[changeset 分析異常: {str(e)[:100]}] {context or ''}"
+                context = f"[auto_approve_code_only: template_s3_url 格式無效 — {validation_reason}] {context or ''}"
                 # Fall through to human approval
-            finally:
-                # Always cleanup changeset
-                if changeset_name:
-                    try:
-                        cleanup_changeset(_get_cfn_client(), stack_name, changeset_name)
-                    except Exception as cleanup_error:  # noqa: BLE001
-                        logger.error("Failed to cleanup changeset", extra={
-                            "src_module": "deployer",
-                            "changeset_name": changeset_name,
-                            "error": str(cleanup_error),
+            else:
+                changeset_name = None
+                try:
+                    # Create dry-run changeset
+                    changeset_name = create_dry_run_changeset(
+                        _get_cfn_client(),
+                        stack_name,
+                        template_s3_url,
+                    )
+
+                    # Analyze changeset
+                    changeset_result = analyze_changeset(
+                        _get_cfn_client(),
+                        stack_name,
+                        changeset_name,
+                    )
+
+                    if changeset_result.is_code_only:
+                        # Auto-approve: start deploy directly
+                        deploy_result = start_deploy(
+                            project_id,
+                            branch or project.get('default_branch', 'master'),
+                            source or 'auto-approve-code-only',
+                            reason,
+                            )
+
+                        # Sprint 58 s58-005: Enhance changes_summary with git diff
+                        base_summary = _format_changeset_summary(changeset_result.resource_changes) or 'template.yaml 無變動 → code-only'
+                        changed_files = _get_changed_files()
+                        if changed_files:
+                            preview_files = changed_files[:3]
+                            file_list = ', '.join(preview_files)
+                            if len(changed_files) > 3:
+                                file_list += f' (+{len(changed_files) - 3} more)'
+                            enhanced_summary = f"{base_summary}\n📁 Changed: {file_list}"
+                        else:
+                            enhanced_summary = base_summary
+
+                        from notifications import send_auto_approve_deploy_notification
+                        send_auto_approve_deploy_notification(
+                            project_id=project_id,
+                            deploy_id=deploy_result.get('deploy_id', ''),
+                            source=source,
+                            reason=reason,
+                            changes_summary=enhanced_summary,
+                        )
+                        return mcp_result(req_id, {
+                            'content': [{'type': 'text', 'text': json.dumps({
+                                'status': 'started',
+                                'deploy_id': deploy_result.get('deploy_id', ''),
+                                'project_id': project_id,
+                                'auto_approved': True,
+                                'auto_approve_type': 'code_only',
+                                'message': f'Code-only 變更（{len(changeset_result.resource_changes)} resources）→ auto-approved',
+                            }, ensure_ascii=False)}]
                         })
+                    else:
+                        # Infrastructure changes detected → human approval with context
+                        if changeset_result.error:
+                            context = f"[changeset 分析失敗: {changeset_result.error}] {context or ''}"
+                        else:
+                            context = f"[需審批：檢測到 infra 變更（{len(changeset_result.resource_changes)} resources）] {context or ''}"
+                        # Fall through to normal approval flow below
+
+                except Exception as e:  # noqa: BLE001 — fail-safe: route to human approval
+                    logger.exception("auto_approve_code_only changeset analysis failed", extra={
+                        "src_module": "deployer",
+                        "project_id": project_id,
+                        "stack_name": stack_name,
+                    })
+                    context = f"[changeset 分析異常: {str(e)[:100]}] {context or ''}"
+                    # Fall through to human approval
+                finally:
+                    # Always cleanup changeset
+                    if changeset_name:
+                        try:
+                            cleanup_changeset(_get_cfn_client(), stack_name, changeset_name)
+                        except Exception as cleanup_error:  # noqa: BLE001
+                            logger.error("Failed to cleanup changeset", extra={
+                                "src_module": "deployer",
+                                "changeset_name": changeset_name,
+                                "error": str(cleanup_error),
+                            })
 
     # 建立審批請求
     request_id = generate_request_id(f"deploy:{project_id}")
