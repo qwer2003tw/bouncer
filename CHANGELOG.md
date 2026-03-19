@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.61.0] - 2026-03-19
+
+### Security
+- `src/template_scanner.py` — `scan_template()` fail-open → fail-closed: scanner exception now returns `{'risk_level': 'error', 'violations': [], 'error': str(e)}` (requires human review) instead of raising and bypassing safelist check; aligns with upload_scanner fail-closed pattern from s60-001 (s61-001)
+
+### Refactored
+- `src/deployer.py` → `src/deploy_db.py` + `src/deploy_preflight.py` — Phase 1 split: extracted DynamoDB access layer (`get/add/update/remove_project`, `get/release_lock`, `create/get/update_deploy_record`, `get_git_commit_info`) into `deploy_db.py`; extracted pre-flight secrets validation (`preflight_check_secrets`, `validate_template_s3_url`, `_get_secretsmanager_client`) into `deploy_preflight.py`; all functions re-exported from `deployer.py` for backward compatibility (s61-002)
+- `src/app.py` → `src/webhook_router.py` — extracted Telegram callback routing logic (`route_telegram_callback()`) from `handle_telegram_webhook()`; covers all inline keyboard callback types (grant approve/deny, deploy, upload, etc.); `app.py` now delegates to `route_telegram_callback()` for callback queries (s61-003)
+
 ## [3.60.0] - 2026-03-19
 
 ### Security
