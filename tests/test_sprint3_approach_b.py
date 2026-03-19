@@ -234,7 +234,7 @@ class TestDeployCommitSHA:
 
             # Final: create_deploy_record auto-detects git commit info
             # Patch get_git_commit_info to return controlled values
-            with patch.object(deploy_db, 'get_git_commit_info', return_value={
+            with patch('deploy_db.get_git_commit_info', return_value={
                 'commit_sha': 'abc1234567890',
                 'commit_short': 'abc1234',
                 'commit_message': 'fix: add reason to notification',
@@ -286,7 +286,7 @@ class TestDeployCommitSHA:
             deployer.history_table = history_tbl
 
             # Patch get_git_commit_info to simulate non-git environment
-            with patch.object(deploy_db, 'get_git_commit_info', return_value={
+            with patch('deploy_db.get_git_commit_info', return_value={
                 'commit_sha': None,
                 'commit_short': None,
                 'commit_message': None,

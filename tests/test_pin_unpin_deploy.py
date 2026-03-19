@@ -180,18 +180,14 @@ class TestDeployCompleteCallsUnpin:
         telegram_message_id = 77777
 
         # Mock DDB record with telegram_message_id
-        mock_table = MagicMock()
-        mock_table.get_item.return_value = {
-            'Item': {
-                'deploy_id': deploy_id,
-                'project_id': 'test-project',
-                'status': 'RUNNING',
-                'execution_arn': 'arn:aws:states:us-east-1:123456789012:execution:test',
-                'started_at': int(time.time()) - 100,
-                'telegram_message_id': telegram_message_id,
-            }
+        mock_deploy_record = {
+            'deploy_id': deploy_id,
+            'project_id': 'test-project',
+            'status': 'RUNNING',
+            'execution_arn': 'arn:aws:states:us-east-1:123456789012:execution:test',
+            'started_at': int(time.time()) - 100,
+            'telegram_message_id': telegram_message_id,
         }
-        mock_table.update_item = MagicMock()
 
         # Mock SFN success
         mock_sfn_client = MagicMock()
@@ -201,10 +197,12 @@ class TestDeployCompleteCallsUnpin:
         mock_sfn_client.get_execution_history.return_value = {
             'events': []
         }
+        mock_update_deploy_record = MagicMock()
 
-        with patch.object(deploy_db, '_get_history_table', return_value=mock_table), \
+        with patch('deployer.get_deploy_record', return_value=mock_deploy_record), \
              patch.object(deployer, '_get_sfn_client', return_value=mock_sfn_client), \
-             patch.object(deploy_db, 'release_lock'), \
+             patch('deployer.update_deploy_record', mock_update_deploy_record), \
+             patch('deployer.release_lock'), \
              patch('deployer.unpin_message') as mock_unpin:
 
             mock_unpin.return_value = True
@@ -223,20 +221,15 @@ class TestDeployCompleteCallsUnpin:
         deploy_id = 'deploy-unpin-fail-test'
         telegram_message_id = 66666
 
-        # Mock DDB record
-        mock_table = MagicMock()
-        mock_table.get_item.return_value = {
-            'Item': {
-                'deploy_id': deploy_id,
-                'project_id': 'test-project',
-                'status': 'RUNNING',
-                'execution_arn': 'arn:aws:states:us-east-1:123456789012:execution:test',
-                'started_at': int(time.time()) - 100,
-                'telegram_message_id': telegram_message_id,
-                'stack_name': 'test-stack',
-            }
+        mock_deploy_record = {
+            'deploy_id': deploy_id,
+            'project_id': 'test-project',
+            'status': 'RUNNING',
+            'execution_arn': 'arn:aws:states:us-east-1:123456789012:execution:test',
+            'started_at': int(time.time()) - 100,
+            'telegram_message_id': telegram_message_id,
+            'stack_name': 'test-stack',
         }
-        mock_table.update_item = MagicMock()
 
         # Mock SFN failure
         mock_sfn_client = MagicMock()
@@ -252,11 +245,13 @@ class TestDeployCompleteCallsUnpin:
         mock_cfn_client.describe_stack_events.return_value = {
             'StackEvents': []
         }
+        mock_update_deploy_record = MagicMock()
 
-        with patch.object(deploy_db, '_get_history_table', return_value=mock_table), \
+        with patch('deployer.get_deploy_record', return_value=mock_deploy_record), \
              patch.object(deployer, '_get_sfn_client', return_value=mock_sfn_client), \
              patch.object(deployer, '_get_cfn_client', return_value=mock_cfn_client), \
-             patch.object(deploy_db, 'release_lock'), \
+             patch('deployer.update_deploy_record', mock_update_deploy_record), \
+             patch('deployer.release_lock'), \
              patch.object(deployer, 'send_deploy_failure_notification'), \
              patch('deployer.unpin_message') as mock_unpin:
 
@@ -275,19 +270,14 @@ class TestDeployCompleteCallsUnpin:
 
         deploy_id = 'deploy-unpin-error-test'
 
-        # Mock DDB record
-        mock_table = MagicMock()
-        mock_table.get_item.return_value = {
-            'Item': {
-                'deploy_id': deploy_id,
-                'project_id': 'test-project',
-                'status': 'RUNNING',
-                'execution_arn': 'arn:aws:states:us-east-1:123456789012:execution:test',
-                'started_at': int(time.time()) - 100,
-                'telegram_message_id': 55555,
-            }
+        mock_deploy_record_unpin = {
+            'deploy_id': deploy_id,
+            'project_id': 'test-project',
+            'status': 'RUNNING',
+            'execution_arn': 'arn:aws:states:us-east-1:123456789012:execution:test',
+            'started_at': int(time.time()) - 100,
+            'telegram_message_id': 55555,
         }
-        mock_table.update_item = MagicMock()
 
         # Mock SFN success
         mock_sfn_client = MagicMock()
@@ -297,10 +287,12 @@ class TestDeployCompleteCallsUnpin:
         mock_sfn_client.get_execution_history.return_value = {
             'events': []
         }
+        mock_update_record = MagicMock()
 
-        with patch.object(deploy_db, '_get_history_table', return_value=mock_table), \
+        with patch('deployer.get_deploy_record', return_value=mock_deploy_record_unpin), \
              patch.object(deployer, '_get_sfn_client', return_value=mock_sfn_client), \
-             patch.object(deploy_db, 'release_lock'), \
+             patch('deployer.update_deploy_record', mock_update_record), \
+             patch('deployer.release_lock'), \
              patch('deployer.unpin_message') as mock_unpin:
 
             # Mock unpin failure (use ValueError which is caught in deployer.py)
@@ -342,9 +334,9 @@ class TestDeployCompleteCallsUnpin:
             'events': []
         }
 
-        with patch.object(deploy_db, '_get_history_table', return_value=mock_table), \
+        with patch('deployer._get_history_table', return_value=mock_table), \
              patch.object(deployer, '_get_sfn_client', return_value=mock_sfn_client), \
-             patch.object(deploy_db, 'release_lock'), \
+             patch('deployer.release_lock'), \
              patch('deployer.unpin_message') as mock_unpin:
 
             # Call get_deploy_status
