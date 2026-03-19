@@ -154,11 +154,11 @@ class TestLoggingPresentAfterRefactor:
             "Expected logger.warning for trust pending query failure in callbacks_command.py"
 
     def test_app_grant_expiry_ddb_update_uses_logger(self):
-        """logger.warning present in app.py after DDB update for grant timeout."""
-        with open(_src('app.py')) as f:
+        """logger.warning present in webhook_router.py after DDB update for grant timeout."""
+        with open(_src('webhook_router.py')) as f:
             content = f.read()
         assert 'GRANT EXPIRY] Failed to update DDB status=timeout' in content, \
-            "Expected logger.warning for DDB update failure in app.py"
+            "Expected logger.warning for DDB update failure in webhook_router.py"
 
     def test_mcp_execute_notification_failure_uses_logger(self):
         """logger.warning present in mcp_execute.py after notification failure."""

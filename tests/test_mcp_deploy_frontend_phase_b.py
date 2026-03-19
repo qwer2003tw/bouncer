@@ -460,7 +460,7 @@ class TestCFInvalidationFailure:
 
 class TestAppRouting:
     def test_deploy_frontend_dispatches_to_handler(self):
-        with open(os.path.join(os.path.dirname(__file__), '..', 'src', 'app.py')) as f:
+        with open(os.path.join(os.path.dirname(__file__), '..', 'src', 'webhook_router.py')) as f:
             content = f.read()
         assert 'handle_deploy_frontend_callback' in content
         assert 'Phase B pending' not in content

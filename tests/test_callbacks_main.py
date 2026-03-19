@@ -53,8 +53,8 @@ def _mock_entities_send():
 class TestTelegramCallbackHandlers:
     """Telegram callback handlers 測試"""
     
-    @patch('app.answer_callback')
-    @patch('app.update_message')
+    @patch('webhook_router.answer_callback')
+    @patch('webhook_router.update_message')
     def test_callback_revoke_trust_success(self, mock_update, mock_answer, app_module):
         """撤銷信任時段成功"""
         trust_id = 'trust-123'
@@ -86,7 +86,7 @@ class TestTelegramCallbackHandlers:
         assert result['statusCode'] == 200
         mock_answer.assert_called()
     
-    @patch('app.answer_callback')
+    @patch('webhook_router.answer_callback')
     def test_callback_request_not_found(self, mock_answer, app_module):
         """請求不存在"""
         event = {
@@ -107,8 +107,8 @@ class TestTelegramCallbackHandlers:
         assert result['statusCode'] == 404
         mock_answer.assert_called_with('cb123', '❌ 請求已過期或不存在')
     
-    @patch('app.answer_callback')
-    @patch('app.update_message')
+    @patch('webhook_router.answer_callback')
+    @patch('webhook_router.update_message')
     def test_callback_request_already_processed(self, mock_update, mock_answer, app_module):
         """請求已處理過"""
         request_id = 'processed-123'
@@ -138,8 +138,8 @@ class TestTelegramCallbackHandlers:
         assert result['statusCode'] == 200
         mock_answer.assert_called_with('cb123', '⚠️ 此請求已處理過')
     
-    @patch('app.answer_callback')
-    @patch('app.update_message')
+    @patch('webhook_router.answer_callback')
+    @patch('webhook_router.update_message')
     def test_callback_request_expired(self, mock_update, mock_answer, app_module):
         """請求已過期"""
         request_id = 'expired-123'
@@ -170,8 +170,8 @@ class TestTelegramCallbackHandlers:
         assert result['statusCode'] == 200
         mock_answer.assert_called_with('cb123', '⏰ 此請求已過期')
     
-    @patch('app.answer_callback')
-    @patch('app.update_message')
+    @patch('webhook_router.answer_callback')
+    @patch('webhook_router.update_message')
     @patch('callbacks_command.execute_command')
     def test_callback_approve_trust(self, mock_execute, mock_update, mock_answer, app_module):
         """批准並建立信任時段"""
@@ -209,7 +209,7 @@ class TestTelegramCallbackHandlers:
         item = app_module.table.get_item(Key={'request_id': request_id})['Item']
         assert item['status'] == 'approved'
 
-    @patch('app.answer_callback')
+    @patch('webhook_router.answer_callback')
     @patch('callbacks_command.update_message')
     @patch('callbacks_command.execute_command')
     def test_callback_execute_immediate_feedback(self, mock_execute, mock_update, mock_answer, app_module):
@@ -743,8 +743,8 @@ class TestCallbackHandlers:
 class TestAlreadyProcessedDisplay:
     """Tests for the 'already processed' callback display logic"""
 
-    @patch('app.update_message')
-    @patch('app.answer_callback')
+    @patch('webhook_router.update_message')
+    @patch('webhook_router.answer_callback')
     def test_already_processed_uses_display_summary(self, mock_answer, mock_update, app_module):
         """Already-processed callback: only toast, original message preserved (not overwritten)"""
         request_id = 'display-summary-test-1'
@@ -780,8 +780,8 @@ class TestAlreadyProcessedDisplay:
         # Original message should be preserved; only a toast notification is shown
         mock_update.assert_not_called()
 
-    @patch('app.update_message')
-    @patch('app.answer_callback')
+    @patch('webhook_router.update_message')
+    @patch('webhook_router.answer_callback')
     def test_already_processed_legacy_fallback(self, mock_answer, mock_update, app_module):
         """Already-processed callback: update_message NOT called (original message preserved)"""
         request_id = 'legacy-no-summary-1'
@@ -815,8 +815,8 @@ class TestAlreadyProcessedDisplay:
         # Fix: update_message must NOT be called — original message is preserved
         mock_update.assert_not_called()
 
-    @patch('app.update_message')
-    @patch('app.answer_callback')
+    @patch('webhook_router.update_message')
+    @patch('webhook_router.answer_callback')
     def test_already_processed_legacy_upload_batch(self, mock_answer, mock_update, app_module):
         """Legacy upload_batch already-processed: update_message NOT called"""
         request_id = 'legacy-batch-1'
@@ -851,8 +851,8 @@ class TestAlreadyProcessedDisplay:
         # Fix: update_message must NOT be called — original message is preserved
         mock_update.assert_not_called()
 
-    @patch('app.update_message')
-    @patch('app.answer_callback')
+    @patch('webhook_router.update_message')
+    @patch('webhook_router.answer_callback')
     def test_already_processed_no_crash_on_empty_item(self, mock_answer, mock_update, app_module):
         """Already-processed callback doesn't crash on items with minimal fields"""
         request_id = 'minimal-item-1'

@@ -235,8 +235,9 @@ class TestRevokeTrustCallbackSummary:
     @pytest.fixture
     def app_mod(self, dynamodb_table):
         # Sprint 58 s58-001: Use centralized BOUNCER_MODS from conftest
+        # Also add webhook_router for Sprint 61 s61-003
         for mod in list(sys.modules.keys()):
-            if mod in BOUNCER_MODS:
+            if mod in BOUNCER_MODS or mod in ['webhook_router', 'src.webhook_router']:
                 del sys.modules[mod]
         os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'
         os.environ['TABLE_NAME'] = 'bouncer-test-trust-summary'
@@ -245,13 +246,25 @@ class TestRevokeTrustCallbackSummary:
         os.environ['REQUEST_SECRET'] = 'test-secret'
         os.environ.setdefault('DEFAULT_ACCOUNT_ID', '111111111111')
 
+        # Mock telegram functions BEFORE importing app modules
+        from unittest.mock import MagicMock
+        import telegram
+        telegram.send_message_with_entities = MagicMock(return_value={'ok': True, 'result': {'message_id': 99999}})
+        telegram.send_telegram_message = MagicMock(return_value={'ok': True, 'result': {'message_id': 99999}})
+
         import app
         import db
+        import webhook_router
         app.table = dynamodb_table
         db.table = dynamodb_table
 
         import trust
         trust._table = dynamodb_table
+
+        # Ensure notifications module picks up mocked telegram
+        import notifications
+        import importlib
+        importlib.reload(notifications)
 
         yield app
 
@@ -292,10 +305,14 @@ class TestRevokeTrustCallbackSummary:
             ],
         })
 
-        with patch('telegram.send_telegram_message') as mock_send, \
-             patch('telegram.send_message_with_entities') as mock_silent, \
-             patch('telegram.update_message'), \
-             patch('telegram.answer_callback'), \
+        # Access the mock already set up in app_mod fixture
+        import telegram
+        mock_silent = telegram.send_message_with_entities
+        mock_silent.reset_mock()  # Clear previous calls
+
+        with patch('telegram.send_telegram_message'), \
+             patch('webhook_router.update_message'), \
+             patch('webhook_router.answer_callback'), \
              patch('scheduler_service.get_trust_expiry_notifier') as mock_notifier:
             mock_notifier.return_value = MagicMock()
             result = app_mod.lambda_handler(self._make_revoke_event(trust_id), {})
@@ -321,10 +338,14 @@ class TestRevokeTrustCallbackSummary:
             'command_count': 0,
         })
 
+        # Access the mock already set up in app_mod fixture
+        import telegram
+        mock_silent = telegram.send_message_with_entities
+        mock_silent.reset_mock()  # Clear previous calls
+
         with patch('telegram.send_telegram_message'), \
-             patch('telegram.send_message_with_entities') as mock_silent, \
-             patch('telegram.update_message'), \
-             patch('telegram.answer_callback'), \
+             patch('webhook_router.update_message'), \
+             patch('webhook_router.answer_callback'), \
              patch('scheduler_service.get_trust_expiry_notifier') as mock_notifier:
             mock_notifier.return_value = MagicMock()
             result = app_mod.lambda_handler(self._make_revoke_event(trust_id), {})
