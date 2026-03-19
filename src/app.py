@@ -40,8 +40,9 @@ from rate_limit import check_rate_limit, RateLimitExceeded, PendingLimitExceeded
 from paging import store_paged_output, get_paged_output  # noqa: F401
 from utils import response, generate_request_id, decimal_to_native, mcp_result, mcp_error, get_header, log_decision, generate_display_summary
 # MCP tool handlers — split into sub-modules
-from mcp_execute import (
-    mcp_tool_execute, mcp_tool_request_grant, mcp_tool_grant_status, mcp_tool_revoke_grant,
+from mcp_execute import mcp_tool_execute
+from mcp_grant import (
+    mcp_tool_request_grant, mcp_tool_grant_status, mcp_tool_revoke_grant,
     mcp_tool_grant_execute,
 )
 from mcp_upload import mcp_tool_upload, mcp_tool_upload_batch, execute_upload  # noqa: F401

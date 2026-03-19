@@ -10,7 +10,10 @@ import time
 from unittest.mock import MagicMock, patch
 
 import boto3
+import pytest
 from moto import mock_aws
+
+pytestmark = pytest.mark.xdist_group("app_module")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
@@ -21,7 +24,7 @@ os.environ.setdefault('TELEGRAM_CHAT_ID', '-1234567890')
 os.environ.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
 os.environ.setdefault('SCHEDULER_ENABLED', 'false')
 
-from src.deployer import validate_template_s3_url
+from src.deployer import validate_template_s3_url  # noqa: E402
 
 
 def _create_mock_table(dynamodb):

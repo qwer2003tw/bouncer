@@ -82,9 +82,9 @@ def mcp_module(mock_dynamodb):
     # 清除可能殘留的模組
     modules_to_clear = [
         'grant', 'db', 'constants', 'trust', 'commands', 'compliance_checker',
-        'risk_scorer', 'mcp_execute', 'mcp_upload', 'mcp_admin', 'notifications', 'telegram', 'app',
+        'risk_scorer', 'mcp_execute', 'mcp_grant', 'chain_analyzer', 'mcp_upload', 'mcp_admin', 'notifications', 'telegram', 'app',
         'utils', 'accounts', 'rate_limit', 'paging', 'callbacks',
-        'smart_approval', 'tool_schema', 'metrics',
+        'smart_approval', 'tool_schema', 'metrics', 'mcp_tools',
     ]
     for mod in modules_to_clear:
         if mod in sys.modules:
@@ -108,6 +108,12 @@ def mcp_module(mock_dynamodb):
     })
 
     import mcp_execute
+    import mcp_grant
+    # Grant functions are now in mcp_grant, so add them to mcp_execute for backward compatibility in tests
+    mcp_execute.mcp_tool_grant_execute = mcp_grant.mcp_tool_grant_execute
+    mcp_execute.mcp_tool_request_grant = mcp_grant.mcp_tool_request_grant
+    mcp_execute.mcp_tool_grant_status = mcp_grant.mcp_tool_grant_status
+    mcp_execute.mcp_tool_revoke_grant = mcp_grant.mcp_tool_revoke_grant
     yield mcp_execute
 
     sys.path.pop(0)
@@ -157,8 +163,8 @@ def create_test_grant(mcp_module, grant_id='test-grant-001', status='active',
 class TestGrantExecuteHappyPath:
     """Happy path 測試"""
 
-    @patch('mcp_execute.execute_command')
-    @patch('mcp_execute.send_grant_execute_notification')
+    @patch('mcp_grant.execute_command')
+    @patch('mcp_grant.send_grant_execute_notification')
     def test_grant_execute_success_allow_repeat_false(self, mock_notify, mock_exec, mcp_module):
         """測試成功執行（allow_repeat=False）"""
         mock_exec.return_value = 'Command executed successfully'
@@ -181,8 +187,8 @@ class TestGrantExecuteHappyPath:
         mock_exec.assert_called_once()
         mock_notify.assert_called_once()
 
-    @patch('mcp_execute.execute_command')
-    @patch('mcp_execute.send_grant_execute_notification')
+    @patch('mcp_grant.execute_command')
+    @patch('mcp_grant.send_grant_execute_notification')
     def test_grant_execute_success_allow_repeat_true(self, mock_notify, mock_exec, mcp_module):
         """測試成功執行（allow_repeat=True，可重複執行同一命令）"""
         mock_exec.return_value = 'Command executed'
@@ -207,8 +213,8 @@ class TestGrantExecuteHappyPath:
         content = json.loads(json.loads(result2['body'])['result']['content'][0]['text'])
         assert content['status'] == 'grant_executed'
 
-    @patch('mcp_execute.execute_command')
-    @patch('mcp_execute.send_grant_execute_notification')
+    @patch('mcp_grant.execute_command')
+    @patch('mcp_grant.send_grant_execute_notification')
     def test_grant_execute_without_account_param(self, mock_notify, mock_exec, mcp_module):
         """測試不帶 account 參數（使用預設帳號）"""
         mock_exec.return_value = 'Success'
@@ -414,8 +420,8 @@ class TestGrantExecuteCommandValidation:
         assert content['status'] == 'command_not_in_grant'
 
     @patch('compliance_checker.check_compliance')
-    @patch('mcp_execute.execute_command')
-    @patch('mcp_execute.send_grant_execute_notification')
+    @patch('mcp_grant.execute_command')
+    @patch('mcp_grant.send_grant_execute_notification')
     def test_command_already_used(self, mock_notify, mock_exec, mock_compliance, mcp_module):
         """測試命令已被使用（allow_repeat=False）"""
         mock_compliance.return_value = (True, None)
@@ -446,8 +452,8 @@ class TestGrantExecuteExecution:
     """命令執行測試"""
 
     @patch('compliance_checker.check_compliance')
-    @patch('mcp_execute.execute_command')
-    @patch('mcp_execute.send_grant_execute_notification')
+    @patch('mcp_grant.execute_command')
+    @patch('mcp_grant.send_grant_execute_notification')
     def test_command_execution_with_result(self, mock_notify, mock_exec, mock_compliance, mcp_module):
         """測試命令執行並返回結果"""
         mock_compliance.return_value = (True, None)
@@ -466,8 +472,8 @@ class TestGrantExecuteExecution:
         assert 'i-123456789' in content['result']
 
     @patch('compliance_checker.check_compliance')
-    @patch('mcp_execute.execute_command')
-    @patch('mcp_execute.send_grant_execute_notification')
+    @patch('mcp_grant.execute_command')
+    @patch('mcp_grant.send_grant_execute_notification')
     def test_notification_failure_does_not_affect_success(self, mock_notify, mock_exec, mock_compliance, mcp_module):
         """測試通知失敗不影響成功響應"""
         mock_compliance.return_value = (True, None)
@@ -487,9 +493,9 @@ class TestGrantExecuteExecution:
         assert content['status'] == 'grant_executed'
 
     @patch('compliance_checker.check_compliance')
-    @patch('mcp_execute.execute_command')
-    @patch('mcp_execute.send_grant_execute_notification')
-    @patch('mcp_execute.store_paged_output')
+    @patch('mcp_grant.execute_command')
+    @patch('mcp_grant.send_grant_execute_notification')
+    @patch('mcp_grant.store_paged_output')
     def test_paged_output(self, mock_page, mock_notify, mock_exec, mock_compliance, mcp_module):
         """測試分頁輸出"""
         mock_compliance.return_value = (True, None)
