@@ -16,6 +16,27 @@ import db as _db
 import notifications
 from aws_lambda_powertools import Logger
 
+# Import and re-export DB operations from deploy_db for backward compatibility
+from deploy_db import (  # noqa: F401 - re-exports for backward compatibility
+    _get_dynamodb,
+    _get_projects_table,
+    _get_history_table,
+    _get_locks_table,
+    get_git_commit_info,
+    list_projects,
+    get_project,
+    add_project,
+    update_project_config,
+    remove_project,
+    acquire_lock,
+    release_lock,
+    get_lock,
+    create_deploy_record,
+    update_deploy_record,
+    get_deploy_record,
+    get_deploy_history,
+)
+
 logger = Logger(service="bouncer")
 
 # 環境變數
@@ -40,35 +61,6 @@ cfn_client = None
 
 # Secrets Manager — lazy init
 secretsmanager_client = None
-
-
-def _get_dynamodb():
-    global _dynamodb
-    if _dynamodb is None:
-        region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
-        _dynamodb = boto3.resource('dynamodb', region_name=region)
-    return _dynamodb
-
-
-def _get_projects_table():
-    global projects_table
-    if projects_table is None:
-        projects_table = _db.deployer_projects_table._get()
-    return projects_table
-
-
-def _get_history_table():
-    global history_table
-    if history_table is None:
-        history_table = _db.deployer_history_table._get()
-    return history_table
-
-
-def _get_locks_table():
-    global locks_table
-    if locks_table is None:
-        locks_table = _db.deployer_locks_table._get()
-    return locks_table
 
 
 def _get_sfn_client():
@@ -175,45 +167,6 @@ def _get_changed_files(repo_path: str = '.') -> list[str]:
 # Git Utilities
 # ============================================================================
 
-def get_git_commit_info(cwd: str = None) -> dict:
-    """
-    取得當前 git commit 資訊
-
-    Returns:
-        dict with commit_sha (full), commit_short (7 chars), commit_message
-        若 git 不可用或非 git repo，回傳全 null 的 graceful fallback
-    """
-    try:
-        kwargs = {'capture_output': True, 'text': True, 'timeout': 5}
-        if cwd:
-            kwargs['cwd'] = cwd
-
-        sha_result = subprocess.run(['git', 'rev-parse', 'HEAD'], **kwargs)
-        if sha_result.returncode != 0:
-            return {'commit_sha': None, 'commit_short': None, 'commit_message': None}
-
-        full_sha = sha_result.stdout.strip()
-        short_sha = full_sha[:7] if full_sha else None
-
-        log_result = subprocess.run(
-            ['git', 'log', '-1', '--format=%h %s'],
-            **kwargs
-        )
-        commit_message = None
-        if log_result.returncode == 0 and log_result.stdout.strip():
-            parts = log_result.stdout.strip().split(' ', 1)
-            commit_message = parts[1] if len(parts) > 1 else None
-
-        return {
-            'commit_sha': full_sha,
-            'commit_short': short_sha,
-            'commit_message': commit_message,
-        }
-    except Exception as e:  # noqa: BLE001 — git subprocess operations, fail-safe fallback
-        logger.warning("get_git_commit_info failed (graceful fallback): %s", e, extra={"src_module": "deployer", "operation": "get_git_commit_info", "error": str(e)})
-        return {'commit_sha': None, 'commit_short': None, 'commit_message': None}
-
-
 # ============================================================================
 # Pre-flight Checks
 # ============================================================================
@@ -316,227 +269,6 @@ def preflight_check_secrets(project: dict, branch: str) -> list:
     finally:
         if tmpdir and os.path.exists(tmpdir):
             shutil.rmtree(tmpdir, ignore_errors=True)
-
-
-# ============================================================================
-# Project Management
-# ============================================================================
-
-def list_projects() -> list:
-    """列出所有專案"""
-    try:
-        result = _get_projects_table().scan()
-        return result.get('Items', [])
-    except ClientError:
-        logger.exception("list_projects failed", extra={"src_module": "deployer", "operation": "list_projects", "error_type": "ClientError"})
-        return []
-    except Exception:
-        logger.exception("list_projects failed", extra={"src_module": "deployer", "operation": "list_projects"})
-        return []
-
-
-def get_project(project_id: str) -> dict:
-    """取得專案配置"""
-    try:
-        result = _get_projects_table().get_item(Key={'project_id': project_id})
-        return result.get('Item')
-    except ClientError:
-        logger.exception("get_project failed", extra={"src_module": "deployer", "operation": "get_project", "project_id": project_id, "error_type": "ClientError"})
-        return None
-
-def add_project(project_id: str, config: dict) -> dict:
-    """新增專案配置"""
-    item = {
-        'project_id': project_id,
-        'name': config.get('name', project_id),
-        'git_repo': config.get('git_repo', ''),
-        'git_repo_owner': config.get('git_repo_owner', ''),
-        'default_branch': config.get('default_branch', 'master'),
-        'stack_name': config.get('stack_name', ''),
-        'target_account': config.get('target_account', ''),
-        'target_role_arn': config.get('target_role_arn', ''),
-        'secrets_id': config.get('secrets_id', ''),
-        'sam_template_path': config.get('sam_template_path', '.'),
-        'allowed_deployers': config.get('allowed_deployers', []),
-        'enabled': True,
-        'created_at': int(time.time()),
-        'auto_approve_deploy': config.get('auto_approve_deploy', False),
-        'auto_approve_code_only': config.get('auto_approve_code_only', False),
-        'template_s3_url': config.get('template_s3_url', ''),
-    }
-    # Filter out empty strings for optional fields to keep DDB clean
-    if not item['template_s3_url']:
-        del item['template_s3_url']
-    _get_projects_table().put_item(Item=item)
-    return item
-
-
-def update_project_config(project_id: str, updates: dict) -> dict:
-    """更新 project config 的部分欄位（patch 語義）。
-
-    支援欄位：auto_approve_deploy (bool), template_s3_url (str), 及其他 config 欄位。
-    不存在的 project → raise ValueError。
-    """
-    project = get_project(project_id)
-    if not project:
-        raise ValueError(f"Project {project_id!r} not found")
-
-    if not updates:
-        return project
-
-    # Build DDB UpdateExpression
-    set_parts = []
-    expr_names = {}
-    expr_values = {}
-    for k, v in updates.items():
-        placeholder = f"#upd_{k}"
-        val_placeholder = f":upd_{k}"
-        set_parts.append(f"{placeholder} = {val_placeholder}")
-        expr_names[placeholder] = k
-        expr_values[val_placeholder] = v
-
-    _get_projects_table().update_item(
-        Key={'project_id': project_id},
-        UpdateExpression='SET ' + ', '.join(set_parts),
-        ExpressionAttributeNames=expr_names,
-        ExpressionAttributeValues=expr_values,
-    )
-    return {**project, **updates}
-
-
-def remove_project(project_id: str) -> bool:
-    """移除專案配置"""
-    try:
-        _get_projects_table().delete_item(Key={'project_id': project_id})
-        return True
-    except ClientError:
-        logger.exception("remove_project failed", extra={"src_module": "deployer", "operation": "remove_project", "project_id": project_id, "error_type": "ClientError"})
-        return False
-
-
-# ============================================================================
-# Lock Management
-# ============================================================================
-
-def acquire_lock(project_id: str, deploy_id: str, locked_by: str) -> bool:
-    """嘗試取得部署鎖"""
-    try:
-        _get_locks_table().put_item(
-            Item={
-                'project_id': project_id,
-                'lock_id': deploy_id,
-                'locked_at': int(time.time()),
-                'locked_by': locked_by,
-                'ttl': int(time.time()) + 3600  # 1 小時自動過期
-            },
-            ConditionExpression='attribute_not_exists(project_id)'
-        )
-        return True
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
-            return False
-        raise
-
-
-def release_lock(project_id: str) -> bool:
-    """釋放部署鎖"""
-    try:
-        _get_locks_table().delete_item(Key={'project_id': project_id})
-        return True
-    except ClientError:
-        logger.exception("release_lock failed", extra={"src_module": "deployer", "operation": "release_lock", "project_id": project_id, "error_type": "ClientError"})
-        return False
-
-def get_lock(project_id: str) -> dict:
-    """取得鎖資訊（檢查是否過期）"""
-    try:
-        result = _get_locks_table().get_item(Key={'project_id': project_id})
-        item = result.get('Item')
-
-        if not item:
-            return None
-
-        # 檢查 TTL 是否過期
-        ttl = item.get('ttl', 0)
-        if ttl and int(time.time()) > ttl:
-            # Lock 已過期，自動清理
-            release_lock(project_id)
-            return None
-
-        return item
-    except ClientError:
-        logger.exception("get_lock failed", extra={"src_module": "deployer", "operation": "get_lock", "project_id": project_id, "error_type": "ClientError"})
-        return None
-
-
-# ============================================================================
-# Deploy History
-# ============================================================================
-
-def create_deploy_record(deploy_id: str, project_id: str, config: dict) -> dict:
-    """建立部署記錄"""
-    # 取得 git commit 資訊
-    git_info = get_git_commit_info()
-
-    item = {
-        'deploy_id': deploy_id,
-        'project_id': project_id,
-        'status': 'PENDING',
-        'branch': config.get('branch', 'master'),
-        'started_at': int(time.time()),
-        'triggered_by': config.get('triggered_by', ''),
-        'reason': config.get('reason', ''),
-        'commit_sha': git_info['commit_sha'],
-        'commit_short': git_info['commit_short'],
-        'commit_message': git_info['commit_message'],
-        'ttl': int(time.time()) + 30 * 24 * 3600  # 30 天
-    }
-    # DynamoDB 不允許存 None，過濾掉 null 欄位
-    item = {k: v for k, v in item.items() if v is not None}
-    _get_history_table().put_item(Item=item)
-    return item
-
-
-def update_deploy_record(deploy_id: str, updates: dict):
-    """更新部署記錄"""
-    try:
-        update_expr = 'SET ' + ', '.join(f'#{k} = :{k}' for k in updates.keys())
-        expr_names = {f'#{k}': k for k in updates.keys()}
-        expr_values = {f':{k}': v for k, v in updates.items()}
-
-        _get_history_table().update_item(
-            Key={'deploy_id': deploy_id},
-            UpdateExpression=update_expr,
-            ExpressionAttributeNames=expr_names,
-            ExpressionAttributeValues=expr_values
-        )
-    except ClientError as e:
-        logger.error(f"Error updating deploy record: {e}", extra={"src_module": "deployer", "operation": "get_deploy_record", "deploy_id": deploy_id})
-
-
-def get_deploy_record(deploy_id: str) -> dict:
-    """取得部署記錄"""
-    try:
-        result = _get_history_table().get_item(Key={'deploy_id': deploy_id})
-        return result.get('Item')
-    except ClientError:
-        logger.exception("get_deploy_record failed", extra={"src_module": "deployer", "operation": "get_deploy_record", "deploy_id": deploy_id, "error_type": "ClientError"})
-        return None
-
-def get_deploy_history(project_id: str, limit: int = 10) -> list:
-    """取得專案部署歷史"""
-    try:
-        result = _get_history_table().query(
-            IndexName='project-time-index',
-            KeyConditionExpression='project_id = :pid',
-            ExpressionAttributeValues={':pid': project_id},
-            ScanIndexForward=False,
-            Limit=limit
-        )
-        return result.get('Items', [])
-    except ClientError as e:
-        logger.error("Error getting deploy history: %s", e, extra={"src_module": "deployer", "operation": "get_deploy_history", "error": str(e)})
-        return []
 
 
 # ============================================================================
