@@ -1,6 +1,9 @@
 """Tests for upload file scanner security screening (#smart-phase5)."""
 import pytest
+from unittest.mock import patch
 from src.upload_scanner import scan_upload, UploadScanResult
+
+pytestmark = pytest.mark.xdist_group("upload_scanner")
 
 
 class TestBlockedExtensions:
@@ -214,7 +217,7 @@ class TestLargeFiles:
 
 
 class TestErrorHandling:
-    """Test error handling and fail-open behavior."""
+    """Test error handling and fail-closed behavior (s60-001)."""
 
     def test_scanner_never_raises(self):
         """Scanner should never raise exceptions, always return a result."""
@@ -236,6 +239,63 @@ class TestErrorHandling:
         result = scan_upload('weird.txt', content, 'text/plain')
         assert result.is_blocked is False
         assert result.risk_level == 'safe'
+
+    @patch('src.upload_scanner.emit_metric')
+    @patch('src.upload_scanner.logger')
+    def test_scanner_exception_returns_error_risk_level(self, mock_logger, mock_metric):
+        """Scanner exception → fail-closed: returns risk_level='error', not 'safe' (s60-001)."""
+        # Inject a broken pattern (None regex) to trigger TypeError inside the try block
+        with patch('src.upload_scanner.SECRET_PATTERNS', [(None, 'trigger')]):
+            result = scan_upload('test.yaml', b'hello world', 'text/yaml')
+
+            # Verify fail-closed behavior
+            assert result.risk_level == 'error', "Scanner error should return 'error', not 'safe'"
+            assert result.is_blocked is False, "Scanner error should not block (requires human review)"
+            assert 'manual review' in result.summary.lower() or 'error' in result.summary.lower()
+
+    @patch('src.upload_scanner.emit_metric')
+    @patch('src.upload_scanner.logger')
+    def test_scanner_exception_emits_metric(self, mock_logger, mock_metric):
+        """Scanner exception → ScannerError CloudWatch metric (s60-001)."""
+        with patch('src.upload_scanner.SECRET_PATTERNS', [(None, 'trigger')]):
+            scan_upload('test.yaml', b'hello world', 'text/yaml')
+
+            # Verify metric emission
+            mock_metric.assert_called_once_with('Bouncer', 'ScannerError', 1)
+
+    @patch('src.upload_scanner.emit_metric')
+    @patch('src.upload_scanner.logger')
+    def test_scanner_exception_logs_error(self, mock_logger, mock_metric):
+        """Scanner exception → structured error log with filename and error_type (s60-001)."""
+        with patch('src.upload_scanner.SECRET_PATTERNS', [(None, 'trigger')]):
+            scan_upload('sensitive.yaml', b'hello world', 'text/yaml')
+
+            # Verify structured logging
+            mock_logger.error.assert_called_once()
+            call_kwargs = mock_logger.error.call_args[1]
+            extra = call_kwargs['extra']
+            assert extra['src_module'] == 'upload_scanner'
+            assert extra['operation'] == 'scan_upload'
+            assert extra['upload_filename'] == 'sensitive.yaml'
+            assert extra['error_type'] == 'TypeError'
+            assert 'error_message' in extra
+
+    def test_normal_scan_unaffected(self):
+        """Normal scan still returns safe/high/medium correctly (s60-001)."""
+        # Test safe file
+        safe_result = scan_upload('normal.txt', b'Hello world', 'text/plain')
+        assert safe_result.risk_level == 'safe'
+        assert safe_result.is_blocked is False
+
+        # Test high-risk file (with secret)
+        high_risk_result = scan_upload('config.yaml', b'password: "MySecretP@ss123"', 'text/yaml')
+        assert high_risk_result.risk_level == 'high'
+        assert high_risk_result.is_blocked is False
+
+        # Test blocked file
+        blocked_result = scan_upload('malware.exe', b'MZ\x90\x00', 'application/octet-stream')
+        assert blocked_result.risk_level == 'blocked'
+        assert blocked_result.is_blocked is True
 
 
 class TestExtensionBasedScanning:

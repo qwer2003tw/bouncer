@@ -3,6 +3,10 @@ import re
 import os
 from dataclasses import dataclass, field
 from typing import List, Tuple
+from aws_lambda_powertools import Logger
+from metrics import emit_metric
+
+logger = Logger(service="bouncer")
 
 BLOCKED_EXTENSIONS = {
     '.exe', '.sh', '.bat', '.cmd', '.ps1', '.vbs',
@@ -29,7 +33,7 @@ MAX_SCAN_SIZE = 1_000_000  # 1MB — don't scan files larger than this
 @dataclass
 class UploadScanResult:
     is_blocked: bool = False         # True = reject immediately
-    risk_level: str = 'safe'         # 'blocked' / 'high' / 'medium' / 'safe'
+    risk_level: str = 'safe'         # 'blocked' / 'high' / 'medium' / 'safe' / 'error'
     findings: List[str] = field(default_factory=list)
     summary: str = ''
 
@@ -37,7 +41,7 @@ class UploadScanResult:
 def scan_upload(filename: str, content_bytes: bytes, content_type: str = '') -> UploadScanResult:
     """Scan uploaded file for security risks.
 
-    Returns UploadScanResult. Never raises — on exception returns safe (fail-open).
+    Returns UploadScanResult. Never raises — on exception returns error (fail-closed, s60-001).
     """
     try:
         ext = os.path.splitext(filename.lower())[1]
@@ -86,5 +90,20 @@ def scan_upload(filename: str, content_bytes: bytes, content_type: str = '') -> 
 
         return UploadScanResult(risk_level='safe', summary='')
 
-    except Exception:  # noqa: BLE001 — fail-open: never block on scanner error
-        return UploadScanResult(risk_level='safe', summary='')
+    except Exception as exc:  # noqa: BLE001
+        # Fail-closed: scanner error requires human review (s60-001)
+        error_type = type(exc).__name__
+        error_msg = str(exc)[:200]
+        logger.error("upload_scanner: unexpected error during scan", extra={
+            "src_module": "upload_scanner",
+            "operation": "scan_upload",
+            "upload_filename": filename,
+            "error_type": error_type,
+            "error_message": error_msg,
+        })
+        emit_metric('Bouncer', 'ScannerError', 1)
+        return UploadScanResult(
+            risk_level='error',
+            is_blocked=False,
+            summary=f'Scanner error ({error_type}): file requires manual review',
+        )
