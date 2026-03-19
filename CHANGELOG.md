@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.60.0] - 2026-03-19
+
+### Security
+- `src/upload_scanner.py` — upload scanner fail-open → fail-closed: scanner exception now returns `risk_level='error'` (requires human review) instead of `'safe'` (was security bypass); emits `ScannerError` CloudWatch metric and structured error log (s60-001)
+
+### Added
+- `src/scheduler_service.py` — `create_pending_reminder_schedule()` now builds an escalation reminder at `reminder_minutes × 3` (e.g. 10 min → escalation at 30 min); escalation skipped if time already past `expires_at` (s60-004)
+- `src/constants.py` — `PENDING_REMINDER_MINUTES` now reads from environment variable (default: 10) (s60-004)
+- `src/app.py` — `pending_reminder` handler shows 🔴 escalation header when `escalation=True` payload (s60-004)
+- `src/callbacks.py` — `delete_escalation_schedule()` added to approval/denial cleanup (best-effort) (s60-004)
+- `src/sequence_analyzer.py`, `src/smart_approval.py` — Smart Approval Phase 6 monitoring foundation: PITR enablement, request metrics, CloudWatch alarms for approval rate and pattern anomalies (s60-003)
+- `template.yaml` — EventBridge Scheduler permissions for escalation schedule; CloudWatch alarms and metrics for Smart Approval Phase 6 (s60-003, s60-004)
+
+### Fixed
+- `src/deployer.py` / `changeset_analyzer.py` — `template_s3_url` format validation before CloudFormation call; rejects non-HTTPS S3 URLs, oversized URLs, and malformed formats to prevent silent CloudFormation failures (s60-008)
+- `tests/test_sprint33_004_typing.py` — added `xdist_group("app_module")` to prevent DynamoDB mock state pollution in xdist parallel CI runs (CI flaky fix)
+- `tests/test_upload_scanner.py` — added `xdist_group` to prevent module reload race condition in xdist parallel CI runs (CI flaky fix)
+
+### Tests
+- Backend: 2246 tests (2235 src + deployer/mcp_server)
+
 ## [3.59.0] - 2026-03-18
 
 ### Added
