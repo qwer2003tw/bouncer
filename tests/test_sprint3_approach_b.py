@@ -19,6 +19,7 @@ from moto import mock_aws
 SRC_DIR = os.path.join(os.path.dirname(__file__), '..', 'src')
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
+import deploy_db
 
 os.environ.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
 os.environ.setdefault('DEFAULT_ACCOUNT_ID', '190825685292')
@@ -233,7 +234,7 @@ class TestDeployCommitSHA:
 
             # Final: create_deploy_record auto-detects git commit info
             # Patch get_git_commit_info to return controlled values
-            with patch.object(deployer, 'get_git_commit_info', return_value={
+            with patch('deploy_db.get_git_commit_info', return_value={
                 'commit_sha': 'abc1234567890',
                 'commit_short': 'abc1234',
                 'commit_message': 'fix: add reason to notification',
@@ -285,7 +286,7 @@ class TestDeployCommitSHA:
             deployer.history_table = history_tbl
 
             # Patch get_git_commit_info to simulate non-git environment
-            with patch.object(deployer, 'get_git_commit_info', return_value={
+            with patch('deploy_db.get_git_commit_info', return_value={
                 'commit_sha': None,
                 'commit_short': None,
                 'commit_message': None,

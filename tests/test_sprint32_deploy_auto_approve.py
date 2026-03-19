@@ -22,6 +22,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+import deploy_db
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -301,7 +302,7 @@ def test_tc06_add_project_includes_auto_approve_fields():
     import deployer
 
     mock_table = MagicMock()
-    with patch.object(deployer, "_get_projects_table", return_value=mock_table):
+    with patch("deploy_db._get_projects_table", return_value=mock_table):
         result = deployer.add_project("proj-tc06", {
             "name": "TC06 Project",
             "stack_name": "tc06-stack",
@@ -332,8 +333,8 @@ def test_tc07_update_project_config_patches_field():
     }
     mock_table = MagicMock()
 
-    with patch.object(deployer, "get_project", return_value=existing_project), \
-         patch.object(deployer, "_get_projects_table", return_value=mock_table):
+    with patch("deploy_db.get_project", return_value=existing_project), \
+         patch("deploy_db._get_projects_table", return_value=mock_table):
 
         result = deployer.update_project_config("proj-tc07", {
             "auto_approve_deploy": True,
@@ -356,7 +357,7 @@ def test_tc07b_update_project_config_not_found_raises():
     """update_project_config raises ValueError when project doesn't exist."""
     import deployer
 
-    with patch.object(deployer, "get_project", return_value=None):
+    with patch("deploy_db.get_project", return_value=None):
         with pytest.raises(ValueError, match="not found"):
             deployer.update_project_config("nonexistent", {"auto_approve_deploy": True})
 
