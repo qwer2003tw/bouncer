@@ -7,7 +7,12 @@ with the deploy approval and completion flow.
 
 import time
 import urllib.error
+import sys
+import os
 from unittest.mock import patch, MagicMock
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+import deploy_db
 
 
 class TestPinMessageFunction:
@@ -197,10 +202,10 @@ class TestDeployCompleteCallsUnpin:
             'events': []
         }
 
-        with patch.object(deployer, '_get_history_table', return_value=mock_table), \
+        with patch.object(deploy_db, '_get_history_table', return_value=mock_table), \
              patch.object(deployer, '_get_sfn_client', return_value=mock_sfn_client), \
-             patch.object(deployer, 'release_lock'), \
-             patch.object(telegram, 'unpin_message') as mock_unpin:
+             patch.object(deploy_db, 'release_lock'), \
+             patch('deployer.unpin_message') as mock_unpin:
 
             mock_unpin.return_value = True
 
@@ -248,12 +253,12 @@ class TestDeployCompleteCallsUnpin:
             'StackEvents': []
         }
 
-        with patch.object(deployer, '_get_history_table', return_value=mock_table), \
+        with patch.object(deploy_db, '_get_history_table', return_value=mock_table), \
              patch.object(deployer, '_get_sfn_client', return_value=mock_sfn_client), \
              patch.object(deployer, '_get_cfn_client', return_value=mock_cfn_client), \
-             patch.object(deployer, 'release_lock'), \
+             patch.object(deploy_db, 'release_lock'), \
              patch.object(deployer, 'send_deploy_failure_notification'), \
-             patch.object(telegram, 'unpin_message') as mock_unpin:
+             patch('deployer.unpin_message') as mock_unpin:
 
             mock_unpin.return_value = True
 
@@ -293,10 +298,10 @@ class TestDeployCompleteCallsUnpin:
             'events': []
         }
 
-        with patch.object(deployer, '_get_history_table', return_value=mock_table), \
+        with patch.object(deploy_db, '_get_history_table', return_value=mock_table), \
              patch.object(deployer, '_get_sfn_client', return_value=mock_sfn_client), \
-             patch.object(deployer, 'release_lock'), \
-             patch.object(telegram, 'unpin_message') as mock_unpin:
+             patch.object(deploy_db, 'release_lock'), \
+             patch('deployer.unpin_message') as mock_unpin:
 
             # Mock unpin failure (use ValueError which is caught in deployer.py)
             mock_unpin.side_effect = ValueError('Message was deleted')
@@ -337,10 +342,10 @@ class TestDeployCompleteCallsUnpin:
             'events': []
         }
 
-        with patch.object(deployer, '_get_history_table', return_value=mock_table), \
+        with patch.object(deploy_db, '_get_history_table', return_value=mock_table), \
              patch.object(deployer, '_get_sfn_client', return_value=mock_sfn_client), \
-             patch.object(deployer, 'release_lock'), \
-             patch.object(telegram, 'unpin_message') as mock_unpin:
+             patch.object(deploy_db, 'release_lock'), \
+             patch('deployer.unpin_message') as mock_unpin:
 
             # Call get_deploy_status
             result = deployer.get_deploy_status(deploy_id)

@@ -14,6 +14,7 @@ from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native,
 import db as _db
 import notifications
 from aws_lambda_powertools import Logger
+from telegram import unpin_message
 
 # Import and re-export DB operations from deploy_db for backward compatibility
 from deploy_db import (  # noqa: F401 - re-exports for backward compatibility
@@ -483,7 +484,6 @@ def get_deploy_status(deploy_id: str) -> dict:
                 telegram_message_id = record.get('telegram_message_id')
                 if telegram_message_id:
                     try:
-                        from telegram import unpin_message
                         unpin_message(int(telegram_message_id))
                     except (OSError, TimeoutError, ConnectionError, ValueError) as e:
                         logger.warning("Failed to unpin message (ignored): %s", e, extra={"src_module": "deployer", "operation": "unpin_message", "error": str(e)})
