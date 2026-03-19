@@ -278,7 +278,7 @@ class TestErrorHandling:
             extra = call_args[1]['extra']
             assert extra['src_module'] == 'upload_scanner'
             assert extra['operation'] == 'scan_upload'
-            assert extra['filename'] == 'sensitive.yaml'
+            assert extra['upload_filename'] == 'sensitive.yaml'
             assert extra['error_type'] == 'KeyError'
             assert 'error_message' in extra
 

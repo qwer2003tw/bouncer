@@ -97,7 +97,7 @@ def scan_upload(filename: str, content_bytes: bytes, content_type: str = '') -> 
         logger.error("upload_scanner: unexpected error during scan", extra={
             "src_module": "upload_scanner",
             "operation": "scan_upload",
-            "filename": filename,
+            "upload_filename": filename,
             "error_type": error_type,
             "error_message": error_msg,
         })
