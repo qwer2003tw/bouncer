@@ -747,40 +747,48 @@ class TestFailClosed:
 
     def test_extraction_failure_is_marked(self):
         """Extraction failure should be detected and marked"""
+        from unittest.mock import patch
+        import sys
+
+        # Get the actual template_scanner module from sys.modules
+        template_scanner_mod = sys.modules.get('template_scanner')
+        if template_scanner_mod is None:
+            import template_scanner as template_scanner_mod
+
         # Mock _extract_param_json to raise exception
-        import template_scanner
-        original_fn = template_scanner._extract_param_json
+        original_fn = template_scanner_mod._extract_param_json
 
         def mock_extract_failing(command, param):
             if param == '--policy-document':
                 raise ValueError("Mock extraction failure")
             return original_fn(command, param)
 
-        template_scanner._extract_param_json = mock_extract_failing
-
-        try:
+        with patch.object(template_scanner_mod, '_extract_param_json', side_effect=mock_extract_failing):
             cmd = 'aws iam put-role-policy --policy-document {}'
-            results, extraction_failed = extract_json_payloads(cmd)
+            # Call through the module to ensure patched version is used
+            results, extraction_failed = template_scanner_mod.extract_json_payloads(cmd)
             assert extraction_failed is True
             # Should still return results from other parameters (none in this case)
             assert results == []
-        finally:
-            template_scanner._extract_param_json = original_fn
 
     def test_extraction_error_emits_metric_and_high_score(self):
         """Extraction error should emit metric and return high-risk factor"""
-        import template_scanner
-        original_fn = template_scanner._extract_param_json
+        from unittest.mock import patch
+        import sys
+
+        # Get the actual template_scanner module from sys.modules
+        template_scanner_mod = sys.modules.get('template_scanner')
+        if template_scanner_mod is None:
+            import template_scanner as template_scanner_mod
 
         def mock_extract_failing(command, param):
             raise RuntimeError("Mock extraction failure")
 
-        template_scanner._extract_param_json = mock_extract_failing
-
-        try:
+        with patch.object(template_scanner_mod, '_extract_param_json', side_effect=mock_extract_failing):
             cmd = 'aws iam put-role-policy --policy-document {}'
             rules = _make_template_rules()
-            score, factors = scan_command_payloads(cmd, rules)
+            # Call through the module to ensure patched version is used
+            score, factors = template_scanner_mod.scan_command_payloads(cmd, rules)
 
             # Should return high score indicating error
             assert score == 95
@@ -788,67 +796,73 @@ class TestFailClosed:
             assert 'Extraction Error' in factors[0].name
             assert 's61-001' in factors[0].details
             assert 'manual review' in factors[0].details
-        finally:
-            template_scanner._extract_param_json = original_fn
 
     def test_extraction_error_prevents_bypass(self):
         """Extraction error should NOT allow bypass of security checks"""
-        import template_scanner
-        original_fn = template_scanner._extract_param_json
+        from unittest.mock import patch
+        import sys
+
+        # Get the actual template_scanner module from sys.modules
+        template_scanner_mod = sys.modules.get('template_scanner')
+        if template_scanner_mod is None:
+            import template_scanner as template_scanner_mod
 
         # Simulate attacker payload that causes extraction failure
+        original_fn = template_scanner_mod._extract_param_json
+
         def mock_extract_failing(command, param):
             if '--policy-document' in command:
                 raise ValueError("Attacker crafted malformed payload")
             return original_fn(command, param)
 
-        template_scanner._extract_param_json = mock_extract_failing
-
-        try:
+        with patch.object(template_scanner_mod, '_extract_param_json', side_effect=mock_extract_failing):
             # Even though command has dangerous policy, extraction fails
             cmd = (
                 'aws iam put-role-policy --role-name admin --policy-name admin '
                 """--policy-document '{"Statement":[{"Effect":"Allow","Action":"*","Resource":"*"}]}'"""
             )
             rules = _make_template_rules()
-            score, factors = scan_command_payloads(cmd, rules)
+            # Call through the module to ensure patched version is used
+            score, factors = template_scanner_mod.scan_command_payloads(cmd, rules)
 
             # Should NOT return 0 (fail-open would allow bypass)
             # Should return high score requiring manual review
             assert score >= 90
             assert len(factors) > 0
             assert any('Extraction Error' in f.name for f in factors)
-        finally:
-            template_scanner._extract_param_json = original_fn
 
     def test_partial_extraction_failure_still_scans_valid(self):
         """Partial failure should scan valid payloads but still mark error"""
-        import template_scanner
-        original_fn = template_scanner._extract_param_json
+        from unittest.mock import patch
+        import sys
+
+        # Get the actual template_scanner module from sys.modules
+        template_scanner_mod = sys.modules.get('template_scanner')
+        if template_scanner_mod is None:
+            import template_scanner as template_scanner_mod
+
+        original_fn = template_scanner_mod._extract_param_json
 
         def mock_extract_partial_failure(command, param):
             if param == '--policy-document':
                 raise ValueError("Fail on policy-document")
             return original_fn(command, param)
 
-        template_scanner._extract_param_json = mock_extract_partial_failure
-
-        try:
+        with patch.object(template_scanner_mod, '_extract_param_json', side_effect=mock_extract_partial_failure):
             # Command with both --policy-document (will fail) and --environment (will succeed)
             cmd = (
                 'aws lambda update-function-configuration --function-name test '
                 """--policy-document '{"Statement":[]}' """
                 """--environment '{"Variables":{"SECRET_KEY":"abc"}}'"""
             )
-            results, extraction_failed = extract_json_payloads(cmd)
+            # Call through the module to ensure patched version is used
+            results, extraction_failed = template_scanner_mod.extract_json_payloads(cmd)
 
             # Should mark extraction failure
             assert extraction_failed is True
             # But should still extract the valid --environment payload
             assert len(results) >= 1
             assert any(r[0] == '--environment' for r in results)
-        finally:
-            template_scanner._extract_param_json = original_fn
 
 
 # ============================================================================
