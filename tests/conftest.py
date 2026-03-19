@@ -192,8 +192,8 @@ def app_module(mock_dynamodb):
                 'mcp_tools', 'mcp_execute', 'mcp_upload', 'mcp_admin',
                 'accounts', 'rate_limit', 'smart_approval',
                 'constants', 'utils', 'risk_scorer', 'template_scanner',
-                'scheduler_service', 'otp',
-                'src.app', 'src.telegram', 'src.paging', 'src.trust', 'src.commands']:
+                'scheduler_service', 'otp', 'webhook_router',
+                'src.app', 'src.telegram', 'src.paging', 'src.trust', 'src.commands', 'src.webhook_router']:
         if mod in sys.modules:
             del sys.modules[mod]
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
