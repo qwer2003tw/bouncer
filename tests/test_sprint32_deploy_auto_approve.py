@@ -134,9 +134,9 @@ def test_tc01_auto_approve_code_only_start_deploy():
     project = _make_project()
     deploy_result = _make_deploy_result()
 
-    with patch.object(deploy_db, "get_project", return_value=project), \
+    with patch.object(deployer, "get_project", return_value=project), \
          patch.object(deployer, "preflight_check_secrets", return_value=[]), \
-         patch.object(deploy_db, "get_lock", return_value=None), \
+         patch.object(deployer, "get_lock", return_value=None), \
          patch("changeset_analyzer.create_dry_run_changeset", return_value="bouncer-dryrun-tc01"), \
          patch("changeset_analyzer.analyze_changeset", return_value=_make_code_only_analysis()), \
          patch("changeset_analyzer.cleanup_changeset") as mock_cleanup, \
@@ -166,9 +166,9 @@ def test_tc02_auto_approve_infra_change_goes_to_approval():
 
     project = _make_project()
 
-    with patch.object(deploy_db, "get_project", return_value=project), \
+    with patch.object(deployer, "get_project", return_value=project), \
          patch.object(deployer, "preflight_check_secrets", return_value=[]), \
-         patch.object(deploy_db, "get_lock", return_value=None), \
+         patch.object(deployer, "get_lock", return_value=None), \
          patch("changeset_analyzer.create_dry_run_changeset", return_value="bouncer-dryrun-tc02"), \
          patch("changeset_analyzer.analyze_changeset", return_value=_make_infra_analysis()), \
          patch("changeset_analyzer.cleanup_changeset") as mock_cleanup, \
@@ -206,9 +206,9 @@ def test_tc03_auto_approve_changeset_error_fallback():
 
     project = _make_project()
 
-    with patch.object(deploy_db, "get_project", return_value=project), \
+    with patch.object(deployer, "get_project", return_value=project), \
          patch.object(deployer, "preflight_check_secrets", return_value=[]), \
-         patch.object(deploy_db, "get_lock", return_value=None), \
+         patch.object(deployer, "get_lock", return_value=None), \
          patch("changeset_analyzer.create_dry_run_changeset", return_value="bouncer-dryrun-tc03"), \
          patch("changeset_analyzer.analyze_changeset", return_value=_make_error_analysis()), \
          patch("changeset_analyzer.cleanup_changeset") as mock_cleanup, \
@@ -240,9 +240,9 @@ def test_tc04_auto_approve_disabled_no_changeset():
 
     project = _make_project(auto_approve=False)
 
-    with patch.object(deploy_db, "get_project", return_value=project), \
+    with patch.object(deployer, "get_project", return_value=project), \
          patch.object(deployer, "preflight_check_secrets", return_value=[]), \
-         patch.object(deploy_db, "get_lock", return_value=None), \
+         patch.object(deployer, "get_lock", return_value=None), \
          patch("changeset_analyzer.create_dry_run_changeset") as mock_create, \
          patch("changeset_analyzer.analyze_changeset") as mock_analyze, \
          patch("changeset_analyzer.cleanup_changeset") as mock_cleanup, \
@@ -273,9 +273,9 @@ def test_tc05_auto_approve_empty_template_url_no_changeset():
 
     project = _make_project(auto_approve=True, template_s3_url="")
 
-    with patch.object(deploy_db, "get_project", return_value=project), \
+    with patch.object(deployer, "get_project", return_value=project), \
          patch.object(deployer, "preflight_check_secrets", return_value=[]), \
-         patch.object(deploy_db, "get_lock", return_value=None), \
+         patch.object(deployer, "get_lock", return_value=None), \
          patch("changeset_analyzer.create_dry_run_changeset") as mock_create, \
          patch("changeset_analyzer.analyze_changeset") as mock_analyze, \
          patch("changeset_analyzer.cleanup_changeset") as mock_cleanup, \
@@ -302,7 +302,7 @@ def test_tc06_add_project_includes_auto_approve_fields():
     import deployer
 
     mock_table = MagicMock()
-    with patch.object(deploy_db, "_get_projects_table", return_value=mock_table):
+    with patch("deploy_db._get_projects_table", return_value=mock_table):
         result = deployer.add_project("proj-tc06", {
             "name": "TC06 Project",
             "stack_name": "tc06-stack",
@@ -333,8 +333,8 @@ def test_tc07_update_project_config_patches_field():
     }
     mock_table = MagicMock()
 
-    with patch.object(deploy_db, "get_project", return_value=existing_project), \
-         patch.object(deploy_db, "_get_projects_table", return_value=mock_table):
+    with patch("deploy_db.get_project", return_value=existing_project), \
+         patch("deploy_db._get_projects_table", return_value=mock_table):
 
         result = deployer.update_project_config("proj-tc07", {
             "auto_approve_deploy": True,
@@ -357,7 +357,7 @@ def test_tc07b_update_project_config_not_found_raises():
     """update_project_config raises ValueError when project doesn't exist."""
     import deployer
 
-    with patch.object(deploy_db, "get_project", return_value=None):
+    with patch("deploy_db.get_project", return_value=None):
         with pytest.raises(ValueError, match="not found"):
             deployer.update_project_config("nonexistent", {"auto_approve_deploy": True})
 
@@ -398,9 +398,9 @@ def test_tc09_cleanup_always_called_in_finally():
 
     project = _make_project()
 
-    with patch.object(deploy_db, "get_project", return_value=project), \
+    with patch.object(deployer, "get_project", return_value=project), \
          patch.object(deployer, "preflight_check_secrets", return_value=[]), \
-         patch.object(deploy_db, "get_lock", return_value=None), \
+         patch.object(deployer, "get_lock", return_value=None), \
          patch("changeset_analyzer.create_dry_run_changeset", return_value="bouncer-dryrun-tc09"), \
          patch("changeset_analyzer.analyze_changeset", side_effect=RuntimeError("boom")), \
          patch("changeset_analyzer.cleanup_changeset") as mock_cleanup, \
@@ -431,9 +431,9 @@ def test_tc10_auto_approve_notification_called_once():
     project = _make_project()
     deploy_result = _make_deploy_result()
 
-    with patch.object(deploy_db, "get_project", return_value=project), \
+    with patch.object(deployer, "get_project", return_value=project), \
          patch.object(deployer, "preflight_check_secrets", return_value=[]), \
-         patch.object(deploy_db, "get_lock", return_value=None), \
+         patch.object(deployer, "get_lock", return_value=None), \
          patch("changeset_analyzer.create_dry_run_changeset", return_value="bouncer-dryrun-tc10"), \
          patch("changeset_analyzer.analyze_changeset", return_value=_make_code_only_analysis()), \
          patch("changeset_analyzer.cleanup_changeset"), \
