@@ -14,21 +14,12 @@ from telegram import answer_callback, update_message, escape_markdown
 from utils import response
 from metrics import emit_metric
 from db import table
-from callbacks import (
-    handle_show_page_callback,
-    handle_command_callback,
-    handle_account_add_callback,
-    handle_account_remove_callback,
-    handle_deploy_callback,
-    handle_upload_callback,
-    handle_upload_batch_callback,
-    handle_deploy_frontend_callback,
-    handle_grant_approve_all,
-    handle_grant_approve_safe,
-    handle_grant_deny,
-)
-from trust import revoke_trust_session
-from notifications import send_trust_session_summary
+# callbacks, trust, notifications are lazy-imported inside functions
+# to avoid Lambda cold-start Runtime.ExitError caused by module-level
+# import of callbacks.py in a lazy-import context (app.py imports
+# webhook_router lazily; triggering module-level imports of callbacks
+# on first invocation can crash the Lambda process on ARM64).
+# See: sprint61 hotfix
 
 logger = Logger(service="bouncer")
 
@@ -69,6 +60,7 @@ def _is_grant_expired(request_id: str, callback: dict) -> bool:
 
 
 def handle_show_page(request_id: str, callback: dict) -> dict:
+    from callbacks import handle_show_page_callback  # noqa: F811 lazy import
     """Handle show_page callback for on-demand pagination (sprint13-003).
 
     Callback data format: 'show_page:{original_request_id}:{page_num}'
@@ -134,6 +126,8 @@ def handle_infra_approval(action: str, request_id: str, callback: dict, user_id:
 
 
 def handle_revoke_trust(request_id: str, callback: dict) -> dict:
+    from trust import revoke_trust_session  # noqa: F811 lazy import
+    from notifications import send_trust_session_summary  # noqa: F811 lazy import
     """Handle revoke_trust callback to end a trust session."""
     emit_metric('Bouncer', 'ApprovalAction', 1, dimensions={'Action': 'revoke_trust'})
 
@@ -165,6 +159,7 @@ def handle_revoke_trust(request_id: str, callback: dict) -> dict:
 
 
 def handle_grant_callbacks(action: str, request_id: str, callback: dict) -> dict:
+    from callbacks import handle_grant_approve_all, handle_grant_approve_safe, handle_grant_deny  # noqa: F811 lazy import
     """Handle grant session callbacks (approve_all, approve_safe, deny, revoke)."""
     emit_metric('Bouncer', 'ApprovalAction', 1, dimensions={'Action': action})
 
@@ -196,6 +191,15 @@ def handle_grant_callbacks(action: str, request_id: str, callback: dict) -> dict
 
 
 def handle_general_approval(action: str, request_id: str, callback: dict, user_id: str, source_ip: str) -> dict:
+    from callbacks import (  # noqa: F811 lazy import
+        handle_command_callback,
+        handle_account_add_callback,
+        handle_account_remove_callback,
+        handle_deploy_callback,
+        handle_upload_callback,
+        handle_upload_batch_callback,
+        handle_deploy_frontend_callback,
+    )
     """Handle general approval flow: DynamoDB lookup, TTL check, and action dispatch."""
     try:
         db_start = time.time()
