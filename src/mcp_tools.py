@@ -2,7 +2,8 @@
 Bouncer - MCP Tool 實作模組（向後兼容 re-export hub）
 
 實際實作已拆分到:
-  - mcp_execute.py  — execute pipeline + grant session tools
+  - mcp_execute.py  — execute pipeline
+  - mcp_grant.py    — grant session MCP tools (sprint60-002)
   - mcp_upload.py   — upload pipeline + batch upload
   - mcp_admin.py    — admin/query tools
 
@@ -24,9 +25,6 @@ MCP 錯誤格式規則：
 from mcp_execute import (  # noqa: F401
     ExecuteContext,
     mcp_tool_execute,
-    mcp_tool_request_grant,
-    mcp_tool_grant_status,
-    mcp_tool_revoke_grant,
     # internal helpers (used by tests via patch)
     _check_grant_session,
     _check_compliance,
@@ -41,6 +39,14 @@ from mcp_execute import (  # noqa: F401
     _safe_risk_factors,
     _log_smart_approval_shadow,
     SHADOW_TABLE_NAME,
+)
+
+# --- Grant session tools (moved to mcp_grant in sprint60-002) ---
+from mcp_grant import (  # noqa: F401
+    mcp_tool_request_grant,
+    mcp_tool_grant_status,
+    mcp_tool_revoke_grant,
+    mcp_tool_grant_execute,
 )
 
 # --- Upload pipeline ---
