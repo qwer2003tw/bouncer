@@ -20,6 +20,9 @@ All notable changes to this project will be documented in this file.
 - `tests/test_sprint33_004_typing.py` — added `xdist_group("app_module")` to prevent DynamoDB mock state pollution in xdist parallel CI runs (CI flaky fix)
 - `tests/test_upload_scanner.py` — added `xdist_group` to prevent module reload race condition in xdist parallel CI runs (CI flaky fix)
 
+### Refactored
+- `src/mcp_execute.py` → `src/mcp_grant.py` + `src/chain_analyzer.py` — Phase 1 split: extracted 4 grant MCP tool functions (`mcp_tool_request_grant`, `grant_status`, `revoke_grant`, `grant_execute`) to `mcp_grant.py` and chain risk analysis (`check_chain_risks`, `split_chain`) to `chain_analyzer.py`; `mcp_execute.py` reduced from 1507 to 998 lines (−33%); API behavior unchanged; 15 test mock paths updated (s60-002)
+
 ### Tests
 - Backend: 2246 tests (2235 src + deployer/mcp_server)
 
