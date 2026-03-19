@@ -107,8 +107,8 @@ class TestTelegramCallbackHandlers:
         assert result['statusCode'] == 404
         mock_answer.assert_called_with('cb123', '❌ 請求已過期或不存在')
     
-    @patch('app.answer_callback')
-    @patch('app.update_message')
+    @patch('webhook_router.answer_callback')
+    @patch('webhook_router.update_message')
     def test_callback_request_already_processed(self, mock_update, mock_answer, app_module):
         """請求已處理過"""
         request_id = 'processed-123'
@@ -138,8 +138,8 @@ class TestTelegramCallbackHandlers:
         assert result['statusCode'] == 200
         mock_answer.assert_called_with('cb123', '⚠️ 此請求已處理過')
     
-    @patch('app.answer_callback')
-    @patch('app.update_message')
+    @patch('webhook_router.answer_callback')
+    @patch('webhook_router.update_message')
     def test_callback_request_expired(self, mock_update, mock_answer, app_module):
         """請求已過期"""
         request_id = 'expired-123'
@@ -209,7 +209,7 @@ class TestTelegramCallbackHandlers:
         item = app_module.table.get_item(Key={'request_id': request_id})['Item']
         assert item['status'] == 'approved'
 
-    @patch('app.answer_callback')
+    @patch('webhook_router.answer_callback')
     @patch('callbacks_command.update_message')
     @patch('callbacks_command.execute_command')
     def test_callback_execute_immediate_feedback(self, mock_execute, mock_update, mock_answer, app_module):
