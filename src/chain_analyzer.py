@@ -24,8 +24,11 @@ def _safe_risk_category(smart_decision):
     """安全取得 risk category 值（相容 enum 和 string）"""
     if not smart_decision:
         return None
-    cat = smart_decision.risk_category
-    return cat.value if hasattr(cat, 'value') else str(cat)
+    try:
+        cat = smart_decision.risk_result.category
+        return cat.value if hasattr(cat, 'value') else cat
+    except (AttributeError, KeyError):
+        return None
 
 
 def _safe_risk_factors(smart_decision):
