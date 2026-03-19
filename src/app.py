@@ -494,14 +494,18 @@ def lambda_handler(event: dict, context) -> dict:
             command_preview = event.get('command_preview', '')[:100]
             source_field = event.get('source_field', '')
             expires_at = int(item.get('expires_at', 0))
+            is_escalation = event.get('escalation', False)
 
             # Format expires_at as human-readable
             from datetime import datetime, timezone
             expires_dt = datetime.fromtimestamp(expires_at, tz=timezone.utc)
             expires_str = expires_dt.strftime('%Y-%m-%d %H:%M:%S UTC')
 
+            # Use different header for escalation (2nd reminder)
+            header = "🔴 *第 2 次提醒 — 尚未審批的請求*" if is_escalation else "⏰ *尚未審批的請求*"
+
             text = (
-                f"⏰ *尚未審批的請求*\n\n"
+                f"{header}\n\n"
                 f"📋 *命令：* `{escape_markdown(command_preview)}`\n"
                 f"🤖 *來源：* {escape_markdown(source_field)}\n"
                 f"🆔 `{request_id}`\n"
