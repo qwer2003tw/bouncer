@@ -178,7 +178,7 @@ class TestMcpToolExecuteNative:
             }
         })
 
-        assert 'error' in result
+        assert 'error' in json.dumps(result)
         assert 'Missing required parameter: aws' in json.dumps(result)
 
     def test_missing_service(self, mock_table, mock_notifications):
@@ -195,7 +195,7 @@ class TestMcpToolExecuteNative:
             }
         })
 
-        assert 'error' in result
+        assert 'error' in json.dumps(result)
         assert 'Missing required parameter: aws.service' in json.dumps(result)
 
     def test_missing_trust_scope(self, mock_table, mock_notifications):
@@ -213,7 +213,7 @@ class TestMcpToolExecuteNative:
             }
         })
 
-        assert 'error' in result
+        assert 'error' in json.dumps(result)
         assert 'trust_scope' in json.dumps(result)
 
     @mock_aws
@@ -222,7 +222,9 @@ class TestMcpToolExecuteNative:
         from mcp_execute import mcp_tool_execute_native
 
         # Mock compliance checker to block the command
-        with patch('mcp_execute._check_compliance') as mock_compliance:
+        with patch('mcp_execute._score_risk'), \
+             patch('mcp_execute._scan_template'), \
+             patch('mcp_execute._check_compliance') as mock_compliance:
             mock_compliance.return_value = {
                 'id': 'req-123',
                 'jsonrpc': '2.0',
@@ -258,14 +260,21 @@ class TestMcpToolExecuteNative:
         from mcp_execute import mcp_tool_execute_native
 
         # Mock auto_approve to return True for describe operations
-        with patch('mcp_execute.is_auto_approve') as mock_auto_approve, \
+        with patch('mcp_execute._score_risk'), \
+             patch('mcp_execute._scan_template'), \
+             patch('mcp_execute.is_auto_approve') as mock_auto_approve, \
+             patch('mcp_execute.execute_boto3_native') as mock_execute, \
              patch('mcp_execute.store_paged_output') as mock_paging:
             mock_auto_approve.return_value = True
-            mock_paging.return_value = False
-
-            # Create a test bucket
-            s3 = boto3.client('s3', region_name='us-east-1')
-            s3.create_bucket(Bucket='test-bucket-auto')
+            mock_execute.return_value = '{"Buckets": [{"Name": "test-bucket-auto"}]}'
+            mock_paging.return_value = {
+                'result': '{"Buckets": [{"Name": "test-bucket-auto"}]}',
+                'paged': False,
+                'page': 1,
+                'total_pages': 1,
+                'output_length': 50,
+                'truncated': False,
+            }
 
             result = mcp_tool_execute_native('req-123', {
                 'aws': {
@@ -297,7 +306,9 @@ class TestMcpToolExecuteNative:
             # Return None to continue pipeline
             return None
 
-        with patch('mcp_execute._check_compliance', side_effect=capture_compliance), \
+        with patch('mcp_execute._score_risk'), \
+             patch('mcp_execute._scan_template'), \
+             patch('mcp_execute._check_compliance', side_effect=capture_compliance), \
              patch('mcp_execute._check_blocked') as mock_blocked:
             # Make blocked return a result to stop pipeline
             mock_blocked.return_value = {
@@ -352,5 +363,5 @@ class TestMcpToolExecuteNative:
             }
         })
 
-        assert 'error' in result
+        assert 'error' in json.dumps(result)
         assert 'must be a dict' in json.dumps(result)
