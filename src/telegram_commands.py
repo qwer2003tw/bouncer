@@ -30,6 +30,16 @@ def handle_telegram_command(message: dict) -> dict:
     chat_id = str(message.get('chat', {}).get('id', ''))
     text = message.get('text', '').strip()
 
+    logger.info(
+        "Telegram command received",
+        extra={
+            "src_module": "telegram_commands",
+            "operation": "handle_telegram_command",
+            "user_id": user_id,
+            "command_type": text.split()[0] if text else "",
+        }
+    )
+
     # 權限檢查
     if user_id not in APPROVED_CHAT_IDS:
         return response(200, {'ok': True})  # 忽略非授權用戶
@@ -265,6 +275,15 @@ def handle_otp_command(chat_id: str, user_id: str, provided_code: str) -> dict:
     """處理 /otp {code} 指令 — OTP 二次驗證"""
     from otp import get_pending_otp, validate_otp
 
+    logger.info(
+        "OTP command started",
+        extra={
+            "src_module": "telegram_commands",
+            "operation": "handle_otp_command",
+            "user_id": user_id,
+        }
+    )
+
     # Find pending OTP for this user
     otp_record = get_pending_otp(user_id)
     if not otp_record:
@@ -278,8 +297,28 @@ def handle_otp_command(chat_id: str, user_id: str, provided_code: str) -> dict:
     success, msg = validate_otp(original_request_id, provided_code)
 
     if not success:
+        logger.info(
+            "OTP validation failed",
+            extra={
+                "src_module": "telegram_commands",
+                "operation": "handle_otp_command",
+                "user_id": user_id,
+                "result": "fail",
+            }
+        )
         send_telegram_message_to(chat_id, f"❌ {msg}")
         return response(200, {'ok': True})
+
+    logger.info(
+        "OTP validation successful",
+        extra={
+            "src_module": "telegram_commands",
+            "operation": "handle_otp_command",
+            "user_id": user_id,
+            "result": "success",
+            "request_id": original_request_id,
+        }
+    )
 
     # OTP valid - retrieve original request and execute
     send_telegram_message_to(chat_id, f"✅ {msg}，正在執行命令...")

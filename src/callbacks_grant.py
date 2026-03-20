@@ -50,6 +50,17 @@ def handle_grant_approve(query: dict, grant_id: str, mode: str = 'all') -> dict:
         granted = grant.get('granted_commands', [])
         ttl_minutes = grant.get('ttl_minutes', 30)
 
+        logger.info(
+            "Grant approved, ready for execution",
+            extra={
+                "src_module": "callbacks_grant",
+                "operation": "handle_grant_approve",
+                "grant_id": grant_id,
+                "mode": mode,
+                "granted_commands_count": len(granted),
+            }
+        )
+
         cb_suffix = '命令' if mode == 'all' else '安全命令'
 
         if show_alert:

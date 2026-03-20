@@ -615,13 +615,40 @@ def is_command_in_grant(normalized_cmd: str, grant: Dict) -> bool:
 
         # Fast path: exact match
         if normalized_cmd in granted_commands:
+            logger.info(
+                "Grant command matched (exact)",
+                extra={
+                    "src_module": "grant",
+                    "operation": "is_command_in_grant",
+                    "matched": True,
+                    "match_type": "exact",
+                }
+            )
             return True
 
         # Pattern match path
         for pat in granted_commands:
             if _is_pattern(pat) and match_pattern(pat, normalized_cmd):
+                logger.info(
+                    "Grant command matched (pattern)",
+                    extra={
+                        "src_module": "grant",
+                        "operation": "is_command_in_grant",
+                        "matched": True,
+                        "match_type": "pattern",
+                        "pattern": pat,
+                    }
+                )
                 return True
 
+        logger.info(
+            "Grant command not matched",
+            extra={
+                "src_module": "grant",
+                "operation": "is_command_in_grant",
+                "matched": False,
+            }
+        )
         return False
     except (re.error, ValueError, TypeError) as e:
         logger.error(f"[GRANT] is_command_in_grant error: {e}", extra={"src_module": "grant", "operation": "is_command_in_grant", "error": str(e)})
