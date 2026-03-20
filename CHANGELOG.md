@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.62.0] - 2026-03-20
+
+### Fixed
+- `src/commands.py` — exit code 0 + empty output now returns `⚠️ 命令執行完成（無輸出，請確認結果）` instead of `✅ 命令執行成功（無輸出）`; prevents false-positive success on IAM implicitDeny (s62 bouncer-ux-empty-output)
+- `src/callbacks_command.py` — `_format_approval_response` now shows truncation notice when `1000 < len(result) <= 4000` instead of silently truncating (issue #168, s62 bouncer-s62-001)
+- `src/notifications.py` — `send_trust_auto_approve_notification` and `send_grant_execute_notification` now enforce 4096-char Telegram limit with graceful truncation; previously entire notification would disappear on long output (issue #168)
+
+### Changed
+- `src/constants.py` — `APPROVAL_TIMEOUT_DEFAULT` increased from 300s to 600s (10 minutes); reduces expiry-before-approval rate (s62 bouncer-ux-ttl)
+
+### Added
+- `template.yaml` — `RuntimeExitErrorMetricFilter` + `RuntimeExitErrorAlarm`: CloudWatch Logs metric filter scans Lambda logs for `Runtime.ExitError`; alarm triggers within 60s of any Lambda crash (s62 bouncer-s61-hotfix-alarm)
+- `tests/test_commands.py` — `TestExecuteCommandSystemExitRegression`: 4 regression tests for PR #162 SystemExit handling (s62 bouncer-s61-hotfix-regression)
+- `tests/test_sprint62_001_truncation.py` — 9 regression tests covering output truncation paths (issue #168)
+
 ## [3.61.2] - 2026-03-20
 
 ### Fixed
