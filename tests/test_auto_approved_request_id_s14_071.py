@@ -36,6 +36,7 @@ class TestAutoApprovedRequestId:
         ctx.req_id = 'req-auto-001'
         ctx.assume_role = None
         ctx.smart_decision = None
+        ctx.is_native = False
 
         with patch('mcp_execute.is_auto_approve', return_value=True), \
              patch('mcp_execute.execute_command', return_value='output'), \
@@ -67,6 +68,7 @@ class TestAutoApprovedRequestId:
         ctx.req_id = 'req-trust-001'
         ctx.assume_role = None
         ctx.smart_decision = None
+        ctx.is_native = False
         ctx.trust_scope = 'trust-test-source'
 
         trust_session = {
@@ -110,6 +112,7 @@ class TestAutoApprovedRequestId:
         ctx.req_id = 'req-grant-001'
         ctx.assume_role = None
         ctx.smart_decision = None
+        ctx.is_native = False
         ctx.trust_scope = 'grant-test-source'
         ctx.grant_id = 'grant-xyz789'
 
