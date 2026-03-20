@@ -164,7 +164,7 @@ class TestTrustAutoApproveNotificationTruncation:
         )
 
         mock_telegram_send.assert_called_once()
-        sent_text = mock_telegram_send.call_args[1]['text']
+        sent_text = mock_telegram_send.call_args[0][0]
         assert len(sent_text) <= 4096
         assert '已截斷' not in sent_text
 
@@ -185,7 +185,7 @@ class TestTrustAutoApproveNotificationTruncation:
         )
 
         mock_telegram_send.assert_called_once()
-        sent_text = mock_telegram_send.call_args[1]['text']
+        sent_text = mock_telegram_send.call_args[0][0]
         # Text should be truncated to fit within 4096
         assert len(sent_text) <= 4096
         # Should contain truncation notice
@@ -207,7 +207,7 @@ class TestTrustAutoApproveNotificationTruncation:
         )
 
         mock_telegram_send.assert_called_once()
-        sent_text = mock_telegram_send.call_args[1]['text']
+        sent_text = mock_telegram_send.call_args[0][0]
         assert len(sent_text) <= 4096
 
 
@@ -231,7 +231,7 @@ class TestGrantExecuteNotificationTruncation:
         )
 
         mock_telegram_send.assert_called_once()
-        sent_text = mock_telegram_send.call_args[1]['text']
+        sent_text = mock_telegram_send.call_args[0][0]
         assert len(sent_text) <= 4096
         assert '已截斷' not in sent_text
 
@@ -249,7 +249,7 @@ class TestGrantExecuteNotificationTruncation:
         )
 
         mock_telegram_send.assert_called_once()
-        sent_text = mock_telegram_send.call_args[1]['text']
+        sent_text = mock_telegram_send.call_args[0][0]
         # Text should be truncated to fit within 4096
         assert len(sent_text) <= 4096
         # Should contain truncation notice
@@ -268,5 +268,5 @@ class TestGrantExecuteNotificationTruncation:
         )
 
         mock_telegram_send.assert_called_once()
-        sent_text = mock_telegram_send.call_args[1]['text']
+        sent_text = mock_telegram_send.call_args[0][0]
         assert len(sent_text) <= 4096
