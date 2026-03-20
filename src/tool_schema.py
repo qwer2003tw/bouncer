@@ -55,6 +55,76 @@ MCP_TOOLS = {
             'required': ['command', 'trust_scope']
         }
     },
+    'bouncer_execute_native': {
+        'description': '使用 boto3 native API 執行 AWS 操作，完全不依賴 awscli。與 bouncer_execute 相同的安全管道（compliance、blocked、trust、approval），但執行層直接呼叫 boto3。',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'aws': {
+                    'type': 'object',
+                    'description': 'AWS API 呼叫參數',
+                    'properties': {
+                        'service': {
+                            'type': 'string',
+                            'description': 'boto3 服務名稱（例如：eks, s3, ec2）'
+                        },
+                        'operation': {
+                            'type': 'string',
+                            'description': 'boto3 方法名稱（snake_case，例如：create_cluster, describe_instances）'
+                        },
+                        'params': {
+                            'type': 'object',
+                            'description': 'boto3 方法的參數 dict（例如：{"name": "ztp-eks", "version": "1.32"}）'
+                        },
+                        'region': {
+                            'type': 'string',
+                            'description': 'AWS region（例如：us-east-1），不填則使用環境變數'
+                        },
+                        'account': {
+                            'type': 'string',
+                            'description': '目標 AWS 帳號 ID（12 位數字），不填則使用預設帳號'
+                        }
+                    },
+                    'required': ['service', 'operation', 'params']
+                },
+                'bouncer': {
+                    'type': 'object',
+                    'description': 'Bouncer 審批參數',
+                    'properties': {
+                        'reason': {
+                            'type': 'string',
+                            'description': '執行原因（用於審批記錄）',
+                            'default': 'No reason provided'
+                        },
+                        'source': {
+                            'type': 'string',
+                            'description': '請求來源描述（例如：Private Bot (EKS Native)）'
+                        },
+                        'trust_scope': {
+                            'type': 'string',
+                            'description': '信任範圍識別符（必填，用於 Trust Session 匹配）'
+                        },
+                        'context': {
+                            'type': 'string',
+                            'description': '任務上下文說明'
+                        },
+                        'approval_timeout': {
+                            'type': 'integer',
+                            'description': '審批超時秒數（預設 300）',
+                            'default': 300
+                        },
+                        'sync': {
+                            'type': 'boolean',
+                            'description': '同步模式：等待審批結果（可能超時），預設 false',
+                            'default': False
+                        }
+                    },
+                    'required': ['trust_scope']
+                }
+            },
+            'required': ['aws', 'bouncer']
+        }
+    },
     'bouncer_status': {
         'description': '查詢請求狀態（用於異步模式輪詢結果）',
         'parameters': {

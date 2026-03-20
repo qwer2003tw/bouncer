@@ -100,6 +100,7 @@ class TestAutoApproveAwsCliFailure:
         ctx_mock.account_name = 'Test'
         ctx_mock.req_id = 1
         ctx_mock.smart_decision = None
+        ctx_mock.is_native = False
 
         with patch('mcp_execute.is_auto_approve', return_value=True), \
              patch('mcp_execute.execute_command', return_value=cmd_result), \
@@ -169,6 +170,7 @@ class TestTrustSessionAwsCliFailure:
         ctx_mock.req_id = 2
         ctx_mock.trust_scope = 'scope-abc'
         ctx_mock.smart_decision = None
+        ctx_mock.is_native = False
 
         trust_session = {'request_id': 'trust-001', 'expires_at': 9999999999}
 
@@ -228,6 +230,7 @@ class TestGrantSessionAwsCliFailure:
         ctx_mock.req_id = 3
         ctx_mock.grant_id = 'grant-001'
         ctx_mock.smart_decision = None
+        ctx_mock.is_native = False
 
         grant = {
             'grant_id': 'grant-001',
