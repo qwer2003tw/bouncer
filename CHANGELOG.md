@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.63.0] - 2026-03-20
+
+### Fixed
+- `src/otp.py` — `get_pending_otp` now paginates DynamoDB scan with `LastEvaluatedKey` loop; previously only the first 1MB page was scanned causing OTP verification to always fail (issue #169, s63-001)
+
+### Changed
+- `src/otp.py` — `get_pending_otp` migrated from full-table Scan to GSI Query (`user-id-created-index`); significantly reduces cost and latency (s63-004)
+- `src/otp.py` — Added INFO structured logs for OTP create/query/validate lifecycle events (issue #173, s63-001)
+- `src/telegram_commands.py`, `src/mcp_execute.py`, `src/callbacks_grant.py`, `src/grant.py` — Added INFO logs to critical paths: command receipt, approval submission, grant matching, grant approval (issue #173, s63-002)
+- `CLAUDE.md` — Added Logging Standard: mandatory INFO log scenarios, structured fields, PR checklist item (s63-003)
+
+### Infrastructure
+- `template.yaml` — Added `user-id-created-index` GSI to RequestsTable (`user_id` HASH + `created_at` RANGE, `ProjectionType: ALL`) (s63-004)
+
 ## [3.62.0] - 2026-03-20
 
 ### Fixed
