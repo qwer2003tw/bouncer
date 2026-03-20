@@ -51,40 +51,43 @@ def create_otp_record(request_id: str, user_id: str, otp_code: str, message_id: 
 
 
 def get_pending_otp(user_id: str) -> Optional[dict]:
-    """Find the most recent pending OTP for a user.
+    """Find the most recent pending OTP for a user using GSI Query.
 
-    Scans for otp# records belonging to user_id that haven't expired.
+    Queries user-id-created-index GSI for otp# records belonging to user_id that haven't expired.
     Returns None if no pending OTP found.
     """
     table = _get_table()
     now = int(time.time())
     all_items = []
-    scan_kwargs = {
-        'FilterExpression': 'begins_with(request_id, :prefix) AND user_id = :uid AND #ttl > :now AND #type = :t',
+    query_kwargs = {
+        'IndexName': 'user-id-created-index',
+        'KeyConditionExpression': 'user_id = :uid',
+        'FilterExpression': 'begins_with(request_id, :prefix) AND #ttl > :now AND #type = :t',
         'ExpressionAttributeValues': {
-            ':prefix': 'otp#',
             ':uid': user_id,
+            ':prefix': 'otp#',
             ':now': now,
             ':t': 'otp_pending',
         },
         'ExpressionAttributeNames': {'#ttl': 'ttl', '#type': 'type'},
+        'ScanIndexForward': False,  # newest first
     }
 
     try:
-        # Query by user_id using scan with pagination (OTP records are short-lived, low volume)
+        # Query by user_id using GSI with pagination
         while True:
-            result = table.scan(**scan_kwargs)
+            result = table.query(**query_kwargs)
             all_items.extend(result.get('Items', []))
             last_key = result.get('LastEvaluatedKey')
             if not last_key:
                 break
-            scan_kwargs['ExclusiveStartKey'] = last_key
+            query_kwargs['ExclusiveStartKey'] = last_key
 
         if not all_items:
             logger.info("No pending OTP found for user", extra={"src_module": "otp", "operation": "get_pending_otp", "user_id": user_id, "found": False})
             return None
-        # Return most recently created
-        otp = max(all_items, key=lambda x: x.get('created_at', 0))
+        # Return most recently created (already sorted by ScanIndexForward=False)
+        otp = all_items[0]
         logger.info("Found pending OTP", extra={"src_module": "otp", "operation": "get_pending_otp", "user_id": user_id, "found": True, "request_id": otp.get('original_request_id')})
         return otp
     except ClientError as e:
