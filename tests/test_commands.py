@@ -608,6 +608,85 @@ class TestExecuteCommandAdditional:
 
 
 # ============================================================================
+# Sprint 62 Regression Tests: SystemExit Handling (PR #162)
+# ============================================================================
+
+
+class TestExecuteCommandSystemExitRegression:
+    """Regression tests for PR #162: SystemExit from awscli driver.main().
+
+    Background: Sprint 61 hotfix PR #162 fixed execute_command not catching
+    SystemExit exceptions raised by awscli driver.main(), which caused Lambda
+    to crash instead of returning the command output.
+
+    These tests ensure the incident doesn't recur.
+    """
+
+    def test_systemexit_zero_with_output_returns_output(self, app_module):
+        """driver.main() sys.exit(0) with output → return output, not crash Lambda."""
+
+        def mock_main_with_output(cli_args):
+            """Simulate driver.main() writing to stdout then calling sys.exit(0)."""
+            import sys
+            sys.stdout.write('command output here\n')
+            raise SystemExit(0)
+
+        mock_driver = MagicMock()
+        mock_driver.main.side_effect = mock_main_with_output
+
+        with patch('awscli.clidriver.create_clidriver', return_value=mock_driver):
+            result = app_module.execute_command('aws s3 ls')
+
+        # Should return the captured output, not crash
+        assert 'command output here' in result
+        assert 'exit code' not in result  # exit 0 shouldn't show exit code
+
+    def test_systemexit_zero_no_output_returns_warning(self, app_module):
+        """driver.main() sys.exit(0) no output → return warning message."""
+
+        mock_driver = MagicMock()
+        mock_driver.main.side_effect = SystemExit(0)
+
+        with patch('awscli.clidriver.create_clidriver', return_value=mock_driver):
+            result = app_module.execute_command('aws s3 ls')
+
+        # Should return warning message for successful command with no output
+        assert '命令執行完成' in result
+        assert '無輸出' in result
+
+    def test_systemexit_nonzero_returns_exit_code(self, app_module):
+        """driver.main() sys.exit(1) → return (exit code: 1), not crash Lambda."""
+
+        mock_driver = MagicMock()
+        mock_driver.main.side_effect = SystemExit(1)
+
+        with patch('awscli.clidriver.create_clidriver', return_value=mock_driver):
+            result = app_module.execute_command('aws s3 ls')
+
+        # Should return exit code, not crash
+        assert '(exit code: 1)' in result
+
+    def test_systemexit_nonzero_with_stderr_returns_error(self, app_module):
+        """driver.main() sys.exit(1) with stderr → return stderr + exit code."""
+
+        def mock_main_with_error(cli_args):
+            """Simulate driver.main() writing to stderr then calling sys.exit(1)."""
+            import sys
+            sys.stderr.write('An error occurred (InvalidBucketName)\n')
+            raise SystemExit(1)
+
+        mock_driver = MagicMock()
+        mock_driver.main.side_effect = mock_main_with_error
+
+        with patch('awscli.clidriver.create_clidriver', return_value=mock_driver):
+            result = app_module.execute_command('aws s3 ls s3://invalid')
+
+        # Should return stderr content with exit code
+        assert 'An error occurred' in result
+        assert '(exit code: 1)' in result
+
+
+# ============================================================================
 # Paged Output 測試補充
 # ============================================================================
 
