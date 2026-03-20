@@ -358,7 +358,7 @@ def send_account_approval_request(request_id: str, action: str, account_id: str,
 
         mb.newline()
         mb.text("📋 ").bold("請求 ID：").text(" ").code(request_id).newline()
-        mb.text("⏰ ").bold("5 分鐘後過期")
+        mb.text("⏰ ").bold("10 分鐘後過期")
 
         text, entities = mb.build()
 
