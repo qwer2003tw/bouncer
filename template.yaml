@@ -691,6 +691,35 @@ Resources:
       AlarmActions:
         - !Ref AlarmNotificationTopic
 
+  RuntimeExitErrorMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ApprovalFunction}"
+      FilterPattern: '"Runtime.ExitError"'
+      MetricTransformations:
+        - MetricName: RuntimeExitErrorCount
+          MetricNamespace: Bouncer
+          MetricValue: "1"
+          DefaultValue: 0
+
+  RuntimeExitErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Environment}-bouncer-runtime-exit-error"
+      AlarmDescription: "Lambda Runtime.ExitError detected — Lambda crashed without returning a response"
+      MetricName: RuntimeExitErrorCount
+      Namespace: Bouncer
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
+
   # ============================================================
   # CloudWatch Logs - Log Group with Retention
   # ============================================================
