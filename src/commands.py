@@ -696,10 +696,12 @@ def _execute_locked(command: str, assume_role_arn: str = None,
             # 禁用 pager
             os.environ['AWS_PAGER'] = ''
 
+            print(f"DEBUG_EXECUTE cli_args={cli_args}", file=old_stderr)  # noqa: T201
             exit_code = driver.main(cli_args)
 
             stdout_output = sys.stdout.getvalue()
             stderr_output = sys.stderr.getvalue()
+            print(f"DEBUG_EXECUTE exit_code={exit_code} stdout={repr(stdout_output[:500])} stderr={repr(stderr_output[:500])}", file=old_stderr)  # noqa: T201
 
         except SystemExit as _sysexit:  # awscli driver.main() may call sys.exit() directly
             # Capture output BEFORE finally restores sys.stdout/stderr
@@ -711,6 +713,7 @@ def _execute_locked(command: str, assume_role_arn: str = None,
                 _captured_stderr = sys.stderr.getvalue()
             except Exception:  # noqa: BLE001
                 pass
+            print(f"DEBUG_EXECUTE SystemExit code={_sysexit.code} stdout={repr(_captured_stdout[:500])} stderr={repr(_captured_stderr[:500])}", file=old_stderr)  # noqa: T201
             _exit_code = _sysexit.code if _sysexit.code is not None else 1
             _output_text = (_captured_stdout or _captured_stderr or '').strip()
             # Re-raise with a wrapper so outer except SystemExit can access captured output
