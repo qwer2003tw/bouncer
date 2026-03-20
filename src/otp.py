@@ -47,6 +47,7 @@ def create_otp_record(request_id: str, user_id: str, otp_code: str, message_id: 
         'ttl': now + OTP_TTL,
         'type': 'otp_pending',
     })
+    logger.info("OTP record created", extra={"src_module": "otp", "operation": "create_otp_record", "request_id": request_id, "user_id": user_id})
 
 
 def get_pending_otp(user_id: str) -> Optional[dict]:
@@ -57,26 +58,37 @@ def get_pending_otp(user_id: str) -> Optional[dict]:
     """
     table = _get_table()
     now = int(time.time())
+    all_items = []
+    scan_kwargs = {
+        'FilterExpression': 'begins_with(request_id, :prefix) AND user_id = :uid AND #ttl > :now AND #type = :t',
+        'ExpressionAttributeValues': {
+            ':prefix': 'otp#',
+            ':uid': user_id,
+            ':now': now,
+            ':t': 'otp_pending',
+        },
+        'ExpressionAttributeNames': {'#ttl': 'ttl', '#type': 'type'},
+    }
 
     try:
-        # Query by user_id using scan (OTP records are short-lived, low volume)
-        result = table.scan(
-            FilterExpression='begins_with(request_id, :prefix) AND user_id = :uid AND #ttl > :now AND #type = :t',
-            ExpressionAttributeValues={
-                ':prefix': 'otp#',
-                ':uid': user_id,
-                ':now': now,
-                ':t': 'otp_pending',
-            },
-            ExpressionAttributeNames={'#ttl': 'ttl', '#type': 'type'},
-        )
-        items = result.get('Items', [])
-        if not items:
+        # Query by user_id using scan with pagination (OTP records are short-lived, low volume)
+        while True:
+            result = table.scan(**scan_kwargs)
+            all_items.extend(result.get('Items', []))
+            last_key = result.get('LastEvaluatedKey')
+            if not last_key:
+                break
+            scan_kwargs['ExclusiveStartKey'] = last_key
+
+        if not all_items:
+            logger.info("No pending OTP found for user", extra={"src_module": "otp", "operation": "get_pending_otp", "user_id": user_id, "found": False})
             return None
         # Return most recently created
-        return max(items, key=lambda x: x.get('created_at', 0))
+        otp = max(all_items, key=lambda x: x.get('created_at', 0))
+        logger.info("Found pending OTP", extra={"src_module": "otp", "operation": "get_pending_otp", "user_id": user_id, "found": True, "request_id": otp.get('original_request_id')})
+        return otp
     except ClientError as e:
-        logger.error("Failed to query OTP records: %s", e, extra={"src_module": "otp", "user_id": user_id})
+        logger.error("Failed to query OTP records: %s", e, extra={"src_module": "otp", "operation": "get_pending_otp", "user_id": user_id, "error": str(e)})
         return None
 
 
@@ -136,4 +148,5 @@ def validate_otp(request_id: str, provided_code: str) -> tuple[bool, str]:
         ExpressionAttributeNames={'#type': 'type'},
         ExpressionAttributeValues={':t': 'otp_used'},
     )
+    logger.info("OTP validated successfully", extra={"src_module": "otp", "operation": "validate_otp", "request_id": request_id})
     return True, "OTP 驗證成功"
