@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.64.0] - 2026-03-20
+
+### Added
+- `src/mcp_execute.py` + `src/commands.py` — `bouncer_execute_native` MCP tool: execute AWS API calls directly via boto3 without awscli dependency. Input schema: `{"aws": {"service": "eks", "operation": "create_cluster", "params": {...}, "region": "...", "account": "..."}, "bouncer": {"reason": "...", "source": "...", "trust_scope": "..."}}`. Passes through full Bouncer pipeline (compliance, risk scoring, approval) (s64 bouncer-upgrade-awscli-v2)
+
 ## [3.63.0] - 2026-03-20
 
 ### Fixed
