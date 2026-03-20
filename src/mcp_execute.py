@@ -528,7 +528,19 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
 
         # Normalize 比對
         normalized_cmd = normalize_command(ctx.command)
-        if not is_command_in_grant(normalized_cmd, grant):
+        matched = is_command_in_grant(normalized_cmd, grant)
+
+        logger.info(
+            "Grant session check result",
+            extra={
+                "src_module": "mcp_execute",
+                "operation": "_check_grant_session",
+                "grant_id": grant_id,
+                "matched": matched,
+            }
+        )
+
+        if not matched:
             return None  # 不在清單 → fallthrough
 
         # 總執行次數檢查
@@ -832,6 +844,18 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
 
     request_id = generate_request_id(ctx.command)
     ttl = int(time.time()) + ctx.timeout + APPROVAL_TTL_BUFFER
+
+    # Preview for logging
+    command_preview = ctx.command[:100] + '...' if len(ctx.command) > 100 else ctx.command
+    logger.info(
+        "Submitting command for approval",
+        extra={
+            "src_module": "mcp_execute",
+            "operation": "_submit_for_approval",
+            "request_id": request_id,
+            "command_preview": command_preview,
+        }
+    )
 
     # 存入 DynamoDB
     item = {

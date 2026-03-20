@@ -118,6 +118,26 @@ Even for urgent hotfixes:
 - Never loosen safelist without explicit approval
 - No hardcoded credentials
 
+## Logging Standard（強制）
+
+每個 PR 合併前必須確認：
+
+### 必須有 INFO log 的情況
+1. **MCP tool 入口**：`logger.info("Tool called", extra={"src_module": ..., "operation": "tool_called", "tool": tool_name})`
+2. **審批決策**：approved/denied/auto_approved，必須含 `request_id`
+3. **關鍵 DDB 操作結果**：put/update/delete 的成功結果
+4. **Early return 路徑**：任何提前 return（包括 not found、skip）
+5. **狀態轉換**：OTP created/validated, trust session created/expired, grant started/completed
+
+### Structured logging 欄位（必填）
+- `src_module`：檔案名（不含 .py）
+- `operation`：函數名或操作名
+- `request_id`（如有）：對應的審批請求 ID
+
+### PR Checklist 新增
+- [ ] 新增的關鍵路徑是否有 INFO log（含 `src_module`, `operation`, `request_id`）？
+- [ ] Early return 路徑是否有 INFO log？
+
 ## Code Style
 - Python 3.12, ruff for linting
 - Entities pattern for Telegram messages (not raw `send_message`)
