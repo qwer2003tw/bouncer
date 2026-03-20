@@ -826,7 +826,7 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
                 'request_id': request_id,
                 'project_id': project_id,
                 'message': '部署請求已發送，等待 Telegram 確認',
-                'expires_in': '300 seconds'
+                'expires_in': '600 seconds'
             })}]
         })
 
@@ -977,7 +977,7 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
         f"{git_diff_line}"
         f"\n"
         f"🆔 *ID：* `{request_id}`\n"
-        f"⏰ *5 分鐘後過期*"
+        f"⏰ *10 分鐘後過期*"
     )
 
     keyboard = {
