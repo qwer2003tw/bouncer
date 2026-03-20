@@ -654,6 +654,26 @@ def _execute_locked(command: str, assume_role_arn: str = None,
         # 移除 'aws' 前綴，awscli.clidriver 不需要它
         cli_args = args[1:]
 
+        # Guard: awscli v1 global flags that conflict with subcommand params.
+        # '--version' is a known conflict: 'eks create-cluster --version 1.32'
+        # triggers the global --version flag (prints awscli version, sys.exit(0))
+        # instead of being parsed as the EKS Kubernetes version parameter.
+        # Callers must use the correct subcommand-specific flag names, e.g.:
+        # - EKS: --kubernetes-version (not --version)
+        # See: awscli/argparser.py MainArgParser._build() version action.
+        _AWSCLI_GLOBAL_NO_VALUE_FLAGS = frozenset({
+            '--version', '--debug', '--no-verify-ssl', '--no-paginate',
+            '--no-sign-request',
+        })
+        _conflicting = [f for f in cli_args if f in _AWSCLI_GLOBAL_NO_VALUE_FLAGS
+                        and cli_args.index(f) > 0]  # not at position 0 = likely subcommand param
+        if '--version' in _conflicting:
+            return (
+                '❌ `--version` 與 awscli v1 全域 flag 衝突，無法作為 subcommand 參數使用。\n'
+                '請改用正確的 subcommand 參數名，例如：\n'
+                '  EKS: `--kubernetes-version <版本號>`（不是 `--version`）'
+            )
+
         # 保存原始環境變數
         original_env = {}
 
@@ -696,12 +716,10 @@ def _execute_locked(command: str, assume_role_arn: str = None,
             # 禁用 pager
             os.environ['AWS_PAGER'] = ''
 
-            print(f"DEBUG_EXECUTE cli_args={cli_args}", file=old_stderr)  # noqa: T201
             exit_code = driver.main(cli_args)
 
             stdout_output = sys.stdout.getvalue()
             stderr_output = sys.stderr.getvalue()
-            print(f"DEBUG_EXECUTE exit_code={exit_code} stdout={repr(stdout_output[:500])} stderr={repr(stderr_output[:500])}", file=old_stderr)  # noqa: T201
 
         except SystemExit as _sysexit:  # awscli driver.main() may call sys.exit() directly
             # Capture output BEFORE finally restores sys.stdout/stderr
@@ -713,7 +731,6 @@ def _execute_locked(command: str, assume_role_arn: str = None,
                 _captured_stderr = sys.stderr.getvalue()
             except Exception:  # noqa: BLE001
                 pass
-            print(f"DEBUG_EXECUTE SystemExit code={_sysexit.code} stdout={repr(_captured_stdout[:500])} stderr={repr(_captured_stderr[:500])}", file=old_stderr)  # noqa: T201
             _exit_code = _sysexit.code if _sysexit.code is not None else 1
             _output_text = (_captured_stdout or _captured_stderr or '').strip()
             # Re-raise with a wrapper so outer except SystemExit can access captured output
