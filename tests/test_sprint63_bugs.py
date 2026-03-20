@@ -24,7 +24,19 @@ def _create_mock_table(dynamodb):
     table = dynamodb.create_table(
         TableName='clawdbot-approval-requests',
         KeySchema=[{'AttributeName': 'request_id', 'KeyType': 'HASH'}],
-        AttributeDefinitions=[{'AttributeName': 'request_id', 'AttributeType': 'S'}],
+        AttributeDefinitions=[
+            {'AttributeName': 'request_id', 'AttributeType': 'S'},
+            {'AttributeName': 'user_id', 'AttributeType': 'S'},
+            {'AttributeName': 'created_at', 'AttributeType': 'N'},
+        ],
+        GlobalSecondaryIndexes=[{
+            'IndexName': 'user-id-created-index',
+            'KeySchema': [
+                {'AttributeName': 'user_id', 'KeyType': 'HASH'},
+                {'AttributeName': 'created_at', 'KeyType': 'RANGE'},
+            ],
+            'Projection': {'ProjectionType': 'ALL'},
+        }],
         BillingMode='PAY_PER_REQUEST',
     )
     table.wait_until_exists()
