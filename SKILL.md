@@ -144,6 +144,60 @@ mcporter call bouncer bouncer_execute \
 **✅ v3.13.0 DANGEROUS approve modal（#62）：**
 - DANGEROUS 命令批准時，Telegram callback 改用 `show_alert=True` modal alert，需二次確認才執行
 
+
+### bouncer_execute_native
+執行 AWS API call（**boto3 native，不依賴 awscli**）。與 `bouncer_execute` 走相同的 Bouncer 審批 pipeline，但不需要 CLI string，直接用 boto3 參數格式。
+
+**使用時機：**
+- 需要乾淨的 boto3 參數格式（避免 awscli global flag 衝突）
+- 例如：`aws eks create-cluster --version 1.32`（awscli v1 全域 flag 衝突）→ 改用 native
+
+```bash
+mcporter call bouncer bouncer_execute_native --args '{
+  "aws": {
+    "service": "eks",
+    "operation": "create_cluster",
+    "region": "us-east-1",
+    "account": "992382394211",
+    "params": {
+      "name": "my-cluster",
+      "version": "1.32",
+      "roleArn": "arn:aws:iam::992382394211:role/eksClusterRole",
+      "resourcesVpcConfig": {
+        "subnetIds": ["subnet-xxx", "subnet-yyy"],
+        "securityGroupIds": ["sg-xxx"]
+      }
+    }
+  },
+  "bouncer": {
+    "reason": "建立 EKS cluster",
+    "source": "Private Bot (EKS)",
+    "trust_scope": "private-bot-eks"
+  }
+}'
+```
+
+**Parameters（aws 物件）：**
+| 參數 | 必填 | 說明 |
+|------|------|------|
+| `service` | ✅ | boto3 service name（eks, s3, ec2, iam...） |
+| `operation` | ✅ | boto3 method name（snake_case，如 create_cluster） |
+| `params` | ✅ | boto3 kwargs dict |
+| `region` | ❌ | AWS region（預設 us-east-1） |
+| `account` | ❌ | 目標 AWS 帳號 ID（用於 cross-account assume role） |
+
+**Parameters（bouncer 物件）：**
+| 參數 | 必填 | 說明 |
+|------|------|------|
+| `reason` | ✅ | 執行原因 |
+| `source` | ✅ | 來源標識 |
+| `trust_scope` | ✅ | 穩定呼叫者 ID |
+| `approval_timeout` | ❌ | 審批等待秒數（預設 600） |
+
+**與 bouncer_execute 的差異：**
+- `bouncer_execute`：CLI string（`aws eks create-cluster --version 1.32 ...`）
+- `bouncer_execute_native`：boto3 kwargs（`{"service": "eks", "operation": "create_cluster", "params": {"version": "1.32", ...}}`）
+
 ### bouncer_status
 查詢審批請求狀態。
 

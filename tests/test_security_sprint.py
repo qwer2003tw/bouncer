@@ -44,8 +44,17 @@ def _create_mock_table(dynamodb):
             {'AttributeName': 'status', 'AttributeType': 'S'},
             {'AttributeName': 'created_at', 'AttributeType': 'N'},
             {'AttributeName': 'source', 'AttributeType': 'S'},
+            {'AttributeName': 'user_id', 'AttributeType': 'S'},
         ],
         GlobalSecondaryIndexes=[
+            {
+                'IndexName': 'user-id-created-index',
+                'KeySchema': [
+                    {'AttributeName': 'user_id', 'KeyType': 'HASH'},
+                    {'AttributeName': 'created_at', 'KeyType': 'RANGE'},
+                ],
+                'Projection': {'ProjectionType': 'ALL'},
+            },
             {
                 'IndexName': 'status-created-index',
                 'KeySchema': [
