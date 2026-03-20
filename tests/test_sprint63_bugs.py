@@ -43,7 +43,7 @@ class TestS63_001_OTPPaginationFix:
             import src.otp as otp_mod
             otp_mod._get_table = lambda: table
 
-            # Create mock scan results that simulate pagination
+            # Create mock query results that simulate pagination
             # First page returns one item and LastEvaluatedKey
             # Second page returns the matching OTP record
             now = int(time.time())
@@ -59,17 +59,18 @@ class TestS63_001_OTPPaginationFix:
                 'type': 'otp_pending',
             }
 
-            # Mock table.scan to return paginated results
-            original_scan = table.scan
+            # Mock table.query to return paginated results
             call_count = [0]
 
-            def mock_scan(**kwargs):
+            def mock_query(**kwargs):
+                # Verify GSI usage
+                assert kwargs.get('IndexName') == 'user-id-created-index', "Should use user-id-created-index GSI"
                 call_count[0] += 1
                 if call_count[0] == 1:
                     # First page: return empty items with LastEvaluatedKey
                     return {
                         'Items': [],
-                        'LastEvaluatedKey': {'request_id': 'otp#dummy'},
+                        'LastEvaluatedKey': {'request_id': 'otp#dummy', 'user_id': 'user123', 'created_at': now},
                         'Count': 0,
                         'ScannedCount': 100,
                     }
@@ -81,13 +82,13 @@ class TestS63_001_OTPPaginationFix:
                         'ScannedCount': 100,
                     }
 
-            table.scan = mock_scan
+            table.query = mock_query
 
             # Call get_pending_otp - should handle pagination
             result = otp_mod.get_pending_otp('user123')
 
-            # Verify pagination was handled (scan called twice)
-            assert call_count[0] == 2, "scan should be called twice for pagination"
+            # Verify pagination was handled (query called twice)
+            assert call_count[0] == 2, "query should be called twice for pagination"
             assert result is not None, "Should find OTP in second page"
             assert result['request_id'] == 'otp#req-target'
             assert result['otp_code'] == '123456'
@@ -103,20 +104,7 @@ class TestS63_001_OTPPaginationFix:
 
             now = int(time.time())
 
-            # Older OTP in first page
-            old_otp = {
-                'request_id': 'otp#req-old',
-                'otp_code': '111111',
-                'user_id': 'user123',
-                'original_request_id': 'req-old',
-                'message_id': 100,
-                'attempts': 0,
-                'created_at': now - 100,
-                'ttl': now + 200,
-                'type': 'otp_pending',
-            }
-
-            # Newer OTP in second page
+            # Newer OTP should be in first page (ScanIndexForward=False sorts desc)
             new_otp = {
                 'request_id': 'otp#req-new',
                 'otp_code': '222222',
@@ -129,29 +117,45 @@ class TestS63_001_OTPPaginationFix:
                 'type': 'otp_pending',
             }
 
+            # Older OTP in second page
+            old_otp = {
+                'request_id': 'otp#req-old',
+                'otp_code': '111111',
+                'user_id': 'user123',
+                'original_request_id': 'req-old',
+                'message_id': 100,
+                'attempts': 0,
+                'created_at': now - 100,
+                'ttl': now + 200,
+                'type': 'otp_pending',
+            }
+
             call_count = [0]
 
-            def mock_scan(**kwargs):
+            def mock_query(**kwargs):
+                # Verify GSI usage and descending sort
+                assert kwargs.get('IndexName') == 'user-id-created-index', "Should use user-id-created-index GSI"
+                assert kwargs.get('ScanIndexForward') is False, "Should sort descending (newest first)"
                 call_count[0] += 1
                 if call_count[0] == 1:
                     return {
-                        'Items': [old_otp],
-                        'LastEvaluatedKey': {'request_id': 'otp#req-old'},
+                        'Items': [new_otp],
+                        'LastEvaluatedKey': {'request_id': 'otp#req-new', 'user_id': 'user123', 'created_at': now},
                         'Count': 1,
                         'ScannedCount': 100,
                     }
                 else:
                     return {
-                        'Items': [new_otp],
+                        'Items': [old_otp],
                         'Count': 1,
                         'ScannedCount': 100,
                     }
 
-            table.scan = mock_scan
+            table.query = mock_query
 
             result = otp_mod.get_pending_otp('user123')
 
-            # Should return the newer OTP (highest created_at)
+            # Should return the newer OTP (first item from descending sort)
             assert result is not None
             assert result['otp_code'] == '222222', "Should return most recent OTP"
             assert result['created_at'] == now

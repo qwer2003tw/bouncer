@@ -80,6 +80,8 @@ Resources:
           AttributeType: S
         - AttributeName: expires_at
           AttributeType: N
+        - AttributeName: user_id
+          AttributeType: S
       KeySchema:
         - AttributeName: request_id
           KeyType: HASH
@@ -107,6 +109,14 @@ Resources:
             - AttributeName: type
               KeyType: HASH
             - AttributeName: expires_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: user-id-created-index
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: created_at
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
