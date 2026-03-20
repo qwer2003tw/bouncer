@@ -447,7 +447,14 @@ def _format_approval_response(
             }]]
         }
     else:
-        truncate_notice = ""
+        if len(result) > max_preview:
+            # Output was truncated but not paged (between max_preview and 4000 chars)
+            truncate_notice = (
+                f"\n\n✂️ *輸出已截斷*（顯示前 {max_preview} 字元，共 {len(result)} 字元）\n"
+                f"用 `bouncer_get_page` 查看完整輸出"
+            )
+        else:
+            truncate_notice = ""
         next_page_button = None
 
     failed = _is_execute_failed(result)
