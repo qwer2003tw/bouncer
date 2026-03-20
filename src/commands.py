@@ -752,7 +752,7 @@ def _execute_locked(command: str, assume_role_arn: str = None,
 
         if exit_code == 0:
             if not output.strip():
-                output = '✅ 命令執行成功（無輸出）'
+                output = '⚠️ 命令執行完成（無輸出，請確認結果）'
         else:
             # 顯示完整原始輸出（和直接跑 CLI 一樣），加上 exit code 提示
             if output.strip():
