@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.61.2] - 2026-03-20
+
+### Fixed
+- `src/commands.py` — guard against awscli v1 global `--version` flag conflict: `aws eks create-cluster --version 1.32` triggered global `--version` (prints awscli version, sys.exit(0)) instead of EKS Kubernetes version parameter; now returns clear error directing caller to use `--kubernetes-version` (PR #166)
+- `src/commands.py` — fix SystemExit output capture: stderr/stdout were lost after `finally` restored sys.stdout; now captured in inner try block before finally runs (PR #164)
+- `src/commands.py` — catch `SystemExit` in execute_command to prevent Lambda `Runtime.ExitError` when awscli `driver.main()` calls `sys.exit()` (PR #162)
+
 ## [3.61.0] - 2026-03-19
 
 ### Security
