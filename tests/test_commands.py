@@ -1130,7 +1130,7 @@ class TestExecuteCommandChain:
         }
 
         def mock_execute_locked(command, assume_role_arn=None, cli_input_json=None):
-            return outputs.get(command.strip(), '✅ 命令執行成功（無輸出）')
+            return outputs.get(command.strip(), '⚠️ 命令執行完成（無輸出，請確認結果）')
 
         with patch.object(cmd_mod, '_execute_locked', side_effect=mock_execute_locked):
             result = cmd_mod.execute_command('aws s3 ls && aws sts get-caller-identity')
@@ -1183,7 +1183,7 @@ class TestIsFailedOutput:
     def test_success_output_not_failed(self, app_module):
         from commands import _is_failed_output
         assert _is_failed_output('some normal output') is False
-        assert _is_failed_output('✅ 命令執行成功（無輸出）') is False
+        assert _is_failed_output('⚠️ 命令執行完成（無輸出，請確認結果）') is False
 
     def test_exit_code_nonzero_is_failed(self, app_module):
         from commands import _is_failed_output
