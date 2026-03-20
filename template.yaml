@@ -555,6 +555,38 @@ Resources:
         - !Ref AlarmNotificationTopic
 
   # ============================================================
+  # CloudWatch - Runtime.ExitError Metric Filter + Alarm
+  # ============================================================
+  RuntimeExitErrorMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ApprovalFunction}"
+      FilterPattern: '"Runtime.ExitError"'
+      MetricTransformations:
+        - MetricName: RuntimeExitErrors
+          MetricNamespace: !Sub "Bouncer/${Environment}"
+          MetricValue: "1"
+          DefaultValue: 0
+
+  RuntimeExitErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "bouncer-${Environment}-runtime-exit-error"
+      AlarmDescription: "Lambda Runtime.ExitError detected - Lambda process crashed without returning response"
+      MetricName: RuntimeExitErrors
+      Namespace: !Sub "Bouncer/${Environment}"
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
+
+  # ============================================================
   # SNS - Alarm Notifications
   # ============================================================
   AlarmNotificationTopic:
