@@ -20,7 +20,7 @@ from botocore.exceptions import ClientError
 
 
 from utils import mcp_result, mcp_error, generate_request_id, log_decision, generate_display_summary, record_execution_error, extract_exit_code
-from commands import get_block_reason, is_auto_approve, execute_command
+from commands import get_block_reason, is_auto_approve, execute_command, execute_boto3_native
 from chain_analyzer import check_chain_risks
 from accounts import (
     init_default_account, get_account, list_accounts,
@@ -196,6 +196,12 @@ class ExecuteContext:
     grant_id: Optional[str] = None
     template_scan_result: Optional[dict] = None  # Layer 2.5 template scan result
     cli_input_json: Optional[dict] = None
+    # Native execution fields (for bouncer_execute_native)
+    is_native: bool = False  # True if this is a boto3 native execution
+    native_service: Optional[str] = None  # boto3 service name (e.g. 'eks')
+    native_operation: Optional[str] = None  # boto3 operation (e.g. 'create_cluster')
+    native_params: Optional[dict] = None  # boto3 params dict
+    native_region: Optional[str] = None  # AWS region
 
 
 def _parse_execute_request(req_id, arguments: dict) -> 'dict | ExecuteContext':
@@ -558,7 +564,17 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
         # 執行命令 (使用 grant 的 assume_role_arn，fallback 到 account role)
         grant_req_id = generate_request_id(ctx.command)
         grant_assume_role = grant.get('assume_role_arn') or ctx.assume_role
-        result = execute_command(ctx.command, grant_assume_role, cli_input_json=ctx.cli_input_json)
+        # Execute: use native boto3 or traditional awscli
+        if ctx.is_native:
+            result = execute_boto3_native(
+                service=ctx.native_service,
+                operation=ctx.native_operation,
+                params=ctx.native_params,
+                region=ctx.native_region,
+                assume_role_arn=grant_assume_role,
+            )
+        else:
+            result = execute_command(ctx.command, grant_assume_role, cli_input_json=ctx.cli_input_json)
         _exit_code = extract_exit_code(result)
         is_failed = _exit_code is not None and _exit_code != 0
         cmd_status = 'error' if is_failed else 'success'
@@ -636,7 +652,17 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
         return None
 
     request_id = generate_request_id(ctx.command)
-    result = execute_command(ctx.command, ctx.assume_role, cli_input_json=ctx.cli_input_json)
+    # Execute: use native boto3 or traditional awscli
+    if ctx.is_native:
+        result = execute_boto3_native(
+            service=ctx.native_service,
+            operation=ctx.native_operation,
+            params=ctx.native_params,
+            region=ctx.native_region,
+            assume_role_arn=ctx.assume_role,
+        )
+    else:
+        result = execute_command(ctx.command, ctx.assume_role, cli_input_json=ctx.cli_input_json)
     _exit_code = extract_exit_code(result)
     is_failed = _exit_code is not None and _exit_code != 0
     cmd_status = 'error' if is_failed else 'success'
@@ -768,7 +794,17 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
 
     # 執行命令
     request_id = generate_request_id(ctx.command)
-    result = execute_command(ctx.command, ctx.assume_role, cli_input_json=ctx.cli_input_json)
+    # Execute: use native boto3 or traditional awscli
+    if ctx.is_native:
+        result = execute_boto3_native(
+            service=ctx.native_service,
+            operation=ctx.native_operation,
+            params=ctx.native_params,
+            region=ctx.native_region,
+            assume_role_arn=ctx.assume_role,
+        )
+    else:
+        result = execute_command(ctx.command, ctx.assume_role, cli_input_json=ctx.cli_input_json)
     _exit_code = extract_exit_code(result)
     is_failed = _exit_code is not None and _exit_code != 0
     cmd_status = 'error' if is_failed else 'success'
@@ -988,6 +1024,181 @@ def mcp_tool_execute(req_id: str, arguments: dict) -> dict:
     chain_check = check_chain_risks(ctx)
     if chain_check is not None:
         return chain_check
+
+    # Phase 3: Pipeline — first non-None result wins
+    # NOTE: if template_scan says escalate, skip auto_approve and trust layers
+    if ctx.template_scan_result and ctx.template_scan_result.get('escalate'):
+        result = (
+            _check_compliance(ctx)
+            or _check_blocked(ctx)
+            or _check_rate_limit(ctx)
+            or _submit_for_approval(ctx)
+        )
+    else:
+        result = (
+            _check_compliance(ctx)
+            or _check_blocked(ctx)
+            or _check_grant_session(ctx)
+            or _check_auto_approve(ctx)
+            or _check_trust_session(ctx)
+            or _check_rate_limit(ctx)
+            or _submit_for_approval(ctx)
+        )
+
+    # Phase 4: Log shadow with actual decision for comparison
+    if ctx.smart_decision:
+        actual = _extract_actual_decision(result)
+        _log_smart_approval_shadow(
+            req_id=ctx.req_id,
+            command=ctx.command,
+            reason=ctx.reason,
+            source=ctx.source,
+            account_id=ctx.account_id,
+            smart_decision=ctx.smart_decision,
+            actual_decision=actual,
+        )
+
+    return result
+
+
+def mcp_tool_execute_native(req_id: str, arguments: dict) -> dict:
+    """MCP tool: bouncer_execute_native — boto3 native execution without awscli dependency.
+
+    Input format:
+    {
+      "aws": {
+        "service": "eks",
+        "operation": "create_cluster",
+        "region": "us-east-1",
+        "account": "992382394211",
+        "params": {...}
+      },
+      "bouncer": {
+        "reason": "建 EKS cluster",
+        "source": "Private Bot (EKS)",
+        "trust_scope": "agent-bouncer-exec",
+        "approval_timeout": 600
+      }
+    }
+    """
+    # Parse aws section
+    aws_section = arguments.get('aws', {})
+    if not aws_section:
+        return mcp_error(req_id, -32602, 'Missing required parameter: aws')
+
+    service = str(aws_section.get('service', '')).strip()
+    operation = str(aws_section.get('operation', '')).strip()
+    params = aws_section.get('params', {})
+    region = aws_section.get('region', None)
+    account_id = aws_section.get('account', None)
+
+    if not service:
+        return mcp_error(req_id, -32602, 'Missing required parameter: aws.service')
+    if not operation:
+        return mcp_error(req_id, -32602, 'Missing required parameter: aws.operation')
+    if not isinstance(params, dict):
+        return mcp_error(req_id, -32602, 'aws.params must be a dict')
+
+    # Parse bouncer section
+    bouncer_section = arguments.get('bouncer', {})
+    reason = str(bouncer_section.get('reason', 'No reason provided'))
+    source = bouncer_section.get('source', None)
+    trust_scope = str(bouncer_section.get('trust_scope', '')).strip()
+    context = bouncer_section.get('context', None)
+    timeout = min(int(bouncer_section.get('approval_timeout', MCP_MAX_WAIT)), MCP_MAX_WAIT)
+    sync_mode = bouncer_section.get('sync', False)
+
+    if not trust_scope:
+        return mcp_error(req_id, -32602, (
+            'Missing required parameter: bouncer.trust_scope\n\n'
+            'trust_scope is a stable caller identifier used for trust session matching.\n'
+            'Examples:\n'
+            '  - "agent-bouncer-exec"      (for general agent usage)\n'
+            '  - "private-bot-eks"         (for EKS operations)\n\n'
+            'Use a consistent value per bot/task to enable trust session auto-approval.'
+        ))
+
+    # Convert boto3 operation to kebab-case for synthetic command (for compliance checking)
+    # e.g. create_cluster -> create-cluster
+    operation_kebab = operation.replace('_', '-')
+
+    # Build synthetic command string for compliance/risk scoring
+    # Format: "aws {service} {operation-kebab} {params_json}"
+    # This allows existing compliance rules to work with native calls
+    synthetic_command = f"aws {service} {operation_kebab} {json.dumps(params, separators=(',', ':'))}"
+
+    # 初始化預設帳號
+    init_default_account()
+
+    # 解析帳號配置
+    if account_id:
+        account_id = str(account_id).strip()
+        valid, error = validate_account_id(account_id)
+        if not valid:
+            return mcp_result(req_id, {
+                'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': error})}],
+                'isError': True
+            })
+
+        account = get_account(account_id)
+        if not account:
+            available = [a['account_id'] for a in list_accounts()]
+            return mcp_result(req_id, {
+                'content': [{'type': 'text', 'text': json.dumps({
+                    'status': 'error',
+                    'error': f'帳號 {account_id} 未配置',
+                    'available_accounts': available
+                })}],
+                'isError': True
+            })
+
+        if not account.get('enabled', True):
+            return mcp_result(req_id, {
+                'content': [{'type': 'text', 'text': json.dumps({
+                    'status': 'error',
+                    'error': f'帳號 {account_id} 已停用'
+                })}],
+                'isError': True
+            })
+
+        assume_role = account.get('role_arn')
+        account_name = account.get('name', account_id)
+    else:
+        account_id = DEFAULT_ACCOUNT_ID
+        account = get_account(account_id) if account_id else None
+        assume_role = account.get('role_arn') if account else None
+        account_name = account.get('name', 'Default') if account else 'Default'
+
+    # Create ExecuteContext with native mode enabled
+    ctx = ExecuteContext(
+        req_id=req_id,
+        command=synthetic_command,  # Used for compliance/risk checking
+        reason=reason,
+        source=source,
+        trust_scope=trust_scope,
+        context=context,
+        account_id=account_id,
+        account_name=account_name,
+        assume_role=assume_role,
+        timeout=timeout,
+        sync_mode=sync_mode,
+        caller_ip=arguments.get('caller_ip', ''),
+        # Native execution fields
+        is_native=True,
+        native_service=service,
+        native_operation=operation,
+        native_params=params,
+        native_region=region,
+    )
+
+    # Phase 2: Smart approval shadow scoring (before any decision)
+    _score_risk(ctx)
+
+    # Phase 2.5: Template scan — escalate to MANUAL on HIGH/CRITICAL hits
+    _scan_template(ctx)
+
+    # Phase 2.6: Chain risk pre-check — skip for native (no && chains in native mode)
+    # Native calls don't support command chaining
 
     # Phase 3: Pipeline — first non-None result wins
     # NOTE: if template_scan says escalate, skip auto_approve and trust layers

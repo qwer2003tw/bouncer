@@ -24,6 +24,7 @@ __all__ = [
     'is_dangerous',
     'is_auto_approve',
     'execute_command',
+    'execute_boto3_native',
     'aws_cli_split',
     '_split_chain',
     '_is_failed_output',
@@ -554,6 +555,68 @@ def execute_command(command: str, assume_role_arn: str = None,
     # Multi-command chain: execute sequentially, stop at first failure
     chain_result = _execute_chain(sub_cmds, assume_role_arn, _executor, cli_input_json)
     return chain_result.combined_output if chain_result.all_succeeded else _chain_failure_output(chain_result)
+
+
+def execute_boto3_native(
+    service: str,
+    operation: str,
+    params: dict,
+    region: str = None,
+    assume_role_arn: str = None,
+) -> str:
+    """Execute AWS API call directly via boto3 (no awscli dependency).
+
+    Args:
+        service: boto3 service name (e.g. 'eks', 's3', 'ec2')
+        operation: boto3 method name in snake_case (e.g. 'create_cluster')
+        params: boto3 kwargs dict
+        region: AWS region (default: AWS_DEFAULT_REGION env var)
+        assume_role_arn: optional IAM role to assume
+
+    Returns:
+        JSON string of the response, or error message starting with '❌'
+    """
+    import json
+
+    region = region or os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+
+    # Build boto3 client with optional assume role
+    if assume_role_arn:
+        try:
+            sts = boto3.client('sts')
+            assumed = sts.assume_role(
+                RoleArn=assume_role_arn,
+                RoleSessionName='bouncer-native-execution',
+                DurationSeconds=900,
+            )
+            creds = assumed['Credentials']
+            client = boto3.client(
+                service,
+                region_name=region,
+                aws_access_key_id=creds['AccessKeyId'],
+                aws_secret_access_key=creds['SecretAccessKey'],
+                aws_session_token=creds['SessionToken'],
+            )
+        except ClientError as e:
+            return f'❌ Assume role 失敗: {str(e)}'
+    else:
+        client = boto3.client(service, region_name=region)
+
+    # Validate service and operation exist
+    if not hasattr(client, operation):
+        return f'❌ 不支援的操作: {service}.{operation}'
+
+    # Execute
+    try:
+        method = getattr(client, operation)
+        response = method(**params)
+        # Remove ResponseMetadata (not useful to user)
+        response.pop('ResponseMetadata', None)
+        return json.dumps(response, default=str, indent=2) if response else '⚠️ 命令執行完成（無輸出，請確認結果）'
+    except ClientError as e:
+        return f'❌ AWS API 錯誤: {e.response["Error"]["Code"]}: {e.response["Error"]["Message"]}'
+    except Exception as e:  # noqa: BLE001
+        return f'❌ 執行錯誤: {str(e)}'
 
 
 def _is_failed_output(output: str) -> bool:
