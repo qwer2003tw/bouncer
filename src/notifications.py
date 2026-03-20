@@ -447,6 +447,28 @@ def send_trust_auto_approve_notification(command: str, trust_id: str, remaining:
         ]]
     }
 
+    # Safety net: Telegram 4096 char limit
+    TELEGRAM_MAX_TEXT = 4096
+    if len(text) > TELEGRAM_MAX_TEXT:
+        # Truncate result text to fit within limit
+        from telegram_entities import _utf16_len
+        truncation_notice = "\n\n[輸出已截斷，超過 Telegram 4096 字元限制]"
+        available = TELEGRAM_MAX_TEXT - len(header_text) - len(result_header) - len(truncation_notice) if result else TELEGRAM_MAX_TEXT - len(header_text) - len(truncation_notice)
+        if available > 0 and result:
+            result_text = result_text[:available] + truncation_notice
+            # Rebuild text with truncated result
+            text = header_text + result_header + result_text
+            # Re-compute result entities for truncated text
+            result_entities, result_text_for_entities = format_command_output(result_text)
+            header_and_result_header_len = _utf16_len(header_text + result_header)
+            for entity in result_entities:
+                entity['offset'] += header_and_result_header_len
+            entities = header_entities + [result_header_entity] + result_entities
+        else:
+            # Even header is too long, truncate everything
+            text = text[:TELEGRAM_MAX_TEXT - len(truncation_notice)] + truncation_notice
+            entities = []
+
     _telegram.send_message_with_entities(text, entities, reply_markup=keyboard, silent=True)
 
 
@@ -622,6 +644,37 @@ def send_grant_execute_notification(
                 {'text': '🛑 Revoke Grant', 'callback_data': f'grant_revoke:{grant_id}', 'style': 'danger'}
             ]]
         }
+
+        # Safety net: Telegram 4096 char limit
+        TELEGRAM_MAX_TEXT = 4096
+        if len(text) > TELEGRAM_MAX_TEXT:
+            # Truncate result text to fit within limit
+            from telegram_entities import _utf16_len
+            truncation_notice = "\n\n[輸出已截斷，超過 Telegram 4096 字元限制]"
+            available = TELEGRAM_MAX_TEXT - len(header_text) - len("\n") - len(footer_text) - len(truncation_notice)
+            if available > 0:
+                # Save old footer offset to recalculate entity positions
+                old_footer_offset = _utf16_len(header_text + formatted_result + "\n")
+                # Truncate the formatted result
+                formatted_result = formatted_result[:available] + truncation_notice
+                # Rebuild text with truncated result
+                text = header_text + formatted_result + "\n" + footer_text
+                # Re-compute result entities for truncated text
+                result_entities, _ = format_command_output(formatted_result)
+                header_len = _utf16_len(header_text)
+                for entity in result_entities:
+                    entity['offset'] += header_len
+                # Recalculate footer entity offsets
+                new_footer_offset = _utf16_len(header_text + formatted_result + "\n")
+                for entity in footer_entities:
+                    # Extract relative offset within footer, then apply new footer offset
+                    relative_offset = entity['offset'] - old_footer_offset
+                    entity['offset'] = new_footer_offset + relative_offset
+                entities = header_entities + result_entities + footer_entities
+            else:
+                # Even header+footer is too long, truncate everything
+                text = text[:TELEGRAM_MAX_TEXT - len(truncation_notice)] + truncation_notice
+                entities = []
 
         _telegram.send_message_with_entities(text, entities, reply_markup=keyboard, silent=True)
 
