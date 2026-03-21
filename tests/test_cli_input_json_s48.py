@@ -1,3 +1,4 @@
+import pytest
 """
 Test suite for cli_input_json parameter (bouncer-s48-001)
 
@@ -246,6 +247,7 @@ class TestCliInputJsonParameter:
         assert ctx.cli_input_json is None
 
 
+@pytest.mark.xdist_group("src_commands")
 class TestCliInputJsonIntegration:
     """Integration tests for cli_input_json through the full pipeline"""
 
