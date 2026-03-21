@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.65.0] - 2026-03-21
+
+### Changed
+- `src/requirements.txt` — removed `awscli>=1.27.0`; replaced in-process `create_clidriver().main()` with `subprocess.run(['/opt/bin/aws', ...])` in `execute_command` (s65-002)
+- `src/commands.py` — `_execute_locked` now uses `_run_aws_subprocess` subprocess wrapper instead of awscli in-process; `/opt/bin/aws` (Lambda Layer) with fallback to `aws` binary (s65-002)
+- `src/tool_schema.py` — `bouncer_execute` description now includes deprecation notice; sunset timeline: v3.67 deprecated, v3.70 removed (s65-003)
+- `CLAUDE.md` — added `bouncer_execute` deprecation timeline section (s65-003)
+
+### Documentation
+- `README.md` — added `bouncer_execute_native` to MCP Tools table + usage examples; `bouncer_execute` marked as planned deprecation (s65-001)
+
 ## [3.64.0] - 2026-03-20
 
 ### Added
