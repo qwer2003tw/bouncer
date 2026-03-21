@@ -68,7 +68,7 @@ class TestCredentialIsolation:
         assert any(lock_acquired), "Lock was not acquired during execute_command"
 
     def test_os_environ_restored_after_assume_role(self):
-        """After execute_command with assume_role, os.environ must be restored."""
+        """After execute_command with assume_role, os.environ must not be modified."""
         original_key = os.environ.get('AWS_ACCESS_KEY_ID')
 
         fake_sts = MagicMock()
@@ -76,31 +76,20 @@ class TestCredentialIsolation:
             'AKIA_ASSUMED', 'assumed_secret', 'assumed_token'
         )
 
-        import io
-        fake_stdout = io.StringIO('{"UserId":"AIDA..."}')
-        fake_stderr = io.StringIO()
-
-        def fake_main(cli_args):
-            import sys
-            sys.stdout.write('{"UserId":"AIDA..."}')
-            return 0
-
-        fake_driver = MagicMock()
-        fake_driver.main.side_effect = fake_main
+        # Mock subprocess to return success
+        def fake_subprocess(cli_args, env_override=None, timeout=55):
+            return (0, '{"UserId":"AIDA..."}', '')
 
         with patch('boto3.client', return_value=fake_sts), \
-             patch('commands.create_clidriver', return_value=fake_driver, create=True):
-            # Patch create_clidriver inside the module
-            import awscli.clidriver
-            with patch.object(awscli.clidriver, 'create_clidriver', return_value=fake_driver):
-                commands_mod.execute_command(
-                    'aws sts get-caller-identity',
-                    assume_role_arn='arn:aws:iam::111:role/TestRole',
-                )
+             patch('commands._run_aws_subprocess', side_effect=fake_subprocess):
+            commands_mod.execute_command(
+                'aws sts get-caller-identity',
+                assume_role_arn='arn:aws:iam::111:role/TestRole',
+            )
 
-        # os.environ must be restored to original value
+        # os.environ must not be modified (subprocess approach passes credentials via env_override)
         assert os.environ.get('AWS_ACCESS_KEY_ID') == original_key, (
-            f"os.environ was not restored! Now: {os.environ.get('AWS_ACCESS_KEY_ID')}"
+            f"os.environ was modified! Now: {os.environ.get('AWS_ACCESS_KEY_ID')}"
         )
 
     def test_concurrent_calls_serialized(self):
@@ -121,16 +110,15 @@ class TestCredentialIsolation:
                 concurrent_count['current'] -= 1
             return result
 
-        import awscli.clidriver
-        fake_driver = MagicMock()
-        fake_driver.main.return_value = 0
+        def fake_subprocess(cli_args, env_override=None, timeout=55):
+            return (0, '', '')
 
         errors = []
 
         def thread_fn():
             try:
                 with patch.object(commands_mod, '_execute_locked', side_effect=slow_locked), \
-                     patch.object(awscli.clidriver, 'create_clidriver', return_value=fake_driver):
+                     patch('commands._run_aws_subprocess', side_effect=fake_subprocess):
                     commands_mod.execute_command('aws s3 ls')
             except Exception as e:
                 errors.append(str(e))

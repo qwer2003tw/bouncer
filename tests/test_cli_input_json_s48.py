@@ -15,12 +15,12 @@ class TestCliInputJsonParameter:
     """Test cli_input_json parameter in execute_command and _execute_locked"""
 
     @patch('src.commands.aws_cli_split')
-    @patch('awscli.clidriver.create_clidriver')
+    @patch('src.commands._run_aws_subprocess')
     @patch('builtins.open', new_callable=mock_open)
     @patch('tempfile.NamedTemporaryFile')
     @patch('os.unlink')
     def test_cli_input_json_writes_tempfile_and_adds_flag(
-        self, mock_unlink, mock_tempfile, mock_file, mock_create_clidriver, mock_split
+        self, mock_unlink, mock_tempfile, mock_file, mock_subprocess, mock_split
     ):
         """Test 1: cli_input_json writes tempfile + adds --cli-input-json to command"""
         # Setup mock tempfile
@@ -30,10 +30,8 @@ class TestCliInputJsonParameter:
         mock_temp_obj.__exit__ = Mock(return_value=False)
         mock_tempfile.return_value = mock_temp_obj
 
-        # Setup mock CLI driver
-        mock_driver = Mock()
-        mock_driver.main = Mock(return_value=0)
-        mock_create_clidriver.return_value = mock_driver
+        # Setup mock subprocess
+        mock_subprocess.return_value = (0, '', '')
 
         # Setup mock aws_cli_split to verify the modified command
         def side_effect_split(cmd):
@@ -74,16 +72,14 @@ class TestCliInputJsonParameter:
         assert '✅' in result or 'exit code: 0' not in result
 
     @patch('src.commands.aws_cli_split')
-    @patch('awscli.clidriver.create_clidriver')
+    @patch('src.commands._run_aws_subprocess')
     @patch('tempfile.NamedTemporaryFile')
     def test_cli_input_json_none_no_tempfile(
-        self, mock_tempfile, mock_create_clidriver, mock_split
+        self, mock_tempfile, mock_subprocess, mock_split
     ):
         """Test 2: cli_input_json=None → no tempfile, no --cli-input-json"""
-        # Setup mock CLI driver
-        mock_driver = Mock()
-        mock_driver.main = Mock(return_value=0)
-        mock_create_clidriver.return_value = mock_driver
+        # Setup mock subprocess
+        mock_subprocess.return_value = (0, '', '')
 
         # Setup mock aws_cli_split to verify no modification
         def side_effect_split(cmd):
@@ -107,11 +103,11 @@ class TestCliInputJsonParameter:
         assert '✅' in result or 'exit code: 0' not in result
 
     @patch('src.commands.aws_cli_split')
-    @patch('awscli.clidriver.create_clidriver')
+    @patch('src.commands._run_aws_subprocess')
     @patch('tempfile.NamedTemporaryFile')
     @patch('os.unlink')
     def test_cli_input_json_chinese_characters(
-        self, mock_unlink, mock_tempfile, mock_create_clidriver, mock_split
+        self, mock_unlink, mock_tempfile, mock_subprocess, mock_split
     ):
         """Test 3: Chinese characters in cli_input_json survive roundtrip"""
         # Setup mock tempfile
@@ -121,10 +117,8 @@ class TestCliInputJsonParameter:
         mock_temp_obj.__exit__ = Mock(return_value=False)
         mock_tempfile.return_value = mock_temp_obj
 
-        # Setup mock CLI driver
-        mock_driver = Mock()
-        mock_driver.main = Mock(return_value=0)
-        mock_create_clidriver.return_value = mock_driver
+        # Setup mock subprocess
+        mock_subprocess.return_value = (0, '', '')
 
         mock_split.return_value = ['aws', 'dynamodb', 'update-item', '--cli-input-json', 'file:///tmp/bouncer_cli_test456.json']
 
@@ -151,11 +145,11 @@ class TestCliInputJsonParameter:
         mock_unlink.assert_called_once_with('/tmp/bouncer_cli_test456.json')
 
     @patch('src.commands.aws_cli_split')
-    @patch('awscli.clidriver.create_clidriver')
+    @patch('src.commands._run_aws_subprocess')
     @patch('tempfile.NamedTemporaryFile')
     @patch('os.unlink')
     def test_cli_input_json_cleanup_on_error(
-        self, mock_unlink, mock_tempfile, mock_create_clidriver, mock_split
+        self, mock_unlink, mock_tempfile, mock_subprocess, mock_split
     ):
         """Test 4: tempfile is cleaned up after execution (even on error)"""
         # Setup mock tempfile
@@ -165,10 +159,8 @@ class TestCliInputJsonParameter:
         mock_temp_obj.__exit__ = Mock(return_value=False)
         mock_tempfile.return_value = mock_temp_obj
 
-        # Setup mock CLI driver to raise an exception
-        mock_driver = Mock()
-        mock_driver.main = Mock(side_effect=Exception('AWS CLI error'))
-        mock_create_clidriver.return_value = mock_driver
+        # Setup mock subprocess to raise an exception
+        mock_subprocess.side_effect = Exception('AWS CLI error')
 
         mock_split.return_value = ['aws', 's3', 'ls', '--cli-input-json', 'file:///tmp/bouncer_cli_test789.json']
 
@@ -257,16 +249,14 @@ class TestCliInputJsonParameter:
 class TestCliInputJsonIntegration:
     """Integration tests for cli_input_json through the full pipeline"""
 
-    @patch('awscli.clidriver.create_clidriver')
+    @patch('src.commands._run_aws_subprocess')
     @patch('os.unlink')
     def test_execute_command_with_cli_input_json_integration(
-        self, mock_unlink, mock_create_clidriver
+        self, mock_unlink, mock_subprocess
     ):
         """Integration test: full flow from execute_command to AWS CLI with cli_input_json"""
-        # Setup mock CLI driver
-        mock_driver = Mock()
-        mock_driver.main = Mock(return_value=0)
-        mock_create_clidriver.return_value = mock_driver
+        # Setup mock subprocess
+        mock_subprocess.return_value = (0, '', '')
 
         cli_input_data = {
             'Bucket': 'my-bucket',
@@ -281,13 +271,12 @@ class TestCliInputJsonIntegration:
             cli_input_json=cli_input_data
         )
 
-        # Verify driver was called
-        mock_create_clidriver.assert_called_once()
-        mock_driver.main.assert_called_once()
+        # Verify subprocess was called
+        mock_subprocess.assert_called_once()
 
         # Verify the CLI args contain --cli-input-json
-        cli_args = mock_driver.main.call_args[0][0]
-        assert '--cli-input-json' in cli_args
+        cli_args = mock_subprocess.call_args[0][0]
+        assert '--cli-input-json' in ' '.join(cli_args)
 
         # Verify tempfile was cleaned up
         assert mock_unlink.called
