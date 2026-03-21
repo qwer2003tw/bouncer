@@ -251,14 +251,11 @@ class TestCliInputJsonParameter:
 class TestCliInputJsonIntegration:
     """Integration tests for cli_input_json through the full pipeline"""
 
-    @patch('commands._run_aws_subprocess')
     @patch('src.commands._run_aws_subprocess')
     @patch('os.unlink')
     def test_execute_command_with_cli_input_json_integration(
-        self, mock_unlink, mock_subprocess_src, mock_subprocess
+        self, mock_unlink, mock_subprocess
     ):
-        # Ensure both patch targets point to same mock
-        mock_subprocess_src.side_effect = mock_subprocess
         """Integration test: full flow from execute_command to AWS CLI with cli_input_json"""
         # Setup mock subprocess
         mock_subprocess.return_value = (0, '', '')
@@ -269,8 +266,9 @@ class TestCliInputJsonIntegration:
             'Body': '測試內容\n換行'
         }
 
-        # Execute the command
-        result = execute_command(
+        # Use module-level reference to ensure patch is applied correctly in xdist
+        import src.commands as _src_commands
+        result = _src_commands.execute_command(
             'aws s3 put-object',
             assume_role_arn=None,
             cli_input_json=cli_input_data
