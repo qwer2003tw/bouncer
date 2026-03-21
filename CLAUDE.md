@@ -152,5 +152,17 @@ tests/        # pytest tests
 scripts/      # run-tests.sh, close-sprint.sh
 ```
 
+## bouncer_execute Deprecation 計劃
+
+| 版本 | 行動 |
+|------|------|
+| v3.65+ | `bouncer_execute_native` 為推薦選項，`bouncer_execute` description 加入 deprecation 提示 |
+| v3.67 | `bouncer_execute` 標記 deprecated（功能仍可用） |
+| v3.70 | `bouncer_execute` 移除，所有呼叫方需遷移至 `bouncer_execute_native` |
+
+**遷移方式：**
+- `bouncer_execute(command="aws eks create-cluster --kubernetes-version 1.32 ...")`
+- → `bouncer_execute_native({"aws": {"service": "eks", "operation": "create_cluster", "params": {"version": "1.32", ...}}, "bouncer": {...}})`
+
 ## Repo
 https://github.com/qwer2003tw/bouncer
