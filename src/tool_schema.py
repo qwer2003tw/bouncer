@@ -5,7 +5,12 @@ Bouncer - MCP Tool Schema 定義
 
 MCP_TOOLS = {
     'bouncer_execute': {
-        'description': '執行 AWS CLI 命令。安全命令自動執行，危險命令需要 Telegram 審批。預設異步返回 request_id，用 bouncer_status 查詢結果。',
+        'description': (
+            '⚠️ [計劃棄用] 建議改用 bouncer_execute_native（boto3 native，無 awscli 依賴）。'
+            '棄用時程：v3.67 標記為 deprecated，v3.70 移除。\n\n'
+            '執行 AWS CLI 命令。安全命令自動執行，危險命令需要 Telegram 審批。'
+            '預設異步返回 request_id，用 bouncer_status 查詢結果。'
+        ),
         'parameters': {
             'type': 'object',
             'properties': {
