@@ -485,7 +485,9 @@ class TestApproveCallbackS3Copy:
 
         with patch('telegram.update_message'), \
              patch('telegram.answer_callback'), \
-             patch('metrics.emit_metric'):
+             patch('metrics.emit_metric'), \
+             patch('callbacks_upload.get_s3_client', return_value=s3), \
+             patch('constants.DEFAULT_ACCOUNT_ID', '111111111111'):
             import callbacks
             callbacks._db.table = table
 

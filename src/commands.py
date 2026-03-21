@@ -4,10 +4,8 @@ Bouncer - 命令分類與執行模組
 """
 import os
 import re
-import sys
 import threading
 from dataclasses import dataclass, field
-from io import StringIO
 from typing import Callable, List, Optional
 
 import boto3
@@ -691,6 +689,39 @@ def _execute_chain(sub_cmds: List[str], assume_role_arn: Optional[str],
     return chain
 
 
+def _run_aws_subprocess(cli_args: list, env_override: dict = None, timeout: int = 55) -> tuple:
+    """Run aws CLI command via subprocess (awscli v2 Lambda Layer or system aws).
+
+    Returns (exit_code, stdout, stderr).
+    Lambda Layer path: /opt/bin/aws (ARM64 awscli v2 layer)
+    Fallback: system 'aws' command (local dev / CI)
+    """
+    import subprocess as _subprocess
+
+    aws_binary = '/opt/bin/aws'
+    if not os.path.exists(aws_binary):
+        aws_binary = 'aws'
+
+    run_env = os.environ.copy()
+    run_env['AWS_PAGER'] = ''
+    if env_override:
+        run_env.update(env_override)
+
+    try:
+        result = _subprocess.run(
+            [aws_binary] + cli_args,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=run_env,
+        )
+        return result.returncode, result.stdout, result.stderr
+    except _subprocess.TimeoutExpired:
+        return 1, '', f'命令執行超時（{timeout}秒）'
+    except FileNotFoundError:
+        return 1, '', '❌ aws CLI 未安裝或 Lambda Layer 未配置'
+
+
 def _execute_locked(command: str, assume_role_arn: str = None,
                     cli_input_json: dict = None) -> str:
     """execute_command 的實作，必須在 _execute_lock 持有時呼叫。"""
@@ -714,7 +745,7 @@ def _execute_locked(command: str, assume_role_arn: str = None,
         if not args or args[0] != 'aws':
             return '❌ 只能執行 aws CLI 命令'
 
-        # 移除 'aws' 前綴，awscli.clidriver 不需要它
+        # 移除 'aws' 前綴，subprocess 需要 'aws' 作為第一個參數但不包含在 cli_args 裡
         cli_args = args[1:]
 
         # Guard: awscli v1 global flags that conflict with subcommand params.
@@ -737,8 +768,8 @@ def _execute_locked(command: str, assume_role_arn: str = None,
                 '  EKS: `--kubernetes-version <版本號>`（不是 `--version`）'
             )
 
-        # 保存原始環境變數
-        original_env = {}
+        # 準備環境變數覆蓋（包含 assume role credentials）
+        env_override = {}
 
         # 如果需要 assume role，先取得臨時 credentials
         if assume_role_arn:
@@ -751,65 +782,22 @@ def _execute_locked(command: str, assume_role_arn: str = None,
                 )
                 creds = assumed['Credentials']
 
-                # 設定環境變數讓 awscli 使用這些 credentials
-                original_env = {
-                    'AWS_ACCESS_KEY_ID': os.environ.get('AWS_ACCESS_KEY_ID'),
-                    'AWS_SECRET_ACCESS_KEY': os.environ.get('AWS_SECRET_ACCESS_KEY'),
-                    'AWS_SESSION_TOKEN': os.environ.get('AWS_SESSION_TOKEN'),
+                # 設定環境變數覆蓋讓 aws CLI 使用這些 credentials
+                env_override = {
+                    'AWS_ACCESS_KEY_ID': creds['AccessKeyId'],
+                    'AWS_SECRET_ACCESS_KEY': creds['SecretAccessKey'],
+                    'AWS_SESSION_TOKEN': creds['SessionToken'],
                 }
-                os.environ['AWS_ACCESS_KEY_ID'] = creds['AccessKeyId']
-                os.environ['AWS_SECRET_ACCESS_KEY'] = creds['SecretAccessKey']
-                os.environ['AWS_SESSION_TOKEN'] = creds['SessionToken']
 
             except ClientError as e:
                 return f'❌ Assume role 失敗: {str(e)}'
 
-        # 捕獲 stdout/stderr
-        old_stdout = sys.stdout
-        old_stderr = sys.stderr
-        sys.stdout = StringIO()
-        sys.stderr = StringIO()
-
-        _captured_stdout = ''
-        _captured_stderr = ''
-        try:
-            from awscli.clidriver import create_clidriver
-            driver = create_clidriver()
-
-            # 禁用 pager
-            os.environ['AWS_PAGER'] = ''
-
-            exit_code = driver.main(cli_args)
-
-            stdout_output = sys.stdout.getvalue()
-            stderr_output = sys.stderr.getvalue()
-
-        except SystemExit as _sysexit:  # awscli driver.main() may call sys.exit() directly
-            # Capture output BEFORE finally restores sys.stdout/stderr
-            try:
-                _captured_stdout = sys.stdout.getvalue()
-            except Exception:  # noqa: BLE001
-                pass
-            try:
-                _captured_stderr = sys.stderr.getvalue()
-            except Exception:  # noqa: BLE001
-                pass
-            _exit_code = _sysexit.code if _sysexit.code is not None else 1
-            _output_text = (_captured_stdout or _captured_stderr or '').strip()
-            # Re-raise with a wrapper so outer except SystemExit can access captured output
-            raise _sysexit.__class__(_exit_code) from None
-
-        finally:
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
-
-            # 還原環境變數
-            if assume_role_arn and original_env:
-                for key, value in original_env.items():
-                    if value is None:
-                        os.environ.pop(key, None)
-                    else:
-                        os.environ[key] = value
+        # 執行 aws CLI 命令（透過 subprocess）
+        exit_code, stdout_output, stderr_output = _run_aws_subprocess(
+            cli_args,
+            env_override=env_override if env_override else None,
+            timeout=55
+        )
 
         output = stdout_output or stderr_output or ''
 
@@ -825,20 +813,6 @@ def _execute_locked(command: str, assume_role_arn: str = None,
 
         return output  # 不截斷，讓呼叫端用 store_paged_output 處理
 
-    except SystemExit as e:  # awscli driver.main() called sys.exit(); output was captured before finally
-        exit_code = e.code if e.code is not None else 1
-        # _captured_stdout/_captured_stderr were set in the inner except SystemExit before finally restored sys.stdout
-        try:
-            output_text = (_captured_stdout or _captured_stderr or '').strip()  # noqa: F821
-        except NameError:
-            output_text = ''
-        if exit_code == 0:
-            if not output_text:
-                return '⚠️ 命令執行完成（無輸出，請確認結果）'
-            return output_text
-        return f'{output_text}\n\n(exit code: {exit_code})' if output_text else f'(exit code: {exit_code})'
-    except ImportError:
-        return '❌ awscli 模組未安裝'
     except ValueError as e:
         return f'❌ 命令格式錯誤: {str(e)}'
     except Exception as e:  # noqa: BLE001 — fail-closed AWS CLI execution wrapper
