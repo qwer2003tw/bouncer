@@ -69,12 +69,114 @@ mcporter call bouncer.bouncer_deploy \
   reason="修復 bug"
 ```
 
+### bouncer_execute vs bouncer_execute_native
+
+#### bouncer_execute（舊版，計劃 deprecate）
+使用 awscli 字串格式，實際執行時透過 subprocess 調用 `aws` CLI。
+
+**限制：**
+- 依賴系統安裝的 awscli
+- 存在 global flag 衝突問題（如 `--version` 會被 awscli 自己解析）
+- 參數解析較不穩定
+
+#### bouncer_execute_native（推薦）
+使用 boto3 native 格式，直接調用 AWS SDK。完全不依賴 awscli。
+
+**優點：**
+- ✅ 無 awscli global flag 衝突問題
+- ✅ 參數類型安全（int、bool、list 直接傳遞）
+- ✅ 性能更好（無 subprocess overhead）
+- ✅ 支援所有 boto3 API
+
+**Input 結構：**
+```json
+{
+  "aws": {
+    "service": "eks",
+    "operation": "create_cluster",
+    "region": "us-east-1",
+    "account": "992382394211",
+    "params": {
+      "name": "my-cluster",
+      "version": "1.32",
+      "roleArn": "arn:aws:iam::992382394211:role/eksClusterRole"
+    }
+  },
+  "bouncer": {
+    "reason": "建立 EKS cluster",
+    "source": "Private Bot (EKS)",
+    "trust_scope": "agent-bouncer-exec"
+  }
+}
+```
+
+**使用範例：**
+```bash
+# 建立 EKS cluster
+mcporter call bouncer bouncer_execute_native --args '{
+  "aws": {
+    "service": "eks",
+    "operation": "create_cluster",
+    "region": "us-east-1",
+    "account": "992382394211",
+    "params": {
+      "name": "my-cluster",
+      "version": "1.32",
+      "roleArn": "arn:aws:iam::992382394211:role/eksClusterRole",
+      "resourcesVpcConfig": {
+        "subnetIds": ["subnet-xxx", "subnet-yyy"]
+      }
+    }
+  },
+  "bouncer": {
+    "reason": "建立 EKS cluster",
+    "source": "Private Bot",
+    "trust_scope": "agent-bouncer-exec"
+  }
+}'
+
+# 列出 S3 buckets（SAFELIST - 自動執行）
+mcporter call bouncer bouncer_execute_native --args '{
+  "aws": {
+    "service": "s3",
+    "operation": "list_buckets",
+    "region": "us-east-1"
+  },
+  "bouncer": {
+    "reason": "檢查 S3 buckets",
+    "source": "Private Bot"
+  }
+}'
+
+# 啟動 EC2 instance（APPROVAL - 需要審批）
+mcporter call bouncer bouncer_execute_native --args '{
+  "aws": {
+    "service": "ec2",
+    "operation": "start_instances",
+    "region": "us-east-1",
+    "params": {
+      "InstanceIds": ["i-0123456789abcdef0"]
+    }
+  },
+  "bouncer": {
+    "reason": "啟動開發環境",
+    "source": "Private Bot"
+  }
+}'
+```
+
+**服務與操作對應：**
+- `service`: boto3 service name（如 `eks`, `s3`, `ec2`, `iam`）
+- `operation`: boto3 operation name（如 `create_cluster`, `list_buckets`, `start_instances`）
+- 參考 [boto3 documentation](https://boto3.amazonaws.com/v1/documentation/api/latest/index.html) 查詢可用操作
+
 ## MCP Tools
 
 ### 核心功能
 | Tool | 說明 | 審批 |
 |------|------|------|
-| `bouncer_execute` | 執行 AWS CLI 命令 | 視命令而定 |
+| `bouncer_execute` | 執行 AWS CLI 命令（awscli string 格式）⚠️ 計劃 deprecate | 視命令而定 |
+| `bouncer_execute_native` | 執行 AWS API call（**boto3 native 格式，推薦**）| 視命令而定 |
 | `bouncer_status` | 查詢審批請求狀態 | 自動 |
 
 ### 帳號管理
