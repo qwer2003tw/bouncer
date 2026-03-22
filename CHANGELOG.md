@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.66.0] - 2026-03-22
+
+### Added
+- `bouncer_mcp.py` — added `bouncer_execute_native` tool definition, handler (`tool_execute_native`), and routing to local MCP proxy; enables `mcporter call bouncer bouncer_execute_native` (s66-001)
+
+### Documentation
+- `SKILL.md` — added note that bouncer_execute_native is accessible via mcporter from v3.66+ (s66-001)
+- `scripts/bouncer_exec.sh` (workspace) — added deprecation notice pointing to bouncer_execute_native
+- `TOOLS.md` (workspace) — added migration guide from bouncer_exec.sh to bouncer_execute_native
+
 ## [3.65.0] - 2026-03-21
 
 ### Changed
