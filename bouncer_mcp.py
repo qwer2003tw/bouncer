@@ -79,6 +79,43 @@ TOOLS = [
         }
     },
     {
+        'name': 'bouncer_execute_native',
+        'description': (
+            '使用 boto3 native API 執行 AWS 操作，完全不依賴 awscli。'
+            '與 bouncer_execute 相同的安全管道（compliance、blocked、trust、approval），但執行層直接呼叫 boto3。'
+            '推薦用於新的 AWS 操作，特別是需要避免 awscli global flag 衝突的場景（如 eks create-cluster）。'
+        ),
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'aws': {
+                    'type': 'object',
+                    'description': 'AWS API 呼叫參數',
+                    'properties': {
+                        'service': {'type': 'string', 'description': 'boto3 服務名稱（例如：eks, s3, ec2）'},
+                        'operation': {'type': 'string', 'description': 'boto3 方法名稱 snake_case（例如：create_cluster）'},
+                        'params': {'type': 'object', 'description': 'boto3 方法的參數 dict'},
+                        'region': {'type': 'string', 'description': 'AWS region（預設 us-east-1）'},
+                        'account': {'type': 'string', 'description': '目標 AWS 帳號 ID（12 位數字）'},
+                    },
+                    'required': ['service', 'operation', 'params']
+                },
+                'bouncer': {
+                    'type': 'object',
+                    'description': 'Bouncer 審批參數',
+                    'properties': {
+                        'reason': {'type': 'string', 'description': '執行原因'},
+                        'source': {'type': 'string', 'description': '來源描述'},
+                        'trust_scope': {'type': 'string', 'description': '信任範圍識別符（必填）'},
+                        'approval_timeout': {'type': 'integer', 'description': '審批等待秒數（預設 600）'},
+                    },
+                    'required': ['reason', 'trust_scope']
+                },
+            },
+            'required': ['aws', 'bouncer']
+        }
+    },
+    {
         'name': 'bouncer_status',
         'description': '查詢審批請求狀態（用於異步模式輪詢結果）',
         'inputSchema': {
@@ -1196,6 +1233,64 @@ def tool_confirm_frontend_deploy(arguments: dict) -> dict:
     return parse_mcp_result(result) or result
 
 
+def tool_execute_native(arguments: dict) -> dict:
+    """執行 AWS boto3 native API 呼叫，等待審批（立即返回）。"""
+    aws_args = arguments.get('aws', {})
+    bouncer_args = arguments.get('bouncer', {})
+
+    if not aws_args.get('service'):
+        return {'error': 'Missing required parameter: aws.service'}
+    if not aws_args.get('operation'):
+        return {'error': 'Missing required parameter: aws.operation'}
+    if not bouncer_args.get('trust_scope'):
+        return {'error': 'Missing required parameter: bouncer.trust_scope'}
+    if not bouncer_args.get('reason'):
+        return {'error': 'Missing required parameter: bouncer.reason'}
+
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+
+    mcp_args = {
+        'aws': {k: v for k, v in {
+            'service': aws_args.get('service'),
+            'operation': aws_args.get('operation'),
+            'params': aws_args.get('params', {}),
+            'region': aws_args.get('region', 'us-east-1'),
+            'account': aws_args.get('account'),
+        }.items() if v is not None},
+        'bouncer': {k: v for k, v in {
+            'reason': bouncer_args.get('reason'),
+            'source': bouncer_args.get('source', 'OpenClaw Agent'),
+            'trust_scope': bouncer_args.get('trust_scope'),
+            'approval_timeout': bouncer_args.get('approval_timeout', 600),
+        }.items() if v is not None},
+    }
+
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'execute_native',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_execute_native',
+            'arguments': mcp_args
+        }
+    }
+
+    result = http_request('POST', '/mcp', payload)
+
+    # Parse MCP response
+    if 'result' in result:
+        content = result['result'].get('content', [])
+        if content and content[0].get('type') == 'text':
+            try:
+                return json.loads(content[0]['text'])
+            except Exception:
+                return {'result': content[0]['text']}
+    if 'error' in result:
+        return result
+    return result
+
+
 def tool_grant_execute(arguments: dict) -> dict:
     """在已批准的 Grant Session 內執行命令（精確匹配）"""
     if not SECRET:
@@ -1289,6 +1384,8 @@ def handle_request(request: dict) -> dict:
 
         if tool_name == 'bouncer_execute':
             result = tool_execute(arguments)
+        elif tool_name == 'bouncer_execute_native':
+            result = tool_execute_native(arguments)
         elif tool_name == 'bouncer_status':
             result = tool_status(arguments)
         elif tool_name == 'bouncer_help':
