@@ -146,7 +146,9 @@ mcporter call bouncer bouncer_execute \
 
 
 ### bouncer_execute_native
-執行 AWS API call（**boto3 native，不依賴 awscli**）。與 `bouncer_execute` 走相同的 Bouncer 審批 pipeline，但不需要 CLI string，直接用 boto3 參數格式。
+執行 AWS API call（**boto3 native，不依賴 awscli**）。
+
+> **v3.66+：** `bouncer_mcp.py` local proxy 已支援此 tool，可透過 `mcporter call bouncer bouncer_execute_native` 直接呼叫。與 `bouncer_execute` 走相同的 Bouncer 審批 pipeline，但不需要 CLI string，直接用 boto3 參數格式。
 
 **使用時機：**
 - 需要乾淨的 boto3 參數格式（避免 awscli global flag 衝突）
