@@ -559,12 +559,16 @@ def execute_command(command: str, assume_role_arn: str = None,
 def generate_eks_token(cluster_name: str, region: str = 'us-east-1', assume_role_arn: str = None) -> str:
     """Generate EKS kubectl token (k8s-aws-v1.* format) via STS presigned URL.
 
-    Uses boto3.generate_presigned_url for correct query-string signing.
+    Uses SigV4QueryAuth to include x-k8s-aws-id header in the signed URL.
     Returns ExecCredential JSON string.
     """
     import base64
     import datetime
     import json as _json
+    import urllib.parse
+    from botocore.awsrequest import AWSRequest
+    from botocore.auth import SigV4QueryAuth
+    from botocore.credentials import Credentials as BotoCreds
 
     try:
         if assume_role_arn:
@@ -575,23 +579,22 @@ def generate_eks_token(cluster_name: str, region: str = 'us-east-1', assume_role
                 DurationSeconds=900,
             )
             creds_data = assumed['Credentials']
-            sts_client = boto3.client(
-                'sts',
-                region_name=region,
-                aws_access_key_id=creds_data['AccessKeyId'],
-                aws_secret_access_key=creds_data['SecretAccessKey'],
-                aws_session_token=creds_data['SessionToken'],
+            frozen = BotoCreds(
+                access_key=creds_data['AccessKeyId'],
+                secret_key=creds_data['SecretAccessKey'],
+                token=creds_data['SessionToken'],
             )
         else:
-            sts_client = boto3.client('sts', region_name=region)
+            import boto3 as _boto3
+            session = _boto3.Session(region_name=region)
+            frozen = session.get_credentials().get_frozen_credentials()
 
-        presigned_url = sts_client.generate_presigned_url(
-            'get_caller_identity',
-            Params={},
-            ExpiresIn=60,
-            HttpMethod='GET',
-        )
-        presigned_url += f'&x-k8s-aws-id={cluster_name}'
+        # Build STS GetCallerIdentity presigned URL with x-k8s-aws-id signed header
+        params = urllib.parse.urlencode({'Action': 'GetCallerIdentity', 'Version': '2011-06-15'})
+        url = f'https://sts.{region}.amazonaws.com/?{params}'
+        req = AWSRequest(method='GET', url=url, headers={'x-k8s-aws-id': cluster_name})
+        SigV4QueryAuth(frozen, 'sts', region, expires=60).add_auth(req)
+        presigned_url = req.prepare().url
 
         token = 'k8s-aws-v1.' + base64.urlsafe_b64encode(presigned_url.encode()).decode().rstrip('=')
         expiry = (
@@ -608,7 +611,9 @@ def generate_eks_token(cluster_name: str, region: str = 'us-east-1', assume_role
         }
         return _json.dumps(cred)
     except ClientError as e:
-        return f'\u274c EKS token \u751f\u6210\u5931\u6557: {e.response["Error"]["Code"]}: {e.response["Error"]["Message"]}'
+        code = e.response["Error"]["Code"]
+        msg = e.response["Error"]["Message"]
+        return f'\u274c EKS token \u751f\u6210\u5931\u6557: {code}: {msg}'
     except Exception as e:  # noqa: BLE001
         return f'\u274c EKS token \u751f\u6210\u5931\u6557: {str(e)}'
 
