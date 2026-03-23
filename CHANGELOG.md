@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.67.0] - 2026-03-23
+
+### Added
+- `src/mcp_execute.py`, `src/commands.py` — `bouncer_eks_get_token` MCP tool: generate kubectl EKS token (k8s-aws-v1.* format) without awscli, via STS presigned URL using SigV4QueryAuth; supports cross-account assume role (s67)
+- `bouncer_mcp.py` — `bouncer_eks_get_token` exposed via mcporter proxy (s67)
+- `src/mcp_tools.py`, `src/app.py` — routing for `bouncer_eks_get_token` (s67)
+
+### Fixed
+- `src/mcp_execute.py`, `src/callbacks_command.py` — `bouncer_execute_native` human-approval callback now correctly uses boto3 (`execute_boto3_native`) instead of awscli; stores `action_type='native'` + native params in DDB pending record (s67)
+- `src/commands.py` — EKS token generation uses `SigV4QueryAuth` (query-string signing) instead of `SigV4Auth` (header signing); `x-k8s-aws-id` is now correctly included in the signed URL (s67)
+
 ## [3.66.0] - 2026-03-22
 
 ### Added
