@@ -1061,6 +1061,38 @@ def mcp_tool_execute(req_id: str, arguments: dict) -> dict:
     return result
 
 
+
+def mcp_tool_eks_get_token(req_id: str, arguments: dict) -> dict:
+    """MCP tool: bouncer_eks_get_token — generate kubectl EKS token via STS presigned URL."""
+    from commands import generate_eks_token
+    from utils import mcp_result, mcp_error
+
+    cluster_name = arguments.get('cluster_name', '').strip()
+    region = arguments.get('region', 'us-east-1').strip()
+    account = arguments.get('account', '').strip()
+
+    if not cluster_name:
+        return mcp_error(req_id, -32602, 'Missing required parameter: cluster_name')
+
+    # Resolve assume_role_arn from account
+    assume_role_arn = None
+    if account:
+        from accounts import get_account
+        acct = get_account(account)
+        if acct and acct.get('assume_role'):
+            assume_role_arn = acct['assume_role']
+        elif account:
+            assume_role_arn = f'arn:aws:iam::{account}:role/BouncerRole'
+
+    result = generate_eks_token(cluster_name, region=region, assume_role_arn=assume_role_arn)
+
+    return mcp_result(req_id, {
+        'content': [{
+            'type': 'text',
+            'text': result,
+        }]
+    })
+
 def mcp_tool_execute_native(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_execute_native — boto3 native execution without awscli dependency.
 

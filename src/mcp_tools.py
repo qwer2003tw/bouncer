@@ -25,6 +25,8 @@ MCP 錯誤格式規則：
 from mcp_execute import (  # noqa: F401
     ExecuteContext,
     mcp_tool_execute,
+    mcp_tool_execute_native,
+    mcp_tool_eks_get_token,
     # internal helpers (used by tests via patch)
     _check_grant_session,
     _check_compliance,

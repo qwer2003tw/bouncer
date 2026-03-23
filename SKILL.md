@@ -200,6 +200,13 @@ mcporter call bouncer bouncer_execute_native --args '{
 - `bouncer_execute`：CLI string（`aws eks create-cluster --version 1.32 ...`）
 - `bouncer_execute_native`：boto3 kwargs（`{"service": "eks", "operation": "create_cluster", "params": {"version": "1.32", ...}}`）
 
+### bouncer_eks_get_token
+生成 kubectl EKS 認證 token（k8s-aws-v1.* 格式）。等同於 `aws eks get-token`，但不需要 awscli binary（v3.67+ 新增）。
+
+```bash
+mcporter call bouncer bouncer_eks_get_token --args '{"cluster_name": "ztp-eks-v2", "region": "us-east-1", "account": "992382394211"}'
+```
+
 ### bouncer_status
 查詢審批請求狀態。
 

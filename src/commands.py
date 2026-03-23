@@ -555,6 +555,63 @@ def execute_command(command: str, assume_role_arn: str = None,
     return chain_result.combined_output if chain_result.all_succeeded else _chain_failure_output(chain_result)
 
 
+
+def generate_eks_token(cluster_name: str, region: str = 'us-east-1', assume_role_arn: str = None) -> str:
+    """Generate EKS kubectl token (k8s-aws-v1.* format) via STS presigned URL.
+
+    Replicates `aws eks get-token` without requiring awscli binary.
+    Returns ExecCredential JSON string.
+    """
+    import base64
+    import datetime
+    import json as _json
+    from botocore.auth import SigV4Auth
+    from botocore.awsrequest import AWSRequest
+    from botocore.credentials import Credentials as BotoCreds
+
+    try:
+        if assume_role_arn:
+            sts_client = boto3.client('sts')
+            assumed = sts_client.assume_role(
+                RoleArn=assume_role_arn,
+                RoleSessionName='bouncer-eks-token',
+                DurationSeconds=900,
+            )
+            creds_data = assumed['Credentials']
+            frozen = BotoCreds(
+                access_key=creds_data['AccessKeyId'],
+                secret_key=creds_data['SecretAccessKey'],
+                token=creds_data['SessionToken'],
+            )
+        else:
+            import boto3 as _boto3
+            session = _boto3.Session(region_name=region)
+            frozen = session.get_credentials().get_frozen_credentials()
+
+        url = f'https://sts.{region}.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15'
+        req = AWSRequest(method='GET', url=url, headers={'x-k8s-aws-id': cluster_name})
+        SigV4Auth(frozen, 'sts', region).add_auth(req)
+        presigned_url = req.prepare().url
+
+        token = 'k8s-aws-v1.' + base64.urlsafe_b64encode(presigned_url.encode()).decode().rstrip('=')
+        expiry = (
+            datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=14)
+        ).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+        cred = {
+            'apiVersion': 'client.authentication.k8s.io/v1beta1',
+            'kind': 'ExecCredential',
+            'status': {
+                'token': token,
+                'expirationTimestamp': expiry,
+            },
+        }
+        return _json.dumps(cred)
+    except ClientError as e:
+        return f'❌ EKS token 生成失敗: {e.response["Error"]["Code"]}: {e.response["Error"]["Message"]}'
+    except Exception as e:  # noqa: BLE001
+        return f'❌ EKS token 生成失敗: {str(e)}'
+
 def execute_boto3_native(
     service: str,
     operation: str,
