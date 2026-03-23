@@ -559,39 +559,39 @@ def execute_command(command: str, assume_role_arn: str = None,
 def generate_eks_token(cluster_name: str, region: str = 'us-east-1', assume_role_arn: str = None) -> str:
     """Generate EKS kubectl token (k8s-aws-v1.* format) via STS presigned URL.
 
-    Replicates `aws eks get-token` without requiring awscli binary.
+    Uses boto3.generate_presigned_url for correct query-string signing.
     Returns ExecCredential JSON string.
     """
     import base64
     import datetime
     import json as _json
-    from botocore.auth import SigV4Auth
-    from botocore.awsrequest import AWSRequest
-    from botocore.credentials import Credentials as BotoCreds
 
     try:
         if assume_role_arn:
-            sts_client = boto3.client('sts')
-            assumed = sts_client.assume_role(
+            sts_base = boto3.client('sts', region_name=region)
+            assumed = sts_base.assume_role(
                 RoleArn=assume_role_arn,
                 RoleSessionName='bouncer-eks-token',
                 DurationSeconds=900,
             )
             creds_data = assumed['Credentials']
-            frozen = BotoCreds(
-                access_key=creds_data['AccessKeyId'],
-                secret_key=creds_data['SecretAccessKey'],
-                token=creds_data['SessionToken'],
+            sts_client = boto3.client(
+                'sts',
+                region_name=region,
+                aws_access_key_id=creds_data['AccessKeyId'],
+                aws_secret_access_key=creds_data['SecretAccessKey'],
+                aws_session_token=creds_data['SessionToken'],
             )
         else:
-            import boto3 as _boto3
-            session = _boto3.Session(region_name=region)
-            frozen = session.get_credentials().get_frozen_credentials()
+            sts_client = boto3.client('sts', region_name=region)
 
-        url = f'https://sts.{region}.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15'
-        req = AWSRequest(method='GET', url=url, headers={'x-k8s-aws-id': cluster_name})
-        SigV4Auth(frozen, 'sts', region).add_auth(req)
-        presigned_url = req.prepare().url
+        presigned_url = sts_client.generate_presigned_url(
+            'get_caller_identity',
+            Params={},
+            ExpiresIn=60,
+            HttpMethod='GET',
+        )
+        presigned_url += f'&x-k8s-aws-id={cluster_name}'
 
         token = 'k8s-aws-v1.' + base64.urlsafe_b64encode(presigned_url.encode()).decode().rstrip('=')
         expiry = (
@@ -608,9 +608,10 @@ def generate_eks_token(cluster_name: str, region: str = 'us-east-1', assume_role
         }
         return _json.dumps(cred)
     except ClientError as e:
-        return f'❌ EKS token 生成失敗: {e.response["Error"]["Code"]}: {e.response["Error"]["Message"]}'
+        return f'\u274c EKS token \u751f\u6210\u5931\u6557: {e.response["Error"]["Code"]}: {e.response["Error"]["Message"]}'
     except Exception as e:  # noqa: BLE001
-        return f'❌ EKS token 生成失敗: {str(e)}'
+        return f'\u274c EKS token \u751f\u6210\u5931\u6557: {str(e)}'
+
 
 def execute_boto3_native(
     service: str,
