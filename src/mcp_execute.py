@@ -916,6 +916,14 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
         item['risk_category'] = _safe_risk_category(ctx.smart_decision) or ''
         item['risk_factors'] = _safe_risk_factors(ctx.smart_decision) or []
         item['decision_type'] = 'pending'  # 會在 callback 時更新
+    # Store native execution info for callback to use boto3 instead of awscli
+    if ctx.is_native:
+        import json as _json
+        item['action_type'] = 'native'
+        item['native_service'] = ctx.native_service or ''
+        item['native_operation'] = ctx.native_operation or ''
+        item['native_params'] = _json.dumps(ctx.native_params or {})
+        item['native_region'] = ctx.native_region or ''
     table.put_item(Item=item)
 
     # 發送 Telegram 審批請求

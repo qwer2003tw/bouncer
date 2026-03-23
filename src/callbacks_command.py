@@ -143,8 +143,27 @@ def _execute_and_store_result(
     """
     table = _get_table()
 
-    # 執行命令
-    result = execute_command(command, assume_role)
+    # 執行命令（native boto3 or awscli based on stored action_type）
+    if item.get('action_type') == 'native':
+        import json as _json
+        from commands import execute_boto3_native
+        native_service = item.get('native_service', '')
+        native_operation = item.get('native_operation', '')
+        native_params_str = item.get('native_params', '{}')
+        native_region = item.get('native_region', 'us-east-1') or 'us-east-1'
+        try:
+            native_params = _json.loads(native_params_str) if isinstance(native_params_str, str) else native_params_str
+        except Exception:
+            native_params = {}
+        result = execute_boto3_native(
+            service=native_service,
+            operation=native_operation,
+            params=native_params,
+            region=native_region,
+            assume_role_arn=assume_role,
+        )
+    else:
+        result = execute_command(command, assume_role)
     cmd_status = 'failed' if _is_execute_failed(result) else 'success'
     emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'manual_approve'})
     paged = store_paged_output(request_id, result)
