@@ -79,6 +79,19 @@ TOOLS = [
         }
     },
     {
+        'name': 'bouncer_eks_get_token',
+        'description': '生成 kubectl EKS 認證 token（k8s-aws-v1.* 格式）。等同於 aws eks get-token，但不需要 awscli binary。',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'cluster_name': {'type': 'string', 'description': 'EKS cluster 名稱（例如：ztp-eks-v2）'},
+                'region': {'type': 'string', 'description': 'AWS region（預設 us-east-1）'},
+                'account': {'type': 'string', 'description': '目標 AWS 帳號 ID'},
+            },
+            'required': ['cluster_name']
+        }
+    },
+    {
         'name': 'bouncer_execute_native',
         'description': (
             '使用 boto3 native API 執行 AWS 操作，完全不依賴 awscli。'
@@ -1291,6 +1304,40 @@ def tool_execute_native(arguments: dict) -> dict:
     return result
 
 
+def tool_eks_get_token(arguments: dict) -> dict:
+    """Generate EKS kubectl token via STS presigned URL."""
+    cluster_name = str(arguments.get('cluster_name', '')).strip()
+    region = str(arguments.get('region', 'us-east-1')).strip()
+    account = arguments.get('account', None)
+    if account:
+        account = str(account).strip()
+
+    if not cluster_name:
+        return {'error': 'Missing required parameter: cluster_name'}
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+
+    mcp_args = {'cluster_name': cluster_name, 'region': region}
+    if account:
+        mcp_args['account'] = account
+
+    payload = {
+        'jsonrpc': '2.0', 'id': 'eks_get_token',
+        'method': 'tools/call',
+        'params': {'name': 'bouncer_eks_get_token', 'arguments': mcp_args}
+    }
+    result = http_request('POST', '/mcp', payload)
+    if 'result' in result:
+        content_list = result['result'].get('content', [])
+        if content_list and content_list[0].get('type') == 'text':
+            try:
+                import json as _json
+                return _json.loads(content_list[0]['text'])
+            except Exception:
+                return {'result': content_list[0]['text']}
+    return result
+
+
 def tool_grant_execute(arguments: dict) -> dict:
     """在已批准的 Grant Session 內執行命令（精確匹配）"""
     if not SECRET:
@@ -1384,6 +1431,8 @@ def handle_request(request: dict) -> dict:
 
         if tool_name == 'bouncer_execute':
             result = tool_execute(arguments)
+        elif tool_name == 'bouncer_eks_get_token':
+            result = tool_eks_get_token(arguments)
         elif tool_name == 'bouncer_execute_native':
             result = tool_execute_native(arguments)
         elif tool_name == 'bouncer_status':
