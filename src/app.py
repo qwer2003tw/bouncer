@@ -40,7 +40,7 @@ from rate_limit import check_rate_limit, RateLimitExceeded, PendingLimitExceeded
 from paging import store_paged_output, get_paged_output  # noqa: F401
 from utils import response, generate_request_id, decimal_to_native, mcp_result, mcp_error, get_header, log_decision, generate_display_summary
 # MCP tool handlers — split into sub-modules
-from mcp_execute import mcp_tool_execute, mcp_tool_execute_native
+from mcp_execute import mcp_tool_execute, mcp_tool_execute_native, mcp_tool_eks_get_token
 from mcp_grant import (
     mcp_tool_request_grant, mcp_tool_grant_status, mcp_tool_revoke_grant,
     mcp_tool_grant_execute,
@@ -621,6 +621,7 @@ def handle_mcp_request(event) -> dict:
 TOOL_HANDLERS = {
     'bouncer_execute': mcp_tool_execute,
     'bouncer_execute_native': mcp_tool_execute_native,
+    'bouncer_eks_get_token': mcp_tool_eks_get_token,
     'bouncer_status': mcp_tool_status,
     'bouncer_help': mcp_tool_help,
     'bouncer_list_safelist': mcp_tool_list_safelist,

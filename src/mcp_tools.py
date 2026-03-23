@@ -22,24 +22,9 @@ MCP 錯誤格式規則：
 # ---------------------------------------------------------------------------
 
 # --- Execute pipeline ---
-from mcp_execute import (  # noqa: F401
-    ExecuteContext,
-    mcp_tool_execute,
-    # internal helpers (used by tests via patch)
-    _check_grant_session,
-    _check_compliance,
-    _check_blocked,
-    _check_auto_approve,
-    _check_rate_limit,
-    _check_trust_session,
-    _submit_for_approval,
-    _parse_execute_request,
-    _score_risk,
-    _safe_risk_category,
-    _safe_risk_factors,
-    _log_smart_approval_shadow,
-    SHADOW_TABLE_NAME,
-)
+from mcp_execute import (
+    mcp_tool_eks_get_token,  # noqa: F401
+    )
 
 # --- Grant session tools (moved to mcp_grant in sprint60-002) ---
 from mcp_grant import (  # noqa: F401
