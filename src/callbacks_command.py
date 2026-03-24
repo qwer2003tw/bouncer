@@ -308,8 +308,8 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
         now = int(time.time())
         table.update_item(
             Key={'request_id': req_id},
-            UpdateExpression='SET #s = :s, #r = :r, approved_at = :t, decision_type = :dt, decided_at = :da, command_status = :cs',
-            ExpressionAttributeNames={'#s': 'status', '#r': 'result'},
+            UpdateExpression='SET #s = :s, #r = :r, approved_at = :t, decision_type = :dt, decided_at = :da, command_status = :cs, #ttl = :ttl',
+            ExpressionAttributeNames={'#s': 'status', '#r': 'result', '#ttl': 'ttl'},
             ExpressionAttributeValues={
                 ':s': 'approved',
                 ':r': paged['result'],
@@ -317,6 +317,7 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
                 ':dt': 'trust_auto_approved',
                 ':da': now,
                 ':cs': cmd_status,
+                ':ttl': now + RESULT_TTL,
             },
         )
 

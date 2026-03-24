@@ -668,3 +668,50 @@ class TestSEC013AutoExecutePendingCompliance:
             cb_mod._auto_execute_pending_requests(
                 'nonexistent-scope', '123456789012', None, 'trust-000'
             )
+
+    def test_auto_execute_sets_ttl(self):
+        """Regression: #bouncer-bug-ttl-zero — verify TTL is set after auto-execute"""
+        with mock_aws():
+            dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
+            table = _create_mock_table(dynamodb)
+
+            now = int(time.time())
+            req_id = 'pending-ttl-test-001'
+            table.put_item(Item={
+                'request_id': req_id,
+                'command': 'aws s3 ls',
+                'reason': 'test ttl',
+                'source': 'test-agent',
+                'trust_scope': 'test-scope-ttl',
+                'account_id': '123456789012',
+                'status': 'pending',
+                'created_at': now,
+                'ttl': now + 3600,
+            })
+
+            import importlib
+            import src.callbacks_command as cb_cmd_mod
+            import src.db as db_mod
+            from src.constants import RESULT_TTL
+            importlib.reload(cb_cmd_mod)
+            db_mod.table = table
+            cb_cmd_mod._db.table = table
+
+            with patch('src.callbacks_command.execute_command', return_value='OK output'), \
+                 patch('src.callbacks_command.store_paged_output', return_value={'result': 'OK', 'paged': False}), \
+                 patch('src.callbacks_command.increment_trust_command_count', return_value=1), \
+                 patch('src.utils.log_decision'), \
+                 patch('src.callbacks_command.send_trust_auto_approve_notification'), \
+                 patch('src.callbacks_command.emit_metric'):
+                cb_cmd_mod._auto_execute_pending_requests(
+                    'test-scope-ttl', '123456789012', None, 'trust-ttl-001', 'test-agent'
+                )
+
+            # Verify TTL was set correctly
+            item = table.get_item(Key={'request_id': req_id}).get('Item', {})
+            assert item.get('status') == 'approved'
+            assert 'ttl' in item, "TTL field missing in DDB item after auto-execute"
+            assert item['ttl'] > now, "TTL should be in the future"
+            # Allow some slack for test execution time
+            expected_ttl = now + RESULT_TTL
+            assert abs(item['ttl'] - expected_ttl) < 5, f"TTL should be ~{expected_ttl}, got {item['ttl']}"
