@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.70.0] - 2026-03-24
+
+### Removed
+- `bouncer_execute` MCP tool — scheduled v3.70 removal; tool was deprecated since v3.65 when awscli was removed from Lambda; use `bouncer_execute_native` (boto3 native format) instead (s70-001)
+- `src/tool_schema.py` — removed `bouncer_execute` schema definition
+- `src/app.py` — removed `bouncer_execute` routing
+- `bouncer_mcp.py` — removed `bouncer_execute` tool definition, handler, and routing
+
+### Changed  
+- `.github/workflows/ci.yaml` — updated actions/checkout to v6, actions/setup-python to v6 (s70-002)
+
 ## [3.69.0] - 2026-03-24
 
 ### Fixed
