@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.69.0] - 2026-03-24
+
+### Fixed
+- `src/metrics.py` — `emit_metric` now accepts both `dict` and `list[dict]` dimensions format; previously `smart_approval` passed `[{'Name': 'k', 'Value': 'v'}]` format causing `'list' object has no attribute 'keys'` error which made all smart approval evaluations fall back to 70-point manual review (s69)
+- `src/utils.py`, `src/mcp_execute.py` — `log_decision` now stores `result` field in DDB; previously auto_approve executions did not save result, causing `bouncer_status` to return empty result string (s69)
+
 ## [3.68.0] - 2026-03-24
 
 ### Fixed
