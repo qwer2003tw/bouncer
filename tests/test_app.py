@@ -101,8 +101,8 @@ class TestIntegration:
     
     def test_full_mcp_flow_safelist(self, app_module):
         """測試完整 MCP 流程（SAFELIST）"""
+        from mcp_execute import mcp_tool_execute
         import mcp_execute
-        import mcp_tools
         with patch.object(mcp_execute, 'execute_command', return_value='{"UserId": "123", "Account": "456", "Arn": "arn:aws:iam::456:user/test"}'):
             # Initialize
             init_event = {
@@ -118,28 +118,16 @@ class TestIntegration:
             }
             result = app_module.lambda_handler(init_event, None)
             assert result['statusCode'] == 200
-            
+
             # Execute
-            exec_event = {
-                'rawPath': '/mcp',
-                'headers': {'x-approval-secret': 'test-secret'},
-                'body': json.dumps({
-                    'jsonrpc': '2.0',
-                    'id': 2,
-                    'method': 'tools/call',
-                    'params': {
-                        'name': 'bouncer_execute',
-                        'arguments': {
-                            'command': 'aws sts get-caller-identity',
-                            'trust_scope': 'test-session',
-                        }
-                    }
-                }),
-                'requestContext': {'http': {'method': 'POST'}}
-            }
-            result = app_module.lambda_handler(exec_event, None)
+            result = mcp_tool_execute('req-2', {
+                'command': 'aws sts get-caller-identity',
+                'trust_scope': 'test-session',
+            })
+
             body = json.loads(result['body'])
-            
+
+
             content = json.loads(body['result']['content'][0]['text'])
             assert content['status'] == 'auto_approved'
             assert 'UserId' in content['result']
@@ -508,31 +496,21 @@ class TestAppModuleMore:
     
     def test_mcp_execute_with_paging(self, app_module):
         """執行命令並測試分頁"""
+        from mcp_execute import mcp_tool_execute
+        import mcp_execute
         # Mock 返回長輸出
         long_output = 'x' * 5000
-        with patch.object(app_module, 'execute_command', return_value=long_output):
-            event = {
-                'rawPath': '/mcp',
-                'headers': {'x-approval-secret': 'test-secret'},
-                'body': json.dumps({
-                    'jsonrpc': '2.0',
-                    'id': 'test',
-                    'method': 'tools/call',
-                    'params': {
-                        'name': 'bouncer_execute',
-                        'arguments': {
-                            'command': 'aws logs get-log-events --log-group-name test --log-stream-name test-stream',
-                            'trust_scope': 'test-session',
-                        }
-                    }
-                }),
-                'requestContext': {'http': {'method': 'POST'}}
-            }
-            
-            result = app_module.lambda_handler(event, None)
+        with patch.object(mcp_execute, 'execute_command', return_value=long_output):
+            result = mcp_tool_execute('test-paging', {
+                'command': 'aws logs get-log-events --log-group-name test --log-stream-name test-stream',
+                'trust_scope': 'test-session',
+            })
+
             body = json.loads(result['body'])
+
+
             content = json.loads(body['result']['content'][0]['text'])
-            
+
             assert content['status'] == 'auto_approved'
             # 檢查是否有分頁
             if content.get('paged'):
@@ -675,37 +653,25 @@ class TestCoverage80Sprint:
     @patch('telegram.send_telegram_message')
     def test_mcp_execute_with_configured_account(self, mock_telegram, app_module):
         """執行命令使用配置的帳號"""
+        from mcp_execute import mcp_tool_execute
         import mcp_execute
-        import mcp_tools
         with patch.object(mcp_execute, 'get_account', return_value={
             'account_id': '555555555555',
             'name': 'Configured Account',
             'enabled': True,
             'role_arn': 'arn:aws:iam::555555555555:role/TestRole'
         }), patch.object(mcp_execute, 'execute_command', return_value='{"result": "ok"}'):
-            event = {
-                'rawPath': '/mcp',
-                'headers': {'x-approval-secret': 'test-secret'},
-                'body': json.dumps({
-                    'jsonrpc': '2.0',
-                    'id': 'test',
-                    'method': 'tools/call',
-                    'params': {
-                        'name': 'bouncer_execute',
-                        'arguments': {
-                            'command': 'aws s3 ls',
-                            'trust_scope': 'test-session',
-                            'account': '555555555555'
-                        }
-                    }
-                }),
-                'requestContext': {'http': {'method': 'POST'}}
-            }
-            
-            result = app_module.lambda_handler(event, None)
+            result = mcp_tool_execute('test-acct', {
+                'command': 'aws s3 ls',
+                'trust_scope': 'test-session',
+                'account': '555555555555'
+            })
+
             body = json.loads(result['body'])
+
+
             content = json.loads(body['result']['content'][0]['text'])
-            
+
             assert content['status'] == 'auto_approved'
             assert content['account'] == '555555555555'
     
@@ -753,7 +719,7 @@ class TestCoverage80Sprint:
         
         # 驗證所有主要工具都存在
         expected_tools = [
-            'bouncer_execute',
+            'bouncer_execute_native',
             'bouncer_status',
             'bouncer_list_safelist',
             'bouncer_list_accounts',

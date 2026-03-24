@@ -10,7 +10,7 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │  Clawdbot / OpenClaw Agent (EC2)                                │
 │                                                                  │
-│    mcporter call bouncer.bouncer_execute ...                    │
+│    mcporter call bouncer.bouncer_execute_native ...             │
 │         │                                                        │
 │         │ stdio (MCP Protocol)                                   │
 │         ▼                                                        │
@@ -51,35 +51,13 @@
 透過 `mcporter` 呼叫：
 
 ```bash
-# 列出 S3 buckets (SAFELIST - 自動執行)
-mcporter call bouncer.bouncer_execute \
-  command="aws s3 ls" \
-  reason="檢查 S3" \
-  source="Steven's Private Bot"
-
-# 啟動 EC2 (APPROVAL - 需要審批)
-mcporter call bouncer.bouncer_execute \
-  command="aws ec2 start-instances --instance-ids i-xxx" \
-  reason="啟動開發環境" \
-  source="Steven's Private Bot"
-
 # 部署 SAM 專案 (需要審批)
 mcporter call bouncer.bouncer_deploy \
   project="bouncer" \
   reason="修復 bug"
 ```
 
-### bouncer_execute vs bouncer_execute_native
-
-#### bouncer_execute（舊版，計劃 deprecate）
-使用 awscli 字串格式，實際執行時透過 subprocess 調用 `aws` CLI。
-
-**限制：**
-- 依賴系統安裝的 awscli
-- 存在 global flag 衝突問題（如 `--version` 會被 awscli 自己解析）
-- 參數解析較不穩定
-
-#### bouncer_execute_native（推薦）
+### bouncer_execute_native（推薦）
 使用 boto3 native 格式，直接調用 AWS SDK。完全不依賴 awscli。
 
 **優點：**
@@ -172,11 +150,12 @@ mcporter call bouncer bouncer_execute_native --args '{
 
 ## MCP Tools
 
+> ⚠️ **注意：** `bouncer_execute` 已於 v3.70 移除（v3.65 標記為 deprecated），請使用 `bouncer_execute_native`。
+
 ### 核心功能
 | Tool | 說明 | 審批 |
 |------|------|------|
-| `bouncer_execute` | 執行 AWS CLI 命令（awscli string 格式）⚠️ 計劃 deprecate | 視命令而定 |
-| `bouncer_execute_native` | 執行 AWS API call（**boto3 native 格式，推薦**）| 視命令而定 |
+| `bouncer_execute_native` | 執行 AWS API call（**boto3 native 格式**）| 視命令而定 |
 | `bouncer_status` | 查詢審批請求狀態 | 自動 |
 
 ### 帳號管理

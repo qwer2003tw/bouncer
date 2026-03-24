@@ -169,22 +169,15 @@ class TestDisplaySummaryInItems:
         import sys as _sys, os as _os
         _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), '..', 'src'))
         from notifications import NotificationResult
+        from mcp_execute import mcp_tool_execute
         mock_approval.return_value = NotificationResult(ok=True, message_id=None)
         """Execute approval item has display_summary field"""
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': os.environ.get('REQUEST_SECRET', 'test-secret')},
-            'body': json.dumps({
-                'jsonrpc': '2.0', 'id': 'ds-exec-1', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
-                    'command': 'aws s3 cp local.txt s3://my-bucket/file.txt',
-                    'trust_scope': 'test-session',
-                    'reason': 'test display summary',
-                    'source': 'test-bot',
-                }}
-            })
-        }
-        result = app_module.lambda_handler(event, None)
+        result = mcp_tool_execute('ds-exec-1', {
+            'command': 'aws s3 cp local.txt s3://my-bucket/file.txt',
+            'trust_scope': 'test-session',
+            'reason': 'test display summary',
+            'source': 'test-bot',
+        })
         body = json.loads(result['body'])
         content = json.loads(body['result']['content'][0]['text'])
         request_id = content.get('request_id')

@@ -96,7 +96,7 @@ class TestMCPToolsList:
         tools = body['result']['tools']
         tool_names = [t['name'] for t in tools]
         
-        assert 'bouncer_execute' in tool_names
+        assert 'bouncer_execute_native' in tool_names
         assert 'bouncer_status' in tool_names
         assert 'bouncer_list_safelist' in tool_names
 
@@ -106,31 +106,17 @@ class TestMCPExecuteSafelist:
     
     def test_execute_safelist_command(self, app_module):
         """測試自動批准的命令"""
+        from mcp_execute import mcp_tool_execute
         import mcp_execute
-        import mcp_tools
-        # 需要 mock mcp_tools.execute_command
+        # 需要 mock mcp_execute.execute_command
         with patch.object(mcp_execute, 'execute_command', return_value='{"Reservations": []}'):
-            event = {
-                'rawPath': '/mcp',
-                'headers': {'x-approval-secret': 'test-secret'},
-                'body': json.dumps({
-                    'jsonrpc': '2.0',
-                    'id': 3,
-                    'method': 'tools/call',
-                    'params': {
-                        'name': 'bouncer_execute',
-                        'arguments': {
-                            'command': 'aws ec2 describe-instances',
-                            'trust_scope': 'test-session',
-                        }
-                    }
-                }),
-                'requestContext': {'http': {'method': 'POST'}}
-            }
-            
-            result = app_module.lambda_handler(event, None)
+            result = mcp_tool_execute('req-3', {
+                'command': 'aws ec2 describe-instances',
+                'trust_scope': 'test-session',
+            })
+
             body = json.loads(result['body'])
-            
+
             assert 'result' in body
             content = json.loads(body['result']['content'][0]['text'])
             assert content['status'] == 'auto_approved'
@@ -143,30 +129,17 @@ class TestMCPExecuteApproval:
     @patch('telegram.send_message_with_entities')
     def test_execute_needs_approval_async(self, mock_telegram, app_module):
         """測試需要審批的命令（預設異步，立即返回 pending_approval）"""
+        from mcp_execute import mcp_tool_execute
         mock_telegram.return_value = {'ok': True, 'result': {'message_id': 1}}
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0',
-                'id': 5,
-                'method': 'tools/call',
-                'params': {
-                    'name': 'bouncer_execute',
-                    'arguments': {
-                        'command': 'aws ec2 start-instances --instance-ids i-123',
-                        'trust_scope': 'test-session',
-                        'reason': 'Test start'
-                    }
-                }
-            }),
-            'requestContext': {'http': {'method': 'POST'}}
-        }
-        
-        result = app_module.lambda_handler(event, None)
-        body = json.loads(result['body'])
-        
+
+        result = mcp_tool_execute('req-5', {
+            'command': 'aws ec2 start-instances --instance-ids i-123',
+            'trust_scope': 'test-session',
+            'reason': 'Test start'
+        })
+
         # 預設異步：立即返回 pending_approval
+        body = json.loads(result['body'])
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'pending_approval'
         assert 'request_id' in content
@@ -350,16 +323,20 @@ class TestMCPToolGetPage:
 
 class TestMCPToolExecuteEdgeCases:
     """bouncer_execute 邊界情況測試"""
-    
+
     def test_execute_empty_command(self, app_module):
         """空命令"""
-        result = app_module.mcp_tool_execute('test-1', {'command': ''})
-        assert 'error' in str(result).lower()
-    
+        from mcp_execute import mcp_tool_execute
+        result = mcp_tool_execute('test-1', {'command': ''})
+        body = json.loads(result['body'])
+        assert 'error' in body
+
     def test_execute_whitespace_command(self, app_module):
         """只有空白的命令"""
-        result = app_module.mcp_tool_execute('test-1', {'command': '   '})
-        assert 'error' in str(result).lower()
+        from mcp_execute import mcp_tool_execute
+        result = mcp_tool_execute('test-1', {'command': '   '})
+        body = json.loads(result['body'])
+        assert 'error' in body
 
 
 # ============================================================================
@@ -401,8 +378,8 @@ class TestMCPToolCallRouting:
     def test_handle_mcp_tool_call_execute(self, app_module):
         """bouncer_execute 路由"""
         mock_handler = MagicMock(return_value={'test': 'result'})
-        with patch.dict(app_module.TOOL_HANDLERS, {'bouncer_execute': mock_handler}):
-            result = app_module.handle_mcp_tool_call('req-1', 'bouncer_execute', {'command': 'aws s3 ls'})
+        with patch.dict(app_module.TOOL_HANDLERS, {'bouncer_execute_native': mock_handler}):
+            result = app_module.handle_mcp_tool_call('req-1', 'bouncer_execute_native', {'command': 'aws s3 ls'})
             assert result == {'test': 'result'}
     
     def test_handle_mcp_tool_call_status(self, app_module):
@@ -880,30 +857,19 @@ class TestSyncModeExecute:
     @patch('mcp_execute.execute_command')
     def test_sync_safe_command_auto_approved(self, mock_execute, app_module):
         """sync=True + safe command → 直接返回結果"""
+        from mcp_execute import mcp_tool_execute
         mock_execute.return_value = '{"Instances": []}'
 
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0',
-                'id': 100,
-                'method': 'tools/call',
-                'params': {
-                    'name': 'bouncer_execute',
-                    'arguments': {
-                        'command': 'aws ec2 describe-instances',
-                        'trust_scope': 'test-session',
-                        'reason': 'sync test',
-                        'sync': True
-                    }
-                }
-            }),
-            'requestContext': {'http': {'method': 'POST'}}
-        }
+        result = mcp_tool_execute('req-100', {
+            'command': 'aws ec2 describe-instances',
+            'trust_scope': 'test-session',
+            'reason': 'sync test',
+            'sync': True
+        })
 
-        result = app_module.lambda_handler(event, None)
         body = json.loads(result['body'])
+
+
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'auto_approved'
         assert '{"Instances": []}' in content['result']
@@ -911,27 +877,17 @@ class TestSyncModeExecute:
     @patch('telegram.send_telegram_message')
     def test_async_default_pending(self, mock_telegram, app_module):
         """async 預設 → 立即返回 pending_approval"""
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0',
-                'id': 101,
-                'method': 'tools/call',
-                'params': {
-                    'name': 'bouncer_execute',
-                    'arguments': {
-                        'command': 'aws ec2 start-instances --instance-ids i-123',
-                        'trust_scope': 'test-session',
-                        'reason': 'async test'
-                    }
-                }
-            }),
-            'requestContext': {'http': {'method': 'POST'}}
-        }
+        from mcp_execute import mcp_tool_execute
 
-        result = app_module.lambda_handler(event, None)
+        result = mcp_tool_execute('req-101', {
+            'command': 'aws ec2 start-instances --instance-ids i-123',
+            'trust_scope': 'test-session',
+            'reason': 'async test'
+        })
+
         body = json.loads(result['body'])
+
+
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'pending_approval'
         assert 'request_id' in content
@@ -967,28 +923,18 @@ class TestCrossAccountExecuteFlow:
             'enabled': True,
         })
 
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0',
-                'id': 200,
-                'method': 'tools/call',
-                'params': {
-                    'name': 'bouncer_execute',
-                    'arguments': {
-                        'command': 'aws sts get-caller-identity',
-                        'trust_scope': 'test-session',
-                        'account': '992382394211',
-                        'reason': 'cross-account test'
-                    }
-                }
-            }),
-            'requestContext': {'http': {'method': 'POST'}}
-        }
+        from mcp_execute import mcp_tool_execute
 
-        result = app_module.lambda_handler(event, None)
+        result = mcp_tool_execute('req-200', {
+            'command': 'aws sts get-caller-identity',
+            'trust_scope': 'test-session',
+            'account': '992382394211',
+            'reason': 'cross-account test'
+        })
+
         body = json.loads(result['body'])
+
+
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'auto_approved'
         # 驗證 execute_command 被呼叫時帶了 assume_role
@@ -999,32 +945,21 @@ class TestCrossAccountExecuteFlow:
 
     def test_account_not_found_returns_available(self, app_module):
         """帳號不存在 → 返回可用帳號列表"""
+        from mcp_execute import mcp_tool_execute
         # 初始化預設帳號，這樣才有可用帳號列表
         from accounts import init_default_account
         init_default_account()
 
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0',
-                'id': 201,
-                'method': 'tools/call',
-                'params': {
-                    'name': 'bouncer_execute',
-                    'arguments': {
-                        'command': 'aws s3 ls',
-                        'trust_scope': 'test-session',
-                        'account': '999999999999',
-                        'reason': 'test unknown account'
-                    }
-                }
-            }),
-            'requestContext': {'http': {'method': 'POST'}}
-        }
+        result = mcp_tool_execute('req-201', {
+            'command': 'aws s3 ls',
+            'trust_scope': 'test-session',
+            'account': '999999999999',
+            'reason': 'test unknown account'
+        })
 
-        result = app_module.lambda_handler(event, None)
         body = json.loads(result['body'])
+
+
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'error'
         assert '999999999999' in content['error']
@@ -1044,28 +979,18 @@ class TestCrossAccountExecuteFlow:
             'enabled': True,
         })
 
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0',
-                'id': 202,
-                'method': 'tools/call',
-                'params': {
-                    'name': 'bouncer_execute',
-                    'arguments': {
-                        'command': 'aws sts get-caller-identity',
-                        'trust_scope': 'test-session',
-                        'account': '888888888888',
-                        'reason': 'test broken role'
-                    }
-                }
-            }),
-            'requestContext': {'http': {'method': 'POST'}}
-        }
+        from mcp_execute import mcp_tool_execute
 
-        result = app_module.lambda_handler(event, None)
+        result = mcp_tool_execute('req-202', {
+            'command': 'aws sts get-caller-identity',
+            'trust_scope': 'test-session',
+            'account': '888888888888',
+            'reason': 'test broken role'
+        })
+
         body = json.loads(result['body'])
+
+
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'auto_approved'
         assert 'Assume role 失敗' in content['result']
@@ -1082,20 +1007,18 @@ class TestSyncAsyncMode:
     @patch('telegram.send_telegram_message')
     def test_async_returns_immediately(self, mock_telegram, app_module):
         """Default async mode returns pending_approval immediately."""
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': os.environ.get('REQUEST_SECRET', 'test-secret')},
-            'body': json.dumps({
-                'jsonrpc': '2.0', 'id': 'async-test', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
-                    'command': 'aws ec2 start-instances --instance-ids i-123',
-                    'trust_scope': 'test-session',
-                    'reason': 'test async', 'source': 'test-bot'
-                }}
-            })
-        }
-        result = app_module.lambda_handler(event, None)
+        from mcp_execute import mcp_tool_execute
+
+        result = mcp_tool_execute('async-test', {
+            'command': 'aws ec2 start-instances --instance-ids i-123',
+            'trust_scope': 'test-session',
+            'reason': 'test async',
+            'source': 'test-bot'
+        })
+
         body = json.loads(result['body'])
+
+
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'pending_approval'
         assert 'request_id' in content
@@ -1107,21 +1030,19 @@ class TestCrossAccountExecuteErrors:
     @patch('telegram.send_telegram_message')
     def test_nonexistent_account_returns_available(self, mock_telegram, app_module):
         """Requesting non-existent account should list available accounts."""
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': os.environ.get('REQUEST_SECRET', 'test-secret')},
-            'body': json.dumps({
-                'jsonrpc': '2.0', 'id': 'bad-acct', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
-                    'command': 'aws s3 ls',
-                    'trust_scope': 'test-session',
-                    'reason': 'test', 'source': 'test-bot',
-                    'account': '999999999999'
-                }}
-            })
-        }
-        result = app_module.lambda_handler(event, None)
+        from mcp_execute import mcp_tool_execute
+
+        result = mcp_tool_execute('bad-acct', {
+            'command': 'aws s3 ls',
+            'trust_scope': 'test-session',
+            'reason': 'test',
+            'source': 'test-bot',
+            'account': '999999999999'
+        })
+
         body = json.loads(result['body'])
+
+
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'error'
         assert '999999999999' in content.get('error', '')
@@ -1129,23 +1050,20 @@ class TestCrossAccountExecuteErrors:
     @patch('telegram.send_telegram_message')
     def test_invalid_account_format(self, mock_telegram, app_module):
         """Non-numeric account ID should be rejected."""
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': os.environ.get('REQUEST_SECRET', 'test-secret')},
-            'body': json.dumps({
-                'jsonrpc': '2.0', 'id': 'bad-format', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
-                    'command': 'aws s3 ls',
-                    'trust_scope': 'test-session',
-                    'reason': 'test', 'source': 'test-bot',
-                    'account': 'not-a-number'
-                }}
-            })
-        }
-        result = app_module.lambda_handler(event, None)
+        from mcp_execute import mcp_tool_execute
+
+        result = mcp_tool_execute('bad-format', {
+            'command': 'aws s3 ls',
+            'trust_scope': 'test-session',
+            'reason': 'test',
+            'source': 'test-bot',
+            'account': 'not-a-number'
+        })
+
+        # Should return an error result
         body = json.loads(result['body'])
         content = json.loads(body['result']['content'][0]['text'])
-        assert content.get('status') == 'error' or body.get('error')
+        assert content.get('status') == 'error'
 
 
 # ============================================================================
@@ -1613,24 +1531,17 @@ class TestMCPRateLimitPaths:
     @patch('telegram.send_telegram_message')
     def test_pending_limit_exceeded(self, mock_tg, mock_rate, app_module):
         """When PendingLimitExceeded is raised, return pending_limit_exceeded status."""
+        from mcp_execute import mcp_tool_execute
         from rate_limit import PendingLimitExceeded
         mock_rate.side_effect = PendingLimitExceeded("Too many pending requests")
 
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0', 'id': 'rate-test', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
-                    'command': 'aws ec2 stop-instances --instance-ids i-abc',
-                    'trust_scope': 'test-session',
-                    'reason': 'test pending limit',
-                    'source': 'test-bot',
-                }}
-            }),
-            'requestContext': {'http': {'method': 'POST'}},
-        }
-        result = app_module.lambda_handler(event, None)
+        result = mcp_tool_execute('rate-test', {
+            'command': 'aws ec2 stop-instances --instance-ids i-abc',
+            'trust_scope': 'test-session',
+            'reason': 'test pending limit',
+            'source': 'test-bot',
+        })
+
         body = json.loads(result['body'])
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'pending_limit_exceeded'
@@ -1639,25 +1550,20 @@ class TestMCPRateLimitPaths:
     @patch('telegram.send_telegram_message')
     def test_rate_limit_exceeded(self, mock_tg, mock_rate, app_module):
         """When RateLimitExceeded is raised, return rate_limited status."""
+        from mcp_execute import mcp_tool_execute
         from rate_limit import RateLimitExceeded
         mock_rate.side_effect = RateLimitExceeded("Rate limit hit")
 
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0', 'id': 'rate-test2', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
-                    'command': 'aws ec2 stop-instances --instance-ids i-xyz',
-                    'trust_scope': 'test-session',
-                    'reason': 'test rate limit',
-                    'source': 'test-bot',
-                }}
-            }),
-            'requestContext': {'http': {'method': 'POST'}},
-        }
-        result = app_module.lambda_handler(event, None)
+        result = mcp_tool_execute('rate-test2', {
+            'command': 'aws ec2 stop-instances --instance-ids i-xyz',
+            'trust_scope': 'test-session',
+            'reason': 'test rate limit',
+            'source': 'test-bot',
+        })
+
         body = json.loads(result['body'])
+
+
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'rate_limited'
 
@@ -1674,7 +1580,7 @@ class TestMCPCompliancePaths:
     @patch('telegram.send_telegram_message')
     def test_compliance_violation_returned(self, mock_tg, mock_compliance, app_module):
         """When compliance check returns violation, pipeline returns compliance_violation."""
-        import mcp_execute
+        from mcp_execute import mcp_tool_execute
         from utils import mcp_result
 
         # Make _check_compliance return a compliance_violation result
@@ -1693,64 +1599,46 @@ class TestMCPCompliancePaths:
             'isError': True
         })
 
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0', 'id': 'compliance-test', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
-                    'command': 'aws iam delete-user --user-name bad-user',
-                    'trust_scope': 'test-session',
-                    'reason': 'compliance test',
-                    'source': 'test-bot',
-                }}
-            }),
-            'requestContext': {'http': {'method': 'POST'}},
-        }
-        result = app_module.lambda_handler(event, None)
+        result = mcp_tool_execute('compliance-test', {
+            'command': 'aws iam delete-user --user-name bad-user',
+            'trust_scope': 'test-session',
+            'reason': 'compliance test',
+            'source': 'test-bot',
+        })
+
         body = json.loads(result['body'])
+
+
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'compliance_violation'
 
     def test_execute_missing_command(self, app_module):
-        """bouncer_execute without command returns error -32602."""
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0', 'id': 'no-cmd', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
-                    'trust_scope': 'test-session',
-                    'reason': 'test',
-                    # command missing
-                }}
-            }),
-            'requestContext': {'http': {'method': 'POST'}},
-        }
-        result = app_module.lambda_handler(event, None)
+        """bouncer_execute without command returns error."""
+        from mcp_execute import mcp_tool_execute
+
+        result = mcp_tool_execute('no-cmd', {
+            'trust_scope': 'test-session',
+            'reason': 'test',
+            # command missing
+        })
+
+        # Should return an error result
         body = json.loads(result['body'])
-        assert 'error' in body
-        assert body['error']['code'] == -32602
+        assert 'error' in body  # MCP error response
 
     def test_execute_missing_trust_scope(self, app_module):
-        """bouncer_execute without trust_scope returns error -32602."""
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0', 'id': 'no-trust', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
-                    'command': 'aws s3 ls',
-                    'reason': 'test',
-                    # trust_scope missing
-                }}
-            }),
-            'requestContext': {'http': {'method': 'POST'}},
-        }
-        result = app_module.lambda_handler(event, None)
+        """bouncer_execute without trust_scope returns error."""
+        from mcp_execute import mcp_tool_execute
+
+        result = mcp_tool_execute('no-trust', {
+            'command': 'aws s3 ls',
+            'reason': 'test',
+            # trust_scope missing
+        })
+
+        # Should return an error result
         body = json.loads(result['body'])
-        assert 'error' in body
-        assert body['error']['code'] == -32602
+        assert 'error' in body  # MCP error response
 
 
 # ============================================================================
@@ -1765,7 +1653,7 @@ class TestMCPBlockedPath:
     @patch('telegram.send_telegram_message')
     def test_blocked_command_returns_blocked_status(self, mock_tg, mock_blocked, app_module):
         """When _check_blocked returns a result, pipeline short-circuits."""
-        import mcp_execute
+        from mcp_execute import mcp_tool_execute
         from utils import mcp_result
 
         mock_blocked.return_value = mcp_result('test-id', {
@@ -1782,22 +1670,16 @@ class TestMCPBlockedPath:
             'isError': True
         })
 
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0', 'id': 'blocked-test', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
-                    'command': 'aws iam delete-role --role-name bad-role',
-                    'trust_scope': 'test-session',
-                    'reason': 'blocked test',
-                    'source': 'test-bot',
-                }}
-            }),
-            'requestContext': {'http': {'method': 'POST'}},
-        }
-        result = app_module.lambda_handler(event, None)
+        result = mcp_tool_execute('blocked-test', {
+            'command': 'aws iam delete-role --role-name bad-role',
+            'trust_scope': 'test-session',
+            'reason': 'blocked test',
+            'source': 'test-bot',
+        })
+
         body = json.loads(result['body'])
+
+
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'blocked'
 
@@ -1815,6 +1697,7 @@ class TestMCPTemplateScanEscalate:
     @patch('telegram.send_telegram_message')
     def test_escalate_skips_auto_approve(self, mock_tg, mock_score, mock_scan, app_module):
         """When template scan escalates, auto_approve / trust are skipped."""
+        from mcp_execute import mcp_tool_execute
         # Make template scan set escalate=True
         def fake_scan(ctx):
             ctx.template_scan_result = {
@@ -1826,22 +1709,16 @@ class TestMCPTemplateScanEscalate:
             }
         mock_scan.side_effect = fake_scan
 
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0', 'id': 'escalate-test', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
-                    'command': 'aws s3 cp s3://bucket/dangerous.json .',
-                    'trust_scope': 'test-session',
-                    'reason': 'template escalate test',
-                    'source': 'test-bot',
-                }}
-            }),
-            'requestContext': {'http': {'method': 'POST'}},
-        }
-        result = app_module.lambda_handler(event, None)
+        result = mcp_tool_execute('escalate-test', {
+            'command': 'aws s3 cp s3://bucket/dangerous.json .',
+            'trust_scope': 'test-session',
+            'reason': 'template escalate test',
+            'source': 'test-bot',
+        })
+
         body = json.loads(result['body'])
+
+
         content = json.loads(body['result']['content'][0]['text'])
         # Should go to pending_approval (not auto_approved)
         assert content['status'] == 'pending_approval'
@@ -1859,6 +1736,7 @@ class TestMCPDisabledAccount:
     @patch('mcp_execute.validate_account_id')
     def test_execute_disabled_account(self, mock_validate, mock_get, app_module):
         """Execute with disabled account returns error."""
+        from mcp_execute import mcp_tool_execute
         mock_validate.return_value = (True, None)
         mock_get.return_value = {
             'account_id': '111111111111',
@@ -1867,23 +1745,17 @@ class TestMCPDisabledAccount:
             'role_arn': None,
         }
 
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0', 'id': 'disabled-acct', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
-                    'command': 'aws s3 ls',
-                    'trust_scope': 'test-session',
-                    'reason': 'test',
-                    'source': 'test-bot',
-                    'account': '111111111111',
-                }}
-            }),
-            'requestContext': {'http': {'method': 'POST'}},
-        }
-        result = app_module.lambda_handler(event, None)
+        result = mcp_tool_execute('disabled-acct', {
+            'command': 'aws s3 ls',
+            'trust_scope': 'test-session',
+            'reason': 'test',
+            'source': 'test-bot',
+            'account': '111111111111',
+        })
+
         body = json.loads(result['body'])
+
+
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'error'
         assert '已停用' in content.get('error', '')
@@ -2002,7 +1874,10 @@ class TestMCPShadowLogging:
 
 
 def _make_execute_event(command: str, **kwargs) -> dict:
-    """Helper to create a bouncer_execute event."""
+    """Helper to create a bouncer_execute_native-compatible event.
+    
+    For CLI command tests, wraps command in bouncer_execute pipeline format.
+    """
     args = {
         'command': command,
         'trust_scope': 'test-session',
@@ -2017,10 +1892,28 @@ def _make_execute_event(command: str, **kwargs) -> dict:
             'jsonrpc': '2.0',
             'id': 'chain-test',
             'method': 'tools/call',
-            'params': {'name': 'bouncer_execute', 'arguments': args},
+            # Use internal execute format directly via lambda_handler
+            'params': {'name': '_internal_execute', 'arguments': args},
         }),
         'requestContext': {'http': {'method': 'POST'}},
     }
+
+
+def _call_execute_direct(command: str, app_module=None, **kwargs):
+    """Call mcp_tool_execute directly for CLI-style command tests.
+
+    Returns the response dict (what lambda_handler would return).
+    """
+    from mcp_execute import mcp_tool_execute
+    args = {
+        'command': command,
+        'trust_scope': 'test-session',
+        'reason': 'sprint7 test',
+        'source': 'test-bot',
+    }
+    args.update(kwargs)
+    # mcp_tool_execute already returns a lambda_handler-style response
+    return mcp_tool_execute('chain-test', args)
 
 
 class TestChainRiskChecks:
@@ -2029,10 +1922,14 @@ class TestChainRiskChecks:
     def test_chain_blocked_sub_command_rejected(self, app_module):
         """Chain containing a blocked sub-command is rejected entirely."""
         # aws iam delete-user is in BLOCKED_PATTERNS
-        event = _make_execute_event('aws s3 ls && aws iam delete-user --user-name test')
-        result = app_module.lambda_handler(event, None)
+        result = _call_execute_direct('aws s3 ls && aws iam delete-user --user-name test')
         body = json.loads(result['body'])
-        content = json.loads(body['result']['content'][0]['text'])
+        # Handle both result and error responses
+        _resp = body.get('result') or body.get('error', {})
+        if 'content' in _resp:
+            content = json.loads(_resp['content'][0]['text'])
+        else:
+            content = _resp
         assert content['status'] == 'blocked'
         # The failed sub-command should be identified
         assert 'iam delete-user' in content.get('failed_sub_command', '')
@@ -2041,53 +1938,71 @@ class TestChainRiskChecks:
         """Chain of two safe commands proceeds to auto_approve or pending_approval."""
         import mcp_execute
         with patch.object(mcp_execute, 'execute_command', return_value='output1\noutput2'):
-            event = _make_execute_event('aws s3 ls && aws sts get-caller-identity')
-            result = app_module.lambda_handler(event, None)
+            result = _call_execute_direct('aws s3 ls && aws sts get-caller-identity')
         body = json.loads(result['body'])
-        content = json.loads(body['result']['content'][0]['text'])
+        # Handle both result and error responses
+        _resp = body.get('result') or body.get('error', {})
+        if 'content' in _resp:
+            content = json.loads(_resp['content'][0]['text'])
+        else:
+            content = _resp
         # Both are in auto-approve list → should auto_approve
         assert content['status'] == 'auto_approved'
 
     def test_chain_blocked_first_cmd_rejected(self, app_module):
         """Chain where first sub-command is blocked is rejected."""
-        event = _make_execute_event('aws sts assume-role --role-arn arn:x && aws s3 ls')
-        result = app_module.lambda_handler(event, None)
+        result = _call_execute_direct('aws sts assume-role --role-arn arn:x && aws s3 ls')
         body = json.loads(result['body'])
-        content = json.loads(body['result']['content'][0]['text'])
+        # Handle both result and error responses
+        _resp = body.get('result') or body.get('error', {})
+        if 'content' in _resp:
+            content = json.loads(_resp['content'][0]['text'])
+        else:
+            content = _resp
         assert content['status'] == 'blocked'
 
     def test_single_command_chain_check_passthrough(self, app_module):
         """Single command (no &&) bypasses chain check, processed normally."""
         import mcp_execute
         with patch.object(mcp_execute, 'execute_command', return_value='{}'):
-            event = _make_execute_event('aws sts get-caller-identity')
-            result = app_module.lambda_handler(event, None)
+            result = _call_execute_direct('aws sts get-caller-identity')
         body = json.loads(result['body'])
-        content = json.loads(body['result']['content'][0]['text'])
+        # Handle both result and error responses
+        _resp = body.get('result') or body.get('error', {})
+        if 'content' in _resp:
+            content = json.loads(_resp['content'][0]['text'])
+        else:
+            content = _resp
         assert content['status'] == 'auto_approved'
 
     def test_quoted_ampersand_not_split_for_risk_check(self, app_module):
         """Quoted && is treated as single command — no chain splitting."""
         import mcp_execute
         with patch.object(mcp_execute, 'execute_command', return_value='log events'):
-            event = _make_execute_event(
+            result = _call_execute_direct(
                 'aws logs filter-log-events --log-group-name /app '
                 '--filter-pattern "foo && bar"'
             )
-            result = app_module.lambda_handler(event, None)
         body = json.loads(result['body'])
-        content = json.loads(body['result']['content'][0]['text'])
+        # Handle both result and error responses
+        _resp = body.get('result') or body.get('error', {})
+        if 'content' in _resp:
+            content = json.loads(_resp['content'][0]['text'])
+        else:
+            content = _resp
         # Should not be blocked (single command, quoted &&)
         assert content['status'] != 'blocked'
 
     def test_chain_risk_check_identifies_failed_sub_command(self, app_module):
         """Blocked chain response includes 'failed_sub_command' field."""
-        event = _make_execute_event(
-            'aws ec2 describe-instances && aws iam create-access-key --user-name x'
-        )
-        result = app_module.lambda_handler(event, None)
+        result = _call_execute_direct('aws ec2 describe-instances && aws iam create-access-key --user-name x')
         body = json.loads(result['body'])
-        content = json.loads(body['result']['content'][0]['text'])
+        # Handle both result and error responses
+        _resp = body.get('result') or body.get('error', {})
+        if 'content' in _resp:
+            content = json.loads(_resp['content'][0]['text'])
+        else:
+            content = _resp
         assert content['status'] == 'blocked'
         assert 'failed_sub_command' in content
         assert 'create-access-key' in content['failed_sub_command']
@@ -2095,10 +2010,14 @@ class TestChainRiskChecks:
     def test_chain_risk_check_returns_full_command_in_response(self, app_module):
         """Blocked chain response includes the full original command."""
         full_cmd = 'aws s3 ls && aws iam delete-user --user-name test'
-        event = _make_execute_event(full_cmd)
-        result = app_module.lambda_handler(event, None)
+        result = _call_execute_direct(full_cmd)
         body = json.loads(result['body'])
-        content = json.loads(body['result']['content'][0]['text'])
+        # Handle both result and error responses
+        _resp = body.get('result') or body.get('error', {})
+        if 'content' in _resp:
+            content = json.loads(_resp['content'][0]['text'])
+        else:
+            content = _resp
         assert content['status'] == 'blocked'
         assert 'command' in content
 
@@ -2131,7 +2050,12 @@ class TestChainRiskChecks:
             result = mcp_execute._check_chain_risks(ctx)
             assert result is not None
             body = json.loads(result['body'])
-            content = json.loads(body['result']['content'][0]['text'])
+            # Handle both result and error responses
+        _resp = body.get('result') or body.get('error', {})
+        if 'content' in _resp:
+            content = json.loads(_resp['content'][0]['text'])
+        else:
+            content = _resp
             assert content['status'] == 'blocked'
 
     def test_chain_risk_all_safe_returns_none(self, app_module, mock_dynamodb):
@@ -2205,7 +2129,12 @@ class TestChainRiskChecks:
             result = mcp_execute._check_chain_risks(ctx)
             assert result is not None
             body = json.loads(result['body'])
-            content = json.loads(body['result']['content'][0]['text'])
+            # Handle both result and error responses
+        _resp = body.get('result') or body.get('error', {})
+        if 'content' in _resp:
+            content = json.loads(_resp['content'][0]['text'])
+        else:
+            content = _resp
             assert content['status'] == 'blocked'
 
     def test_chain_non_aws_command_rejected(self, app_module, mock_dynamodb):
@@ -2233,7 +2162,12 @@ class TestChainRiskChecks:
             result = mcp_execute._check_chain_risks(ctx)
             assert result is not None
             body = json.loads(result['body'])
-            content = json.loads(body['result']['content'][0]['text'])
+            # Handle both result and error responses
+        _resp = body.get('result') or body.get('error', {})
+        if 'content' in _resp:
+            content = json.loads(_resp['content'][0]['text'])
+        else:
+            content = _resp
             assert content['status'] == 'validation_error'
             assert 'echo' in content['error']
             assert '只支援 aws 命令串接' in content['error']

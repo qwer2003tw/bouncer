@@ -48,11 +48,10 @@ Use `mcporter` to execute AWS CLI commands through the Bouncer approval system.
 
 ```bash
 # 1. 發送請求（立即返回 request_id）
-mcporter call bouncer bouncer_execute \
-  command="aws s3 mb s3://test" \
-  reason="建桶" \
-  source="Private Bot (task)" \
-  trust_scope="private-bot-main"
+mcporter call bouncer bouncer_execute_native --args '{
+  "aws": {"service": "s3", "operation": "create_bucket", "params": {"Bucket": "test"}},
+  "bouncer": {"reason": "建桶", "source": "Private Bot (task)", "trust_scope": "private-bot-main"}
+}'
 # 返回: {"status": "pending_approval", "request_id": "abc123", ...}
 
 # 2. 輪詢結果（必須！不會自動通知！）
@@ -73,9 +72,9 @@ mcporter call bouncer bouncer_status request_id="abc123"
 
 ## ⚠️ 必填參數
 
-### trust_scope（bouncer_execute 必填）
+### trust_scope（bouncer_execute_native 必填）
 
-`trust_scope` 是穩定的呼叫者識別符，用於信任匹配。**bouncer_execute 必須帶此參數**。
+`trust_scope` 是穩定的呼叫者識別符，用於信任匹配。**bouncer_execute_native 必須帶此參數**。
 
 - 使用 session key 或其他穩定 ID（不要用 source，source 是顯示用）
 - 同一個 bot 不同任務應有不同 trust_scope
@@ -104,46 +103,7 @@ Examples:
 
 ## Core Tools
 
-### bouncer_execute
-執行 AWS CLI 命令。安全命令自動執行，危險命令需要 Telegram 審批。
-
-```bash
-mcporter call bouncer bouncer_execute \
-  command="aws ec2 describe-instances" \
-  reason="檢查 EC2 狀態" \
-  source="Private Bot (infra check)" \
-  trust_scope="private-bot-main"
-```
-
-**Parameters:**
-| 參數 | 必填 | 說明 |
-|------|------|------|
-| `command` | ✅ | AWS CLI 命令 |
-| `reason` | ✅ | 執行原因（顯示在審批通知） |
-| `source` | ✅ | 來源標識 |
-| `trust_scope` | ✅ | 穩定呼叫者 ID（session key） |
-| `account` | ❌ | 目標 AWS 帳號 ID（預設 190825685292） |
-| `sync` | ❌ | 同步模式（不推薦） |
-
-**Returns:**
-- `auto_approved` — 安全命令，已自動執行
-- `pending_approval` — 需要 Telegram 審批
-- `blocked` — 被封鎖（含 `block_reason` 和 `suggestion`）
-- `trust_auto_approved` — 信任期間自動執行
-
-**✅ v3.10.0 Telegram 審批按鈕（英文化 + Bot API 9.4 style）：**
-- `[✅ Approve]` (green) / `[❌ Reject]` (red) — 一般審批
-- `[🔓 Trust 10min]` (blue) — 建立信任時段
-- `[⏹ End Trust]` / `[🚫 Revoke Grant]` — 撤銷
-- `[⏰ expires_at]` — 顯示「5 分鐘後過期（UTC 14:35）」（UTC 絕對時間）
-
-**⚠️ Lambda 環境變數保護（B-LAMBDA-01）：**
-- `lambda update-function-configuration --environment Variables={}` → **BLOCKED**（空值覆寫保護）
-- `lambda update-function-configuration --environment Variables={...}` → **DANGEROUS**（帶值需審批，附警告）
-
-**✅ v3.13.0 DANGEROUS approve modal（#62）：**
-- DANGEROUS 命令批准時，Telegram callback 改用 `show_alert=True` modal alert，需二次確認才執行
-
+> ⚠️ **注意：** `bouncer_execute` 已於 v3.70 移除（v3.65 標記為 deprecated）。請使用 `bouncer_execute_native`。
 
 ### bouncer_execute_native
 執行 AWS API call（**boto3 native，不依賴 awscli**）。

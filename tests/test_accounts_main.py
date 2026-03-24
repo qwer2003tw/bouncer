@@ -121,28 +121,15 @@ class TestAccountValidationErrorPaths:
     
     def test_execute_invalid_account_id_format(self, app_module):
         """帳號 ID 格式錯誤"""
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0',
-                'id': 'test-1',
-                'method': 'tools/call',
-                'params': {
-                    'name': 'bouncer_execute',
-                    'arguments': {
-                        'command': 'aws s3 ls',
-                        'trust_scope': 'test-session',
-                        'account': 'invalid'  # 非 12 位數字 (注意：參數名是 account 不是 account_id)
-                    }
-                }
-            }),
-            'requestContext': {'http': {'method': 'POST'}}
-        }
-        
-        result = app_module.lambda_handler(event, None)
+        from mcp_execute import mcp_tool_execute
+
+        result = mcp_tool_execute('test-1', {
+            'command': 'aws s3 ls',
+            'trust_scope': 'test-session',
+            'account': 'invalid'  # 非 12 位數字 (注意：參數名是 account 不是 account_id)
+        })
         body = json.loads(result['body'])
-        
+
         assert 'result' in body
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'error'
@@ -151,31 +138,18 @@ class TestAccountValidationErrorPaths:
     
     def test_execute_account_not_configured(self, app_module):
         """帳號未配置"""
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0',
-                'id': 'test-1',
-                'method': 'tools/call',
-                'params': {
-                    'name': 'bouncer_execute',
-                    'arguments': {
-                        'command': 'aws s3 ls',
-                        'trust_scope': 'test-session',
-                        'account': '999999999999'  # 不存在的帳號
-                    }
-                }
-            }),
-            'requestContext': {'http': {'method': 'POST'}}
-        }
-        
+        from mcp_execute import mcp_tool_execute
+
         # Mock get_account 返回 None
         with patch('accounts.get_account', return_value=None), \
              patch.object(app_module, 'list_accounts', return_value=[{'account_id': '123456789012'}]):
-            result = app_module.lambda_handler(event, None)
+            result = mcp_tool_execute('test-1', {
+                'command': 'aws s3 ls',
+                'trust_scope': 'test-session',
+                'account': '999999999999'  # 不存在的帳號
+            })
             body = json.loads(result['body'])
-            
+
             assert 'result' in body
             content = json.loads(body['result']['content'][0]['text'])
             assert content['status'] == 'error'
@@ -185,36 +159,22 @@ class TestAccountValidationErrorPaths:
     
     def test_execute_account_disabled(self, app_module):
         """帳號已停用"""
-        import mcp_tools
+        from mcp_execute import mcp_tool_execute
         import mcp_execute
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0',
-                'id': 'test-1',
-                'method': 'tools/call',
-                'params': {
-                    'name': 'bouncer_execute',
-                    'arguments': {
-                        'command': 'aws s3 ls',
-                        'trust_scope': 'test-session',
-                        'account': '123456789012'
-                    }
-                }
-            }),
-            'requestContext': {'http': {'method': 'POST'}}
-        }
-        
+
         # Mock get_account 返回停用的帳號
         with patch.object(mcp_execute, 'get_account', return_value={
             'account_id': '123456789012',
             'name': 'Test',
             'enabled': False
         }):
-            result = app_module.lambda_handler(event, None)
+            result = mcp_tool_execute('test-1', {
+                'command': 'aws s3 ls',
+                'trust_scope': 'test-session',
+                'account': '123456789012'
+            })
             body = json.loads(result['body'])
-            
+
             assert 'result' in body
             content = json.loads(body['result']['content'][0]['text'])
             assert content['status'] == 'error'
