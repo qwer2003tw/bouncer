@@ -176,7 +176,7 @@ class TestDisplaySummaryInItems:
             'headers': {'x-approval-secret': os.environ.get('REQUEST_SECRET', 'test-secret')},
             'body': json.dumps({
                 'jsonrpc': '2.0', 'id': 'ds-exec-1', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
+                'params': {'name': 'bouncer_execute_native', 'arguments': {
                     'command': 'aws s3 cp local.txt s3://my-bucket/file.txt',
                     'trust_scope': 'test-session',
                     'reason': 'test display summary',

@@ -901,7 +901,7 @@ class TestOrphanApprovalCleanup:
                 'id': 900,
                 'method': 'tools/call',
                 'params': {
-                    'name': 'bouncer_execute',
+                    'name': 'bouncer_execute_native',
                     'arguments': {
                         'command': 'aws ec2 start-instances --instance-ids i-p1-1a',
                         'trust_scope': 'test-scope',
@@ -939,7 +939,7 @@ class TestOrphanApprovalCleanup:
                 'id': 901,
                 'method': 'tools/call',
                 'params': {
-                    'name': 'bouncer_execute',
+                    'name': 'bouncer_execute_native',
                     'arguments': {
                         'command': 'aws ec2 stop-instances --instance-ids i-p1-1b',
                         'trust_scope': 'test-scope',
@@ -983,7 +983,7 @@ class TestOrphanApprovalCleanup:
                 'id': 902,
                 'method': 'tools/call',
                 'params': {
-                    'name': 'bouncer_execute',
+                    'name': 'bouncer_execute_native',
                     'arguments': {
                         'command': 'aws ec2 reboot-instances --instance-ids i-p1-1c',
                         'trust_scope': 'test-scope',

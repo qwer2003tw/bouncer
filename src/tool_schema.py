@@ -4,62 +4,6 @@ Bouncer - MCP Tool Schema 定義
 """
 
 MCP_TOOLS = {
-    'bouncer_execute': {
-        'description': (
-            '⚠️ [計劃棄用] 建議改用 bouncer_execute_native（boto3 native，無 awscli 依賴）。'
-            '棄用時程：v3.67 標記為 deprecated，v3.70 移除。\n\n'
-            '執行 AWS CLI 命令。安全命令自動執行，危險命令需要 Telegram 審批。'
-            '預設異步返回 request_id，用 bouncer_status 查詢結果。'
-        ),
-        'parameters': {
-            'type': 'object',
-            'properties': {
-                'command': {
-                    'type': 'string',
-                    'description': 'AWS CLI 命令（例如：aws ec2 describe-instances）'
-                },
-                'account': {
-                    'type': 'string',
-                    'description': '目標 AWS 帳號 ID（12 位數字），不填則使用預設帳號'
-                },
-                'reason': {
-                    'type': 'string',
-                    'description': '執行原因（用於審批記錄）',
-                    'default': 'No reason provided'
-                },
-                'source': {
-                    'type': 'string',
-                    'description': '請求來源描述（顯示用，例如：Private Bot (Bouncer 部署)）'
-                },
-                'trust_scope': {
-                    'type': 'string',
-                    'description': '信任範圍識別符（必填，用於 Trust Session 匹配。使用 session key 或穩定 ID，不要用任務描述）'
-                },
-                'context': {
-                    'type': 'string',
-                    'description': '任務上下文說明（例如：清除 bouncer deploy lock，準備部署 schema 修復）'
-                },
-                'sync': {
-                    'type': 'boolean',
-                    'description': '同步模式：等待審批結果（可能超時），預設 false',
-                    'default': False
-                },
-                'grant_id': {
-                    'type': 'string',
-                    'description': 'Grant Session ID（如果有有效的 grant session，命令將自動執行）'
-                },
-                'cli_input_json': {
-                    'type': 'object',
-                    'description': (
-                        '可選。將此 dict 寫入 tempfile 並以 --cli-input-json file:// 傳入 AWS CLI。'
-                        '用於含特殊字元（中文、換行、巢狀引號）的 JSON 值，完全繞過 shell 引號問題。'
-                        '格式：AWS CLI --cli-input-json 接受的完整請求 JSON object。'
-                    )
-                }
-            },
-            'required': ['command', 'trust_scope']
-        }
-    },
     'bouncer_execute_native': {
         'description': '使用 boto3 native API 執行 AWS 操作，完全不依賴 awscli。與 bouncer_execute 相同的安全管道（compliance、blocked、trust、approval），但執行層直接呼叫 boto3。',
         'parameters': {

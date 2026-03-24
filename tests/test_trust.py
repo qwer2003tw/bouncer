@@ -276,7 +276,7 @@ class TestTrustAutoApprove:
                     'id': 'test-1',
                     'method': 'tools/call',
                     'params': {
-                        'name': 'bouncer_execute',
+                        'name': 'bouncer_execute_native',
                         'arguments': {
                             'command': 'aws s3 cp file.txt s3://bucket/',
                             'trust_scope': source,

@@ -37,48 +37,6 @@ VERSION = '2.0.0'
 
 TOOLS = [
     {
-        'name': 'bouncer_execute',
-        'description': '執行 AWS CLI 命令。安全命令自動執行，危險命令需要 Telegram 審批。預設異步返回 request_id，用 bouncer_status 查詢結果。',
-        'inputSchema': {
-            'type': 'object',
-            'properties': {
-                'command': {
-                    'type': 'string',
-                    'description': 'AWS CLI 命令（例如：aws ec2 describe-instances）'
-                },
-                'reason': {
-                    'type': 'string',
-                    'description': '執行原因，會顯示在審批請求中，讓審批者了解用途'
-                },
-                'source': {
-                    'type': 'string',
-                    'description': '來源描述（例如：Private Bot (Bouncer 部署)）'
-                },
-                'trust_scope': {
-                    'type': 'string',
-                    'description': '信任範圍識別符（必填，用於 Trust Session 匹配。使用 session key 或穩定 ID）'
-                },
-                'account': {
-                    'type': 'string',
-                    'description': '目標 AWS 帳號 ID（12 位數字），不填則使用預設帳號'
-                },
-                'sync': {
-                    'type': 'boolean',
-                    'description': '同步模式：等待審批結果（可能超時），預設 false'
-                },
-                'grant_id': {
-                    'type': 'string',
-                    'description': 'Grant Session ID — 帶此參數時，命令在授權清單內會自動執行'
-                },
-                'cli_input_json': {
-                    'type': 'object',
-                    'description': '可選。將此 dict 寫入 tempfile 並以 --cli-input-json file:// 傳入 AWS CLI。用於含特殊字元（中文、換行、巢狀引號）的 JSON 值，完全繞過 shell 引號問題'
-                }
-            },
-            'required': ['command', 'reason', 'trust_scope']
-        }
-    },
-    {
         'name': 'bouncer_eks_get_token',
         'description': '生成 kubectl EKS 認證 token（k8s-aws-v1.* 格式）。等同於 aws eks get-token，但不需要 awscli binary。',
         'inputSchema': {
@@ -694,72 +652,6 @@ def http_request(method: str, path: str, data: dict = None) -> dict:
 # ============================================================================
 # Tool 實作
 # ============================================================================
-
-def tool_execute(arguments: dict) -> dict:
-    """執行 AWS 命令，等待審批（立即返回，不做本地輪詢）"""
-    command = str(arguments.get('command', '')).strip()
-    reason = str(arguments.get('reason', 'No reason provided'))
-    source = arguments.get('source', 'OpenClaw Agent')
-    trust_scope = str(arguments.get('trust_scope', '')).strip()
-    account = arguments.get('account', None)
-    if account:
-        account = str(account).strip()
-    timeout = int(arguments.get('timeout', DEFAULT_TIMEOUT))
-
-    if not command:
-        return {'error': 'Missing required parameter: command'}
-
-    if not trust_scope:
-        return {'error': 'Missing required parameter: trust_scope (use session key or stable ID)'}
-
-    if not SECRET:
-        return {'error': 'BOUNCER_SECRET not configured'}
-
-    # Lambda 預設異步返回
-    mcp_args = {
-        'command': command,
-        'reason': reason,
-        'source': source,
-        'trust_scope': trust_scope,
-        'timeout': timeout,
-        'async': True  # 關鍵：讓 Lambda 不等待，立即返回
-    }
-    if account:
-        mcp_args['account'] = account
-    if arguments.get('grant_id'):
-        mcp_args['grant_id'] = arguments['grant_id']
-    if arguments.get('cli_input_json'):
-        mcp_args['cli_input_json'] = arguments['cli_input_json']
-
-    payload = {
-        'jsonrpc': '2.0',
-        'id': 'execute',
-        'method': 'tools/call',
-        'params': {
-            'name': 'bouncer_execute',
-            'arguments': mcp_args
-        }
-    }
-
-    result = http_request('POST', '/mcp', payload)
-
-    # 解析 MCP 回應
-    inner_result = None
-    if 'result' in result:
-        content = result['result'].get('content', [])
-        if content and content[0].get('type') == 'text':
-            try:
-                inner_result = json.loads(content[0]['text'])
-            except Exception:
-                return result
-
-    if not inner_result:
-        return result
-
-    # 直接返回結果（不做本地輪詢，避免 block stdio）
-    # Agent 需要自己用 bouncer_status 輪詢
-    return inner_result
-
 
 def tool_status(arguments: dict) -> dict:
     """查詢請求狀態"""
@@ -1429,9 +1321,7 @@ def handle_request(request: dict) -> dict:
         except Exception:  # noqa: BLE001 — metrics are best-effort, never block tool execution
             pass
 
-        if tool_name == 'bouncer_execute':
-            result = tool_execute(arguments)
-        elif tool_name == 'bouncer_eks_get_token':
+        if tool_name == 'bouncer_eks_get_token':
             result = tool_eks_get_token(arguments)
         elif tool_name == 'bouncer_execute_native':
             result = tool_execute_native(arguments)

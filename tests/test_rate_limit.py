@@ -72,7 +72,7 @@ class TestRateLimitErrors:
                 'id': 'test-1',
                 'method': 'tools/call',
                 'params': {
-                    'name': 'bouncer_execute',
+                    'name': 'bouncer_execute_native',
                     'arguments': {
                         'command': 'aws ec2 start-instances --instance-ids i-123',
                         'trust_scope': 'test-session',
@@ -104,7 +104,7 @@ class TestRateLimitErrors:
                 'id': 'test-1',
                 'method': 'tools/call',
                 'params': {
-                    'name': 'bouncer_execute',
+                    'name': 'bouncer_execute_native',
                     'arguments': {
                         'command': 'aws ec2 start-instances --instance-ids i-123',
                         'trust_scope': 'test-session',

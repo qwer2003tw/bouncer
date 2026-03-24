@@ -128,7 +128,7 @@ class TestIntegration:
                     'id': 2,
                     'method': 'tools/call',
                     'params': {
-                        'name': 'bouncer_execute',
+                        'name': 'bouncer_execute_native',
                         'arguments': {
                             'command': 'aws sts get-caller-identity',
                             'trust_scope': 'test-session',
@@ -519,7 +519,7 @@ class TestAppModuleMore:
                     'id': 'test',
                     'method': 'tools/call',
                     'params': {
-                        'name': 'bouncer_execute',
+                        'name': 'bouncer_execute_native',
                         'arguments': {
                             'command': 'aws logs get-log-events --log-group-name test --log-stream-name test-stream',
                             'trust_scope': 'test-session',
@@ -691,7 +691,7 @@ class TestCoverage80Sprint:
                     'id': 'test',
                     'method': 'tools/call',
                     'params': {
-                        'name': 'bouncer_execute',
+                        'name': 'bouncer_execute_native',
                         'arguments': {
                             'command': 'aws s3 ls',
                             'trust_scope': 'test-session',
@@ -753,7 +753,7 @@ class TestCoverage80Sprint:
         
         # 驗證所有主要工具都存在
         expected_tools = [
-            'bouncer_execute',
+            'bouncer_execute_native',
             'bouncer_status',
             'bouncer_list_safelist',
             'bouncer_list_accounts',

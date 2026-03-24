@@ -96,7 +96,7 @@ class TestMCPToolsList:
         tools = body['result']['tools']
         tool_names = [t['name'] for t in tools]
         
-        assert 'bouncer_execute' in tool_names
+        assert 'bouncer_execute_native' in tool_names
         assert 'bouncer_status' in tool_names
         assert 'bouncer_list_safelist' in tool_names
 
@@ -118,7 +118,7 @@ class TestMCPExecuteSafelist:
                     'id': 3,
                     'method': 'tools/call',
                     'params': {
-                        'name': 'bouncer_execute',
+                        'name': 'bouncer_execute_native',
                         'arguments': {
                             'command': 'aws ec2 describe-instances',
                             'trust_scope': 'test-session',
@@ -152,7 +152,7 @@ class TestMCPExecuteApproval:
                 'id': 5,
                 'method': 'tools/call',
                 'params': {
-                    'name': 'bouncer_execute',
+                    'name': 'bouncer_execute_native',
                     'arguments': {
                         'command': 'aws ec2 start-instances --instance-ids i-123',
                         'trust_scope': 'test-session',
@@ -401,8 +401,8 @@ class TestMCPToolCallRouting:
     def test_handle_mcp_tool_call_execute(self, app_module):
         """bouncer_execute 路由"""
         mock_handler = MagicMock(return_value={'test': 'result'})
-        with patch.dict(app_module.TOOL_HANDLERS, {'bouncer_execute': mock_handler}):
-            result = app_module.handle_mcp_tool_call('req-1', 'bouncer_execute', {'command': 'aws s3 ls'})
+        with patch.dict(app_module.TOOL_HANDLERS, {'bouncer_execute_native': mock_handler}):
+            result = app_module.handle_mcp_tool_call('req-1', 'bouncer_execute_native', {'command': 'aws s3 ls'})
             assert result == {'test': 'result'}
     
     def test_handle_mcp_tool_call_status(self, app_module):
@@ -890,7 +890,7 @@ class TestSyncModeExecute:
                 'id': 100,
                 'method': 'tools/call',
                 'params': {
-                    'name': 'bouncer_execute',
+                    'name': 'bouncer_execute_native',
                     'arguments': {
                         'command': 'aws ec2 describe-instances',
                         'trust_scope': 'test-session',
@@ -919,7 +919,7 @@ class TestSyncModeExecute:
                 'id': 101,
                 'method': 'tools/call',
                 'params': {
-                    'name': 'bouncer_execute',
+                    'name': 'bouncer_execute_native',
                     'arguments': {
                         'command': 'aws ec2 start-instances --instance-ids i-123',
                         'trust_scope': 'test-session',
@@ -975,7 +975,7 @@ class TestCrossAccountExecuteFlow:
                 'id': 200,
                 'method': 'tools/call',
                 'params': {
-                    'name': 'bouncer_execute',
+                    'name': 'bouncer_execute_native',
                     'arguments': {
                         'command': 'aws sts get-caller-identity',
                         'trust_scope': 'test-session',
@@ -1011,7 +1011,7 @@ class TestCrossAccountExecuteFlow:
                 'id': 201,
                 'method': 'tools/call',
                 'params': {
-                    'name': 'bouncer_execute',
+                    'name': 'bouncer_execute_native',
                     'arguments': {
                         'command': 'aws s3 ls',
                         'trust_scope': 'test-session',
@@ -1052,7 +1052,7 @@ class TestCrossAccountExecuteFlow:
                 'id': 202,
                 'method': 'tools/call',
                 'params': {
-                    'name': 'bouncer_execute',
+                    'name': 'bouncer_execute_native',
                     'arguments': {
                         'command': 'aws sts get-caller-identity',
                         'trust_scope': 'test-session',
@@ -1087,7 +1087,7 @@ class TestSyncAsyncMode:
             'headers': {'x-approval-secret': os.environ.get('REQUEST_SECRET', 'test-secret')},
             'body': json.dumps({
                 'jsonrpc': '2.0', 'id': 'async-test', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
+                'params': {'name': 'bouncer_execute_native', 'arguments': {
                     'command': 'aws ec2 start-instances --instance-ids i-123',
                     'trust_scope': 'test-session',
                     'reason': 'test async', 'source': 'test-bot'
@@ -1112,7 +1112,7 @@ class TestCrossAccountExecuteErrors:
             'headers': {'x-approval-secret': os.environ.get('REQUEST_SECRET', 'test-secret')},
             'body': json.dumps({
                 'jsonrpc': '2.0', 'id': 'bad-acct', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
+                'params': {'name': 'bouncer_execute_native', 'arguments': {
                     'command': 'aws s3 ls',
                     'trust_scope': 'test-session',
                     'reason': 'test', 'source': 'test-bot',
@@ -1134,7 +1134,7 @@ class TestCrossAccountExecuteErrors:
             'headers': {'x-approval-secret': os.environ.get('REQUEST_SECRET', 'test-secret')},
             'body': json.dumps({
                 'jsonrpc': '2.0', 'id': 'bad-format', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
+                'params': {'name': 'bouncer_execute_native', 'arguments': {
                     'command': 'aws s3 ls',
                     'trust_scope': 'test-session',
                     'reason': 'test', 'source': 'test-bot',
@@ -1621,7 +1621,7 @@ class TestMCPRateLimitPaths:
             'headers': {'x-approval-secret': 'test-secret'},
             'body': json.dumps({
                 'jsonrpc': '2.0', 'id': 'rate-test', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
+                'params': {'name': 'bouncer_execute_native', 'arguments': {
                     'command': 'aws ec2 stop-instances --instance-ids i-abc',
                     'trust_scope': 'test-session',
                     'reason': 'test pending limit',
@@ -1647,7 +1647,7 @@ class TestMCPRateLimitPaths:
             'headers': {'x-approval-secret': 'test-secret'},
             'body': json.dumps({
                 'jsonrpc': '2.0', 'id': 'rate-test2', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
+                'params': {'name': 'bouncer_execute_native', 'arguments': {
                     'command': 'aws ec2 stop-instances --instance-ids i-xyz',
                     'trust_scope': 'test-session',
                     'reason': 'test rate limit',
@@ -1698,7 +1698,7 @@ class TestMCPCompliancePaths:
             'headers': {'x-approval-secret': 'test-secret'},
             'body': json.dumps({
                 'jsonrpc': '2.0', 'id': 'compliance-test', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
+                'params': {'name': 'bouncer_execute_native', 'arguments': {
                     'command': 'aws iam delete-user --user-name bad-user',
                     'trust_scope': 'test-session',
                     'reason': 'compliance test',
@@ -1719,7 +1719,7 @@ class TestMCPCompliancePaths:
             'headers': {'x-approval-secret': 'test-secret'},
             'body': json.dumps({
                 'jsonrpc': '2.0', 'id': 'no-cmd', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
+                'params': {'name': 'bouncer_execute_native', 'arguments': {
                     'trust_scope': 'test-session',
                     'reason': 'test',
                     # command missing
@@ -1739,7 +1739,7 @@ class TestMCPCompliancePaths:
             'headers': {'x-approval-secret': 'test-secret'},
             'body': json.dumps({
                 'jsonrpc': '2.0', 'id': 'no-trust', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
+                'params': {'name': 'bouncer_execute_native', 'arguments': {
                     'command': 'aws s3 ls',
                     'reason': 'test',
                     # trust_scope missing
@@ -1787,7 +1787,7 @@ class TestMCPBlockedPath:
             'headers': {'x-approval-secret': 'test-secret'},
             'body': json.dumps({
                 'jsonrpc': '2.0', 'id': 'blocked-test', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
+                'params': {'name': 'bouncer_execute_native', 'arguments': {
                     'command': 'aws iam delete-role --role-name bad-role',
                     'trust_scope': 'test-session',
                     'reason': 'blocked test',
@@ -1831,7 +1831,7 @@ class TestMCPTemplateScanEscalate:
             'headers': {'x-approval-secret': 'test-secret'},
             'body': json.dumps({
                 'jsonrpc': '2.0', 'id': 'escalate-test', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
+                'params': {'name': 'bouncer_execute_native', 'arguments': {
                     'command': 'aws s3 cp s3://bucket/dangerous.json .',
                     'trust_scope': 'test-session',
                     'reason': 'template escalate test',
@@ -1872,7 +1872,7 @@ class TestMCPDisabledAccount:
             'headers': {'x-approval-secret': 'test-secret'},
             'body': json.dumps({
                 'jsonrpc': '2.0', 'id': 'disabled-acct', 'method': 'tools/call',
-                'params': {'name': 'bouncer_execute', 'arguments': {
+                'params': {'name': 'bouncer_execute_native', 'arguments': {
                     'command': 'aws s3 ls',
                     'trust_scope': 'test-session',
                     'reason': 'test',
@@ -2017,7 +2017,7 @@ def _make_execute_event(command: str, **kwargs) -> dict:
             'jsonrpc': '2.0',
             'id': 'chain-test',
             'method': 'tools/call',
-            'params': {'name': 'bouncer_execute', 'arguments': args},
+            'params': {'name': 'bouncer_execute_native', 'arguments': args},
         }),
         'requestContext': {'http': {'method': 'POST'}},
     }

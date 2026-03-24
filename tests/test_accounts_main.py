@@ -129,7 +129,7 @@ class TestAccountValidationErrorPaths:
                 'id': 'test-1',
                 'method': 'tools/call',
                 'params': {
-                    'name': 'bouncer_execute',
+                    'name': 'bouncer_execute_native',
                     'arguments': {
                         'command': 'aws s3 ls',
                         'trust_scope': 'test-session',
@@ -159,7 +159,7 @@ class TestAccountValidationErrorPaths:
                 'id': 'test-1',
                 'method': 'tools/call',
                 'params': {
-                    'name': 'bouncer_execute',
+                    'name': 'bouncer_execute_native',
                     'arguments': {
                         'command': 'aws s3 ls',
                         'trust_scope': 'test-session',
@@ -195,7 +195,7 @@ class TestAccountValidationErrorPaths:
                 'id': 'test-1',
                 'method': 'tools/call',
                 'params': {
-                    'name': 'bouncer_execute',
+                    'name': 'bouncer_execute_native',
                     'arguments': {
                         'command': 'aws s3 ls',
                         'trust_scope': 'test-session',

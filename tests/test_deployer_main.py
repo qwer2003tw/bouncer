@@ -27,7 +27,7 @@ class TestMCPExecuteBlocked:
                 'id': 4,
                 'method': 'tools/call',
                 'params': {
-                    'name': 'bouncer_execute',
+                    'name': 'bouncer_execute_native',
                     'arguments': {
                         'command': 'aws iam create-user --user-name hacker',
                         'trust_scope': 'test-session',
@@ -113,7 +113,7 @@ class TestBlockedCommandPath:
                 'id': 'test-1',
                 'method': 'tools/call',
                 'params': {
-                    'name': 'bouncer_execute',
+                    'name': 'bouncer_execute_native',
                     'arguments': {
                         'command': 'aws iam create-access-key --user-name admin',
                         'trust_scope': 'test-session',
@@ -140,7 +140,7 @@ class TestBlockedCommandPath:
                 'id': 'test-1',
                 'method': 'tools/call',
                 'params': {
-                    'name': 'bouncer_execute',
+                    'name': 'bouncer_execute_native',
                     'arguments': {
                         'command': 'aws sts assume-role --role-arn arn:aws:iam::123456789012:role/Admin',
                         'trust_scope': 'test-session',
@@ -700,7 +700,7 @@ class TestBlockedCommands:
                 'id': 'test-1',
                 'method': 'tools/call',
                 'params': {
-                    'name': 'bouncer_execute',
+                    'name': 'bouncer_execute_native',
                     'arguments': {
                         'command': 'aws iam create-user --user-name hacker',
                         'trust_scope': 'test-session',
@@ -725,7 +725,7 @@ class TestBlockedCommands:
                 'id': 'test-1',
                 'method': 'tools/call',
                 'params': {
-                    'name': 'bouncer_execute',
+                    'name': 'bouncer_execute_native',
                     'arguments': {
                         'command': 'aws sts assume-role --role-arn arn:aws:iam::123:role/Admin',
                         'trust_scope': 'test-session',

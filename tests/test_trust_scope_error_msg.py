@@ -18,7 +18,7 @@ class TestTrustScopeMissingErrorMessage:
                 'id': 1,
                 'method': 'tools/call',
                 'params': {
-                    'name': 'bouncer_execute',
+                    'name': 'bouncer_execute_native',
                     'arguments': arguments,
                 },
             }),
