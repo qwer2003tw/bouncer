@@ -19,27 +19,14 @@ class TestMCPExecuteBlocked:
     
     def test_execute_blocked_command(self, app_module):
         """測試被封鎖的命令"""
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0',
-                'id': 4,
-                'method': 'tools/call',
-                'params': {
-                    'name': 'bouncer_execute_native',
-                    'arguments': {
-                        'command': 'aws iam create-user --user-name hacker',
-                        'trust_scope': 'test-session',
-                    }
-                }
-            }),
-            'requestContext': {'http': {'method': 'POST'}}
-        }
-        
-        result = app_module.lambda_handler(event, None)
+        from mcp_execute import mcp_tool_execute
+
+        result = mcp_tool_execute('test', {
+            'command': 'aws iam create-user --user-name hacker',
+            'trust_scope': 'test-session',
+        })
         body = json.loads(result['body'])
-        
+
         assert 'result' in body
         assert body['result']['isError'] == True
         content = json.loads(body['result']['content'][0]['text'])
@@ -105,54 +92,28 @@ class TestBlockedCommandPath:
     
     def test_blocked_command_returns_error(self, app_module):
         """BLOCKED 命令應返回 isError"""
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0',
-                'id': 'test-1',
-                'method': 'tools/call',
-                'params': {
-                    'name': 'bouncer_execute_native',
-                    'arguments': {
-                        'command': 'aws iam create-access-key --user-name admin',
-                        'trust_scope': 'test-session',
-                    }
-                }
-            }),
-            'requestContext': {'http': {'method': 'POST'}}
-        }
-        
-        result = app_module.lambda_handler(event, None)
+        from mcp_execute import mcp_tool_execute
+
+        result = mcp_tool_execute('test-1', {
+            'command': 'aws iam create-access-key --user-name admin',
+            'trust_scope': 'test-session',
+        })
         body = json.loads(result['body'])
-        
+
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'blocked'
         assert body['result']['isError'] == True
     
     def test_blocked_assume_role(self, app_module):
         """sts assume-role 應該被封鎖"""
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0',
-                'id': 'test-1',
-                'method': 'tools/call',
-                'params': {
-                    'name': 'bouncer_execute_native',
-                    'arguments': {
-                        'command': 'aws sts assume-role --role-arn arn:aws:iam::123456789012:role/Admin',
-                        'trust_scope': 'test-session',
-                    }
-                }
-            }),
-            'requestContext': {'http': {'method': 'POST'}}
-        }
-        
-        result = app_module.lambda_handler(event, None)
+        from mcp_execute import mcp_tool_execute
+
+        result = mcp_tool_execute('test-1', {
+            'command': 'aws sts assume-role --role-arn arn:aws:iam::123456789012:role/Admin',
+            'trust_scope': 'test-session',
+        })
         body = json.loads(result['body'])
-        
+
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'blocked'
 
@@ -692,50 +653,24 @@ class TestBlockedCommands:
     
     def test_blocked_iam_create_user(self, app_module):
         """iam create-user 應該被封鎖"""
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0',
-                'id': 'test-1',
-                'method': 'tools/call',
-                'params': {
-                    'name': 'bouncer_execute_native',
-                    'arguments': {
-                        'command': 'aws iam create-user --user-name hacker',
-                        'trust_scope': 'test-session',
-                    }
-                }
-            }),
-            'requestContext': {'http': {'method': 'POST'}}
-        }
-        
-        result = app_module.lambda_handler(event, None)
+        from mcp_execute import mcp_tool_execute
+
+        result = mcp_tool_execute('test-1', {
+            'command': 'aws iam create-user --user-name hacker',
+            'trust_scope': 'test-session',
+        })
         body = json.loads(result['body'])
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'blocked'
     
     def test_blocked_sts_assume_role(self, app_module):
         """sts assume-role 應該被封鎖"""
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0',
-                'id': 'test-1',
-                'method': 'tools/call',
-                'params': {
-                    'name': 'bouncer_execute_native',
-                    'arguments': {
-                        'command': 'aws sts assume-role --role-arn arn:aws:iam::123:role/Admin',
-                        'trust_scope': 'test-session',
-                    }
-                }
-            }),
-            'requestContext': {'http': {'method': 'POST'}}
-        }
-        
-        result = app_module.lambda_handler(event, None)
+        from mcp_execute import mcp_tool_execute
+
+        result = mcp_tool_execute('test-1', {
+            'command': 'aws sts assume-role --role-arn arn:aws:iam::123:role/Admin',
+            'trust_scope': 'test-session',
+        })
         body = json.loads(result['body'])
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'blocked'

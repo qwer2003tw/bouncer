@@ -268,26 +268,8 @@ class TestTrustAutoApprove:
         
         # 執行命令（應該被自動批准）
         with patch.object(mcp_execute, 'execute_command', return_value='{"result": "ok"}'):
-            event = {
-                'rawPath': '/mcp',
-                'headers': {'x-approval-secret': 'test-secret'},
-                'body': json.dumps({
-                    'jsonrpc': '2.0',
-                    'id': 'test-1',
-                    'method': 'tools/call',
-                    'params': {
-                        'name': 'bouncer_execute_native',
-                        'arguments': {
-                            'command': 'aws s3 cp file.txt s3://bucket/',
-                            'trust_scope': source,
-                            'source': source,
-                            'account': account_id
-                        }
-                    }
-                }),
-                'requestContext': {'http': {'method': 'POST'}}
-            }
-            
+            from mcp_execute import mcp_tool_execute
+
             # Mock get_account 返回有效帳號
             with patch.object(mcp_execute, 'get_account', return_value={
                 'account_id': account_id,
@@ -295,7 +277,12 @@ class TestTrustAutoApprove:
                 'enabled': True,
                 'role_arn': None
             }):
-                result = app_module.lambda_handler(event, None)
+                result = mcp_tool_execute('test-1', {
+                    'command': 'aws s3 cp file.txt s3://bucket/',
+                    'trust_scope': source,
+                    'source': source,
+                    'account': account_id
+                })
                 body = json.loads(result['body'])
                 
                 content = json.loads(body['result']['content'][0]['text'])

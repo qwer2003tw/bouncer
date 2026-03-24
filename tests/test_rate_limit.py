@@ -62,65 +62,37 @@ class TestRateLimitErrors:
     
     def test_rate_limit_exceeded_error(self, app_module):
         """Rate limit 超過應返回錯誤"""
-        import mcp_tools
+        from mcp_execute import mcp_tool_execute
         import mcp_execute
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0',
-                'id': 'test-1',
-                'method': 'tools/call',
-                'params': {
-                    'name': 'bouncer_execute_native',
-                    'arguments': {
-                        'command': 'aws ec2 start-instances --instance-ids i-123',
-                        'trust_scope': 'test-session',
-                        'source': 'test-source'
-                    }
-                }
-            }),
-            'requestContext': {'http': {'method': 'POST'}}
-        }
-        
+
         # Mock check_rate_limit 拋出 RateLimitExceeded
-        with patch.object(mcp_execute, 'check_rate_limit', 
+        with patch.object(mcp_execute, 'check_rate_limit',
                           side_effect=mcp_execute.RateLimitExceeded('Rate limit exceeded')):
-            result = app_module.lambda_handler(event, None)
+            result = mcp_tool_execute('test-1', {
+                'command': 'aws ec2 start-instances --instance-ids i-123',
+                'trust_scope': 'test-session',
+                'source': 'test-source'
+            })
             body = json.loads(result['body'])
-            
+
             content = json.loads(body['result']['content'][0]['text'])
             assert content['status'] == 'rate_limited'
             assert body['result']['isError'] == True
     
     def test_pending_limit_exceeded_error(self, app_module):
         """Pending limit 超過應返回錯誤"""
-        import mcp_tools
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0',
-                'id': 'test-1',
-                'method': 'tools/call',
-                'params': {
-                    'name': 'bouncer_execute_native',
-                    'arguments': {
-                        'command': 'aws ec2 start-instances --instance-ids i-123',
-                        'trust_scope': 'test-session',
-                        'source': 'test-source'
-                    }
-                }
-            }),
-            'requestContext': {'http': {'method': 'POST'}}
-        }
-        
+        from mcp_execute import mcp_tool_execute
+
         # Mock check_rate_limit 拋出 PendingLimitExceeded
         with patch('mcp_execute.check_rate_limit',
                           side_effect=app_module.PendingLimitExceeded('Too many pending')):
-            result = app_module.lambda_handler(event, None)
+            result = mcp_tool_execute('test-1', {
+                'command': 'aws ec2 start-instances --instance-ids i-123',
+                'trust_scope': 'test-session',
+                'source': 'test-source'
+            })
             body = json.loads(result['body'])
-            
+
             content = json.loads(body['result']['content'][0]['text'])
             assert content['status'] == 'pending_limit_exceeded'
             assert 'hint' in content

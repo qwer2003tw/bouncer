@@ -10,21 +10,8 @@ class TestTrustScopeMissingErrorMessage:
     def _call_execute(self, arguments: dict, app_module) -> dict:
         """Call bouncer_execute via MCP JSON-RPC and return the parsed response."""
         import json as _json
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': _json.dumps({
-                'jsonrpc': '2.0',
-                'id': 1,
-                'method': 'tools/call',
-                'params': {
-                    'name': 'bouncer_execute_native',
-                    'arguments': arguments,
-                },
-            }),
-            'requestContext': {'http': {'method': 'POST'}},
-        }
-        result = app_module.lambda_handler(event, None)
+        from mcp_execute import mcp_tool_execute
+        result = mcp_tool_execute('test', arguments)
         return _json.loads(result['body'])
 
     def test_missing_trust_scope_returns_error(self, app_module):

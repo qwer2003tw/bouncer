@@ -891,28 +891,14 @@ class TestOrphanApprovalCleanup:
     @patch('telegram.send_telegram_message')
     def test_execute_telegram_success_ddb_has_record_returns_pending(self, mock_telegram, mock_dynamodb, app_module):
         """Telegram 成功 → DDB 有 record，回 pending_approval ✅"""
+        from mcp_execute import mcp_tool_execute
         mock_telegram.return_value = {'ok': True, 'result': {'message_id': 1}}
 
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0',
-                'id': 900,
-                'method': 'tools/call',
-                'params': {
-                    'name': 'bouncer_execute_native',
-                    'arguments': {
-                        'command': 'aws ec2 start-instances --instance-ids i-p1-1a',
-                        'trust_scope': 'test-scope',
-                        'reason': 'P1-1 regression success test',
-                    }
-                }
-            }),
-            'requestContext': {'http': {'method': 'POST'}}
-        }
-
-        result = app_module.lambda_handler(event, None)
+        result = mcp_tool_execute('900', {
+            'command': 'aws ec2 start-instances --instance-ids i-p1-1a',
+            'trust_scope': 'test-scope',
+            'reason': 'P1-1 regression success test',
+        })
         body = json.loads(result['body'])
         content = json.loads(body['result']['content'][0]['text'])
 
@@ -929,28 +915,14 @@ class TestOrphanApprovalCleanup:
     @patch('telegram.send_message_with_entities')
     def test_execute_telegram_failure_ddb_no_record_returns_error(self, mock_telegram, mock_dynamodb, app_module):
         """Telegram 失敗（empty response）→ DDB 無 record，回 error ✅"""
+        from mcp_execute import mcp_tool_execute
         mock_telegram.return_value = {}  # Telegram failure returns empty dict
 
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0',
-                'id': 901,
-                'method': 'tools/call',
-                'params': {
-                    'name': 'bouncer_execute_native',
-                    'arguments': {
-                        'command': 'aws ec2 stop-instances --instance-ids i-p1-1b',
-                        'trust_scope': 'test-scope',
-                        'reason': 'P1-1 regression failure test',
-                    }
-                }
-            }),
-            'requestContext': {'http': {'method': 'POST'}}
-        }
-
-        result = app_module.lambda_handler(event, None)
+        result = mcp_tool_execute('901', {
+            'command': 'aws ec2 stop-instances --instance-ids i-p1-1b',
+            'trust_scope': 'test-scope',
+            'reason': 'P1-1 regression failure test',
+        })
         body = json.loads(result['body'])
         content = json.loads(body['result']['content'][0]['text'])
 
@@ -973,28 +945,14 @@ class TestOrphanApprovalCleanup:
     @patch('telegram.send_message_with_entities')
     def test_execute_telegram_exception_ddb_no_record_returns_error(self, mock_telegram, mock_dynamodb, app_module):
         """Telegram 失敗（exception）→ DDB 無 record，回 error ✅"""
+        from mcp_execute import mcp_tool_execute
         mock_telegram.side_effect = Exception("Telegram connection refused")
 
-        event = {
-            'rawPath': '/mcp',
-            'headers': {'x-approval-secret': 'test-secret'},
-            'body': json.dumps({
-                'jsonrpc': '2.0',
-                'id': 902,
-                'method': 'tools/call',
-                'params': {
-                    'name': 'bouncer_execute_native',
-                    'arguments': {
-                        'command': 'aws ec2 reboot-instances --instance-ids i-p1-1c',
-                        'trust_scope': 'test-scope',
-                        'reason': 'P1-1 regression exception test',
-                    }
-                }
-            }),
-            'requestContext': {'http': {'method': 'POST'}}
-        }
-
-        result = app_module.lambda_handler(event, None)
+        result = mcp_tool_execute('902', {
+            'command': 'aws ec2 reboot-instances --instance-ids i-p1-1c',
+            'trust_scope': 'test-scope',
+            'reason': 'P1-1 regression exception test',
+        })
         body = json.loads(result['body'])
         content = json.loads(body['result']['content'][0]['text'])
 
