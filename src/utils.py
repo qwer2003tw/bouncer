@@ -284,7 +284,8 @@ def mcp_error(req_id, code: int, message: str) -> dict:
 def log_decision(table, request_id, command, reason, source, account_id,
                  decision_type, risk_score=None, risk_factors=None,
                  sequence_modifier=None, exit_code: Optional[int] = None,
-                 error_output: Optional[str] = None, **kwargs):
+                 error_output: Optional[str] = None, result: Optional[str] = None,
+                 **kwargs):
     """統一的決策記錄函數 — 記錄所有審批決策到 requests 表"""
     now = int(time.time())
     item = {
@@ -315,6 +316,9 @@ def log_decision(table, request_id, command, reason, source, account_id,
         if len(error_output) > 2000:
             error_output = error_output[:2000] + '[truncated]'
         item['error_output'] = error_output or '(no output)'
+    if result is not None:
+        # Store truncated result for bouncer_status retrieval
+        item['result'] = result[:4000] if len(result) > 4000 else result
     item.update({k: v for k, v in kwargs.items() if v is not None})
     try:
         table.put_item(Item=item)
