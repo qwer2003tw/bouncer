@@ -782,7 +782,12 @@ def _run_aws_subprocess(cli_args: list, env_override: dict = None, timeout: int 
     except _subprocess.TimeoutExpired:
         return 1, '', f'命令執行超時（{timeout}秒）'
     except FileNotFoundError:
-        return 1, '', '❌ aws CLI 未安裝或 Lambda Layer 未配置'
+        return 1, '', (
+            '❌ bouncer_execute 已停用（awscli 已從 Lambda 移除）。\n'
+            '請改用 bouncer_execute_native（boto3 native 格式）：\n'
+            '  mcporter call bouncer bouncer_execute_native --args \'{"aws":{"service":"...","operation":"...","params":{}},"bouncer":{"reason":"...","trust_scope":"...","source":"..."}}\'\n'
+            '詳見 README 或 TOOLS.md。'
+        )
 
 
 def _execute_locked(command: str, assume_role_arn: str = None,

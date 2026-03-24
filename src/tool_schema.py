@@ -527,7 +527,8 @@ MCP_TOOLS = {
             '使用流程：\n'
             '  Step 1: 呼叫此工具取得 presigned_url + s3_key\n'
             '  Step 2: curl -X PUT -H "Content-Type: {content_type}" --data-binary @{file} "{presigned_url}"\n'
-            '  Step 3: 確認上傳後，用 bouncer_execute s3 cp 從 staging 搬到目標 bucket（需審批）\n\n'
+            '  Step 3: 確認上傳後，用 bouncer_execute_native 從 staging 搬到目標 bucket（需審批）：\n'
+            '          {"aws":{"service":"s3","operation":"copy_object","params":{"CopySource":"staging-bucket/key","Bucket":"target","Key":"key"}},"bouncer":{...}}\n\n'
             '適用情境：單一大檔案（> 500KB）直傳。多檔請用 bouncer_request_presigned_batch。\n'
             '上傳目標固定為 staging bucket（bouncer-uploads-{DEFAULT_ACCOUNT_ID}），s3_key 格式：{date}/{request_id}/{filename}。'
         ),
@@ -572,9 +573,10 @@ MCP_TOOLS = {
             '  Step 1: 呼叫此工具，傳入 [{filename, content_type}, ...]\n'
             '  Step 2: 對每個回傳的 presigned_url 執行 PUT（可並行）\n'
             '          curl -X PUT -H "Content-Type: {type}" --data-binary @{file} "{url}"\n'
-            '  Step 3: 全部 PUT 完成後，用 bouncer_execute s3 cp 從 staging 搬到目標 bucket（需審批）\n'
-            '          aws s3 cp s3://staging/{batch_id}/ s3://target-bucket/ --recursive\n'
-            '  Step 4: 如需 CloudFront，用 bouncer_execute cloudfront create-invalidation（需審批）\n\n'
+            '  Step 3: 全部 PUT 完成後，用 bouncer_execute_native 從 staging 搬到目標 bucket（需審批）：\n'
+            '          對每個檔案執行 {"aws":{"service":"s3","operation":"copy_object","params":{"CopySource":"...","Bucket":"...","Key":"..."}},"bouncer":{...}}\n'
+            '  Step 4: 如需 CloudFront，用 bouncer_execute_native（需審批）：\n'
+            '          {"aws":{"service":"cloudfront","operation":"create_invalidation","params":{"DistributionId":"...","InvalidationBatch":{...}}},"bouncer":{...}}\n\n'
             '與 bouncer_upload_batch 的差異：本工具不經 Lambda，無 500KB 限制，支援任意大小檔案（推薦）。\n'
             'bouncer_upload_batch 已 deprecated，新專案請改用此工具。'
         ),
@@ -689,7 +691,8 @@ MCP_TOOLS = {
             '  Step 1: 呼叫 bouncer_request_presigned_batch 取得 batch_id + presigned URLs\n'
             '  Step 2: 對每個 URL 執行 PUT 上傳\n'
             '  Step 3: 呼叫 bouncer_confirm_upload 確認所有檔案都上傳成功\n'
-            '  Step 4: verified=true 後，再執行 bouncer_execute s3 cp 搬到目標 bucket\n\n'
+            '  Step 4: verified=true 後，再執行 bouncer_execute_native 搬到目標 bucket：\n'
+            '          {"aws":{"service":"s3","operation":"copy_object","params":{"CopySource":"...","Bucket":"...","Key":"..."}},"bouncer":{...}}\n\n'
             '一次最多 50 個檔案。'
         ),
         'parameters': {
