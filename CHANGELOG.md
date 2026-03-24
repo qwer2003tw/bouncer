@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.68.0] - 2026-03-24
+
+### Fixed
+- `src/callbacks_command.py` — `_auto_execute_pending_requests` now sets `ttl = now + RESULT_TTL` in DDB update; previously TTL was not updated causing records to display 1970-01-01 and never expire (s68 bouncer-bug-ttl-zero)
+- `src/commands.py` — `_run_aws_subprocess` returns clear migration error message with bouncer_execute_native example instead of generic "aws CLI not installed" (s68-001)
+- `src/tool_schema.py` — Updated presigned upload flow documentation to use `bouncer_execute_native` instead of deprecated `bouncer_execute`; added boto3 format examples (s68-002)
+
 ## [3.67.0] - 2026-03-23
 
 ### Added
