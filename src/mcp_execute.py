@@ -707,6 +707,7 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
         account_name=ctx.account_name,
         mode='mcp',
         command_status='failed' if is_failed else 'success',
+        result=paged.get('result') if paged else None,
     )
 
     # Record execution error to DDB if command failed (sprint9-001)
