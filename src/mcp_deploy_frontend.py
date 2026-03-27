@@ -24,7 +24,7 @@ from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
 from aws_clients import get_s3_client
 
-from constants import DEFAULT_ACCOUNT_ID, APPROVAL_TTL_BUFFER, UPLOAD_TIMEOUT
+from constants import DEFAULT_ACCOUNT_ID, APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER, UPLOAD_TIMEOUT
 from db import table, deployer_projects_table, deployer_history_table
 from notifications import send_deploy_frontend_notification
 from utils import generate_request_id, mcp_result, mcp_error
@@ -917,7 +917,7 @@ def mcp_tool_confirm_frontend_deploy(req_id: str, arguments: dict) -> dict:
         "staging_bucket": staging_bucket,
         "file_count": len(files_manifest),
         "created_at": now,
-        "ttl": now + APPROVAL_TTL_BUFFER,
+        "ttl": now + APPROVAL_TIMEOUT_DEFAULT + APPROVAL_TTL_BUFFER,
     }
 
     try:
