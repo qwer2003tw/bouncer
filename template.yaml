@@ -41,9 +41,19 @@ Parameters:
     Type: String
     Default: ""
     Description: 預設 AWS 帳號 ID（用於上傳桶等資源，部署時必須指定）
+  TrustedAccountIds:
+    Type: String
+    Default: ""
+    Description: 合規檢查信任帳號（逗號分隔，用於 template_scanner + compliance_checker）
+  SAMDeployerKMSKeyArn:
+    Type: String
+    Default: "arn:aws:kms:us-east-1:190825685292:key/5b26bc8c-34a1-4195-bcef-6122d0bcb224"
+    Description: SAM deployer artifacts bucket 的 KMS key ARN（新帳號部署時請替換為該帳號的 KMS key ARN，或留空以停用 KMS 授權）
 
 Conditions:
   HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, ""]]
+  HasDeployerKMSKey: !Not [!Equals [!Ref SAMDeployerKMSKeyArn, ""]]
+  HasTrustedAccountIds: !Not [!Equals [!Ref TrustedAccountIds, ""]]
 
 Globals:
   Function:
@@ -368,6 +378,10 @@ Resources:
           ENABLE_HMAC: !Ref EnableHmac
           MCP_MAX_WAIT: !Ref McpMaxWait
           DEFAULT_ACCOUNT_ID: !Ref DefaultAccountId
+          TRUSTED_ACCOUNT_IDS: !If
+            - HasTrustedAccountIds
+            - !Ref TrustedAccountIds
+            - !Ref DefaultAccountId
           # Deployer 相關
           PROJECTS_TABLE: bouncer-projects
           HISTORY_TABLE: bouncer-deploy-history
@@ -427,12 +441,7 @@ Resources:
                 - cloudformation:DescribeChangeSet
                 - cloudformation:DeleteChangeSet
                 - cloudformation:DescribeStacks
-              Resource:
-                - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/clawdbot-bouncer/*"
-                - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/bouncer-deployer/*"
-                - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/ztp-files-dev/*"
-                - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/bouncer-dev/*"
-                # Add new projects here when onboarding
+              Resource: !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/*"
             # SEC-004b: Allow Lambda to generate presigned URLs and write audit metadata for staging bucket
             - Sid: StagingBucketPresignedAccess
               Effect: Allow
@@ -448,12 +457,15 @@ Resources:
                 - s3:GetObject
               Resource: !Sub "arn:aws:s3:::sam-deployer-artifacts-${DefaultAccountId}/*"
             # sprint33: KMS decrypt for SAM deployer artifacts bucket encryption key (#118)
-            - Sid: SAMDeployerKMSDecrypt
-              Effect: Allow
-              Action:
-                - kms:Decrypt
-                - kms:GenerateDataKey
-              Resource: "arn:aws:kms:us-east-1:190825685292:key/5b26bc8c-34a1-4195-bcef-6122d0bcb224"
+            - !If
+              - HasDeployerKMSKey
+              - Sid: SAMDeployerKMSDecrypt
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource: !Ref SAMDeployerKMSKeyArn
+              - !Ref "AWS::NoValue"
             # sprint7-002: Allow Lambda to manage expiry schedules in EventBridge Scheduler
             - Sid: SchedulerManageExpiry
               Effect: Allow
