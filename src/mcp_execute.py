@@ -1111,7 +1111,7 @@ def mcp_tool_execute_native(req_id: str, arguments: dict) -> dict:
         "service": "eks",
         "operation": "create_cluster",
         "region": "us-east-1",
-        "account": "992382394211",
+        "account": "123456789012",
         "params": {...}
       },
       "bouncer": {

@@ -25,7 +25,7 @@ Named placeholder 語意：
 *  匹配任意非空白字元序列（不含空格）。
 
 範例：
-  aws s3 cp s3://bouncer-uploads-190825685292/{date}/{uuid}/*.html \\
+  aws s3 cp s3://bouncer-uploads-123456789012/{date}/{uuid}/*.html \\
       s3://ztp-files-dev-frontendbucket-nvvimv31xp3v/*.html
 """
 import json
