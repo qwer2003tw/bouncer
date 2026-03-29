@@ -21,6 +21,7 @@ Check IDs:
 """
 
 import json
+import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -51,12 +52,10 @@ TARGET_PARAMETERS = [
     '--environment',
 ]
 
-# 已知 AWS 帳號 (TP-004 排除清單)
-KNOWN_ACCOUNT_IDS = {
-    '190825685292',  # Default/2nd
-    '992382394211',  # Dev
-    '841882238387',  # 1st
-}
+# 已知 AWS 帳號 (TP-004 排除清單) — 從環境變數載入
+# TRUSTED_ACCOUNT_IDS: 逗號分隔的帳號清單，由 SAM template 注入
+_trusted_ids_raw = os.environ.get('TRUSTED_ACCOUNT_IDS', '')
+KNOWN_ACCOUNT_IDS = {aid.strip() for aid in _trusted_ids_raw.split(',') if aid.strip()}
 
 # 高危端口 (TP-006)
 HIGH_RISK_PORTS = {22, 3389, 3306, 1433, 5432, 27017}

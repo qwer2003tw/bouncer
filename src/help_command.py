@@ -34,7 +34,7 @@ _BOUNCER_BUILTIN_HELP: dict[str, dict] = {
             "# Step 3: 申請 grant session\n"
             "mcporter call bouncer bouncer_request_grant \\\n"
             "  commands='[\"aws s3 cp ...\",\"aws lambda update-function-code ...\"]' \\\n"
-            "  reason='部署 app' source='Bot' account_id='190825685292'\n\n"
+            "  reason='部署 app' source='Bot' account_id='123456789012'\n\n"
             "# Step 4: 在 grant 下執行命令\n"
             "mcporter call bouncer bouncer_grant_execute \\\n"
             "  grant_id='<grant_id>' \\\n"

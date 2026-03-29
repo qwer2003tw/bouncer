@@ -378,8 +378,8 @@ AUTO_APPROVE_PREFIXES = [
     # CloudFront
     'aws cloudfront get-',
     'aws cloudfront list-',
-    # CloudFront invalidation — ZTP Files dev distribution only (low risk, max cost ~$0.005/1000 paths)
-    'aws cloudfront create-invalidation --distribution-id e176pw0sa5jf29',
+    # CloudFront invalidation (low risk, max cost ~$0.005/1000 paths)
+    'aws cloudfront create-invalidation',
 
     # Step Functions / States
     'aws states list-',

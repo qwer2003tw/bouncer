@@ -44,12 +44,8 @@ class TestCommandClassification:
             'aws cloudfront create-invalidation --distribution-id E176PW0SA5JF29 '
             '--paths "/index.html" "/assets/*" --region us-east-1'
         )
-        # CF invalidation lowercase distribution-id should also match
+        # CF invalidation with any distribution-id should match (generic prefix)
         assert app_module.is_auto_approve(
-            'aws cloudfront create-invalidation --distribution-id e176pw0sa5jf29 --paths "/*"'
-        )
-        # Other CF distributions still require approval
-        assert not app_module.is_auto_approve(
             'aws cloudfront create-invalidation --distribution-id EXXXXXXXXXX --paths "/*"'
         )
 

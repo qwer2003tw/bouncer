@@ -291,10 +291,11 @@ class TestExternalAccountTrust:
         assert '999999999999' in result[1]
 
     def test_known_account(self):
+        known = next(iter(KNOWN_ACCOUNT_IDS)) if KNOWN_ACCOUNT_IDS else '111111111111'
         payload = {
             "Statement": [{
                 "Effect": "Allow",
-                "Principal": {"AWS": "arn:aws:iam::190825685292:root"},
+                "Principal": {"AWS": f"arn:aws:iam::{known}:root"},
                 "Action": "sts:AssumeRole",
             }],
         }
@@ -315,19 +316,21 @@ class TestExternalAccountTrust:
             assert result is None, f"Known account {account_id} should not trigger"
 
     def test_multiple_principals_with_external(self):
+        known = next(iter(KNOWN_ACCOUNT_IDS)) if KNOWN_ACCOUNT_IDS else '111111111111'
+        external = '444444444444'
         payload = {
             "Statement": [{
                 "Effect": "Allow",
                 "Principal": {"AWS": [
-                    "arn:aws:iam::190825685292:root",
-                    "arn:aws:iam::111111111111:root",
+                    f"arn:aws:iam::{known}:root",
+                    f"arn:aws:iam::{external}:root",
                 ]},
                 "Action": "sts:AssumeRole",
             }],
         }
         result = check_external_account_trust(payload)
         assert result is not None
-        assert '111111111111' in result[1]
+        assert external in result[1]
 
     def test_command_integration(self):
         cmd = (
@@ -620,10 +623,11 @@ class TestNegativeCases:
 
     def test_safe_trust_policy(self):
         """Trust policy with known account"""
+        known = next(iter(KNOWN_ACCOUNT_IDS)) if KNOWN_ACCOUNT_IDS else '111111111111'
         payload = {
             "Statement": [{
                 "Effect": "Allow",
-                "Principal": {"AWS": "arn:aws:iam::190825685292:root"},
+                "Principal": {"AWS": f"arn:aws:iam::{known}:root"},
                 "Action": "sts:AssumeRole",
             }],
         }
