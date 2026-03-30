@@ -807,10 +807,14 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
     table = _get_table()
     params = _parse_deploy_frontend_params(item)
 
+    logger.info("deploy_frontend_callback received", extra={"src_module": "callbacks", "operation": "handle_deploy_frontend_callback", "request_id": request_id, "action": action, "user_id": user_id})
+
     if action == 'deny':
+        logger.info("deploy_frontend_callback denied", extra={"src_module": "callbacks", "operation": "handle_deploy_frontend_callback", "request_id": request_id, "action": "deny", "user_id": user_id})
         return _handle_deploy_frontend_deny(table, request_id, callback_id, message_id, user_id, params)
 
     # action == 'approve'
+    logger.info("deploy_frontend_callback approve started", extra={"src_module": "callbacks", "operation": "handle_deploy_frontend_callback", "request_id": request_id, "action": "approve", "user_id": user_id})
     # SEC: verify approval has not expired
     import time as _time
     item_ttl = int(item.get('ttl', 0))
