@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.71.0] - 2026-03-29
+
+### Fixed
+- `src/mcp_deploy_frontend.py` — `confirm_frontend_deploy` TTL was only 60s (APPROVAL_TTL_BUFFER); changed to APPROVAL_TIMEOUT_DEFAULT + APPROVAL_TTL_BUFFER = 660s; users could not approve frontend deploys in time (s71)
+
+### Security
+- `template.yaml` — parameterized KMS key ARN, stack name wildcard, TrustedAccountIds fallback to DefaultAccountId; enables portable one-click `sam deploy` to new AWS accounts (s71)
+- `src/constants.py` — removed hardcoded CloudFront distribution ID from auto-approve safelist; now approves any `cloudfront create-invalidation` (s71)
+- `src/grant.py`, `src/help_command.py`, `src/mcp_execute.py` — replaced real account IDs in docstrings/examples with generic 123456789012 (s71)
+
 ## [3.70.0] - 2026-03-24
 
 ### Removed
