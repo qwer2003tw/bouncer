@@ -167,6 +167,46 @@ mcporter call bouncer bouncer_execute_native --args '{
 mcporter call bouncer bouncer_eks_get_token --args '{"cluster_name": "ztp-eks-v2", "region": "us-east-1", "account": "992382394211"}'
 ```
 
+
+### bouncer_query_logs
+
+專用日誌查詢工具。一步到位查 CloudWatch Logs，不走審批 pipeline。
+
+```bash
+mcporter call bouncer bouncer_query_logs --args '{
+  "log_group": "/aws/lambda/bouncer-prod-function",
+  "filter_pattern": "deploy_frontend_callback",
+  "start_time": "-1h",
+  "end_time": "now",
+  "limit": 50,
+  "account": "190825685292"
+}'
+```
+
+- 在允許名單內 → 直接用 Log Insights 異步查詢 → 回傳結果
+- 不在允許名單 → 回傳需審批訊息
+- 支援跨帳號（account 參數 + assume role）
+- 時間範圍最大 30 天，結果最多 1000 筆
+- Lambda response 6MB 自動截斷
+
+### bouncer_logs_allowlist
+
+管理日誌查詢允許名單。
+
+```bash
+# 列出
+mcporter call bouncer bouncer_logs_allowlist --args '{"action": "list", "account": "190825685292"}'
+
+# 加入
+mcporter call bouncer bouncer_logs_allowlist --args '{"action": "add", "log_group": "/aws/lambda/my-function", "account": "190825685292"}'
+
+# 批量加入
+mcporter call bouncer bouncer_logs_allowlist --args '{"action": "add_batch", "log_groups": ["/aws/lambda/a", "/aws/lambda/b"], "account": "190825685292"}'
+
+# 移除
+mcporter call bouncer bouncer_logs_allowlist --args '{"action": "remove", "log_group": "/aws/lambda/my-function", "account": "190825685292"}'
+```
+
 ### bouncer_status
 查詢審批請求狀態。
 
