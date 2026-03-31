@@ -323,6 +323,9 @@ AUTO_APPROVE_PREFIXES = [
     'aws logs get-',
     'aws logs list-',
     'aws logs tail',
+    'aws logs start-query',
+    'aws logs get-query-results',
+    'aws logs stop-query',
 
     # CloudWatch Metrics
     'aws cloudwatch describe-',
