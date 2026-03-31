@@ -485,6 +485,14 @@ Resources:
               Action:
                 - secretsmanager:GetSecretValue
               Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:sam-deployer/github-pat*"
+            # Sprint 72: bouncer_query_logs — CloudWatch Log Insights query on default account
+            - Sid: CloudWatchLogsQuery
+              Effect: Allow
+              Action:
+                - logs:StartQuery
+                - logs:GetQueryResults
+                - logs:StopQuery
+              Resource: "*"
 
   # ============================================================
   # API Gateway

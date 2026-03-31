@@ -705,6 +705,98 @@ MCP_TOOLS = {
     }
 }
 
+# ========== CloudWatch Logs Query Tools ==========
+MCP_TOOLS['bouncer_query_logs'] = {
+    'description': (
+        '查詢 CloudWatch Log Insights。log_group 必須在允許名單中（用 bouncer_logs_allowlist 管理）。\n'
+        '支援跨帳號查詢、自訂 Log Insights 查詢語法、時間範圍過濾。\n'
+        '時間範圍最大 30 天，結果最大 1000 筆。'
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'log_group': {
+                'type': 'string',
+                'description': 'CloudWatch Log Group 名稱（例如：/aws/lambda/my-function）',
+            },
+            'query': {
+                'type': 'string',
+                'description': (
+                    'CloudWatch Logs Insights 查詢語法'
+                    '（預設：fields @timestamp, @message | sort @timestamp desc）'
+                ),
+            },
+            'filter_pattern': {
+                'type': 'string',
+                'description': (
+                    '簡易文字過濾（當未提供 query 時，自動轉為 '
+                    'filter @message like /pattern/ 查詢）'
+                ),
+            },
+            'start_time': {
+                'type': 'integer',
+                'description': '查詢起始時間（Unix timestamp 秒），預設 1 小時前',
+            },
+            'end_time': {
+                'type': 'integer',
+                'description': '查詢結束時間（Unix timestamp 秒），預設現在',
+            },
+            'limit': {
+                'type': 'integer',
+                'description': '最大結果筆數（預設 100，最大 1000）',
+                'default': 100,
+                'maximum': 1000,
+            },
+            'account': {
+                'type': 'string',
+                'description': '目標 AWS 帳號 ID（不填則使用預設帳號）',
+            },
+            'region': {
+                'type': 'string',
+                'description': 'AWS region（不填則使用環境變數）',
+            },
+        },
+        'required': ['log_group'],
+    },
+}
+
+MCP_TOOLS['bouncer_logs_allowlist'] = {
+    'description': (
+        '管理 CloudWatch Logs 查詢的允許名單。\n'
+        '支援 4 種操作：add（加入）、remove（移除）、list（列出）、add_batch（批量加入）。\n'
+        'log_group 必須以允許的前綴開頭（如 /aws/lambda/、/aws/ecs/ 等）。'
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'action': {
+                'type': 'string',
+                'description': '操作類型',
+                'enum': ['add', 'remove', 'list', 'add_batch'],
+            },
+            'log_group': {
+                'type': 'string',
+                'description': 'Log Group 名稱（add / remove 時必填）',
+            },
+            'log_groups': {
+                'type': 'array',
+                'items': {'type': 'string'},
+                'description': 'Log Group 名稱清單（add_batch 時必填，最多 50 個）',
+                'maxItems': 50,
+            },
+            'account': {
+                'type': 'string',
+                'description': '目標 AWS 帳號 ID（不填則使用預設帳號）',
+            },
+            'source': {
+                'type': 'string',
+                'description': '請求來源標識',
+            },
+        },
+        'required': ['action'],
+    },
+}
+
 MCP_TOOLS['bouncer_request_frontend_presigned'] = {
     'description': '前端部署 Step 1：生成 presigned PUT URL，繞過 API GW 6MB 限制。Agent 用 presigned URL 直接 PUT 檔案到 S3，然後呼叫 bouncer_confirm_frontend_deploy。',
     'parameters': {

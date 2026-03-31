@@ -58,6 +58,7 @@ from mcp_deploy_frontend import (
     mcp_tool_request_frontend_presigned,
     mcp_tool_confirm_frontend_deploy,
 )
+from mcp_query_logs import mcp_tool_query_logs, mcp_tool_logs_allowlist
 from callbacks import (
     _is_execute_failed,
 )
@@ -644,6 +645,8 @@ TOOL_HANDLERS = {
     'bouncer_stats': mcp_tool_stats,
     'bouncer_request_frontend_presigned': mcp_tool_request_frontend_presigned,
     'bouncer_confirm_frontend_deploy': mcp_tool_confirm_frontend_deploy,
+    'bouncer_query_logs': mcp_tool_query_logs,
+    'bouncer_logs_allowlist': mcp_tool_logs_allowlist,
 }
 
 # Deployer handlers are lazy-imported to avoid cold-start cost

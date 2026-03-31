@@ -617,7 +617,89 @@ TOOLS = [
             },
             'required': ['grant_id', 'command', 'trust_scope']
         }
-    }
+    },
+    # ========== CloudWatch Logs Query Tools ==========
+    {
+        'name': 'bouncer_query_logs',
+        'description': (
+            '查詢 CloudWatch Log Insights。log_group 必須在允許名單中（用 bouncer_logs_allowlist 管理）。'
+            '支援跨帳號查詢、自訂 Log Insights 查詢語法、時間範圍過濾。'
+            '時間範圍最大 30 天，結果最大 1000 筆。'
+        ),
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'log_group': {
+                    'type': 'string',
+                    'description': 'CloudWatch Log Group 名稱（例如：/aws/lambda/my-function）'
+                },
+                'query': {
+                    'type': 'string',
+                    'description': 'CloudWatch Logs Insights 查詢語法（預設：fields @timestamp, @message | sort @timestamp desc）'
+                },
+                'filter_pattern': {
+                    'type': 'string',
+                    'description': '簡易文字過濾（未提供 query 時，自動轉為 filter @message like /pattern/）'
+                },
+                'start_time': {
+                    'type': 'integer',
+                    'description': '查詢起始時間（Unix timestamp 秒），預設 1 小時前'
+                },
+                'end_time': {
+                    'type': 'integer',
+                    'description': '查詢結束時間（Unix timestamp 秒），預設現在'
+                },
+                'limit': {
+                    'type': 'integer',
+                    'description': '最大結果筆數（預設 100，最大 1000）'
+                },
+                'account': {
+                    'type': 'string',
+                    'description': '目標 AWS 帳號 ID（不填則使用預設帳號）'
+                },
+                'region': {
+                    'type': 'string',
+                    'description': 'AWS region（不填則使用環境變數）'
+                }
+            },
+            'required': ['log_group']
+        }
+    },
+    {
+        'name': 'bouncer_logs_allowlist',
+        'description': (
+            '管理 CloudWatch Logs 查詢的允許名單。'
+            '支援 add（加入）、remove（移除）、list（列出）、add_batch（批量加入）。'
+        ),
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'action': {
+                    'type': 'string',
+                    'description': '操作類型：add / remove / list / add_batch',
+                    'enum': ['add', 'remove', 'list', 'add_batch']
+                },
+                'log_group': {
+                    'type': 'string',
+                    'description': 'Log Group 名稱（add / remove 時必填）'
+                },
+                'log_groups': {
+                    'type': 'array',
+                    'items': {'type': 'string'},
+                    'description': 'Log Group 名稱清單（add_batch 時必填，最多 50 個）'
+                },
+                'account': {
+                    'type': 'string',
+                    'description': '目標 AWS 帳號 ID（不填則使用預設帳號）'
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '請求來源標識'
+                }
+            },
+            'required': ['action']
+        }
+    },
 ]
 
 # ============================================================================
@@ -1268,6 +1350,44 @@ def tool_revoke_grant(arguments: dict) -> dict:
     return parse_mcp_result(result) or result
 
 
+def tool_query_logs(arguments: dict) -> dict:
+    """查詢 CloudWatch Log Insights"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'query_logs',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_query_logs',
+            'arguments': arguments
+        }
+    }
+
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
+def tool_logs_allowlist(arguments: dict) -> dict:
+    """管理 logs 查詢允許名單"""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+
+    payload = {
+        'jsonrpc': '2.0',
+        'id': 'logs_allowlist',
+        'method': 'tools/call',
+        'params': {
+            'name': 'bouncer_logs_allowlist',
+            'arguments': arguments
+        }
+    }
+
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
 def parse_mcp_result(result: dict) -> dict:
     """解析 MCP 回應"""
     if 'result' in result:
@@ -1379,6 +1499,11 @@ def handle_request(request: dict) -> dict:
         # Grant execute
         elif tool_name == 'bouncer_grant_execute':
             result = tool_grant_execute(arguments)
+        # CloudWatch Logs query
+        elif tool_name == 'bouncer_query_logs':
+            result = tool_query_logs(arguments)
+        elif tool_name == 'bouncer_logs_allowlist':
+            result = tool_logs_allowlist(arguments)
         else:
             return error_response(req_id, -32602, f'Unknown tool: {tool_name}')
 
