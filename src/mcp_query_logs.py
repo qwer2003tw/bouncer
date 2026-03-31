@@ -236,6 +236,29 @@ def initialize_default_allowlist(account_id: str = None) -> None:
 # MCP Tool: bouncer_query_logs
 # ============================================================================
 
+def _parse_time(value, now: int) -> int:
+    """Parse time value: unix timestamp (int/str) or relative (-1h, -30m, -7d, now)."""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    s = str(value).strip().lower()
+    if s == 'now':
+        return now
+    # Relative time: -1h, -30m, -7d, -3600s
+    m = re.match(r'^-(\d+)([smhd])$', s)
+    if m:
+        num = int(m.group(1))
+        unit = m.group(2)
+        multiplier = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}
+        return now - num * multiplier[unit]
+    # Try as int string
+    try:
+        return int(s)
+    except ValueError:
+        raise ValueError(f'Invalid time format: {value}. Use unix timestamp, "now", or relative (-1h, -30m, -7d)')
+
+
 def mcp_tool_query_logs(req_id: str, arguments: dict) -> dict:
     """MCP tool handler: CloudWatch Log Insights query."""
     logger.info("Tool called", extra={
@@ -280,8 +303,8 @@ def mcp_tool_query_logs(req_id: str, arguments: dict) -> dict:
 
     # --- Validate time range ---
     now = int(time.time())
-    start_time = int(start_time) if start_time else now - 3600
-    end_time = int(end_time) if end_time else now
+    start_time = _parse_time(start_time, now) if start_time else now - 3600
+    end_time = _parse_time(end_time, now) if end_time else now
 
     if end_time - start_time > MAX_TIME_RANGE_SECONDS:
         return mcp_error(req_id, -32602,
