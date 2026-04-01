@@ -184,7 +184,7 @@ mcporter call bouncer bouncer_query_logs --args '{
 ```
 
 - 在允許名單內 → 直接用 Log Insights 異步查詢 → 回傳結果
-- 不在允許名單 → 回傳需審批訊息
+- 不在允許名單 → 發 Telegram 審批通知（三按鈕：一次性允許 / 加入允許名單 / 拒絕）
 - 支援跨帳號（account 參數 + assume role）
 - 時間範圍最大 30 天，結果最多 1000 筆
 - Lambda response 6MB 自動截斷
