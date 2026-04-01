@@ -14,9 +14,11 @@ import boto3
 from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
 
-from utils import mcp_result, mcp_error
+from utils import mcp_result, mcp_error, generate_request_id
 from accounts import get_account
 from db import table
+from telegram import send_telegram_message, escape_markdown
+from notifications import post_notification_setup
 from constants import DEFAULT_ACCOUNT_ID
 
 logger = Logger(service="bouncer")
@@ -55,6 +57,9 @@ LOG_GROUP_NAME_RE = re.compile(r'^[\w.\/\-]+$')
 # Query polling
 QUERY_POLL_INTERVAL = 1   # seconds
 QUERY_MAX_POLL_TIME = 25  # seconds (Lambda timeout safety margin)
+
+# Approval timeout for query_logs fallback
+QUERY_LOGS_APPROVAL_TIMEOUT = 600  # 10 minutes
 
 # Default allowlist entries (auto-initialized on first use)
 DEFAULT_ALLOWLIST = (
@@ -259,6 +264,109 @@ def _parse_time(value, now: int) -> int:
         raise ValueError(f'Invalid time format: {value}. Use unix timestamp, "now", or relative (-1h, -30m, -7d)')
 
 
+def _format_time_range(start_time: int, end_time: int) -> str:
+    """Format time range as human-readable string for Telegram display."""
+    import datetime
+    start_dt = datetime.datetime.fromtimestamp(start_time, tz=datetime.timezone.utc)
+    end_dt = datetime.datetime.fromtimestamp(end_time, tz=datetime.timezone.utc)
+    if start_dt.date() == end_dt.date():
+        return f"{start_dt.strftime('%Y-%m-%d %H:%M')} ~ {end_dt.strftime('%H:%M')} UTC"
+    return f"{start_dt.strftime('%Y-%m-%d %H:%M')} ~ {end_dt.strftime('%Y-%m-%d %H:%M')} UTC"
+
+
+def execute_log_insights(log_group: str, query_with_limit: str, start_time: int, end_time: int,
+                         region: str = '', assume_role_arn: str = None, account_id: str = '') -> dict:
+    """Execute CloudWatch Log Insights query and return results.
+
+    Returns:
+        dict with keys:
+            status: 'complete', 'running', 'error', or lowercase CloudWatch status
+            query_id: str (if query was started)
+            log_group, account_id: echo back
+            records_matched: int (if complete)
+            statistics: dict (if complete)
+            results: list of dicts (if complete)
+            error: str (if status == 'error')
+    """
+    try:
+        logs_client = _get_logs_client(region=region, assume_role_arn=assume_role_arn)
+
+        start_resp = logs_client.start_query(
+            logGroupName=log_group,
+            startTime=start_time,
+            endTime=end_time,
+            queryString=query_with_limit,
+        )
+        query_id = start_resp['queryId']
+
+        logger.info("Log query started: query_id=%s, log_group=%s",
+                     query_id, log_group,
+                     extra={"src_module": "mcp_query_logs", "operation": "start_query",
+                            "query_id": query_id, "log_group": log_group,
+                            "account_id": account_id})
+
+        # Poll for results
+        poll_start = time.time()
+        status = 'Running'
+        results = []
+        stats = {}
+
+        while status in ('Scheduled', 'Running') and (time.time() - poll_start) < QUERY_MAX_POLL_TIME:
+            time.sleep(QUERY_POLL_INTERVAL)
+            get_resp = logs_client.get_query_results(queryId=query_id)
+            status = get_resp.get('status', '')
+            results = get_resp.get('results', [])
+            stats = get_resp.get('statistics', {})
+
+        if status in ('Scheduled', 'Running'):
+            logger.info("Log query still running after poll timeout: query_id=%s", query_id,
+                         extra={"src_module": "mcp_query_logs", "operation": "query_timeout",
+                                "query_id": query_id})
+            return {
+                'status': 'running',
+                'query_id': query_id,
+                'poll_seconds': round(time.time() - poll_start, 1),
+            }
+
+        # Format results
+        formatted_results = []
+        for row in results:
+            entry = {field['field']: field['value'] for field in row}
+            formatted_results.append(entry)
+
+        logger.info("Log query complete: query_id=%s, records=%d",
+                     query_id, len(formatted_results),
+                     extra={"src_module": "mcp_query_logs", "operation": "query_complete",
+                            "query_id": query_id, "records": len(formatted_results)})
+
+        return {
+            'status': 'complete' if status == 'Complete' else status.lower(),
+            'query_id': query_id,
+            'log_group': log_group,
+            'account_id': account_id,
+            'records_matched': len(formatted_results),
+            'statistics': {
+                'records_matched': stats.get('recordsMatched', 0),
+                'records_scanned': stats.get('recordsScanned', 0),
+                'bytes_scanned': stats.get('bytesScanned', 0),
+            },
+            'results': formatted_results,
+        }
+
+    except ClientError as e:
+        code = e.response['Error']['Code']
+        msg = e.response['Error']['Message']
+        logger.error("Log query error: %s: %s", code, msg,
+                     extra={"src_module": "mcp_query_logs", "operation": "query_error",
+                            "log_group": log_group, "error": f'{code}: {msg}'})
+        return {'status': 'error', 'error': f'CloudWatch Logs 錯誤: {code}: {msg}'}
+    except Exception as e:  # noqa: BLE001 — query execution entry point
+        logger.error("Log query unexpected error: %s", e,
+                     extra={"src_module": "mcp_query_logs", "operation": "query_error",
+                            "log_group": log_group, "error": str(e)})
+        return {'status': 'error', 'error': f'查詢錯誤: {str(e)}'}
+
+
 def mcp_tool_query_logs(req_id: str, arguments: dict) -> dict:
     """MCP tool handler: CloudWatch Log Insights query."""
     logger.info("Tool called", extra={
@@ -322,120 +430,106 @@ def mcp_tool_query_logs(req_id: str, arguments: dict) -> dict:
 
     # --- Check allowlist ---
     if not _check_allowlist(account_id, log_group):
-        logger.info("Log group not in allowlist: %s (account=%s)", log_group, account_id,
+        logger.info("Log group not in allowlist, sending approval request: %s (account=%s)",
+                     log_group, account_id,
                      extra={"src_module": "mcp_query_logs", "operation": "allowlist_check",
                             "log_group": log_group, "account_id": account_id})
+
+        # Create DDB pending request
+        approval_req_id = generate_request_id(f'query_logs:{log_group}')
+        now = int(time.time())
+        expires_at = now + QUERY_LOGS_APPROVAL_TIMEOUT
+        time_range_str = _format_time_range(start_time, end_time)
+
+        table.put_item(Item={
+            'request_id': approval_req_id,
+            'action': 'query_logs',
+            'status': 'pending_approval',
+            'log_group': log_group,
+            'account_id': account_id,
+            'assume_role_arn': assume_role_arn or '',
+            'query': query_with_limit,
+            'start_time': start_time,
+            'end_time': end_time,
+            'region': region or '',
+            'created_at': now,
+            'ttl': expires_at,
+            'expires_at': expires_at,
+        })
+
+        # Send Telegram notification with approval buttons
+        tg_text = (
+            f"📋 *Log 查詢請求*\n\n"
+            f"📁 *Log Group：* `{escape_markdown(log_group)}`\n"
+            f"🏦 *Account：* `{account_id}`\n"
+            f"⏰ *時間範圍：* {escape_markdown(time_range_str)}\n\n"
+            f"🆔 `{approval_req_id}`\n"
+            f"⏰ *10 分鐘後過期*"
+        )
+        keyboard = {
+            'inline_keyboard': [
+                [
+                    {'text': '✅ 一次性允許', 'callback_data': f'approve_query_logs:{approval_req_id}'},
+                    {'text': '📋 加入允許名單', 'callback_data': f'approve_add_allowlist:{approval_req_id}'},
+                ],
+                [
+                    {'text': '❌ 拒絕', 'callback_data': f'deny_query_logs:{approval_req_id}'},
+                ],
+            ]
+        }
+
+        tg_result = send_telegram_message(tg_text, keyboard)
+        tg_message_id = (tg_result or {}).get('result', {}).get('message_id')
+        if tg_message_id:
+            post_notification_setup(approval_req_id, tg_message_id, expires_at)
+
         return mcp_result(req_id, {
             'content': [{'type': 'text', 'text': json.dumps({
-                'status': 'not_in_allowlist',
+                'status': 'pending_approval',
+                'request_id': approval_req_id,
                 'log_group': log_group,
                 'account_id': account_id,
                 'message': (
                     f'log_group "{log_group}" 不在帳號 {account_id} 的允許名單中。'
-                    f'請先用 bouncer_logs_allowlist（action: add）加入允許名單。'
+                    f'已發送審批請求到 Telegram，等待審批後將自動執行查詢。'
                 ),
             }, ensure_ascii=False)}]
         })
 
     # --- Execute Log Insights query ---
-    try:
-        logs_client = _get_logs_client(region=region, assume_role_arn=assume_role_arn)
+    result_data = execute_log_insights(
+        log_group=log_group, query_with_limit=query_with_limit,
+        start_time=start_time, end_time=end_time,
+        region=region, assume_role_arn=assume_role_arn, account_id=account_id,
+    )
 
-        # Start query
-        start_resp = logs_client.start_query(
-            logGroupName=log_group,
-            startTime=start_time,
-            endTime=end_time,
-            queryString=query_with_limit,
-        )
-        query_id = start_resp['queryId']
-
-        logger.info("Log query started: query_id=%s, log_group=%s",
-                     query_id, log_group,
-                     extra={"src_module": "mcp_query_logs", "operation": "start_query",
-                            "query_id": query_id, "log_group": log_group,
-                            "account_id": account_id})
-
-        # Poll for results
-        poll_start = time.time()
-        status = 'Running'
-        results = []
-        stats = {}
-
-        while status in ('Scheduled', 'Running') and (time.time() - poll_start) < QUERY_MAX_POLL_TIME:
-            time.sleep(QUERY_POLL_INTERVAL)
-            get_resp = logs_client.get_query_results(queryId=query_id)
-            status = get_resp.get('status', '')
-            results = get_resp.get('results', [])
-            stats = get_resp.get('statistics', {})
-
-        # Still running → return query_id for later polling
-        if status in ('Scheduled', 'Running'):
-            logger.info("Log query still running after poll timeout: query_id=%s", query_id,
-                         extra={"src_module": "mcp_query_logs", "operation": "query_timeout",
-                                "query_id": query_id})
-            return mcp_result(req_id, {
-                'content': [{'type': 'text', 'text': json.dumps({
-                    'status': 'running',
-                    'query_id': query_id,
-                    'message': '查詢仍在執行中，請稍後用 bouncer_status 或重新呼叫查看結果',
-                    'poll_seconds': round(time.time() - poll_start, 1),
-                }, ensure_ascii=False)}]
-            })
-
-        # Format results
-        formatted_results = []
-        for row in results:
-            entry = {field['field']: field['value'] for field in row}
-            formatted_results.append(entry)
-
-        result_data = {
-            'status': 'complete' if status == 'Complete' else status.lower(),
-            'query_id': query_id,
-            'log_group': log_group,
-            'account_id': account_id,
-            'records_matched': len(formatted_results),
-            'statistics': {
-                'records_matched': stats.get('recordsMatched', 0),
-                'records_scanned': stats.get('recordsScanned', 0),
-                'bytes_scanned': stats.get('bytesScanned', 0),
-            },
-            'results': formatted_results,
-        }
-
-        # Truncate if response exceeds 6 MB Lambda limit
-        result_json = json.dumps(result_data, ensure_ascii=False)
-        if len(result_json.encode('utf-8')) > RESPONSE_SIZE_LIMIT:
-            while (result_data['results']
-                   and len(json.dumps(result_data, ensure_ascii=False).encode('utf-8')) > RESPONSE_SIZE_LIMIT):
-                # Remove 10 at a time for efficiency
-                trim = min(10, len(result_data['results']))
-                result_data['results'] = result_data['results'][:-trim]
-            result_data['truncated'] = True
-            result_data['records_returned'] = len(result_data['results'])
-            result_json = json.dumps(result_data, ensure_ascii=False)
-
-        logger.info("Log query complete: query_id=%s, records=%d",
-                     query_id, len(formatted_results),
-                     extra={"src_module": "mcp_query_logs", "operation": "query_complete",
-                            "query_id": query_id, "records": len(formatted_results)})
-
+    if result_data['status'] == 'running':
         return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': result_json}]
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'running',
+                'query_id': result_data['query_id'],
+                'message': '查詢仍在執行中，請稍後用 bouncer_status 或重新呼叫查看結果',
+                'poll_seconds': result_data.get('poll_seconds', 0),
+            }, ensure_ascii=False)}]
         })
 
-    except ClientError as e:
-        code = e.response['Error']['Code']
-        msg = e.response['Error']['Message']
-        logger.error("Log query error: %s: %s", code, msg,
-                     extra={"src_module": "mcp_query_logs", "operation": "query_error",
-                            "log_group": log_group, "error": f'{code}: {msg}'})
-        return mcp_error(req_id, -32603, f'CloudWatch Logs 錯誤: {code}: {msg}')
-    except Exception as e:  # noqa: BLE001 — MCP handler entry point
-        logger.error("Log query unexpected error: %s", e,
-                     extra={"src_module": "mcp_query_logs", "operation": "query_error",
-                            "log_group": log_group, "error": str(e)})
-        return mcp_error(req_id, -32603, f'查詢錯誤: {str(e)}')
+    if result_data['status'] == 'error':
+        return mcp_error(req_id, -32603, result_data.get('error', 'Unknown error'))
+
+    # Truncate if response exceeds 6 MB Lambda limit
+    result_json = json.dumps(result_data, ensure_ascii=False)
+    if len(result_json.encode('utf-8')) > RESPONSE_SIZE_LIMIT:
+        while (result_data['results']
+               and len(json.dumps(result_data, ensure_ascii=False).encode('utf-8')) > RESPONSE_SIZE_LIMIT):
+            trim = min(10, len(result_data['results']))
+            result_data['results'] = result_data['results'][:-trim]
+        result_data['truncated'] = True
+        result_data['records_returned'] = len(result_data['results'])
+        result_json = json.dumps(result_data, ensure_ascii=False)
+
+    return mcp_result(req_id, {
+        'content': [{'type': 'text', 'text': result_json}]
+    })
 
 
 # ============================================================================

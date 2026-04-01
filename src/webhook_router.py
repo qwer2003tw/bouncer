@@ -27,6 +27,7 @@ from callbacks import (
     handle_grant_approve_safe,
     handle_grant_deny,
 )
+from callbacks_query_logs import handle_query_logs_callback
 from trust import revoke_trust_session
 from notifications import send_trust_session_summary
 
@@ -193,6 +194,12 @@ def handle_grant_callbacks(action: str, request_id: str, callback: dict) -> dict
     else:
         # Should not reach here, but return error for safety
         return response(400, {'error': f'Unknown grant action: {action}'})
+
+
+def handle_query_logs_callbacks(action: str, request_id: str, callback: dict, user_id: str) -> dict:
+    """Handle query_logs approval callbacks (approve_query_logs, approve_add_allowlist, deny_query_logs)."""
+    emit_metric('Bouncer', 'ApprovalAction', 1, dimensions={'Action': action})
+    return handle_query_logs_callback(action, request_id, callback, user_id)
 
 
 def handle_general_approval(action: str, request_id: str, callback: dict, user_id: str, source_ip: str) -> dict:
