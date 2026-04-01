@@ -78,6 +78,12 @@ def handle_telegram_command(message: dict) -> dict:
             send_telegram_message_to(chat_id, "❌ 用法：/otp {驗證碼}\n範例：/otp 123456")
             return response(200, {'ok': True})
 
+    # /logs [account] - 列出允許的 log groups
+    if text == '/logs' or text.startswith('/logs ') or text.startswith('/logs@'):
+        parts = text.split()
+        account = parts[1] if len(parts) >= 2 else ''
+        return handle_logs_command(chat_id, account)
+
     # /help - 顯示指令列表
     if text == '/help' or text.startswith('/help@') or text == '/start' or text.startswith('/start@'):
         return handle_help_command(chat_id)
@@ -355,6 +361,34 @@ def handle_otp_command(chat_id: str, user_id: str, provided_code: str) -> dict:
     return response(200, {'ok': True})
 
 
+def handle_logs_command(chat_id: str, account: str = '') -> dict:
+    """處理 /logs [account] 指令 — 列出允許查詢的 log groups"""
+    from mcp_query_logs import _list_allowlist
+    from constants import DEFAULT_ACCOUNT_ID
+
+    account_id = account.strip() or DEFAULT_ACCOUNT_ID
+    if not account_id:
+        send_telegram_message_to(chat_id, "❌ 無法確定帳號 ID")
+        return response(200, {'ok': True})
+
+    items = _list_allowlist(account_id)
+
+    if not items:
+        text = f"📁 Log 允許名單（{account_id}）\n\n尚無任何 log group"
+    else:
+        lines = [f"📁 Log 允許名單（{account_id}）\n"]
+        for item in items:
+            lg = item.get('log_group', '')
+            added_by = item.get('added_by', '')
+            source = f" — {added_by}" if added_by else ""
+            lines.append(f"• `{lg}`{source}")
+        lines.append(f"\n共 {len(items)} 筆")
+        text = "\n".join(lines)
+
+    send_telegram_message_to(chat_id, text)
+    return response(200, {'ok': True})
+
+
 def handle_help_command(chat_id: str) -> dict:
     """處理 /help 指令"""
     text = """🔐 Bouncer Commands
@@ -364,6 +398,7 @@ def handle_help_command(chat_id: str) -> dict:
 /pending - 列出待審批請求
 /stats [hours] - 統計資訊（預設 24h）
 /otp {code} - OTP 二次驗證（用於高風險命令）
+/logs [account] - 列出允許查詢的 log groups
 /help - 顯示此說明"""
 
     send_telegram_message_to(chat_id, text, parse_mode=None)
