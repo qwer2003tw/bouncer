@@ -152,6 +152,16 @@ tests/        # pytest tests
 scripts/      # run-tests.sh, close-sprint.sh
 ```
 
+## CloudWatch Logs 查詢模組
+
+新增模組 `src/mcp_query_logs.py` + `src/callbacks_query_logs.py`：
+- `bouncer_query_logs`: 專用日誌查詢 tool
+- `bouncer_logs_allowlist`: 允許名單管理 tool
+- DDB key: `LOGS_ALLOWLIST#{account_id}#{log_group}`
+- Callback actions: `approve_query_logs`, `approve_add_allowlist`, `deny_query_logs`
+- filter_pattern 有 sanitize（只允許安全字元）
+- allowlist 有 5min TTL cache
+
 ## bouncer_execute Deprecation 計劃
 
 | 版本 | 行動 |

@@ -185,6 +185,19 @@ mcporter call bouncer bouncer_execute_native --args '{
 
 > **前端部署推薦流程：** `bouncer_deploy_frontend` 一鍵完成（推薦）；或 `bouncer_request_presigned_batch` 取得 URL → PUT → `bouncer_execute s3 cp`（手動）
 
+### CloudWatch Logs 查詢
+
+| Tool | 說明 |
+|------|------|
+| `bouncer_query_logs` | 查詢 CloudWatch Logs（允許名單制 + fallback 審批） |
+| `bouncer_logs_allowlist` | 管理允許查詢的 log group 名單（add/remove/list/add_batch） |
+
+- 允許名單內 → 直接查詢回傳結果
+- 不在允許名單 → Telegram 審批通知（一次性允許 / 加入允許名單 / 拒絕）
+- 支援跨帳號（assume role）
+- 相對時間：`-1h`、`-30m`、`-7d`、`now`
+- Telegram 命令：`/logs [account]` 列出允許名單
+
 ### 信任時段 (Trust Session)
 | Tool | 說明 | 審批 |
 |------|------|------|
