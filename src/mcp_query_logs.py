@@ -54,9 +54,12 @@ ALLOWED_LOG_GROUP_PREFIXES = (
 # Log group name validation regex (alphanum, slash, dash, dot, underscore)
 LOG_GROUP_NAME_RE = re.compile(r'^[\w.\/\-]+$')
 
+# filter_pattern sanitization: only allow safe chars (#1 injection fix)
+FILTER_PATTERN_SAFE_RE = re.compile(r'[^a-zA-Z0-9_.\-\s:@/]')
+
 # Query polling
 QUERY_POLL_INTERVAL = 1   # seconds
-QUERY_MAX_POLL_TIME = 25  # seconds (Lambda timeout safety margin)
+QUERY_MAX_POLL_TIME = 20  # seconds (#4: reduced from 25 to leave margin for Lambda 30s limit)
 
 # Approval timeout for query_logs fallback
 QUERY_LOGS_APPROVAL_TIMEOUT = 1800  # 30 minutes
@@ -69,6 +72,10 @@ DEFAULT_ALLOWLIST = (
 
 # Lazy flag: default allowlist init
 _default_allowlist_initialized = False
+
+# Module-level TTL cache for allowlist checks (#13: avoid redundant DDB reads)
+_allowlist_cache: dict[str, tuple[bool, float]] = {}
+_ALLOWLIST_CACHE_TTL = 300  # 5 minutes
 
 
 # ============================================================================
@@ -151,13 +158,26 @@ def _allowlist_key(account_id: str, log_group: str) -> str:
 
 
 def _check_allowlist(account_id: str, log_group: str) -> bool:
-    """Check if log_group is in the allowlist for this account."""
+    """Check if log_group is in the allowlist for this account.
+
+    Uses module-level TTL cache to avoid redundant DDB reads (#13).
+    """
     key = _allowlist_key(account_id, log_group)
+
+    cached = _allowlist_cache.get(key)
+    if cached:
+        found, ts = cached
+        if time.time() - ts < _ALLOWLIST_CACHE_TTL:
+            return found
+
     try:
         result = table.get_item(Key={'request_id': key})
-        return 'Item' in result
+        found = 'Item' in result
     except ClientError:
-        return False
+        found = False
+
+    _allowlist_cache[key] = (found, time.time())
+    return found
 
 
 def _add_to_allowlist(account_id: str, log_group: str, added_by: str = '') -> None:
@@ -190,19 +210,31 @@ def _remove_from_allowlist(account_id: str, log_group: str) -> bool:
 
 
 def _list_allowlist(account_id: str) -> list:
-    """List all allowlist entries for an account."""
+    """List all allowlist entries for an account.
+
+    TODO(#5): FilterExpression scans entire GSI partition — consider adding
+    a GSI with account_id as PK if allowlist grows large.
+    """
     try:
-        result = table.query(
-            IndexName='type-expires-at-index',
-            KeyConditionExpression='#t = :t',
-            FilterExpression='account_id = :aid',
-            ExpressionAttributeNames={'#t': 'type'},
-            ExpressionAttributeValues={
+        items: list = []
+        kwargs: dict = {
+            'IndexName': 'type-expires-at-index',
+            'KeyConditionExpression': '#t = :t',
+            'FilterExpression': 'account_id = :aid',
+            'ExpressionAttributeNames': {'#t': 'type'},
+            'ExpressionAttributeValues': {
                 ':t': 'logs_allowlist',
                 ':aid': account_id,
             },
-        )
-        return result.get('Items', [])
+        }
+        while True:
+            result = table.query(**kwargs)
+            items.extend(result.get('Items', []))
+            last_key = result.get('LastEvaluatedKey')
+            if not last_key:
+                break
+            kwargs['ExclusiveStartKey'] = last_key
+        return items
     except ClientError as e:
         logger.error("Failed to list allowlist: %s", e,
                      extra={"src_module": "mcp_query_logs", "operation": "list_allowlist",
@@ -254,6 +286,8 @@ def _parse_time(value, now: int) -> int:
     m = re.match(r'^-(\d+)([smhd])$', s)
     if m:
         num = int(m.group(1))
+        if num == 0:
+            return now
         unit = m.group(2)
         multiplier = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}
         return now - num * multiplier[unit]
@@ -391,6 +425,13 @@ def mcp_tool_query_logs(req_id: str, arguments: dict) -> dict:
     if not valid:
         return mcp_error(req_id, -32602, err_msg)
 
+    # --- Sanitize filter_pattern (#1: prevent Log Insights injection) ---
+    if filter_pattern:
+        filter_pattern = FILTER_PATTERN_SAFE_RE.sub('', filter_pattern).strip()
+        if not filter_pattern:
+            return mcp_error(req_id, -32602,
+                             'filter_pattern 包含不允許的字元（僅允許英數字、底線、點、減號、空白、冒號、@、/）')
+
     # --- Build query string ---
     if not query:
         if filter_pattern:
@@ -403,7 +444,10 @@ def mcp_tool_query_logs(req_id: str, arguments: dict) -> dict:
             query = 'fields @timestamp, @message | sort @timestamp desc'
 
     # --- Validate & inject limit ---
-    limit = min(max(1, int(limit)), MAX_RESULTS_LIMIT)
+    try:
+        limit = min(max(1, int(limit)), MAX_RESULTS_LIMIT)
+    except (ValueError, TypeError):
+        return mcp_error(req_id, -32602, f'limit 必須是有效整數，收到: {limit}')
     if 'limit' not in query.lower():
         query_with_limit = f'{query} | limit {limit}'
     else:
@@ -429,6 +473,8 @@ def mcp_tool_query_logs(req_id: str, arguments: dict) -> dict:
     initialize_default_allowlist(account_id)
 
     # --- Check allowlist ---
+    # NOTE(#11): self-approval is by design — the operator who queries is
+    # the same person who approves via Telegram.  Accepted risk for this tool.
     if not _check_allowlist(account_id, log_group):
         logger.info("Log group not in allowlist, sending approval request: %s (account=%s)",
                      log_group, account_id,
@@ -443,6 +489,7 @@ def mcp_tool_query_logs(req_id: str, arguments: dict) -> dict:
 
         table.put_item(Item={
             'request_id': approval_req_id,
+            'type': 'query_logs_approval',
             'action': 'query_logs',
             'status': 'pending_approval',
             'log_group': log_group,
@@ -508,7 +555,10 @@ def mcp_tool_query_logs(req_id: str, arguments: dict) -> dict:
             'content': [{'type': 'text', 'text': json.dumps({
                 'status': 'running',
                 'query_id': result_data['query_id'],
-                'message': '查詢仍在執行中，請稍後用 bouncer_status 或重新呼叫查看結果',
+                'message': (
+                    '查詢仍在執行中。可用 bouncer_execute_native 呼叫 '
+                    'logs.get_query_results(queryId=query_id) 取得結果'
+                ),
                 'poll_seconds': result_data.get('poll_seconds', 0),
             }, ensure_ascii=False)}]
         })
@@ -516,15 +566,36 @@ def mcp_tool_query_logs(req_id: str, arguments: dict) -> dict:
     if result_data['status'] == 'error':
         return mcp_error(req_id, -32603, result_data.get('error', 'Unknown error'))
 
-    # Truncate if response exceeds 6 MB Lambda limit
+    # Truncate if response exceeds 6 MB Lambda limit (#2/#6: estimate-based)
     result_json = json.dumps(result_data, ensure_ascii=False)
-    if len(result_json.encode('utf-8')) > RESPONSE_SIZE_LIMIT:
-        while (result_data['results']
-               and len(json.dumps(result_data, ensure_ascii=False).encode('utf-8')) > RESPONSE_SIZE_LIMIT):
-            trim = min(10, len(result_data['results']))
-            result_data['results'] = result_data['results'][:-trim]
+    result_bytes = len(result_json.encode('utf-8'))
+    if result_bytes > RESPONSE_SIZE_LIMIT:
+        results = result_data['results']
+        # Estimate overhead (everything except the results array)
+        overhead_data = {**result_data, 'results': [], 'truncated': True, 'records_returned': 0}
+        overhead_size = len(json.dumps(overhead_data, ensure_ascii=False).encode('utf-8'))
+        available = RESPONSE_SIZE_LIMIT - overhead_size
+
+        # Estimate per-record size from sample
+        sample_n = min(10, len(results))
+        if sample_n > 0:
+            sample_bytes = len(json.dumps(results[:sample_n], ensure_ascii=False).encode('utf-8'))
+            avg_size = sample_bytes / sample_n
+            keep = max(1, int(available / avg_size * 0.9))  # 10% safety margin
+            keep = min(keep, len(results))
+        else:
+            keep = 0
+
+        result_data['results'] = results[:keep]
         result_data['truncated'] = True
         result_data['records_returned'] = len(result_data['results'])
+
+        # Single fallback: if estimate was wrong, halve until it fits
+        while (result_data['results']
+               and len(json.dumps(result_data, ensure_ascii=False).encode('utf-8')) > RESPONSE_SIZE_LIMIT):
+            result_data['results'] = result_data['results'][:len(result_data['results']) // 2]
+            result_data['records_returned'] = len(result_data['results'])
+
         result_json = json.dumps(result_data, ensure_ascii=False)
 
     return mcp_result(req_id, {

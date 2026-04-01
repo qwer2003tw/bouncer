@@ -734,12 +734,12 @@ MCP_TOOLS['bouncer_query_logs'] = {
                 ),
             },
             'start_time': {
-                'type': 'integer',
-                'description': '查詢起始時間（Unix timestamp 秒），預設 1 小時前',
+                'oneOf': [{'type': 'integer'}, {'type': 'string'}],
+                'description': '查詢起始時間：Unix timestamp（整數）或相對時間字串（如 -1h, -30m, -7d, now），預設 1 小時前',
             },
             'end_time': {
-                'type': 'integer',
-                'description': '查詢結束時間（Unix timestamp 秒），預設現在',
+                'oneOf': [{'type': 'integer'}, {'type': 'string'}],
+                'description': '查詢結束時間：Unix timestamp（整數）或相對時間字串（如 -1h, -30m, now），預設現在',
             },
             'limit': {
                 'type': 'integer',
