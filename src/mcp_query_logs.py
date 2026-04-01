@@ -59,7 +59,7 @@ QUERY_POLL_INTERVAL = 1   # seconds
 QUERY_MAX_POLL_TIME = 25  # seconds (Lambda timeout safety margin)
 
 # Approval timeout for query_logs fallback
-QUERY_LOGS_APPROVAL_TIMEOUT = 600  # 10 minutes
+QUERY_LOGS_APPROVAL_TIMEOUT = 1800  # 30 minutes
 
 # Default allowlist entries (auto-initialized on first use)
 DEFAULT_ALLOWLIST = (
@@ -464,7 +464,7 @@ def mcp_tool_query_logs(req_id: str, arguments: dict) -> dict:
             f"🏦 *Account：* `{account_id}`\n"
             f"⏰ *時間範圍：* {escape_markdown(time_range_str)}\n\n"
             f"🆔 `{approval_req_id}`\n"
-            f"⏰ *10 分鐘後過期*"
+            f"⏰ *30 分鐘後過期*"
         )
         keyboard = {
             'inline_keyboard': [
