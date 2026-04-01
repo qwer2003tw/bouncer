@@ -150,12 +150,17 @@ def handle_pending_command(chat_id: str) -> dict:
     try:
         from boto3.dynamodb.conditions import Key
         # Use status-created-index GSI: PK=status, SK=created_at — ALL projection
-        resp = table.query(
-            IndexName='status-created-index',
-            KeyConditionExpression=Key('status').eq('pending'),
-            ScanIndexForward=False,
-        )
-        items = resp.get('Items', [])
+        # Query both 'pending' and 'pending_approval' (#8: query_logs uses pending_approval)
+        items = []
+        for status_val in ('pending', 'pending_approval'):
+            resp = table.query(
+                IndexName='status-created-index',
+                KeyConditionExpression=Key('status').eq(status_val),
+                ScanIndexForward=False,
+            )
+            items.extend(resp.get('Items', []))
+        # Sort merged results by created_at descending
+        items.sort(key=lambda x: int(x.get('created_at', 0)), reverse=True)
     except ClientError as e:
         logger.error("Query pending requests error: %s", e, extra={"src_module": "telegram_commands", "operation": "handle_pending_command", "error": str(e)})
         items = []
@@ -168,9 +173,14 @@ def handle_pending_command(chat_id: str) -> dict:
         for item in items:
             age = now - int(item.get('created_at', now))
             mins, secs = divmod(age, 60)
-            cmd = item.get('command', '')[:50]
+            # Show log_group for query_logs items, command for others
+            action = item.get('action', '')
+            if action == 'query_logs':
+                label = f"[logs] {item.get('log_group', '')[:50]}"
+            else:
+                label = item.get('command', '')[:50]
             source = item.get('source', 'N/A')
-            lines.append(f"• {cmd}\n  👤 {source} | ⏱️ {mins}m{secs}s ago")
+            lines.append(f"• {label}\n  👤 {source} | ⏱️ {mins}m{secs}s ago")
         text = "\n".join(lines)
 
     send_telegram_message_to(chat_id, text, parse_mode=None)
