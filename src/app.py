@@ -159,6 +159,10 @@ def handle_cleanup_expired(event: dict) -> dict:
     elif action_type == 'deploy':
         project_id = item.get('project_id', '')
         detail_line = f"🚀 *部署：* `{project_id}`\n"
+    elif action_type == 'query_logs':
+        log_group = item.get('log_group', '')
+        account_id = item.get('account_id', '')
+        detail_line = f"📁 *Log Group：* `{log_group}`\n🏦 *Account：* `{account_id}`\n"
     else:
         cmd_preview = command[:200] + '...' if len(command) > 200 else command
         detail_line = f"📋 *命令：*\n`{cmd_preview}`\n"
