@@ -1,5 +1,30 @@
 # Changelog
 
+## v3.72.0 (2026-04-01)
+### Features
+- `bouncer_query_logs` MCP tool — 專用 CloudWatch Logs 查詢（允許名單制 + fallback 審批按鈕 + 跨帳號）
+- `bouncer_logs_allowlist` MCP tool — 允許名單管理（add/remove/list/add_batch）
+- `/logs` Telegram 命令 — 列出允許查詢的 log groups
+- Log Insights (`start_query`, `get_query_results`, `stop_query`) 加入 auto-approve safelist
+- 相對時間支援（`-1h`, `-30m`, `-7d`, `now`）
+
+### Fixes
+- `handle_deploy_frontend_callback` 加 INFO log（approve/deny/expired）
+- query_logs 過期訊息顯示 log group + account（不再顯示空的「命令：」）
+- query_logs TTL 10min→30min
+- allowlist list DDB Decimal 序列化修復
+- filter_pattern 注入防護
+- JSON 截斷效能 + 正確性
+- allowlist 分頁（LastEvaluatedKey）
+- Lambda poll timeout 25→20 秒
+- `/pending` 同時顯示 query_logs 待審批
+- 審批項目加 type 欄位
+- tool_schema start_time/end_time 改 oneOf
+- allowlist cache 5min TTL
+
+### Chores
+- dependabot: codecov/codecov-action v5→v6
+
 All notable changes to this project will be documented in this file.
 
 ## [3.71.0] - 2026-03-29
