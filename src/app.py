@@ -878,6 +878,7 @@ def handle_telegram_webhook(event: dict) -> dict:
         handle_infra_approval,
         handle_revoke_trust,
         handle_grant_callbacks,
+        handle_query_logs_callbacks,
         handle_general_approval,
     )
 
@@ -935,6 +936,9 @@ def handle_telegram_webhook(event: dict) -> dict:
 
     if action in ('grant_approve_all', 'grant_approve_safe', 'grant_deny', 'grant_revoke'):
         return handle_grant_callbacks(action, request_id, callback)
+
+    if action in ('approve_query_logs', 'approve_add_allowlist', 'deny_query_logs'):
+        return handle_query_logs_callbacks(action, request_id, callback, user_id)
 
     # General approval flow
     return handle_general_approval(action, request_id, callback, user_id, source_ip)
