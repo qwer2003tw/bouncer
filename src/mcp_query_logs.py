@@ -556,7 +556,7 @@ def mcp_tool_logs_allowlist(req_id: str, arguments: dict) -> dict:
             {
                 'log_group': item.get('log_group', ''),
                 'added_by': item.get('added_by', ''),
-                'created_at': item.get('created_at', 0),
+                'created_at': int(item.get('created_at', 0)),
             }
             for item in items
         ]
