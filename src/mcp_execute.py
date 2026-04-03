@@ -673,6 +673,9 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
     if not _should_throttle_notification('auto_approve'):
         try:
             result_preview = (result[:300] if result else '(無輸出)').strip()
+            truncation_hint = ""
+            if result and len(result) > 300 and not paged.get('paged'):
+                truncation_hint = f"\n_（結果共 {len(result)} 字，已截斷顯示）_"
             reason_line = f"\U0001f4ac *原因：* {escape_markdown(ctx.reason or '(未填寫)')}\n" if ctx.reason else ""
             account_line = (
                 f"\U0001f3e6 *帳號：* `{ctx.account_id}` ({escape_markdown(ctx.account_name or '')})\n"
@@ -685,9 +688,17 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
                 f"{account_line}"
                 f"{reason_line}"
                 f"\U0001f4cb *命令：*\n```\n{ctx.command[:300]}\n```\n\n"
-                f"{result_emoji} *結果：*\n```\n{result_preview}\n```"
+                f"{result_emoji} *結果：*\n```\n{result_preview}\n```{truncation_hint}"
             )
-            send_telegram_message_silent(_notif_text)
+            _reply_markup = None
+            if paged.get('paged'):
+                _reply_markup = {
+                    'inline_keyboard': [[{
+                        'text': f'➡️ Next Page (2/{paged["total_pages"]})',
+                        'callback_data': f'show_page:{request_id}:2',
+                    }]]
+                }
+            send_telegram_message_silent(_notif_text, reply_markup=_reply_markup)
         except Exception:  # noqa: BLE001 — notification is best-effort
             logger.warning("[EXECUTE] Result notification failed (non-critical)", exc_info=True, extra={"src_module": "execute", "operation": "auto_approve_notification"})
     else:
@@ -720,7 +731,7 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
         'command': ctx.command,
         'account': ctx.account_id,
         'account_name': ctx.account_name,
-        'result': paged['result']
+        'result': result,
     }
     if is_failed:
         response_data['exit_code'] = _exit_code

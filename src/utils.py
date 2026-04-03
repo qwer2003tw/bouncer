@@ -317,8 +317,14 @@ def log_decision(table, request_id, command, reason, source, account_id,
             error_output = error_output[:2000] + '[truncated]'
         item['error_output'] = error_output or '(no output)'
     if result is not None:
-        # Store truncated result for bouncer_status retrieval
-        item['result'] = result[:4000] if len(result) > 4000 else result
+        # Store full result for bouncer_status retrieval (DDB 400KB item limit → cap at 300KB)
+        max_result_bytes = 300_000
+        if len(result.encode('utf-8', errors='replace')) > max_result_bytes:
+            # Binary-safe truncation: find a safe cut point within byte limit
+            truncated = result.encode('utf-8', errors='replace')[:max_result_bytes].decode('utf-8', errors='ignore')
+            item['result'] = truncated + '\n[truncated — result exceeded 300KB]'
+        else:
+            item['result'] = result
     item.update({k: v for k, v in kwargs.items() if v is not None})
     try:
         table.put_item(Item=item)
