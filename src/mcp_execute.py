@@ -672,9 +672,9 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
     # Silent Telegram notification for safelist auto-approve (sprint24-003: throttled)
     if not _should_throttle_notification('auto_approve'):
         try:
-            # Show full first page in notification (not just 300 char preview)
-            first_page_size = 4000  # match OUTPUT_PAGE_SIZE
-            result_preview = (result[:first_page_size] if result else '(無輸出)').strip()
+            # Telegram 4096 char limit: header takes ~800 chars, leave room
+            max_result_preview = 2800
+            result_preview = (result[:max_result_preview] if result else '(無輸出)').strip()
             truncation_hint = ""
             if result and len(result) > 300 and not paged.get('paged'):
                 truncation_hint = f"\n_（結果共 {len(result)} 字，已截斷顯示）_"
