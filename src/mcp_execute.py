@@ -672,26 +672,41 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
     # Silent Telegram notification for safelist auto-approve (sprint24-003: throttled)
     if not _should_throttle_notification('auto_approve'):
         try:
-            # Telegram 4096 char limit: header takes ~800 chars, leave room
-            max_result_preview = 2800
-            result_preview = (result[:max_result_preview] if result else '(無輸出)').strip()
-            truncation_hint = ""
-            if result and len(result) > 300 and not paged.get('paged'):
-                truncation_hint = f"\n_（結果共 {len(result)} 字，已截斷顯示）_"
             reason_line = f"\U0001f4ac *原因：* {escape_markdown(ctx.reason or '(未填寫)')}\n" if ctx.reason else ""
             account_line = (
                 f"\U0001f3e6 *帳號：* `{ctx.account_id}` ({escape_markdown(ctx.account_name or '')})\n"
                 if ctx.account_id else ""
             )
             result_emoji = "❌" if is_failed else "✅"
-            _notif_text = (
+
+            # Build header first to calculate remaining space for result
+            header = (
                 f"\u26a1 *自動執行*\n\n"
                 f"\U0001f916 *來源：* {escape_markdown(ctx.source or '(unknown)')}\n"
                 f"{account_line}"
                 f"{reason_line}"
                 f"\U0001f4cb *命令：*\n```\n{ctx.command[:300]}\n```\n\n"
-                f"{result_emoji} *結果：*\n```\n{result_preview}\n```{truncation_hint}"
+                f"{result_emoji} *結果：*\n```\n"
             )
+            footer = "\n```"
+
+            # Telegram 4096 limit: dynamically calculate max result preview
+            TG_LIMIT = 4096
+            SAFETY_MARGIN = 200  # for markdown escaping overhead + truncation hint
+            max_result_chars = TG_LIMIT - len(header) - len(footer) - SAFETY_MARGIN
+            max_result_chars = max(500, min(max_result_chars, 3500))  # clamp
+
+            result_text = result or '(無輸出)'
+            truncated = len(result_text) > max_result_chars
+            result_preview = result_text[:max_result_chars].strip() if truncated else result_text.strip()
+
+            truncation_hint = ""
+            if truncated:
+                truncation_hint = f"\n_（結果共 {len(result_text)} 字，顯示前 {max_result_chars} 字）_"
+
+            _notif_text = f"{header}{result_preview}{footer}{truncation_hint}"
+
+            # Add Next Page button if paged OR if result was truncated
             _reply_markup = None
             if paged.get('paged'):
                 _reply_markup = {
@@ -700,6 +715,16 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
                         'callback_data': f'show_page:{request_id}:2',
                     }]]
                 }
+            elif truncated:
+                # Result truncated but not formally paged — store pages now and add button
+                paged = store_paged_output(request_id, result)
+                if paged.get('paged'):
+                    _reply_markup = {
+                        'inline_keyboard': [[{
+                            'text': f'➡️ Next Page (2/{paged["total_pages"]})',
+                            'callback_data': f'show_page:{request_id}:2',
+                        }]]
+                    }
             send_telegram_message_silent(_notif_text, reply_markup=_reply_markup)
         except Exception:  # noqa: BLE001 — notification is best-effort
             logger.warning("[EXECUTE] Result notification failed (non-critical)", exc_info=True, extra={"src_module": "execute", "operation": "auto_approve_notification"})
