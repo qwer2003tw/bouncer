@@ -1,5 +1,5 @@
 """
-Changeset Analyzer — Sprint 32-001a
+Changeset Analyzer — Sprint 32-001a (updated Sprint 73)
 
 Provides dry-run changeset creation, analysis, and cleanup for
 determining whether a CloudFormation deployment only changes Lambda
@@ -44,22 +44,30 @@ def is_code_only_change(result: AnalysisResult) -> bool:
     - AWS::Lambda::Version   Add     → SAM publishes a new version
     - AWS::Lambda::Version   Delete  → SAM removes old version
     - AWS::Lambda::Alias     Modify  → Alias points to new version
+    - AWS::Logs::LogGroup    Add     → SAM auto-creates log groups
 
     Any other resource type or action → False (fail-safe → human approval).
-    Empty resource_changes (no-op deploy) → True.
+    Empty resource_changes → False (fail-safe: unexpected empty changeset
+    should not bypass human approval).
     """
     # Condition 1 — analysis must have succeeded
     if result.error is not None:
         return False
 
-    # Empty changeset → no-op deploy, safe to proceed
+    # Empty changeset → fail-safe: route to human approval
+    # (A truly empty deploy should be caught by the no_changes flag in DDB)
     if not result.resource_changes:
-        return True
+        return False
 
     # SAM AutoPublishAlias lifecycle types that are always safe
     _SAFE_LAMBDA_TYPES = {
         "AWS::Lambda::Version",
         "AWS::Lambda::Alias",
+    }
+
+    # Resource types that SAM auto-creates and are safe to add
+    _SAFE_ADD_TYPES = {
+        "AWS::Logs::LogGroup",
     }
 
     for change in result.resource_changes:
@@ -69,6 +77,10 @@ def is_code_only_change(result: AnalysisResult) -> bool:
 
         # Lambda Version Add/Delete and Alias Modify are SAM lifecycle — always safe
         if resource_type in _SAFE_LAMBDA_TYPES:
+            continue
+
+        # SAM auto-created resources (e.g. LogGroup Add) are safe
+        if resource_type in _SAFE_ADD_TYPES and action == "Add":
             continue
 
         # Lambda Function must be Modify-only

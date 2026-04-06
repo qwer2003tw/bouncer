@@ -703,6 +703,9 @@ Resources:
                 - Name: NOTIFIER_LAMBDA_ARN
                   Type: PLAINTEXT
                   Value: !GetAtt NotifierLambda.Arn
+                - Name: DEPLOY_MODE
+                  Type: PLAINTEXT
+                  Value: "package_and_create_changeset"
             ResultPath: $.build_result
             Next: AnalyzeChangeset
             Catch:
@@ -790,6 +793,9 @@ Resources:
                 - Name: SKIP_PACKAGE
                   Type: PLAINTEXT
                   Value: "true"
+                - Name: DEPLOY_MODE
+                  Type: PLAINTEXT
+                  Value: "execute_changeset"
             ResultPath: $.deploy_result
             Next: NotifySuccess
             Catch:

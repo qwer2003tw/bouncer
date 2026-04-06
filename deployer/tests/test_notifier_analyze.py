@@ -1,7 +1,9 @@
 """
 Tests for deployer/notifier/app.py handle_analyze and handle_infra_approval_request
 
-Sprint 35-001c: Post-package changeset analysis
+Sprint 73: Refactored to test DDB-based changeset flow (no more dry-run changeset creation).
+Phase 1 (CodeBuild) creates the changeset via sam deploy --no-execute-changeset and stores
+changeset_name in DDB. handle_analyze reads changeset_name from DDB and analyzes it.
 """
 
 import json
@@ -32,111 +34,82 @@ def mock_env(monkeypatch):
 
 
 @pytest.fixture
-def mock_changeset_analyzer():
-    """Mock changeset_analyzer module"""
-    with patch('app.create_dry_run_changeset') as mock_create, \
-         patch('app.analyze_changeset') as mock_analyze, \
-         patch('app.cleanup_changeset') as mock_cleanup, \
-         patch('app.is_code_only_change') as mock_is_code_only:
-        yield {
-            'create': mock_create,
-            'analyze': mock_analyze,
-            'cleanup': mock_cleanup,
-            'is_code_only': mock_is_code_only,
-        }
-
-
-@pytest.fixture
 def sample_event():
     """Sample event for handle_analyze"""
     return {
         'deploy_id': 'test-deploy-001',
         'project_id': 'test-project',
-        'template_s3_key': 'deploys/test-deploy-001/packaged.yaml',
-        'task_token': 'test-task-token-xyz',
     }
 
 
 class TestHandleAnalyze:
-    """Test handle_analyze function (Sprint 35-001c)"""
+    """Test handle_analyze function (Sprint 73 — DDB-based changeset flow)"""
 
     def test_handle_analyze_code_only_success(self, mock_env, sample_event):
-        """Test handle_analyze with code-only changes → send_task_success(is_code_only=True)"""
-        # Mock DDB to return stack_name
-        mock_ddb_resource = MagicMock()
-        mock_table = MagicMock()
-        mock_table.get_item.return_value = {
-            'Item': {'deploy_id': 'test-deploy-001', 'stack_name': 'test-stack', 'template_s3_url': 'https://test-artifacts-bucket.s3.amazonaws.com/test-project/packaged-template.yaml'}
+        """Test handle_analyze with code-only changes from pre-created changeset"""
+        history_data = {
+            'deploy_id': 'test-deploy-001',
+            'changeset_name': 'arn:aws:cloudformation:us-east-1:123456:changeSet/samcli-deploy-12345/guid',
+            'no_changes': False,
+            'telegram_message_id': 123,
         }
-        mock_ddb_resource.Table.return_value = mock_table
 
-        # Mock SFN and CFN clients
-        mock_sfn = MagicMock()
         mock_cfn = MagicMock()
-
-        # Mock changeset analyzer
         mock_analysis = MagicMock()
         mock_analysis.resource_changes = [
             {'ResourceChange': {'ResourceType': 'AWS::Lambda::Function', 'Action': 'Modify'}}
         ]
         mock_analysis.error = None
 
-        with patch('boto3.resource', return_value=mock_ddb_resource), \
-             patch('boto3.client') as mock_boto_client, \
-             patch('changeset_analyzer.create_dry_run_changeset', return_value='test-changeset-123') as mock_create, \
+        with patch('app.get_history', return_value=history_data), \
+             patch('app.update_history'), \
+             patch('app.handle_progress'), \
+             patch('app._get_stack_name', return_value='test-stack'), \
+             patch('boto3.client', return_value=mock_cfn), \
              patch('changeset_analyzer.analyze_changeset', return_value=mock_analysis) as mock_analyze, \
-             patch('changeset_analyzer.cleanup_changeset') as mock_cleanup, \
-             patch('changeset_analyzer.is_code_only_change', return_value=True) as mock_is_code_only, \
-             patch.object(app, 'ARTIFACTS_BUCKET', 'test-artifacts-bucket'), \
-             patch.object(app, 'DEPLOYS_TABLE', 'test-deploys-table'):
-
-            # Configure boto3.client to return appropriate mocks
-            def client_factory(service, region_name=None):
-                if service == 'stepfunctions':
-                    return mock_sfn
-                elif service == 'cloudformation':
-                    return mock_cfn
-                return MagicMock()
-
-            mock_boto_client.side_effect = client_factory
+             patch('changeset_analyzer.is_code_only_change', return_value=True):
 
             result = app.handle_analyze(sample_event)
 
-            # Verify result (no 'status' key in handle_analyze return)
             assert result['is_code_only'] is True
-
-            # Verify changeset creation
-            mock_create.assert_called_once()
-            assert mock_create.call_args[0][0] == mock_cfn
-            assert mock_create.call_args[0][1] == 'test-stack'
-            assert 'test-artifacts-bucket.s3.amazonaws.com' in mock_create.call_args[0][2]
-
-            # Verify changeset analysis
-            mock_analyze.assert_called_once_with(mock_cfn, 'test-stack', 'test-changeset-123')
-
-            # Verify cleanup
-            mock_cleanup.assert_called_once_with(mock_cfn, 'test-stack', 'test-changeset-123')
-
-            # handle_analyze returns dict directly (no SFN call)
             assert result['deploy_id'] == 'test-deploy-001'
             assert result['project_id'] == 'test-project'
             assert result['change_count'] == 1
 
-    def test_handle_analyze_infra_changes(self, mock_env, sample_event):
-        """Test handle_analyze with infra changes → send_task_success(is_code_only=False)"""
-        # Mock DDB to return stack_name
-        mock_ddb_resource = MagicMock()
-        mock_table = MagicMock()
-        mock_table.get_item.return_value = {
-            'Item': {'deploy_id': 'test-deploy-001', 'stack_name': 'test-stack', 'template_s3_url': 'https://test-artifacts-bucket.s3.amazonaws.com/test-project/packaged-template.yaml'}
+            # Verify analyze_changeset was called with the changeset from DDB
+            mock_analyze.assert_called_once()
+            assert mock_analyze.call_args[0][1] == 'test-stack'
+            assert 'samcli-deploy-12345' in mock_analyze.call_args[0][2]
+
+    def test_handle_analyze_no_changes_flag(self, mock_env, sample_event):
+        """Test handle_analyze when no_changes=true in DDB → auto-approve"""
+        history_data = {
+            'deploy_id': 'test-deploy-001',
+            'changeset_name': '',
+            'no_changes': True,
+            'telegram_message_id': 123,
         }
-        mock_ddb_resource.Table.return_value = mock_table
 
-        # Mock SFN and CFN clients
-        mock_sfn = MagicMock()
+        with patch('app.get_history', return_value=history_data), \
+             patch('app.update_history'), \
+             patch('app.handle_progress'):
+
+            result = app.handle_analyze(sample_event)
+
+            assert result['is_code_only'] is True
+            assert result['change_count'] == 0
+            assert result['analysis_error'] is None
+
+    def test_handle_analyze_infra_changes(self, mock_env, sample_event):
+        """Test handle_analyze with infra changes → is_code_only=False"""
+        history_data = {
+            'deploy_id': 'test-deploy-001',
+            'changeset_name': 'arn:aws:cloudformation:us-east-1:123456:changeSet/samcli-deploy-456/guid',
+            'no_changes': False,
+            'telegram_message_id': 123,
+        }
+
         mock_cfn = MagicMock()
-
-        # Mock changeset analyzer with infra changes
         mock_analysis = MagicMock()
         mock_analysis.resource_changes = [
             {'ResourceChange': {'ResourceType': 'AWS::IAM::Role', 'Action': 'Modify'}},
@@ -144,96 +117,151 @@ class TestHandleAnalyze:
         ]
         mock_analysis.error = None
 
-        with patch('boto3.resource', return_value=mock_ddb_resource), \
-             patch('boto3.client') as mock_boto_client, \
-             patch('changeset_analyzer.create_dry_run_changeset', return_value='test-changeset-456'), \
+        with patch('app.get_history', return_value=history_data), \
+             patch('app.update_history'), \
+             patch('app.handle_progress'), \
+             patch('app._get_stack_name', return_value='test-stack'), \
+             patch('boto3.client', return_value=mock_cfn), \
              patch('changeset_analyzer.analyze_changeset', return_value=mock_analysis), \
-             patch('changeset_analyzer.cleanup_changeset'), \
-             patch('changeset_analyzer.is_code_only_change', return_value=False), \
-             patch.object(app, 'ARTIFACTS_BUCKET', 'test-artifacts-bucket'), \
-             patch.object(app, 'DEPLOYS_TABLE', 'test-deploys-table'):
-
-            # Configure boto3.client to return appropriate mocks
-            def client_factory(service, region_name=None):
-                if service == 'stepfunctions':
-                    return mock_sfn
-                elif service == 'cloudformation':
-                    return mock_cfn
-                return MagicMock()
-
-            mock_boto_client.side_effect = client_factory
+             patch('changeset_analyzer.is_code_only_change', return_value=False):
 
             result = app.handle_analyze(sample_event)
 
-            # Verify result (no 'status' key in handle_analyze return)
             assert result['is_code_only'] is False
+            assert result['deploy_id'] == 'test-deploy-001'
 
-            # handle_analyze returns dict directly — no SFN call
-            assert result['deploy_id'] == 'test-deploy-001' 
-
-    def test_handle_analyze_cfn_error(self, mock_env, sample_event):
-        """Test handle_analyze with CFN error → send_task_failure"""
-        # Mock DDB to return stack_name
-        mock_ddb_resource = MagicMock()
-        mock_table = MagicMock()
-        mock_table.get_item.return_value = {
-            'Item': {'deploy_id': 'test-deploy-001', 'stack_name': 'test-stack', 'template_s3_url': 'https://test-artifacts-bucket.s3.amazonaws.com/test-project/packaged-template.yaml'}
+    def test_handle_analyze_missing_changeset_name(self, mock_env, sample_event):
+        """Test handle_analyze when changeset_name is missing → fail-safe"""
+        history_data = {
+            'deploy_id': 'test-deploy-001',
+            # No changeset_name key
+            'no_changes': False,
+            'telegram_message_id': 123,
         }
-        mock_ddb_resource.Table.return_value = mock_table
 
-        # Mock SFN and CFN clients
-        mock_sfn = MagicMock()
-        mock_cfn = MagicMock()
-
-        with patch('boto3.resource', return_value=mock_ddb_resource), \
-             patch('boto3.client') as mock_boto_client, \
-             patch('changeset_analyzer.create_dry_run_changeset', side_effect=Exception('CloudFormation API error')), \
-             patch('changeset_analyzer.cleanup_changeset'), \
-             patch.object(app, 'ARTIFACTS_BUCKET', 'test-artifacts-bucket'), \
-             patch.object(app, 'DEPLOYS_TABLE', 'test-deploys-table'):
-
-            # Configure boto3.client to return appropriate mocks
-            def client_factory(service, region_name=None):
-                if service == 'stepfunctions':
-                    return mock_sfn
-                elif service == 'cloudformation':
-                    return mock_cfn
-                return MagicMock()
-
-            mock_boto_client.side_effect = client_factory
+        with patch('app.get_history', return_value=history_data), \
+             patch('app.update_history'), \
+             patch('app.handle_progress'), \
+             patch('app._get_stack_name', return_value='test-stack'):
 
             result = app.handle_analyze(sample_event)
 
-            # Verify result — handle_analyze returns is_code_only=False (fail-safe) on error
             assert result['is_code_only'] is False
-            assert result['analysis_error'] is not None
-
-            # handle_analyze returns dict directly — no SFN call
-            assert result['analysis_error'] is not None and 'CloudFormation API error' in result['analysis_error'] 
+            assert 'Missing changeset_name' in result['analysis_error']
 
     def test_handle_analyze_missing_stack_name(self, mock_env, sample_event):
-        """Test handle_analyze when stack_name cannot be determined → send_task_failure"""
-        # Mock DDB to return empty item (no stack_name)
-        mock_ddb_resource = MagicMock()
-        mock_table = MagicMock()
-        mock_table.get_item.return_value = {'Item': {}}
-        mock_ddb_resource.Table.return_value = mock_table
+        """Test handle_analyze when stack_name cannot be determined → fail-safe"""
+        history_data = {
+            'deploy_id': 'test-deploy-001',
+            'changeset_name': 'some-changeset',
+            'no_changes': False,
+            'telegram_message_id': 123,
+        }
 
-        # Mock SFN client
-        mock_sfn = MagicMock()
-
-        with patch('boto3.resource', return_value=mock_ddb_resource), \
-             patch('boto3.client', return_value=mock_sfn), \
-             patch.object(app, 'ARTIFACTS_BUCKET', 'test-artifacts-bucket'), \
-             patch.object(app, 'DEPLOYS_TABLE', 'test-deploys-table'):
+        with patch('app.get_history', return_value=history_data), \
+             patch('app.update_history'), \
+             patch('app.handle_progress'), \
+             patch('app._get_stack_name', return_value=''):
 
             result = app.handle_analyze(sample_event)
 
-            # Verify result — fail-safe on missing stack_name
             assert result['is_code_only'] is False
-            assert result['analysis_error'] is not None and 'Missing stack_name' in result['analysis_error']
+            assert 'Missing stack_name' in result['analysis_error']
 
-            # handle_analyze returns dict directly — no SFN call
+    def test_handle_analyze_cfn_error(self, mock_env, sample_event):
+        """Test handle_analyze with CFN describe-change-set error → fail-safe"""
+        history_data = {
+            'deploy_id': 'test-deploy-001',
+            'changeset_name': 'some-changeset-arn',
+            'no_changes': False,
+            'telegram_message_id': 123,
+        }
+
+        with patch('app.get_history', return_value=history_data), \
+             patch('app.update_history'), \
+             patch('app.handle_progress'), \
+             patch('app._get_stack_name', return_value='test-stack'), \
+             patch('boto3.client', return_value=MagicMock()), \
+             patch('changeset_analyzer.analyze_changeset', side_effect=Exception('CloudFormation API error')):
+
+            result = app.handle_analyze(sample_event)
+
+            assert result['is_code_only'] is False
+            assert 'CloudFormation API error' in result['analysis_error']
+
+    def test_handle_analyze_self_deploying_project(self, mock_env):
+        """Test handle_analyze for bouncer-deployer → always auto-approve"""
+        event = {
+            'deploy_id': 'test-deploy-bd',
+            'project_id': 'bouncer-deployer',
+        }
+
+        history_data = {
+            'deploy_id': 'test-deploy-bd',
+            'telegram_message_id': 123,
+        }
+
+        with patch('app.get_history', return_value=history_data), \
+             patch('app.update_history'), \
+             patch('app.handle_progress'):
+
+            result = app.handle_analyze(event)
+
+            assert result['is_code_only'] is True
+            assert result['project_id'] == 'bouncer-deployer'
+
+    def test_handle_analyze_no_cleanup(self, mock_env, sample_event):
+        """Verify handle_analyze does NOT call cleanup_changeset (Phase 2 handles it)"""
+        history_data = {
+            'deploy_id': 'test-deploy-001',
+            'changeset_name': 'test-changeset-arn',
+            'no_changes': False,
+            'telegram_message_id': 123,
+        }
+
+        mock_cfn = MagicMock()
+        mock_analysis = MagicMock()
+        mock_analysis.resource_changes = []
+        mock_analysis.error = None
+
+        with patch('app.get_history', return_value=history_data), \
+             patch('app.update_history'), \
+             patch('app.handle_progress'), \
+             patch('app._get_stack_name', return_value='test-stack'), \
+             patch('boto3.client', return_value=mock_cfn), \
+             patch('changeset_analyzer.analyze_changeset', return_value=mock_analysis), \
+             patch('changeset_analyzer.is_code_only_change', return_value=False):
+
+            result = app.handle_analyze(sample_event)
+
+            # Verify cleanup_changeset was NOT called on CFN client
+            mock_cfn.delete_change_set.assert_not_called()
+
+    def test_handle_analyze_no_updates_to_perform(self, mock_env, sample_event):
+        """Test handle_analyze when changeset says 'No updates are to be performed' → code-only"""
+        history_data = {
+            'deploy_id': 'test-deploy-001',
+            'changeset_name': 'some-changeset-arn',
+            'no_changes': False,
+            'telegram_message_id': 123,
+        }
+
+        mock_cfn = MagicMock()
+        mock_analysis = MagicMock()
+        mock_analysis.resource_changes = []
+        mock_analysis.error = "No updates are to be performed."
+
+        with patch('app.get_history', return_value=history_data), \
+             patch('app.update_history'), \
+             patch('app.handle_progress'), \
+             patch('app._get_stack_name', return_value='test-stack'), \
+             patch('boto3.client', return_value=mock_cfn), \
+             patch('changeset_analyzer.analyze_changeset', return_value=mock_analysis):
+
+            result = app.handle_analyze(sample_event)
+
+            assert result['is_code_only'] is True
+            assert result['change_count'] == 0
 
 
 class TestGetStackName:

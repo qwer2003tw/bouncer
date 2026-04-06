@@ -264,16 +264,17 @@ def handle_analyze(event):
     """Handle AnalyzeChangeset SFN state.
 
     Called directly by Step Functions as a normal Task (not waitForTaskToken).
-    CodeBuild (.sync) finishes first, then SFN calls this Lambda to analyze
-    the freshly packaged template stored in S3 (URL retrieved from DDB).
+    CodeBuild Phase 1 (sam deploy --no-execute-changeset) creates the changeset
+    and stores its name in DDB. This function reads that changeset and analyzes it.
 
     Returns dict with is_code_only + metadata for CheckChangesetResult Choice state.
     On error → returns is_code_only=False (fail-safe: routes to WaitForInfraApproval).
+
+    NOTE: The changeset is NOT cleaned up here — Phase 2 (execute_changeset) will
+    execute and then clean it up.
     """
     from changeset_analyzer import (
-        create_dry_run_changeset,
         analyze_changeset,
-        cleanup_changeset,
         is_code_only_change,
     )
 
@@ -286,11 +287,6 @@ def handle_analyze(event):
     history = get_history(deploy_id)
     if history.get('telegram_message_id'):
         handle_progress({'deploy_id': deploy_id, 'phase': 'ANALYZING'})
-
-    # Get stack_name and template_s3_url from DDB deploy record
-    # sam_deploy.py already calls update_template_s3_url() which stores the fresh URL
-    stack_name = _get_stack_name(project_id)  # use project_id to query bouncer-projects
-    template_s3_url = _get_template_s3_url(project_id)
 
     # Special case: bouncer-deployer updates itself — always treat as safe (infra changes are intentional)
     SELF_DEPLOYING_PROJECTS = {'bouncer-deployer'}
@@ -305,23 +301,51 @@ def handle_analyze(event):
             'analysis_error': None,
         }
 
-    if not stack_name or not template_s3_url:
-        print(f"Error: Missing stack_name={stack_name!r} or template_s3_url={template_s3_url!r} for deploy_id={deploy_id}")
-        # Fail-safe: return is_code_only=False so WaitForInfraApproval handles it
+    # Read changeset info from DDB (written by Phase 1 CodeBuild via sam_deploy.py)
+    changeset_name = history.get('changeset_name', '')
+    no_changes = history.get('no_changes', False)
+
+    # If no_changes flag set by Phase 1 → no infra changes, safe to auto-approve
+    if no_changes:
+        print(f"[analyze] no_changes=true for deploy_id={deploy_id} — auto-approve (no changes)")
+        return {
+            'is_code_only': True,
+            'deploy_id': deploy_id,
+            'project_id': project_id,
+            'change_count': 0,
+            'resource_changes': [],
+            'analysis_error': None,
+        }
+
+    # Get stack_name from DDB projects table
+    stack_name = _get_stack_name(project_id)
+
+    if not stack_name:
+        print(f"Error: Missing stack_name for project_id={project_id!r}, deploy_id={deploy_id}")
         return {
             'is_code_only': False,
             'deploy_id': deploy_id,
             'project_id': project_id,
             'change_count': 0,
             'resource_changes': [],
-            'analysis_error': 'Missing stack_name or template_s3_url',
+            'analysis_error': 'Missing stack_name',
+        }
+
+    if not changeset_name:
+        print(f"Error: No changeset_name in deploy history for deploy_id={deploy_id}")
+        # Fail-safe: no changeset → require human approval
+        return {
+            'is_code_only': False,
+            'deploy_id': deploy_id,
+            'project_id': project_id,
+            'change_count': 0,
+            'resource_changes': [],
+            'analysis_error': 'Missing changeset_name in deploy history',
         }
 
     cfn = boto3.client('cloudformation', region_name='us-east-1')
 
-    changeset_name = None
     try:
-        changeset_name = create_dry_run_changeset(cfn, stack_name, template_s3_url)
         analysis = analyze_changeset(cfn, stack_name, changeset_name)
 
         # Special case: "No updates" means stack is already at latest → treat as code-only
@@ -356,12 +380,6 @@ def handle_analyze(event):
             'resource_changes': [],
             'analysis_error': str(exc)[:256],
         }
-    finally:
-        if changeset_name:
-            try:
-                cleanup_changeset(cfn, stack_name, changeset_name)
-            except Exception as _ce:  # noqa: BLE001
-                print(f"[analyze] cleanup_changeset failed (non-critical): {_ce}")
 
 
 def _get_template_s3_url(project_id: str) -> str:
