@@ -1,14 +1,17 @@
 """
-Changeset Analyzer — Sprint 32-001a
+Changeset Analyzer — Sprint 32-001a (refactored Sprint 73)
 
-Provides dry-run changeset creation, analysis, and cleanup for
-determining whether a CloudFormation deployment only changes Lambda
-function code (safe to auto-approve).
+Provides changeset analysis and cleanup for determining whether a
+CloudFormation deployment only changes Lambda function code (safe to
+auto-approve).
+
+As of Sprint 73, dry-run changeset creation is no longer needed here.
+SAM deploy --no-execute-changeset creates the changeset in Phase 1
+(CodeBuild), and this module only analyzes the pre-existing changeset.
 """
 from __future__ import annotations
 
 import time
-import uuid
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -45,22 +48,30 @@ def is_code_only_change(result: AnalysisResult) -> bool:
     - AWS::Lambda::Version   Add     → SAM publishes a new version
     - AWS::Lambda::Version   Delete  → SAM removes old version
     - AWS::Lambda::Alias     Modify  → Alias points to new version
+    - AWS::Logs::LogGroup    Add     → SAM auto-creates log groups
 
     Any other resource type or action → False (fail-safe → human approval).
-    Empty resource_changes (no-op deploy) → True.
+    Empty resource_changes → False (fail-safe: unexpected empty changeset
+    should not bypass human approval).
     """
     # Condition 1 — analysis must have succeeded
     if result.error is not None:
         return False
 
-    # Empty changeset → no-op deploy, safe to proceed
+    # Empty changeset → fail-safe: route to human approval
+    # (A truly empty deploy should be caught by the no_changes flag in DDB)
     if not result.resource_changes:
-        return True
+        return False
 
     # SAM AutoPublishAlias lifecycle types that are always safe
     _SAFE_LAMBDA_TYPES = {
         "AWS::Lambda::Version",
         "AWS::Lambda::Alias",
+    }
+
+    # Resource types that SAM auto-creates and are safe to add
+    _SAFE_ADD_TYPES = {
+        "AWS::Logs::LogGroup",
     }
 
     for change in result.resource_changes:
@@ -70,6 +81,10 @@ def is_code_only_change(result: AnalysisResult) -> bool:
 
         # Lambda Version Add/Delete and Alias Modify are SAM lifecycle — always safe
         if resource_type in _SAFE_LAMBDA_TYPES:
+            continue
+
+        # SAM auto-created resources (e.g. LogGroup Add) are safe
+        if resource_type in _SAFE_ADD_TYPES and action == "Add":
             continue
 
         # Lambda Function must be Modify-only
@@ -94,74 +109,6 @@ def is_code_only_change(result: AnalysisResult) -> bool:
 # ---------------------------------------------------------------------------
 # CloudFormation helpers
 # ---------------------------------------------------------------------------
-
-
-def create_dry_run_changeset(
-    cfn_client,
-    stack_name: str,
-    template_s3_url: str,
-) -> str:
-    """Create a dry-run changeset and return its name.
-
-    Uses ChangeSetType=UPDATE and all three CAPABILITY_* values.
-    Does NOT forward Parameters so the existing stack values are reused.
-    ChangeSetName format: bouncer-dryrun-{uuid4()[:12]}
-
-    Fetches the template body from S3 using the Lambda role credentials
-    (rather than passing TemplateURL which would require CloudFormation to
-    access S3 with its own service principal — which may be denied).
-    """
-    import re
-    import boto3
-
-    # Parse S3 URL → bucket + key
-    # Supports: https://{bucket}.s3.amazonaws.com/{key}
-    #           https://{bucket}.s3.{region}.amazonaws.com/{key}
-    m = re.match(
-        r'https://([^.]+)\.s3(?:\.[^.]+)?\.amazonaws\.com/(.+)',
-        template_s3_url,
-    )
-    if not m:
-        raise ValueError(f"Cannot parse S3 URL: {template_s3_url!r}")
-
-    bucket, key = m.group(1), m.group(2)
-    # Use TemplateURL directly — avoids YAML quote validation errors with TemplateBody
-    changeset_name = f"bouncer-dryrun-{str(uuid.uuid4())[:12]}"
-
-    # Query existing stack parameters so we can pass UsePreviousValue=True
-    # This avoids the "Parameters must have values" error for NoEcho / SecretManager params
-    try:
-        stack_resp = cfn_client.describe_stacks(StackName=stack_name)
-        existing_params = stack_resp["Stacks"][0].get("Parameters", [])
-        reuse_params = [
-            {"ParameterKey": p["ParameterKey"], "UsePreviousValue": True}
-            for p in existing_params
-        ]
-    except Exception:  # noqa: BLE001 — fall back to no params (may fail for required params)
-        reuse_params = []
-
-    cfn_client.create_change_set(
-        StackName=stack_name,
-        TemplateURL=template_s3_url,
-        ChangeSetName=changeset_name,
-        ChangeSetType="UPDATE",
-        Parameters=reuse_params,
-        Capabilities=[
-            "CAPABILITY_IAM",
-            "CAPABILITY_NAMED_IAM",
-            "CAPABILITY_AUTO_EXPAND",
-        ],
-    )
-
-    logger.info(
-        "dry_run_changeset_created",
-        extra={
-            "src_module": "changeset_analyzer",
-            "stack_name": stack_name,
-            "changeset_name": changeset_name,
-        },
-    )
-    return changeset_name
 
 
 def analyze_changeset(

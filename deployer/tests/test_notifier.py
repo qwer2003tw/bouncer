@@ -407,20 +407,27 @@ class TestSprint39UX:
             }
         }
 
+        # Override get_history to also return changeset_name (Sprint 73 DDB-based flow)
+        mock_history.get_item.return_value = {
+            'Item': {
+                'deploy_id': 'test-deploy-123',
+                'telegram_message_id': 789,
+                'changeset_name': 'changeset-123',
+                'no_changes': False,
+            }
+        }
+
         with patch('app.update_history') as mock_update_history, \
              patch('app.handle_progress') as mock_handle_progress, \
              patch('app._get_stack_name', return_value='test-stack'), \
-             patch('app._get_template_s3_url', return_value='https://s3.example.com/template.yaml'), \
              patch('boto3.client') as mock_boto3_client:
 
             # Mock CFN client
             mock_cfn = mock_boto3_client.return_value
 
-            # Mock changeset_analyzer imports (patch from changeset_analyzer module)
-            with patch('changeset_analyzer.create_dry_run_changeset', return_value='changeset-123'), \
-                 patch('changeset_analyzer.analyze_changeset') as mock_analyze, \
-                 patch('changeset_analyzer.is_code_only_change', return_value=True), \
-                 patch('changeset_analyzer.cleanup_changeset'):
+            # Mock changeset_analyzer imports (no more create_dry_run_changeset)
+            with patch('changeset_analyzer.analyze_changeset') as mock_analyze, \
+                 patch('changeset_analyzer.is_code_only_change', return_value=True):
 
                 mock_analyze.return_value = type('obj', (object,), {
                     'resource_changes': [],

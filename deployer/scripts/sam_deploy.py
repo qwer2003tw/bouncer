@@ -42,6 +42,21 @@ from botocore.exceptions import ClientError
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Deploy mode constants
+# ---------------------------------------------------------------------------
+
+DEPLOY_MODE_PACKAGE_AND_CREATE = "package_and_create_changeset"
+DEPLOY_MODE_EXECUTE = "execute_changeset"
+
+# Regex to extract changeset ARN from sam deploy --no-execute-changeset output
+_CHANGESET_ARN_RE = re.compile(
+    r"(arn:aws:cloudformation:[^:]+:\d+:changeSet/\S+)"
+)
+
+# Regex to detect "No changes to deploy" from sam deploy output
+_NO_CHANGES_RE = re.compile(r"No changes to deploy", re.IGNORECASE)
+
+# ---------------------------------------------------------------------------
 # Validation helpers
 # ---------------------------------------------------------------------------
 
@@ -546,6 +561,211 @@ def update_template_s3_url(project_id: str, artifacts_bucket: str) -> None:
         # Non-fatal: don't break deploy
 
 
+def _update_deploy_history(deploy_id: str, data: dict) -> None:
+    """Write changeset metadata to the deploy-history DDB table.
+
+    Non-fatal: exceptions are caught and printed; deploy continues regardless.
+    Must be called BEFORE any cross-account assume-role so that the DDB write
+    uses the original CodeBuild IAM credentials (main account).
+    """
+    if not deploy_id:
+        print("[DDB] Skipping deploy history update: DEPLOY_ID not set")
+        return
+    try:
+        region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+        table_name = os.environ.get("HISTORY_TABLE", "bouncer-deploy-history")
+        ddb = boto3.resource("dynamodb", region_name=region)
+        table = ddb.Table(table_name)
+        update_expr = "SET " + ", ".join(f"#{k} = :{k}" for k in data)
+        expr_names = {f"#{k}": k for k in data}
+        expr_values = {f":{k}": v for k, v in data.items()}
+        table.update_item(
+            Key={"deploy_id": deploy_id},
+            UpdateExpression=update_expr,
+            ExpressionAttributeNames=expr_names,
+            ExpressionAttributeValues=expr_values,
+        )
+        print(f"[DDB] Updated deploy history for {deploy_id}: {list(data.keys())}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[DDB] Warning: failed to update deploy history: {exc}")
+
+
+def _get_deploy_history(deploy_id: str) -> dict:
+    """Read deploy history from DDB.
+
+    Non-fatal: exceptions return empty dict.
+    """
+    if not deploy_id:
+        return {}
+    try:
+        region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+        table_name = os.environ.get("HISTORY_TABLE", "bouncer-deploy-history")
+        ddb = boto3.resource("dynamodb", region_name=region)
+        table = ddb.Table(table_name)
+        result = table.get_item(Key={"deploy_id": deploy_id})
+        return result.get("Item", {})
+    except Exception as exc:  # noqa: BLE001
+        print(f"[DDB] Warning: failed to read deploy history: {exc}")
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: Create changeset (sam deploy --no-execute-changeset)
+# ---------------------------------------------------------------------------
+
+
+def _run_create_changeset(
+    cmd: List[str],
+    deploy_id: str,
+) -> None:
+    """Run sam deploy with --no-execute-changeset and store changeset info in DDB.
+
+    Parses the changeset ARN from stdout.  If SAM reports "No changes to deploy",
+    writes no_changes=True to DDB.  On any failure → sys.exit(1).
+    """
+    # Add --no-execute-changeset to the command
+    full_cmd = list(cmd) + ["--no-execute-changeset"]
+    print("[changeset] Running sam deploy --no-execute-changeset ...")
+
+    deploy_result = _run_deploy(full_cmd)
+
+    # Check for "No changes to deploy"
+    if _NO_CHANGES_RE.search(deploy_result.stdout):
+        print("[changeset] No changes to deploy — marking no_changes=true in DDB")
+        _update_deploy_history(deploy_id, {
+            "changeset_name": "",
+            "no_changes": True,
+        })
+        return
+
+    if not deploy_result.succeeded:
+        print(
+            f"ERROR: sam deploy --no-execute-changeset failed (rc={deploy_result.returncode})",
+            file=sys.stderr,
+        )
+        sys.exit(deploy_result.returncode or 1)
+
+    # Parse changeset ARN from output
+    m = _CHANGESET_ARN_RE.search(deploy_result.stdout)
+    if m:
+        changeset_arn = m.group(1)
+        print(f"[changeset] Created changeset: {changeset_arn}")
+        _update_deploy_history(deploy_id, {
+            "changeset_name": changeset_arn,
+            "no_changes": False,
+        })
+    else:
+        # Fallback: try listing changesets via CloudFormation API
+        stack = os.environ.get("STACK_NAME", "").strip()
+        changeset_arn = _find_latest_changeset(stack)
+        if changeset_arn:
+            print(f"[changeset] Found changeset via API: {changeset_arn}")
+            _update_deploy_history(deploy_id, {
+                "changeset_name": changeset_arn,
+                "no_changes": False,
+            })
+        else:
+            print(
+                "WARNING: Could not determine changeset name from output or API. "
+                "Storing empty changeset_name — AnalyzeChangeset will fail-safe.",
+                file=sys.stderr,
+            )
+            _update_deploy_history(deploy_id, {
+                "changeset_name": "",
+                "no_changes": False,
+            })
+
+
+def _find_latest_changeset(stack_name: str) -> str:
+    """List changesets for the stack and return the most recent available one.
+
+    Returns the changeset ARN/name, or empty string if none found.
+    """
+    if not stack_name:
+        return ""
+    try:
+        cfn = boto3.client("cloudformation")
+        resp = cfn.list_change_sets(StackName=stack_name)
+        for cs in resp.get("Summaries", []):
+            if cs.get("ExecutionStatus") == "AVAILABLE":
+                return cs.get("ChangeSetId", cs.get("ChangeSetName", ""))
+        return ""
+    except Exception as exc:  # noqa: BLE001
+        print(f"[changeset] Warning: list_change_sets failed: {exc}")
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: Execute changeset
+# ---------------------------------------------------------------------------
+
+
+def _run_execute_changeset(
+    stack: str,
+    deploy_id: str,
+) -> None:
+    """Read changeset info from DDB and execute it.
+
+    Steps:
+    1. Read changeset_name and no_changes from DDB
+    2. If no_changes → exit 0
+    3. Execute the changeset
+    4. Wait for stack update to complete (15 min timeout)
+    5. Best-effort cleanup of the changeset
+    """
+    history = _get_deploy_history(deploy_id)
+    changeset_name = history.get("changeset_name", "")
+    no_changes = history.get("no_changes", False)
+
+    if no_changes:
+        print("[execute] no_changes=true — nothing to deploy, exiting successfully")
+        sys.exit(0)
+
+    if not changeset_name:
+        print(
+            "ERROR: No changeset_name found in deploy history. "
+            "Phase 1 may have failed to create a changeset.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print(f"[execute] Executing changeset: {changeset_name}")
+
+    try:
+        cfn = boto3.client("cloudformation")
+
+        cfn.execute_change_set(
+            StackName=stack,
+            ChangeSetName=changeset_name,
+        )
+        print("[execute] execute-change-set initiated, waiting for stack update ...")
+
+        # Wait for stack update to complete (15 min timeout)
+        waiter = cfn.get_waiter("stack_update_complete")
+        waiter.wait(
+            StackName=stack,
+            WaiterConfig={"Delay": 10, "MaxAttempts": 90},  # 10s * 90 = 15 min
+        )
+        print("[execute] Stack update completed successfully.")
+
+    except Exception as exc:  # noqa: BLE001
+        print(f"ERROR: execute-change-set failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+    finally:
+        # Best-effort cleanup of the changeset
+        try:
+            cfn_cleanup = boto3.client("cloudformation")
+            cfn_cleanup.delete_change_set(
+                StackName=stack,
+                ChangeSetName=changeset_name,
+            )
+            print(f"[execute] Cleaned up changeset: {changeset_name}")
+        except Exception as cleanup_exc:  # noqa: BLE001
+            print(f"[execute] Cleanup of changeset failed (non-critical): {cleanup_exc}")
+
+    sys.exit(0)
+
+
 def _build_sam_cmd(
     stack: str,
     params_raw: str,
@@ -686,6 +906,15 @@ def main(argv: Optional[List[str]] = None) -> None:
     project_id = os.environ.get("PROJECT_ID", "").strip()
     deploy_id = os.environ.get("DEPLOY_ID", "").strip()
     skip_package = os.environ.get("SKIP_PACKAGE", "").lower() == "true"
+    deploy_mode = os.environ.get("DEPLOY_MODE", "").strip()
+
+    # --- DEPLOY_MODE=execute_changeset: Phase 2 — execute pre-created changeset ---
+    if deploy_mode == DEPLOY_MODE_EXECUTE:
+        print(f"[mode] DEPLOY_MODE={deploy_mode} — executing pre-created changeset")
+        _notify_progress(deploy_id, project_id, "DEPLOYING")
+        _run_execute_changeset(stack, deploy_id)
+        # _run_execute_changeset calls sys.exit() — should not reach here
+        return
 
     # --- sam package: upload Lambda artifacts + produce packaged template ---
     # Must run BEFORE any cross-account assume-role so the S3 upload uses the
@@ -725,6 +954,14 @@ def main(argv: Optional[List[str]] = None) -> None:
     cmd = _build_sam_cmd(stack, params_raw, cfn_role, target_role, artifacts_bucket)
     sys.stdout.flush()
 
+    # --- DEPLOY_MODE=package_and_create_changeset: Phase 1 — create only ---
+    if deploy_mode == DEPLOY_MODE_PACKAGE_AND_CREATE:
+        print(f"[mode] DEPLOY_MODE={deploy_mode} — creating changeset without executing")
+        _notify_progress(deploy_id, project_id, "DEPLOYING")
+        _run_create_changeset(cmd, deploy_id)
+        sys.exit(0)
+
+    # --- Default mode: full deploy (backward compatible) ---
     # --- First deploy attempt ---
     _notify_progress(deploy_id, project_id, 'DEPLOYING')
     deploy_result = _run_deploy(cmd)
