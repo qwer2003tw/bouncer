@@ -370,9 +370,9 @@ def _send_trust_expiry_notification(
                 item.get('display_summary') or
                 item.get('action', 'unknown action')
             )[:60]
-            lines.append(f"  {i + 1}\\. `{req_id}` — `{escape_markdown(cmd_preview)}`")
+            lines.append(f"  {i + 1}. `{req_id}` — `{escape_markdown(cmd_preview)}`")
         if pending_count > 5:
-            lines.append(f"  _{pending_count - 5} 個更多\\.\\.\\._ ")
+            lines.append(f"  _{pending_count - 5} 個更多..._ ")
 
         pending_details = "\n".join(lines)
         text = (
