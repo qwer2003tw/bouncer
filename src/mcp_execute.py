@@ -619,7 +619,7 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
             'command': ctx.command,
             'account': ctx.account_id,
             'account_name': ctx.account_name,
-            'result': paged['result'],
+            'result': result,  # full result for MCP caller
             'grant_id': grant_id,
             'remaining': remaining_info,
         }
@@ -745,7 +745,7 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
         account_name=ctx.account_name,
         mode='mcp',
         command_status='failed' if is_failed else 'success',
-        result=paged.get('result') if paged else None,
+        result=result,  # store full result, not paged first page
     )
 
     # Record execution error to DDB if command failed (sprint9-001)
@@ -891,7 +891,7 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
         'command': ctx.command,
         'account': ctx.account_id,
         'account_name': ctx.account_name,
-        'result': paged['result'],
+        'result': result,  # full result for MCP caller
         'trust_session': trust_session['request_id'],
         'remaining': remaining_str,
         'command_count': f"{new_count}/{TRUST_SESSION_MAX_COMMANDS}"
