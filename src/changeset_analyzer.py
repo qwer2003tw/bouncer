@@ -54,10 +54,9 @@ def is_code_only_change(result: AnalysisResult) -> bool:
     if result.error is not None:
         return False
 
-    # Empty changeset → fail-safe: route to human approval
-    # (A truly empty deploy should be caught by the no_changes flag in DDB)
+    # Empty changeset → safe (no resource changes = no-op deploy)
     if not result.resource_changes:
-        return False
+        return True
 
     # SAM AutoPublishAlias lifecycle types that are always safe
     _SAFE_LAMBDA_TYPES = {
