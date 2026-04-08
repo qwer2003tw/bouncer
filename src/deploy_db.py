@@ -127,6 +127,7 @@ def add_project(project_id: str, config: dict) -> dict:
         'allowed_deployers': config.get('allowed_deployers', []),
         'enabled': True,
         'created_at': int(time.time()),
+        'deploy_mode': config.get('deploy_mode', 'manual'),
         'auto_approve_deploy': config.get('auto_approve_deploy', False),
         'auto_approve_code_only': config.get('auto_approve_code_only', False),
         'template_s3_url': config.get('template_s3_url', ''),

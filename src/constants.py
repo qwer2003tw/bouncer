@@ -92,6 +92,18 @@ MAX_PENDING_PER_SOURCE = 10  # 每 source 最多 10 個 pending
 RATE_LIMIT_ENABLED = os.environ.get('RATE_LIMIT_ENABLED', 'true').lower() == 'true'
 
 # ============================================================================
+# Deploy Mode
+# ============================================================================
+
+DEPLOY_MODE_MANUAL = 'manual'
+DEPLOY_MODE_AUTO_CODE = 'auto_code'
+DEPLOY_MODE_AUTO_ALL = 'auto_all'
+VALID_DEPLOY_MODES = {DEPLOY_MODE_MANUAL, DEPLOY_MODE_AUTO_CODE, DEPLOY_MODE_AUTO_ALL}
+
+# Deploy Rate Limit (per-project)
+DEPLOY_RATE_LIMIT_WINDOW = 300  # 同專案 5 分鐘內最多 1 個 deploy request
+
+# ============================================================================
 # Trust Session - 連續批准功能
 # ============================================================================
 
