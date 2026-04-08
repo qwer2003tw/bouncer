@@ -302,7 +302,7 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
         result = execute_command(cmd, item_assume_role)
         cmd_status = 'failed' if _is_execute_failed(result) else 'success'
         emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'trust_callback'})
-        paged = store_paged_output(req_id, result)
+        store_paged_output(req_id, result)  # store pages for Telegram Next Page button
 
         # 更新 DynamoDB 狀態
         now = int(time.time())
