@@ -1,5 +1,17 @@
 # Changelog
 
+## v3.73.0 (2026-04-08)
+### Features
+- AnalyzeChangeset 根本修復（方案 A）：sam deploy --no-execute-changeset → 分析 changeset → execute-change-set
+- Step Functions 新流程：Phase 1 建 changeset + Phase 2 執行 changeset
+- `is_code_only_change` 安全加強：未知 resource type → fail-closed、LogGroup 加入白名單
+
+### Fixes
+- CodeBuild role 加 DeployHistoryTable DDB 權限
+- MCP bouncer_status + log_decision 回傳完整 result（不再截斷到 paged 第一頁 4000 字元）
+- callbacks_command DDB update 也改完整 result
+- 空 changeset（0 changes）→ auto-approve（不走審批）
+
 ## v3.72.0 (2026-04-01)
 ### Features
 - `bouncer_query_logs` MCP tool — 專用 CloudWatch Logs 查詢（允許名單制 + fallback 審批按鈕 + 跨帳號）
