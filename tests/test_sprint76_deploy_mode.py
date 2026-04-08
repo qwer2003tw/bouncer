@@ -144,7 +144,7 @@ def test_tc07_auto_all_starts_deploy():
              "status": "started", "deploy_id": "deploy-auto-all",
          }) as mock_start, \
          patch.object(deployer, "_get_changed_files", return_value=[]), \
-         patch("deployer.send_auto_approve_deploy_notification") as mock_notify:
+         patch("notifications.send_auto_approve_deploy_notification") as mock_notify:
 
         result = _call_mcp_tool_deploy()
 
@@ -166,12 +166,12 @@ def test_tc08_auto_code_safe_starts_deploy():
     with patch.object(deployer, "get_project", return_value=project), \
          patch.object(deployer, "preflight_check_secrets", return_value=[]), \
          patch.object(deployer, "get_lock", return_value=None), \
-         patch("deployer.analyze_template_diff", return_value=FakeDiffResult(is_safe=True)), \
+         patch("template_diff_analyzer.analyze_template_diff", return_value=FakeDiffResult(is_safe=True)), \
          patch.object(deployer, "start_deploy", return_value={
              "status": "started", "deploy_id": "deploy-auto-code",
          }) as mock_start, \
          patch.object(deployer, "_get_changed_files", return_value=["src/app.py"]), \
-         patch("deployer.send_auto_approve_deploy_notification") as mock_notify:
+         patch("notifications.send_auto_approve_deploy_notification"):
 
         result = _call_mcp_tool_deploy()
 
@@ -192,7 +192,7 @@ def test_tc09_auto_code_unsafe_goes_to_approval():
     with patch.object(deployer, "get_project", return_value=project), \
          patch.object(deployer, "preflight_check_secrets", return_value=[]), \
          patch.object(deployer, "get_lock", return_value=None), \
-         patch("deployer.analyze_template_diff", return_value=FakeDiffResult(
+         patch("template_diff_analyzer.analyze_template_diff", return_value=FakeDiffResult(
              is_safe=False, high_risk_findings=["IAM Role added"],
          )), \
          patch.object(deployer, "send_deploy_approval_request") as mock_approval, \
@@ -213,7 +213,7 @@ def test_tc09_auto_code_unsafe_goes_to_approval():
 
 def test_tc10_add_project_stores_deploy_mode():
     mock_table = MagicMock()
-    with patch("deploy_db._get_projects_table", return_value=mock_table):
+    with patch.object(deployer, "projects_table", mock_table):
         result = deployer.add_project("proj-tc10", {
             "name": "TC10 Project",
             "deploy_mode": "auto_code",
@@ -226,7 +226,7 @@ def test_tc10_add_project_stores_deploy_mode():
 
 def test_tc10b_add_project_default_deploy_mode():
     mock_table = MagicMock()
-    with patch("deploy_db._get_projects_table", return_value=mock_table):
+    with patch.object(deployer, "projects_table", mock_table):
         result = deployer.add_project("proj-tc10b", {"name": "TC10b"})
 
     assert result["deploy_mode"] == "manual"
