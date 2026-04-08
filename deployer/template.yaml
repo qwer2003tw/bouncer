@@ -360,6 +360,12 @@ Resources:
                   - states:SendTaskSuccess
                   - states:SendTaskFailure
                 Resource: "*"
+              - Sid: InvokeNotifierLambda
+                Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt NotifierLambda.Arn
       Tags:
         - Key: Project
           Value: BounceDeployer
