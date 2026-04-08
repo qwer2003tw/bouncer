@@ -313,10 +313,10 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
 
     source_line = build_info_lines(source=source, context=context)
 
-    # SEC: verify approval has not expired
+    # SEC: verify approval has not expired (use approval_expiry, fallback to ttl)
     import time as _time
-    _item_ttl = int(item.get('ttl', 0))
-    if _item_ttl and int(_time.time()) > _item_ttl and action == 'approve':
+    _expiry = int(item.get('approval_expiry', 0)) or int(item.get('ttl', 0))
+    if _expiry and int(_time.time()) > _expiry and action == 'approve':
         logger.warning("deploy_callback rejected: approval expired for %s", request_id, extra={"src_module": "callbacks", "operation": "ttl_check", "request_id": request_id})
         answer_callback(callback_id, '❌ 審批已過期，請重新發起部署')
         try:
