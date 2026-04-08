@@ -638,7 +638,7 @@ class TestSEC013AutoExecutePendingCompliance:
 
             with patch('src.callbacks_command.execute_command') as mock_exec, \
                  patch('src.callbacks_command.emit_metric'):
-                cb_mod._auto_execute_pending_requests(
+                cb_cmd_mod._auto_execute_pending_requests(
                     'test-scope-bad', '123456789012', None, 'trust-002', 'test-agent'
                 )
 
@@ -665,7 +665,7 @@ class TestSEC013AutoExecutePendingCompliance:
             cb_cmd_mod._db.table = table
 
             # 應不拋例外
-            cb_mod._auto_execute_pending_requests(
+            cb_cmd_mod._auto_execute_pending_requests(
                 'nonexistent-scope', '123456789012', None, 'trust-000'
             )
 
