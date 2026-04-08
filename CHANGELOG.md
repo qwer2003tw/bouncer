@@ -1,5 +1,12 @@
 # Changelog
 
+## v3.74.0 (2026-04-08)
+### Fixes
+- #240: grant_execute 改用 execute_boto3_native（awscli 已移除，grant session 恢復正常）
+- #234: CodeBuild 加 lambda:InvokeFunction 權限（deploy 進度通知修復）
+- #228: deploy approval 分離 ttl（7天 DDB retention）和 approval_expiry（660秒）— 審批不再永不過期
+- #242: callback DDB update 加 ConditionExpression 防競態條件
+
 ## v3.73.0 (2026-04-08)
 ### Features
 - AnalyzeChangeset 根本修復（方案 A）：sam deploy --no-execute-changeset → 分析 changeset → execute-change-set
