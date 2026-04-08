@@ -15,7 +15,11 @@ import db as _db
 import notifications
 from aws_lambda_powertools import Logger
 from telegram import unpin_message
-from constants import APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER
+from constants import (
+    APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER,
+    DEPLOY_MODE_MANUAL, DEPLOY_MODE_AUTO_CODE, DEPLOY_MODE_AUTO_ALL,
+    VALID_DEPLOY_MODES,
+)
 
 # Import and re-export DB operations from deploy_db for backward compatibility
 from deploy_db import (  # noqa: F401 - re-exports for backward compatibility
@@ -539,6 +543,27 @@ def get_deploy_status(deploy_id: str) -> dict:
 
 
 # ============================================================================
+# Deploy Mode Resolution
+# ============================================================================
+
+def _resolve_deploy_mode(project: dict) -> str:
+    """Resolve deploy_mode from project config with backward compat.
+
+    Priority:
+    1. project['deploy_mode'] if valid
+    2. auto_approve_deploy=True → 'auto_code' (backward compat)
+    3. default → 'manual'
+    """
+    mode = project.get('deploy_mode')
+    if mode in VALID_DEPLOY_MODES:
+        return mode
+    # Backward compat: auto_approve_deploy=True → auto_code
+    if project.get('auto_approve_deploy', False):
+        return DEPLOY_MODE_AUTO_CODE
+    return DEPLOY_MODE_MANUAL
+
+
+# ============================================================================
 # MCP Tool Handlers
 # ============================================================================
 
@@ -617,10 +642,55 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
             'isError': True
         })
 
-    # Auto-approve 分析（若 project 啟用）
-    auto_approve_enabled = project.get('auto_approve_deploy', False)
+    # Resolve deploy mode (backward compat: auto_approve_deploy → auto_code)
+    deploy_mode = _resolve_deploy_mode(project)
+    logger.info("Deploy mode resolved", extra={
+        "src_module": "deployer", "operation": "mcp_tool_deploy",
+        "project_id": project_id, "deploy_mode": deploy_mode,
+    })
 
-    if auto_approve_enabled:
+    # auto_all: start deploy directly, no approval needed
+    if deploy_mode == DEPLOY_MODE_AUTO_ALL:
+        deploy_result = start_deploy(
+            project_id,
+            branch or project.get('default_branch', 'master'),
+            source or 'auto-approve',
+            reason,
+        )
+        if 'error' in deploy_result:
+            return mcp_result(req_id, {
+                'content': [{'type': 'text', 'text': json.dumps(deploy_result, ensure_ascii=False)}],
+                'isError': True,
+            })
+        changes_summary = 'deploy_mode=auto_all'
+        changed_files = _get_changed_files()
+        if changed_files:
+            preview = changed_files[:3]
+            file_list = ', '.join(preview)
+            if len(changed_files) > 3:
+                file_list += f' (+{len(changed_files) - 3} more)'
+            changes_summary += f'\n📁 Changed: {file_list}'
+        from notifications import send_auto_approve_deploy_notification
+        send_auto_approve_deploy_notification(
+            project_id=project_id,
+            deploy_id=deploy_result.get('deploy_id', ''),
+            source=source,
+            reason=reason,
+            changes_summary=changes_summary,
+        )
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'started',
+                'deploy_id': deploy_result.get('deploy_id', ''),
+                'project_id': project_id,
+                'auto_approved': True,
+                'deploy_mode': 'auto_all',
+                'message': '全自動部署已啟動',
+            }, ensure_ascii=False)}]
+        })
+
+    # auto_code: pre-flight template diff analysis
+    if deploy_mode == DEPLOY_MODE_AUTO_CODE:
         from template_diff_analyzer import analyze_template_diff
         git_repo = project.get('git_repo', '')
         github_pat_secret = project.get('github_pat_secret', 'sam-deployer/github-pat')
@@ -628,15 +698,20 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
         diff_result = analyze_template_diff(git_repo, branch or project.get('default_branch', 'master'), github_pat_secret)
 
         if diff_result.is_safe:
-            # Auto-approve: start deploy directly
+            # Safe: start deploy directly
             deploy_result = start_deploy(
                 project_id,
                 branch or project.get('default_branch', 'master'),
                 source or 'auto-approve',
                 reason,
             )
+            if 'error' in deploy_result:
+                return mcp_result(req_id, {
+                    'content': [{'type': 'text', 'text': json.dumps(deploy_result, ensure_ascii=False)}],
+                    'isError': True,
+                })
 
-            # Sprint 58 s58-005: Enhance changes_summary with git diff
+            # Enhance summary with git diff
             base_summary = diff_result.diff_summary or 'template.yaml 無變動 → code-only'
             changed_files = _get_changed_files()
             if changed_files:
@@ -662,6 +737,7 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
                     'deploy_id': deploy_result.get('deploy_id', ''),
                     'project_id': project_id,
                     'auto_approved': True,
+                    'deploy_mode': 'auto_code',
                     'message': diff_result.diff_summary,
                 }, ensure_ascii=False)}]
             })
@@ -675,10 +751,6 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
             else:
                 context = f"[需審批：{diff_result.diff_summary}] {context or ''}"
             # Fall through to normal approval flow below
-
-    # NOTE: auto_approve_code_only 路徑已移除 (Sprint 75, #243)
-    # Sprint 73 改由 Step Functions AnalyzeChangeset 統一處理 changeset 分析
-    # 舊的 create_dry_run_changeset 路徑與 AnalyzeChangeset 結果矛盾，已廢棄
 
     # 建立審批請求
     request_id = generate_request_id(f"deploy:{project_id}")
