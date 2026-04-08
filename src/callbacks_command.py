@@ -626,10 +626,10 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
     # 格式化顯示資訊
     info = _format_command_info(parsed)
 
-    # SEC: verify approval has not expired
+    # SEC: verify approval has not expired (use approval_expiry, fallback to ttl)
     import time as _time
-    _item_ttl = int(item.get('ttl', 0))
-    if _item_ttl and int(_time.time()) > _item_ttl and action in ('approve', 'approve_trust'):
+    _expiry = int(item.get('approval_expiry', 0)) or int(item.get('ttl', 0))
+    if _expiry and int(_time.time()) > _expiry and action in ('approve', 'approve_trust'):
         logger.warning("callback rejected: approval expired for %s", request_id, extra={"src_module": "callbacks", "operation": "ttl_check", "request_id": request_id})
         answer_callback(callback_id, '❌ 審批已過期，請重新發起請求')
         try:

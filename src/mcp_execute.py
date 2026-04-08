@@ -918,7 +918,9 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
     """Layer 3: submit for human approval — always returns a result."""
 
     request_id = generate_request_id(ctx.command)
-    ttl = int(time.time()) + ctx.timeout + APPROVAL_TTL_BUFFER
+    now = int(time.time())
+    approval_expiry = now + ctx.timeout  # 審批到期時間（通常 300-600 秒）
+    ttl = now + ctx.timeout + APPROVAL_TTL_BUFFER
 
     # Preview for logging
     command_preview = ctx.command[:100] + '...' if len(ctx.command) > 100 else ctx.command
@@ -944,8 +946,9 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
         'account_name': ctx.account_name,
         'assume_role': ctx.assume_role,
         'status': 'pending_approval',
-        'created_at': int(time.time()),
+        'created_at': now,
         'ttl': ttl,
+        'approval_expiry': approval_expiry,
         'mode': 'mcp',
         'display_summary': generate_display_summary('execute', command=ctx.command),
     }

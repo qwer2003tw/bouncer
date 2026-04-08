@@ -1643,17 +1643,17 @@ class TestGetDeployStatusFailedPath:
 
 
 # ============================================================================
-# Auto-approve code-only tests (Sprint 37 #125)
+# Regression: auto_approve_code_only removed (Sprint 75 #243)
 # ============================================================================
 
-class TestAutoApproveCodeOnly:
-    """Tests for auto_approve_code_only flag using changeset analysis."""
+class TestAutoApproveCodeOnlyRemoved:
+    """auto_approve_code_only path removed — changeset analysis delegated to Step Functions AnalyzeChangeset."""
 
-    def test_auto_approve_code_only_enabled_code_only_change(self, app_module, mock_dynamodb):
-        """auto_approve_code_only enabled + code-only changeset → auto-approve."""
+    def test_regression_auto_approve_code_only_flag_ignored(self, app_module, mock_dynamodb):
+        """#243: project with auto_approve_code_only=True should NOT trigger dry-run changeset;
+        deploy goes through normal approval flow (Step Functions handles changeset)."""
         import deployer
 
-        # Add project with auto_approve_code_only enabled
         deployer.add_project('ztp-files', {
             'name': 'ZTP Files',
             'git_repo': 'https://github.com/org/ztp-files.git',
@@ -1662,120 +1662,15 @@ class TestAutoApproveCodeOnly:
             'template_s3_url': 'https://bucket.s3.amazonaws.com/template.yaml',
         })
 
-        # Verify the project was added correctly
-        project = deployer.get_project('ztp-files')
-        print(f"DEBUG: project = {project}")  # Debug output
-        assert project is not None
-        assert project.get('auto_approve_code_only') is True
-
-        # Mock changeset analysis to return code-only result
-        from changeset_analyzer import AnalysisResult
-        mock_result = AnalysisResult(
-            is_code_only=True,
-            resource_changes=[
-                {
-                    'ResourceChange': {
-                        'ResourceType': 'AWS::Lambda::Function',
-                        'Action': 'Modify',
-                        'Details': [{'Target': {'Attribute': 'Properties', 'Name': 'Code'}}],
-                    }
-                }
-            ],
-        )
-
-        with patch('changeset_analyzer.create_dry_run_changeset', return_value='cs-abc123'), \
-             patch('changeset_analyzer.analyze_changeset', return_value=mock_result), \
-             patch('changeset_analyzer.cleanup_changeset'), \
-             patch('notifications.send_auto_approve_deploy_notification'), \
-             patch('deployer.preflight_check_secrets', return_value=[]):
-
+        with patch('deployer.send_deploy_approval_request'):
             result = app_module.handle_mcp_tool_call('test-1', 'bouncer_deploy', {
                 'project': 'ztp-files',
                 'branch': 'main',
                 'reason': 'Deploy code-only change',
             })
 
-        # Verify auto-approved and deploy started
+        # Should go through normal approval — no auto-approve via dry-run changeset
         body = json.loads(result['body'])
-        assert 'result' in body
-        content = json.loads(body['result']['content'][0]['text'])
-        print(f"DEBUG: content = {content}")  # Debug output
-        assert content['status'] == 'started', f"Expected 'started' but got '{content['status']}'. Full content: {content}"
-        assert content['auto_approved'] is True
-        assert content['auto_approve_type'] == 'code_only'
-        assert 'deploy_id' in content
-
-    def test_auto_approve_code_only_enabled_infra_change(self, app_module, mock_dynamodb):
-        """auto_approve_code_only enabled + infra changeset → human approval."""
-        import deployer
-
-        # Add project with auto_approve_code_only enabled
-        deployer.add_project('ztp-files', {
-            'name': 'ZTP Files',
-            'git_repo': 'https://github.com/org/ztp-files.git',
-            'stack_name': 'ztp-files-stack',
-            'auto_approve_code_only': True,
-            'template_s3_url': 'https://bucket.s3.amazonaws.com/template.yaml',
-        })
-
-        # Mock changeset analysis to return infra change result
-        from changeset_analyzer import AnalysisResult
-        mock_result = AnalysisResult(
-            is_code_only=False,
-            resource_changes=[
-                {
-                    'ResourceChange': {
-                        'ResourceType': 'AWS::DynamoDB::Table',
-                        'Action': 'Add',
-                    }
-                }
-            ],
-        )
-
-        with patch('changeset_analyzer.create_dry_run_changeset', return_value='cs-abc123'), \
-             patch('changeset_analyzer.analyze_changeset', return_value=mock_result), \
-             patch('changeset_analyzer.cleanup_changeset'), \
-             patch('deployer.send_deploy_approval_request'):
-
-            result = app_module.handle_mcp_tool_call('test-2', 'bouncer_deploy', {
-                'project': 'ztp-files',
-                'branch': 'main',
-                'reason': 'Deploy with infra change',
-            })
-
-        # Verify routed to human approval
-        body = json.loads(result['body'])
-        assert 'result' in body
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'pending_approval'
         assert 'request_id' in content
-
-    def test_auto_approve_code_only_disabled(self, app_module, mock_dynamodb):
-        """auto_approve_code_only disabled → normal approval flow (no changeset analysis)."""
-        import deployer
-
-        # Add project WITHOUT auto_approve_code_only
-        deployer.add_project('normal-project', {
-            'name': 'Normal Project',
-            'git_repo': 'https://github.com/org/normal.git',
-            'stack_name': 'normal-stack',
-            'auto_approve_code_only': False,
-        })
-
-        with patch('changeset_analyzer.create_dry_run_changeset') as mock_create, \
-             patch('deployer.send_deploy_approval_request'):
-
-            result = app_module.handle_mcp_tool_call('test-3', 'bouncer_deploy', {
-                'project': 'normal-project',
-                'branch': 'main',
-                'reason': 'Normal deploy',
-            })
-
-        # Verify changeset analysis was NOT called
-        mock_create.assert_not_called()
-
-        # Verify routed to normal approval flow
-        body = json.loads(result['body'])
-        assert 'result' in body
-        content = json.loads(body['result']['content'][0]['text'])
-        assert content['status'] == 'pending_approval'

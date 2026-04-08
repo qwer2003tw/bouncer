@@ -1,11 +1,12 @@
 """
-Regression test for #228: deploy approval 永不過期
+Regression test for #228: approval 永不過期
 
-Bug: deploy request 的 ttl 設為 7 天（DDB retention），但 callback
-檢查 ttl 來判斷審批是否過期，導致審批永不過期。
+Sprint 74: deploy request 的 ttl 設為 7 天（DDB retention），但 callback
+檢查 ttl 來判斷審批是否過期，導致審批永不過期。已修復。
 
-Fix: 分離 ttl（DDB retention）和 approval_expiry（審批到期），
-callback 優先檢查 approval_expiry。
+Sprint 75: 一般命令路徑（mcp_execute）也缺少 approval_expiry 欄位，
+callbacks_command.py 只檢查 ttl（= timeout + buffer，較寬鬆）。
+現在 mcp_execute 也寫入 approval_expiry，callbacks_command 優先檢查它。
 """
 import time
 from unittest.mock import patch
@@ -143,3 +144,81 @@ class TestRegressionDeployApprovalExpiry:
 
         # Should reject (fallback to ttl)
         mock_answer.assert_called_once_with('cb-003', '❌ 審批已過期，請重新發起部署')
+
+
+class TestRegressionCommandApprovalExpiry:
+    """Sprint 75 #228 遺漏: command callback should also use approval_expiry."""
+
+    @patch('callbacks_command.update_message')
+    @patch('callbacks_command.answer_callback')
+    @patch('callbacks_command._get_table')
+    def test_regression_command_callback_rejects_expired_approval(
+        self, mock_table, mock_answer, mock_update_msg
+    ):
+        """#228: approval_expiry 已過期 → command callback 應拒絕"""
+        from callbacks_command import handle_command_callback
+        from utils import response
+
+        now = int(time.time())
+        item = {
+            'request_id': 'req-cmd-001',
+            'command': 'aws s3 ls',
+            'reason': 'test',
+            'source': 'test',
+            'trust_scope': '',
+            'context': '',
+            'account_id': '123456789012',
+            'account_name': 'Default',
+            'status': 'pending_approval',
+            'created_at': now - 700,
+            'ttl': now + 3600,              # DDB retention: NOT expired
+            'approval_expiry': now - 100,   # Approval: EXPIRED
+        }
+
+        result = handle_command_callback(
+            action='approve',
+            request_id='req-cmd-001',
+            item=item,
+            message_id=12345,
+            callback_id='cb-cmd-001',
+            user_id='user-001',
+        )
+
+        mock_answer.assert_called_once_with('cb-cmd-001', '❌ 審批已過期，請重新發起請求')
+        assert result['statusCode'] == 200
+
+    @patch('callbacks_command.update_message')
+    @patch('callbacks_command.answer_callback')
+    @patch('callbacks_command._get_table')
+    def test_regression_command_callback_fallback_to_ttl(
+        self, mock_table, mock_answer, mock_update_msg
+    ):
+        """#228: 無 approval_expiry 時 fallback 到 ttl"""
+        from callbacks_command import handle_command_callback
+
+        now = int(time.time())
+        item = {
+            'request_id': 'req-cmd-002',
+            'command': 'aws s3 ls',
+            'reason': 'test',
+            'source': 'test',
+            'trust_scope': '',
+            'context': '',
+            'account_id': '123456789012',
+            'account_name': 'Default',
+            'status': 'pending_approval',
+            'created_at': now - 700,
+            'ttl': now - 100,  # TTL expired, no approval_expiry
+        }
+
+        result = handle_command_callback(
+            action='approve',
+            request_id='req-cmd-002',
+            item=item,
+            message_id=12345,
+            callback_id='cb-cmd-002',
+            user_id='user-002',
+        )
+
+        mock_answer.assert_called_once_with('cb-cmd-002', '❌ 審批已過期，請重新發起請求')
+        assert result['statusCode'] == 200
