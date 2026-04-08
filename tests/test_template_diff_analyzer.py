@@ -11,7 +11,7 @@ pytestmark = pytest.mark.xdist_group("template_diff_analyzer")
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from template_diff_analyzer import analyze_template_diff, TemplateDiffResult
+from template_diff_analyzer import analyze_template_diff, TemplateDiffResult, _scan_added_lines
 
 
 class TestTemplateDiffAnalyzer:
@@ -559,3 +559,110 @@ class TestTemplateDiffAnalyzer:
         assert any('Principal:*' in f for f in result.high_risk_findings)
         assert any('AuthType:NONE' in f for f in result.high_risk_findings)
         assert any('BlockPublicAcls' in f for f in result.high_risk_findings)
+
+
+# ============================================================================
+# Sprint 75 #241: Removal risk patterns (- lines)
+# ============================================================================
+
+class TestRemovalRiskPatterns:
+    """#241: _scan_added_lines must also detect dangerous deletions in - lines."""
+
+    def test_regression_bucket_name_removal_detected(self):
+        """#241: BucketName removal (- line) must be flagged."""
+        patch = (
+            "@@ -10,5 +10,4 @@\n"
+            " Resources:\n"
+            "   MyBucket:\n"
+            "     Type: AWS::S3::Bucket\n"
+            "-    BucketName: my-important-bucket\n"
+            "     Properties:\n"
+        )
+        findings = _scan_added_lines(patch)
+        assert len(findings) >= 1
+        assert any('BucketName' in f and '被刪除' in f for f in findings)
+
+    def test_regression_deletion_policy_removal_detected(self):
+        """#241: DeletionPolicy: Retain removal must be flagged."""
+        patch = (
+            "@@ -5,4 +5,3 @@\n"
+            "   MyTable:\n"
+            "     Type: AWS::DynamoDB::Table\n"
+            "-    DeletionPolicy: Retain\n"
+            "     Properties:\n"
+        )
+        findings = _scan_added_lines(patch)
+        assert len(findings) >= 1
+        assert any('DeletionPolicy' in f and 'Retain' in f for f in findings)
+
+    def test_regression_dynamodb_table_removal_detected(self):
+        """#241: AWS::DynamoDB::Table resource deletion must be flagged."""
+        patch = (
+            "@@ -10,4 +10,2 @@\n"
+            "-  MyTable:\n"
+            "-    Type: AWS::DynamoDB::Table\n"
+            "   MyFunction:\n"
+            "     Type: AWS::Lambda::Function\n"
+        )
+        findings = _scan_added_lines(patch)
+        assert any('DynamoDB Table' in f for f in findings)
+
+    def test_regression_s3_bucket_removal_detected(self):
+        """#241: AWS::S3::Bucket resource deletion must be flagged."""
+        patch = (
+            "@@ -3,3 +3,1 @@\n"
+            "-  DataBucket:\n"
+            "-    Type: AWS::S3::Bucket\n"
+            "   Other:\n"
+        )
+        findings = _scan_added_lines(patch)
+        assert any('S3 Bucket' in f for f in findings)
+
+    def test_regression_rds_removal_detected(self):
+        """#241: AWS::RDS:: resource deletion must be flagged."""
+        patch = (
+            "@@ -3,3 +3,1 @@\n"
+            "-  MyDB:\n"
+            "-    Type: AWS::RDS::DBInstance\n"
+            "   Other:\n"
+        )
+        findings = _scan_added_lines(patch)
+        assert any('RDS' in f for f in findings)
+
+    def test_normal_removal_not_flagged(self):
+        """Removing a safe line (e.g. MemorySize) should NOT be flagged."""
+        patch = (
+            "@@ -10,4 +10,3 @@\n"
+            "   MyFunction:\n"
+            "     Type: AWS::Lambda::Function\n"
+            "-    MemorySize: 256\n"
+            "     Runtime: python3.12\n"
+        )
+        findings = _scan_added_lines(patch)
+        assert findings == []
+
+    @patch('template_diff_analyzer._get_github_pat')
+    @patch('template_diff_analyzer._github_api')
+    def test_removal_triggers_unsafe_in_full_analysis(self, mock_github_api, mock_get_pat):
+        """End-to-end: BucketName removal → is_safe=False in analyze_template_diff."""
+        mock_get_pat.return_value = 'test-pat'
+
+        template_patch = (
+            "@@ -10,5 +10,4 @@\n"
+            " Resources:\n"
+            "   MyBucket:\n"
+            "     Type: AWS::S3::Bucket\n"
+            "-    BucketName: production-data\n"
+            "     Properties:\n"
+        )
+
+        mock_github_api.side_effect = [
+            {'sha': 'head123', 'parents': [{'sha': 'base456'}]},
+            {'files': [{'filename': 'template.yaml', 'patch': template_patch}]},
+        ]
+
+        result = analyze_template_diff('owner/repo', 'main', 'test-secret')
+
+        assert result.is_safe is False
+        assert result.has_template_changes is True
+        assert any('BucketName' in f for f in result.high_risk_findings)

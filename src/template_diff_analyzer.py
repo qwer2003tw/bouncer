@@ -39,6 +39,15 @@ HIGH_RISK_PATTERNS: List[Tuple[str, str]] = [
     (r'MapPublicIpOnLaunch\s*:\s*true', "Subnet 自動分配公開 IP"),
 ]
 
+# Sprint 75 #241: patterns for removed lines (- lines) — dangerous deletions
+REMOVAL_RISK_PATTERNS: List[Tuple[str, str]] = [
+    (r'BucketName\s*:', "BucketName 被刪除 — CloudFormation 可能重建 bucket 導致資料遺失"),
+    (r'DeletionPolicy\s*:\s*Retain', "DeletionPolicy: Retain 被刪除 — 失去刪除保護"),
+    (r'AWS::DynamoDB::Table', "DynamoDB Table 資源被刪除"),
+    (r'AWS::S3::Bucket', "S3 Bucket 資源被刪除"),
+    (r'AWS::RDS::', "RDS 資源被刪除"),
+]
+
 @dataclass
 class TemplateDiffResult:
     is_safe: bool                    # True = auto-approve ok
@@ -89,22 +98,23 @@ def _get_template_diff(owner: str, repo: str, base_sha: str, head_sha: str, pat:
 
 
 def _scan_added_lines(patch: str) -> List[str]:
-    """Scan added lines (+) for high-risk patterns. Return list of finding descriptions.
+    """Scan added (+) and removed (-) lines for high-risk patterns.
 
-    NOTE: This scans only ADDED lines (+) to detect new dangerous additions.
-    For IAM changes (s51-002), this means we catch new IAM resources being created.
-    Modifications to existing IAM resources will have both - and + lines, and the + lines
-    will still trigger the patterns. This is intentional to maintain backward compatibility
-    and avoid false positives for unchanged IAM resources.
+    Added lines are checked against HIGH_RISK_PATTERNS (dangerous additions).
+    Removed lines are checked against REMOVAL_RISK_PATTERNS (dangerous deletions).
     """
     findings = []
     for line in patch.splitlines():
-        if not line.startswith('+') or line.startswith('+++'):
-            continue
-        content = line[1:]  # strip leading +
-        for pattern, description in HIGH_RISK_PATTERNS:
-            if re.search(pattern, content, re.IGNORECASE):
-                findings.append(f"{description} (line: `{content.strip()[:80]}`)")
+        if line.startswith('+') and not line.startswith('+++'):
+            content = line[1:]  # strip leading +
+            for pattern, description in HIGH_RISK_PATTERNS:
+                if re.search(pattern, content, re.IGNORECASE):
+                    findings.append(f"{description} (line: `{content.strip()[:80]}`)")
+        elif line.startswith('-') and not line.startswith('---'):
+            content = line[1:]  # strip leading -
+            for pattern, description in REMOVAL_RISK_PATTERNS:
+                if re.search(pattern, content, re.IGNORECASE):
+                    findings.append(f"{description} (removed: `{content.strip()[:80]}`)")
     return findings
 
 
