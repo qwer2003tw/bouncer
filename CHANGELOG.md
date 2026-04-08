@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.75.0 (2026-04-08)
+### Fixes
+- #243: 移除 auto_approve_code_only dry-run changeset path — changeset 分析統一由 Step Functions AnalyzeChangeset 處理
+- #241: template_diff_analyzer 掃描刪除行（BucketName/DeletionPolicy/DDB/S3/RDS removal detection）
+- #228 followup: approval_expiry 加到一般命令路徑（不只 deploy）
+
 ## v3.74.0 (2026-04-08)
 ### Fixes
 - #240: grant_execute 改用 execute_boto3_native（awscli 已移除，grant session 恢復正常）
