@@ -40,8 +40,12 @@ def _is_execute_failed(output: str) -> bool:
     return code is not None and code != 0
 
 
-def _update_request_status(table, request_id: str, status: str, approver: str, extra_attrs: dict = None) -> None:
-    """更新 DynamoDB 請求狀態"""
+def _update_request_status(table, request_id: str, status: str, approver: str, extra_attrs: dict = None) -> bool:
+    """更新 DynamoDB 請求狀態
+
+    Returns:
+        bool: True if update succeeded, False if status was already changed (stale).
+    """
     now = int(time.time())
 
     update_expr = 'SET #s = :s, approved_at = :t, approver = :a, #ttl = :ttl'
@@ -50,7 +54,8 @@ def _update_request_status(table, request_id: str, status: str, approver: str, e
         ':s': status,
         ':t': now,
         ':a': approver,
-        ':ttl': now + RESULT_TTL
+        ':ttl': now + RESULT_TTL,
+        ':pending': 'pending_approval',
     }
 
     if extra_attrs:
@@ -58,12 +63,23 @@ def _update_request_status(table, request_id: str, status: str, approver: str, e
             update_expr += f', {key} = :{key}'
             expr_values[f':{key}'] = value
 
-    table.update_item(
-        Key={'request_id': request_id},
-        UpdateExpression=update_expr,
-        ExpressionAttributeNames=expr_names,
-        ExpressionAttributeValues=expr_values
-    )
+    try:
+        table.update_item(
+            Key={'request_id': request_id},
+            UpdateExpression=update_expr,
+            ExpressionAttributeNames=expr_names,
+            ExpressionAttributeValues=expr_values,
+            ConditionExpression='#s = :pending',
+        )
+        return True
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            logger.warning(
+                "DDB update skipped: status no longer pending_approval",
+                extra={"src_module": "callbacks_command", "operation": "update_request_status", "request_id": request_id}
+            )
+            return False
+        raise
 
 
 def _parse_command_callback_request(item: dict) -> dict:
@@ -207,12 +223,34 @@ def _execute_and_store_result(
         expr_values[':ol'] = paged['output_length']
         expr_values[':np'] = paged.get('next_page')
 
-    table.update_item(
-        Key={'request_id': request_id},
-        UpdateExpression=update_expr,
-        ExpressionAttributeNames=expr_names,
-        ExpressionAttributeValues=expr_values
-    )
+    # ConditionExpression: only update if status is still pending_approval
+    # Prevents race condition where concurrent callbacks overwrite each other
+    expr_values[':pending'] = 'pending_approval'
+    try:
+        table.update_item(
+            Key={'request_id': request_id},
+            UpdateExpression=update_expr,
+            ExpressionAttributeNames=expr_names,
+            ExpressionAttributeValues=expr_values,
+            ConditionExpression='#s = :pending',
+        )
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            logger.warning(
+                "DDB update skipped: status no longer pending_approval",
+                extra={
+                    "src_module": "callbacks_command",
+                    "operation": "execute_and_store",
+                    "request_id": request_id,
+                }
+            )
+            return {
+                'result': result,
+                'paged': paged,
+                'decision_latency_ms': decision_latency_ms,
+                'stale': True,
+            }
+        raise
 
     # Sprint 58 s58-004: Session lifecycle audit log
     logger.info(
@@ -680,6 +718,16 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         exec_result = _execute_and_store_result(
             command, assume_role, request_id, item, user_id, source_ip, action
         )
+
+        # Check if DDB update was stale (status already changed by concurrent callback)
+        if exec_result.get('stale'):
+            logger.warning("Callback stale: DDB status already changed for %s", request_id, extra={"src_module": "callbacks_command", "operation": "handle_command_callback", "request_id": request_id})
+            try:
+                update_message(message_id, f"⚠️ *此請求已被處理*\n\n`{request_id}`", remove_buttons=True)
+            except Exception as _exc:  # noqa: BLE001 — best-effort
+                logger.debug("Stale update_message failed: %s", _exc)
+            return response(200, {'ok': True})
+
         result = exec_result['result']
         paged = exec_result['paged']
 
