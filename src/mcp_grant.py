@@ -16,7 +16,7 @@ import urllib.error
 from aws_lambda_powertools import Logger
 
 from utils import mcp_result, mcp_error, log_decision
-from commands import execute_command
+from commands import execute_boto3_native
 from accounts import (
     init_default_account, get_account, validate_account_id,
 )
@@ -185,24 +185,24 @@ def mcp_tool_revoke_grant(req_id: str, arguments: dict) -> dict:
 
 
 def mcp_tool_grant_execute(req_id: str, arguments: dict) -> dict:
-    """MCP tool: bouncer_grant_execute — 在 Grant Session 內執行命令（fail-fast）"""
+    """MCP tool: bouncer_grant_execute — 在 Grant Session 內執行 AWS 操作（boto3 native，fail-fast）"""
     try:
-        # Import _normalize_command from mcp_execute
-        from mcp_execute import _normalize_command
-
-        # 1. 解析必填參數
+        # 1. 解析必填參數（native 格式）
         grant_id = str(arguments.get('grant_id', '')).strip()
-        command = str(arguments.get('command', '')).strip()
+        aws_args = arguments.get('aws', {})
+        service = str(aws_args.get('service', '')).strip().lower()
+        operation = str(aws_args.get('operation', '')).strip().lower()
+        params = aws_args.get('params', {})
+        region = aws_args.get('region') or None
         source = str(arguments.get('source', '')).strip()
         reason = str(arguments.get('reason', 'Grant execute')).strip()
         account_param = str(arguments.get('account', '')).strip() if arguments.get('account') else None
-        cli_input_json = arguments.get('cli_input_json') or None
 
-        if not grant_id or not command or not source:
-            return mcp_error(req_id, -32602, 'Missing required parameter: grant_id, command, source')
+        if not grant_id or not service or not operation or not source:
+            return mcp_error(req_id, -32602, 'Missing required parameter: grant_id, aws.service, aws.operation, source')
 
-        # 2. 命令正規化（SEC-003: unicode normalize）
-        normalized_cmd = _normalize_command(command)
+        # 2. 產生 native command key（用於 grant 匹配）
+        cmd_key = f"{service}:{operation}"
 
         # 3. 帳號解析
         init_default_account()
@@ -250,7 +250,7 @@ def mcp_tool_grant_execute(req_id: str, arguments: dict) -> dict:
             })
 
         # 4. 取 grant session（不存在 → grant_not_found）
-        from grant import get_grant_session, is_command_in_grant, try_use_grant_command, normalize_command
+        from grant import get_grant_session, is_command_in_grant, try_use_grant_command
 
         grant = get_grant_session(grant_id)
         if not grant:
@@ -317,10 +317,11 @@ def mcp_tool_grant_execute(req_id: str, arguments: dict) -> dict:
                 'isError': True
             })
 
-        # 9. compliance_checker（安全優先，即使是 grant 核准的命令也要通過）
+        # 9. compliance_checker（用 synthetic CLI 命令做 pattern 匹配）
         from compliance_checker import check_compliance
 
-        is_compliant, violation = check_compliance(normalized_cmd)
+        synthetic_cmd = f"aws {service} {operation.replace('_', '-')}"
+        is_compliant, violation = check_compliance(synthetic_cmd)
         if not is_compliant:
             return mcp_result(req_id, {
                 'content': [{
@@ -334,14 +335,14 @@ def mcp_tool_grant_execute(req_id: str, arguments: dict) -> dict:
                 'isError': True
             })
 
-        # 10. 命令在白名單？
-        if not is_command_in_grant(normalize_command(normalized_cmd), grant):
+        # 10. 命令在 grant 白名單？（native key 格式匹配）
+        if not is_command_in_grant(cmd_key, grant):
             return mcp_result(req_id, {
                 'content': [{
                     'type': 'text',
                     'text': json.dumps({
                         'status': 'command_not_in_grant',
-                        'message': 'Command is not in the approved grant list'
+                        'message': 'Operation is not in the approved grant list'
                     })
                 }],
                 'isError': True
@@ -350,7 +351,6 @@ def mcp_tool_grant_execute(req_id: str, arguments: dict) -> dict:
         # 11. allow_repeat 檢查（pre-check 以提供具體錯誤訊息）
         allow_repeat = grant.get('allow_repeat', False)
         used_commands = grant.get('used_commands', {})
-        cmd_key = normalize_command(normalized_cmd)
 
         if not allow_repeat and cmd_key in used_commands:
             return mcp_result(req_id, {
@@ -358,7 +358,7 @@ def mcp_tool_grant_execute(req_id: str, arguments: dict) -> dict:
                     'type': 'text',
                     'text': json.dumps({
                         'status': 'command_already_used',
-                        'message': 'Command already used (allow_repeat=False)'
+                        'message': 'Operation already used (allow_repeat=False)'
                     })
                 }],
                 'isError': True
@@ -371,15 +371,20 @@ def mcp_tool_grant_execute(req_id: str, arguments: dict) -> dict:
                     'type': 'text',
                     'text': json.dumps({
                         'status': 'command_already_used',
-                        'message': 'Command already used or SEC-009 limit reached'
+                        'message': 'Operation already used or SEC-009 limit reached'
                     })
                 }],
                 'isError': True
             })
 
-        # 13. 執行命令
+        # 13. 執行命令（boto3 native）
         assume_role = account.get('role_arn') if account and account_id != DEFAULT_ACCOUNT_ID else None
-        result = execute_command(normalized_cmd, assume_role_arn=assume_role, cli_input_json=cli_input_json)
+        if not assume_role and grant.get('assume_role_arn'):
+            assume_role = grant['assume_role_arn']
+        result = execute_boto3_native(
+            service=service, operation=operation, params=params,
+            region=region, assume_role_arn=assume_role,
+        )
 
         # 14. 分頁輸出（大輸出時）
         paged = store_paged_output(req_id, result)
@@ -387,10 +392,11 @@ def mcp_tool_grant_execute(req_id: str, arguments: dict) -> dict:
         page_id = paged.next_page if paged.paged else None
 
         # 15. Telegram 通知（best-effort）
+        display_cmd = f"{service}.{operation}"
         try:
             send_grant_execute_notification(
                 grant_id=grant_id,
-                command=normalized_cmd,
+                command=display_cmd,
                 result=result_text,
                 source=source,
                 request_id=req_id
@@ -402,7 +408,7 @@ def mcp_tool_grant_execute(req_id: str, arguments: dict) -> dict:
         log_decision(
             table=table,
             request_id=req_id,
-            command=normalized_cmd,
+            command=display_cmd,
             reason=reason,
             source=source,
             account_id=account_id,
