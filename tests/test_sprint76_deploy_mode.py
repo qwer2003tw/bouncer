@@ -213,7 +213,7 @@ def test_tc09_auto_code_unsafe_goes_to_approval():
 
 def test_tc10_add_project_stores_deploy_mode():
     mock_table = MagicMock()
-    with patch.object(deployer, "projects_table", mock_table):
+    with patch("deploy_db._get_projects_table", return_value=mock_table):
         result = deployer.add_project("proj-tc10", {
             "name": "TC10 Project",
             "deploy_mode": "auto_code",
@@ -226,7 +226,7 @@ def test_tc10_add_project_stores_deploy_mode():
 
 def test_tc10b_add_project_default_deploy_mode():
     mock_table = MagicMock()
-    with patch.object(deployer, "projects_table", mock_table):
+    with patch("deploy_db._get_projects_table", return_value=mock_table):
         result = deployer.add_project("proj-tc10b", {"name": "TC10b"})
 
     assert result["deploy_mode"] == "manual"
