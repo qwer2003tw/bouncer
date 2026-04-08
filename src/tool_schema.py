@@ -319,7 +319,7 @@ MCP_TOOLS = {
                 'commands': {
                     'type': 'array',
                     'items': {'type': 'string'},
-                    'description': '要申請的 AWS CLI 命令清單（1-20 個）'
+                    'description': '要申請的命令清單（1-20 個）。使用 native key 格式：{service}:{operation}（如 s3:copy_object, eks:create_cluster）'
                 },
                 'reason': {
                     'type': 'string',
@@ -382,7 +382,7 @@ MCP_TOOLS = {
         }
     },
     'bouncer_grant_execute': {
-        'description': '在已核准的 Grant Session 內執行命令。命令必須在 grant 授權清單中。不在清單的命令會被拒絕（不 fallthrough 到一般審批流程）。',
+        'description': '在已核准的 Grant Session 內執行 AWS 操作（boto3 native 格式）。操作必須在 grant 授權清單中。不在清單的操作會被拒絕（不 fallthrough 到一般審批流程）。',
         'parameters': {
             'type': 'object',
             'properties': {
@@ -390,9 +390,28 @@ MCP_TOOLS = {
                     'type': 'string',
                     'description': 'Grant Session ID'
                 },
-                'command': {
-                    'type': 'string',
-                    'description': 'AWS CLI 命令（必須精確匹配 grant 已授權的命令之一）'
+                'aws': {
+                    'type': 'object',
+                    'description': 'AWS API 呼叫參數',
+                    'properties': {
+                        'service': {
+                            'type': 'string',
+                            'description': 'boto3 服務名稱（例如：eks, s3, ec2）'
+                        },
+                        'operation': {
+                            'type': 'string',
+                            'description': 'boto3 方法名稱（snake_case，例如：create_cluster, describe_instances）'
+                        },
+                        'params': {
+                            'type': 'object',
+                            'description': 'boto3 方法的參數 dict'
+                        },
+                        'region': {
+                            'type': 'string',
+                            'description': 'AWS region（不填則使用環境變數）'
+                        }
+                    },
+                    'required': ['service', 'operation', 'params']
                 },
                 'source': {
                     'type': 'string',
@@ -406,17 +425,9 @@ MCP_TOOLS = {
                     'type': 'string',
                     'description': '執行原因（用於 audit log）',
                     'default': 'Grant execute'
-                },
-                'cli_input_json': {
-                    'type': 'object',
-                    'description': (
-                        '可選。將此 dict 寫入 tempfile 並以 --cli-input-json file:// 傳入 AWS CLI。'
-                        '用於含特殊字元（中文、換行、巢狀引號）的 JSON 值，完全繞過 shell 引號問題。'
-                        '格式：AWS CLI --cli-input-json 接受的完整請求 JSON object。'
-                    )
                 }
             },
-            'required': ['grant_id', 'command', 'source']
+            'required': ['grant_id', 'aws', 'source']
         }
     },
     # ========== Upload Tool ==========

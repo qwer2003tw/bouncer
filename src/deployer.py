@@ -15,6 +15,7 @@ import db as _db
 import notifications
 from aws_lambda_powertools import Logger
 from telegram import unpin_message
+from constants import APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER
 
 # Import and re-export DB operations from deploy_db for backward compatibility
 from deploy_db import (  # noqa: F401 - re-exports for backward compatibility
@@ -796,7 +797,9 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
 
     # 建立審批請求
     request_id = generate_request_id(f"deploy:{project_id}")
-    ttl = int(time.time()) + 7 * 24 * 3600  # 7 days for history lookup
+    now = int(time.time())
+    ttl = now + 7 * 24 * 3600  # 7 days for DDB record retention (history lookup)
+    approval_expiry = now + APPROVAL_TIMEOUT_DEFAULT + APPROVAL_TTL_BUFFER  # 審批到期時間
 
     item = {
         'request_id': request_id,
@@ -809,15 +812,16 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
         'source': source or 'mcp',  # GSI 不允許 NULL，用預設值
         'context': context or '',
         'status': 'pending_approval',
-        'created_at': int(time.time()),
+        'created_at': now,
         'ttl': ttl,
+        'approval_expiry': approval_expiry,
         'mode': 'mcp',
         'display_summary': generate_display_summary('deploy', project_id=project_id),
     }
     _db.table.put_item(Item=item)
 
     # 發送 Telegram 審批請求
-    send_deploy_approval_request(request_id, project, branch, reason, source, context=context, expires_at=ttl)
+    send_deploy_approval_request(request_id, project, branch, reason, source, context=context, expires_at=approval_expiry)
 
     if async_mode:
         return mcp_result(req_id, {

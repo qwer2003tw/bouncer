@@ -616,7 +616,7 @@ class TestNoPaginationAutoPush:
         app_module.table.put_item(Item={
             'request_id': request_id,
             'command': 'aws ec2 describe-instances',
-            'status': 'pending',
+            'status': 'pending_approval',
             'source': 'test',
             'reason': 'describe',
             'account_id': '123456789012',

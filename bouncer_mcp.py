@@ -594,7 +594,7 @@ TOOLS = [
     },
     {
         'name': 'bouncer_grant_execute',
-        'description': '在已批准的 Grant Session 內執行命令（精確匹配）',
+        'description': '在已批准的 Grant Session 內執行 AWS 操作（boto3 native 格式，精確匹配授權清單）',
         'inputSchema': {
             'type': 'object',
             'properties': {
@@ -602,20 +602,43 @@ TOOLS = [
                     'type': 'string',
                     'description': 'Grant Session ID'
                 },
-                'command': {
-                    'type': 'string',
-                    'description': 'AWS CLI 命令（必須精確匹配授權清單中的命令）'
-                },
-                'trust_scope': {
-                    'type': 'string',
-                    'description': '信任範圍識別符'
-                },
-                'cli_input_json': {
+                'aws': {
                     'type': 'object',
-                    'description': '可選。將此 dict 寫入 tempfile 並以 --cli-input-json file:// 傳入 AWS CLI。用於含特殊字元（中文、換行、巢狀引號）的 JSON 值，完全繞過 shell 引號問題'
+                    'description': 'AWS API 呼叫參數',
+                    'properties': {
+                        'service': {
+                            'type': 'string',
+                            'description': 'boto3 服務名稱（例如：eks, s3, ec2）'
+                        },
+                        'operation': {
+                            'type': 'string',
+                            'description': 'boto3 方法名稱（snake_case，例如：create_cluster）'
+                        },
+                        'params': {
+                            'type': 'object',
+                            'description': 'boto3 方法的參數 dict'
+                        },
+                        'region': {
+                            'type': 'string',
+                            'description': 'AWS region（不填則使用環境變數）'
+                        }
+                    },
+                    'required': ['service', 'operation', 'params']
+                },
+                'source': {
+                    'type': 'string',
+                    'description': '請求來源標識（必須與 grant 建立時的 source 一致）'
+                },
+                'account': {
+                    'type': 'string',
+                    'description': '目標 AWS 帳號 ID'
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': '執行原因（用於 audit log）'
                 }
             },
-            'required': ['grant_id', 'command', 'trust_scope']
+            'required': ['grant_id', 'aws', 'source']
         }
     },
     # ========== CloudWatch Logs Query Tools ==========

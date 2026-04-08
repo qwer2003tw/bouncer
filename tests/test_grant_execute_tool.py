@@ -1,6 +1,8 @@
 """
 Bouncer - Grant Execute Tool 測試
 覆蓋 mcp_tool_grant_execute 的所有驗證步驟和邊界條件
+
+Updated for native boto3 format (awscli removed).
 """
 
 import json
@@ -9,7 +11,6 @@ import os
 import time
 import pytest
 from unittest.mock import patch, MagicMock
-from decimal import Decimal
 
 from moto import mock_aws
 import boto3
@@ -123,17 +124,20 @@ def mcp_module(mock_dynamodb):
 # Helper Functions
 # ============================================================================
 
+def _make_aws_args(service='s3', operation='list_objects_v2', params=None):
+    """Build aws dict for grant_execute arguments."""
+    return {'service': service, 'operation': operation, 'params': params or {}}
+
+
 def create_test_grant(mcp_module, grant_id='test-grant-001', status='active',
                      source='test-source', account_id='111111111111',
                      commands=None, allow_repeat=False, expires_at=None):
-    """建立測試用的 grant session"""
+    """建立測試用的 grant session（使用 native key 格式）"""
     if commands is None:
-        commands = ['aws s3 ls', 'aws ec2 describe-instances']
+        commands = ['s3:list_objects_v2', 'ec2:describe_instances']
 
     if expires_at is None:
         expires_at = int(time.time()) + 1800  # 30 分鐘後過期
-
-    from grant import normalize_command
 
     grant = {
         'request_id': grant_id,
@@ -142,7 +146,7 @@ def create_test_grant(mcp_module, grant_id='test-grant-001', status='active',
         'source': source,
         'account_id': account_id,
         'reason': 'Test grant',
-        'granted_commands': [normalize_command(cmd) for cmd in commands],
+        'granted_commands': commands,
         'allow_repeat': allow_repeat,
         'used_commands': {},
         'total_executions': 0,
@@ -163,17 +167,17 @@ def create_test_grant(mcp_module, grant_id='test-grant-001', status='active',
 class TestGrantExecuteHappyPath:
     """Happy path 測試"""
 
-    @patch('mcp_grant.execute_command')
+    @patch('mcp_grant.execute_boto3_native')
     @patch('mcp_grant.send_grant_execute_notification')
     def test_grant_execute_success_allow_repeat_false(self, mock_notify, mock_exec, mcp_module):
         """測試成功執行（allow_repeat=False）"""
-        mock_exec.return_value = 'Command executed successfully'
+        mock_exec.return_value = '{"Buckets": []}'
 
-        grant = create_test_grant(mcp_module, allow_repeat=False)
+        create_test_grant(mcp_module, allow_repeat=False)
 
         result = mcp_module.mcp_tool_grant_execute('req-001', {
             'grant_id': 'test-grant-001',
-            'command': 'aws s3 ls',
+            'aws': _make_aws_args('s3', 'list_objects_v2', {'Bucket': 'test'}),
             'source': 'test-source',
             'account': '111111111111',
             'reason': 'Test execution'
@@ -187,18 +191,18 @@ class TestGrantExecuteHappyPath:
         mock_exec.assert_called_once()
         mock_notify.assert_called_once()
 
-    @patch('mcp_grant.execute_command')
+    @patch('mcp_grant.execute_boto3_native')
     @patch('mcp_grant.send_grant_execute_notification')
     def test_grant_execute_success_allow_repeat_true(self, mock_notify, mock_exec, mcp_module):
         """測試成功執行（allow_repeat=True，可重複執行同一命令）"""
-        mock_exec.return_value = 'Command executed'
+        mock_exec.return_value = '{"Buckets": []}'
 
-        grant = create_test_grant(mcp_module, allow_repeat=True)
+        create_test_grant(mcp_module, allow_repeat=True)
 
         # 第一次執行
         result1 = mcp_module.mcp_tool_grant_execute('req-001', {
             'grant_id': 'test-grant-001',
-            'command': 'aws s3 ls',
+            'aws': _make_aws_args('s3', 'list_objects_v2', {'Bucket': 'test'}),
             'source': 'test-source'
         })
         assert 'error' not in json.loads(result1['body'])
@@ -206,24 +210,24 @@ class TestGrantExecuteHappyPath:
         # 第二次執行同一命令（allow_repeat=True 應該允許）
         result2 = mcp_module.mcp_tool_grant_execute('req-002', {
             'grant_id': 'test-grant-001',
-            'command': 'aws s3 ls',
+            'aws': _make_aws_args('s3', 'list_objects_v2', {'Bucket': 'test'}),
             'source': 'test-source'
         })
         assert 'error' not in json.loads(result2['body'])
         content = json.loads(json.loads(result2['body'])['result']['content'][0]['text'])
         assert content['status'] == 'grant_executed'
 
-    @patch('mcp_grant.execute_command')
+    @patch('mcp_grant.execute_boto3_native')
     @patch('mcp_grant.send_grant_execute_notification')
     def test_grant_execute_without_account_param(self, mock_notify, mock_exec, mcp_module):
         """測試不帶 account 參數（使用預設帳號）"""
-        mock_exec.return_value = 'Success'
+        mock_exec.return_value = '{"result": "ok"}'
 
         create_test_grant(mcp_module)
 
         result = mcp_module.mcp_tool_grant_execute('req-001', {
             'grant_id': 'test-grant-001',
-            'command': 'aws s3 ls',
+            'aws': _make_aws_args('s3', 'list_objects_v2', {'Bucket': 'test'}),
             'source': 'test-source'
         })
 
@@ -238,14 +242,14 @@ class TestGrantExecuteValidation:
     def test_missing_grant_id(self, mcp_module):
         """測試缺少 grant_id"""
         result = mcp_module.mcp_tool_grant_execute('req-001', {
-            'command': 'aws s3 ls',
+            'aws': _make_aws_args(),
             'source': 'test-source'
         })
         assert 'error' in json.loads(result['body'])
         assert json.loads(result['body'])['error']['code'] == -32602
 
-    def test_missing_command(self, mcp_module):
-        """測試缺少 command"""
+    def test_missing_aws(self, mcp_module):
+        """測試缺少 aws 參數"""
         result = mcp_module.mcp_tool_grant_execute('req-001', {
             'grant_id': 'test-grant-001',
             'source': 'test-source'
@@ -257,7 +261,7 @@ class TestGrantExecuteValidation:
         """測試缺少 source"""
         result = mcp_module.mcp_tool_grant_execute('req-001', {
             'grant_id': 'test-grant-001',
-            'command': 'aws s3 ls'
+            'aws': _make_aws_args()
         })
         assert 'error' in json.loads(result['body'])
         assert json.loads(result['body'])['error']['code'] == -32602
@@ -272,7 +276,7 @@ class TestGrantExecuteAccountValidation:
 
         result = mcp_module.mcp_tool_grant_execute('req-001', {
             'grant_id': 'test-grant-001',
-            'command': 'aws s3 ls',
+            'aws': _make_aws_args(),
             'source': 'test-source',
             'account': '999999999999'
         })
@@ -287,7 +291,7 @@ class TestGrantExecuteAccountValidation:
 
         result = mcp_module.mcp_tool_grant_execute('req-001', {
             'grant_id': 'test-grant-001',
-            'command': 'aws s3 ls',
+            'aws': _make_aws_args(),
             'source': 'test-source',
             'account': 'invalid-account'
         })
@@ -303,7 +307,7 @@ class TestGrantExecuteGrantValidation:
         """測試 grant 不存在"""
         result = mcp_module.mcp_tool_grant_execute('req-001', {
             'grant_id': 'nonexistent-grant',
-            'command': 'aws s3 ls',
+            'aws': _make_aws_args(),
             'source': 'test-source'
         })
 
@@ -317,7 +321,7 @@ class TestGrantExecuteGrantValidation:
 
         result = mcp_module.mcp_tool_grant_execute('req-001', {
             'grant_id': 'test-grant-001',
-            'command': 'aws s3 ls',
+            'aws': _make_aws_args(),
             'source': 'wrong-source'
         })
 
@@ -331,7 +335,7 @@ class TestGrantExecuteGrantValidation:
 
         result = mcp_module.mcp_tool_grant_execute('req-001', {
             'grant_id': 'test-grant-001',
-            'command': 'aws s3 ls',
+            'aws': _make_aws_args(),
             'source': 'test-source'
         })
 
@@ -346,7 +350,7 @@ class TestGrantExecuteGrantValidation:
 
         result = mcp_module.mcp_tool_grant_execute('req-001', {
             'grant_id': 'test-grant-001',
-            'command': 'aws s3 ls',
+            'aws': _make_aws_args(),
             'source': 'test-source'
         })
 
@@ -371,7 +375,7 @@ class TestGrantExecuteGrantValidation:
         # 嘗試用不同的帳號執行
         result = mcp_module.mcp_tool_grant_execute('req-001', {
             'grant_id': 'test-grant-001',
-            'command': 'aws s3 ls',
+            'aws': _make_aws_args(),
             'source': 'test-source',
             'account': '222222222222'
         })
@@ -391,11 +395,11 @@ class TestGrantExecuteCommandValidation:
         mock_violation.message = 'Test violation'
         mock_compliance.return_value = (False, mock_violation)
 
-        create_test_grant(mcp_module, commands=['aws s3 ls'])
+        create_test_grant(mcp_module, commands=['s3:list_objects_v2'])
 
         result = mcp_module.mcp_tool_grant_execute('req-001', {
             'grant_id': 'test-grant-001',
-            'command': 'aws s3 ls',
+            'aws': _make_aws_args('s3', 'list_objects_v2', {'Bucket': 'test'}),
             'source': 'test-source'
         })
 
@@ -405,14 +409,14 @@ class TestGrantExecuteCommandValidation:
 
     @patch('compliance_checker.check_compliance')
     def test_command_not_in_grant(self, mock_compliance, mcp_module):
-        """測試命令不在授權清單中"""
+        """測試操作不在授權清單中"""
         mock_compliance.return_value = (True, None)
 
-        create_test_grant(mcp_module, commands=['aws s3 ls', 'aws ec2 describe-instances'])
+        create_test_grant(mcp_module, commands=['s3:list_objects_v2', 'ec2:describe_instances'])
 
         result = mcp_module.mcp_tool_grant_execute('req-001', {
             'grant_id': 'test-grant-001',
-            'command': 'aws iam list-users',  # 不在授權清單中
+            'aws': _make_aws_args('iam', 'list_users'),  # 不在授權清單中
             'source': 'test-source'
         })
 
@@ -420,27 +424,27 @@ class TestGrantExecuteCommandValidation:
         assert content['status'] == 'command_not_in_grant'
 
     @patch('compliance_checker.check_compliance')
-    @patch('mcp_grant.execute_command')
+    @patch('mcp_grant.execute_boto3_native')
     @patch('mcp_grant.send_grant_execute_notification')
     def test_command_already_used(self, mock_notify, mock_exec, mock_compliance, mcp_module):
         """測試命令已被使用（allow_repeat=False）"""
         mock_compliance.return_value = (True, None)
-        mock_exec.return_value = 'Success'
+        mock_exec.return_value = '{"result": "ok"}'
 
         create_test_grant(mcp_module, allow_repeat=False)
 
         # 第一次執行
         result1 = mcp_module.mcp_tool_grant_execute('req-001', {
             'grant_id': 'test-grant-001',
-            'command': 'aws s3 ls',
+            'aws': _make_aws_args('s3', 'list_objects_v2', {'Bucket': 'test'}),
             'source': 'test-source'
         })
         assert 'error' not in json.loads(result1['body'])
 
-        # 第二次執行同一命令（應該失敗）
+        # 第二次執行同一操作（應該失敗）
         result2 = mcp_module.mcp_tool_grant_execute('req-002', {
             'grant_id': 'test-grant-001',
-            'command': 'aws s3 ls',
+            'aws': _make_aws_args('s3', 'list_objects_v2', {'Bucket': 'test'}),
             'source': 'test-source'
         })
 
@@ -452,18 +456,18 @@ class TestGrantExecuteExecution:
     """命令執行測試"""
 
     @patch('compliance_checker.check_compliance')
-    @patch('mcp_grant.execute_command')
+    @patch('mcp_grant.execute_boto3_native')
     @patch('mcp_grant.send_grant_execute_notification')
     def test_command_execution_with_result(self, mock_notify, mock_exec, mock_compliance, mcp_module):
         """測試命令執行並返回結果"""
         mock_compliance.return_value = (True, None)
-        mock_exec.return_value = 'i-123456789\ni-987654321'
+        mock_exec.return_value = '{"Reservations": [{"InstanceId": "i-123456789"}]}'
 
-        create_test_grant(mcp_module, commands=['aws ec2 describe-instances'])
+        create_test_grant(mcp_module, commands=['ec2:describe_instances'])
 
         result = mcp_module.mcp_tool_grant_execute('req-001', {
             'grant_id': 'test-grant-001',
-            'command': 'aws ec2 describe-instances',
+            'aws': _make_aws_args('ec2', 'describe_instances', {}),
             'source': 'test-source'
         })
 
@@ -472,19 +476,19 @@ class TestGrantExecuteExecution:
         assert 'i-123456789' in content['result']
 
     @patch('compliance_checker.check_compliance')
-    @patch('mcp_grant.execute_command')
+    @patch('mcp_grant.execute_boto3_native')
     @patch('mcp_grant.send_grant_execute_notification')
     def test_notification_failure_does_not_affect_success(self, mock_notify, mock_exec, mock_compliance, mcp_module):
         """測試通知失敗不影響成功響應"""
         mock_compliance.return_value = (True, None)
-        mock_exec.return_value = 'Success'
+        mock_exec.return_value = '{"result": "ok"}'
         mock_notify.side_effect = Exception('Notification failed')
 
         create_test_grant(mcp_module)
 
         result = mcp_module.mcp_tool_grant_execute('req-001', {
             'grant_id': 'test-grant-001',
-            'command': 'aws s3 ls',
+            'aws': _make_aws_args('s3', 'list_objects_v2', {'Bucket': 'test'}),
             'source': 'test-source'
         })
 
@@ -493,13 +497,13 @@ class TestGrantExecuteExecution:
         assert content['status'] == 'grant_executed'
 
     @patch('compliance_checker.check_compliance')
-    @patch('mcp_grant.execute_command')
+    @patch('mcp_grant.execute_boto3_native')
     @patch('mcp_grant.send_grant_execute_notification')
     @patch('mcp_grant.store_paged_output')
     def test_paged_output(self, mock_page, mock_notify, mock_exec, mock_compliance, mcp_module):
         """測試分頁輸出"""
         mock_compliance.return_value = (True, None)
-        mock_exec.return_value = 'Large output...'
+        mock_exec.return_value = '{"data": "large output..."}'
         from paging import PaginatedOutput
         mock_page.return_value = PaginatedOutput(paged=True, result='Truncated output...', page=1, total_pages=2, output_length=1000, next_page='page-001')
 
@@ -507,7 +511,7 @@ class TestGrantExecuteExecution:
 
         result = mcp_module.mcp_tool_grant_execute('req-001', {
             'grant_id': 'test-grant-001',
-            'command': 'aws s3 ls',
+            'aws': _make_aws_args('s3', 'list_objects_v2', {'Bucket': 'test'}),
             'source': 'test-source'
         })
 
@@ -520,22 +524,34 @@ class TestGrantExecuteEdgeCases:
     """邊界條件測試"""
 
     @patch('compliance_checker.check_compliance')
-    def test_unicode_command_normalization(self, mock_compliance, mcp_module):
-        """測試 Unicode 命令正規化"""
+    @patch('mcp_grant.execute_boto3_native')
+    @patch('mcp_grant.send_grant_execute_notification')
+    def test_grant_assume_role_fallback(self, mock_notify, mock_exec, mock_compliance, mcp_module):
+        """測試 grant 的 assume_role_arn 作為 fallback"""
         mock_compliance.return_value = (True, None)
+        mock_exec.return_value = '{"result": "ok"}'
 
-        # 測試含有 Unicode 空白的命令
-        create_test_grant(mcp_module, commands=['aws s3 ls'])
+        # Create grant with assume_role_arn
+        create_test_grant(mcp_module)
+        import db
+        db.table.update_item(
+            Key={'request_id': 'test-grant-001'},
+            UpdateExpression='SET assume_role_arn = :arn',
+            ExpressionAttributeValues={':arn': 'arn:aws:iam::111111111111:role/GrantRole'}
+        )
 
         result = mcp_module.mcp_tool_grant_execute('req-001', {
             'grant_id': 'test-grant-001',
-            'command': 'aws  s3  ls',  # 多個空格
+            'aws': _make_aws_args('s3', 'list_objects_v2', {'Bucket': 'test'}),
             'source': 'test-source'
         })
 
-        # 應該正規化後匹配成功（但會因為沒有 mock execute_command 而在執行階段出錯）
-        # 這裡主要測試正規化不會導致參數驗證失敗
-        assert 'Missing required parameter' not in str(result)
+        content = json.loads(json.loads(result['body'])['result']['content'][0]['text'])
+        assert content['status'] == 'grant_executed'
+        # Verify assume_role_arn was passed to execute_boto3_native
+        mock_exec.assert_called_once()
+        call_kwargs = mock_exec.call_args
+        assert call_kwargs.kwargs.get('assume_role_arn') == 'arn:aws:iam::111111111111:role/GrantRole'
 
     def test_default_reason(self, mcp_module):
         """測試預設 reason"""
@@ -544,7 +560,7 @@ class TestGrantExecuteEdgeCases:
         # 不提供 reason 參數
         result = mcp_module.mcp_tool_grant_execute('req-001', {
             'grant_id': 'test-grant-001',
-            'command': 'aws s3 ls',
+            'aws': _make_aws_args('s3', 'list_objects_v2', {'Bucket': 'test'}),
             'source': 'test-source'
         })
 
