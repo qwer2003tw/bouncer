@@ -187,7 +187,7 @@ def _execute_and_store_result(
     expr_names = {'#s': 'status', '#r': 'result', '#ttl': 'ttl'}
     expr_values = {
         ':s': 'approved',
-        ':r': paged['result'],
+        ':r': result,  # full result, not paged first page
         ':t': now,
         ':a': user_id,
         ':aby': user_id,                         # audit trail: who approved (Telegram user_id)
@@ -312,7 +312,7 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
             ExpressionAttributeNames={'#s': 'status', '#r': 'result', '#ttl': 'ttl'},
             ExpressionAttributeValues={
                 ':s': 'approved',
-                ':r': paged['result'],
+                ':r': result,  # full result, not paged first page
                 ':t': now,
                 ':dt': 'trust_auto_approved',
                 ':da': now,
