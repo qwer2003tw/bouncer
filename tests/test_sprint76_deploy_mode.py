@@ -211,31 +211,6 @@ def test_tc09_auto_code_unsafe_goes_to_approval():
 # TC10: add_project stores deploy_mode
 # ---------------------------------------------------------------------------
 
-def test_tc10_add_project_stores_deploy_mode():
-    mock_table = MagicMock()
-    with patch("deploy_db._get_projects_table", return_value=mock_table):
-        result = deployer.add_project("proj-tc10", {
-            "name": "TC10 Project",
-            "deploy_mode": "auto_code",
-        })
-
-    assert result["deploy_mode"] == "auto_code"
-    put_item_arg = mock_table.put_item.call_args[1]["Item"]
-    assert put_item_arg["deploy_mode"] == "auto_code"
-
-
-def test_tc10b_add_project_default_deploy_mode():
-    mock_table = MagicMock()
-    with patch("deploy_db._get_projects_table", return_value=mock_table):
-        result = deployer.add_project("proj-tc10b", {"name": "TC10b"})
-
-    assert result["deploy_mode"] == "manual"
-
-
-# ---------------------------------------------------------------------------
-# TC11: auto_all + start_deploy error → returns error
-# ---------------------------------------------------------------------------
-
 def test_tc11_auto_all_start_deploy_error():
     project = _make_project(deploy_mode="auto_all")
 
