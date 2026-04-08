@@ -98,6 +98,12 @@ def handle_progress(event):
 
     # 取得之前的 message_id
     history = get_history(deploy_id)
+
+    # Fallback: read project_id/branch from deploy history if not in event
+    if not project_id and history:
+        project_id = history.get('project_id', '')
+    if branch == 'master' and history and history.get('branch'):
+        branch = history.get('branch', 'master')
     message_id = history.get('telegram_message_id') if history else None
 
     # 根據 phase 建立進度顯示
@@ -286,7 +292,7 @@ def handle_analyze(event):
     # Try to send a progress update message
     history = get_history(deploy_id)
     if history.get('telegram_message_id'):
-        handle_progress({'deploy_id': deploy_id, 'phase': 'ANALYZING'})
+        handle_progress({'deploy_id': deploy_id, 'project_id': project_id, 'branch': event.get('branch', 'master'), 'phase': 'ANALYZING'})
 
     # Special case: bouncer-deployer updates itself — always treat as safe (infra changes are intentional)
     SELF_DEPLOYING_PROJECTS = {'bouncer-deployer'}
