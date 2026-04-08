@@ -18,7 +18,7 @@ from telegram import unpin_message
 from constants import (
     APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER,
     DEPLOY_MODE_MANUAL, DEPLOY_MODE_AUTO_CODE, DEPLOY_MODE_AUTO_ALL,
-    VALID_DEPLOY_MODES,
+    VALID_DEPLOY_MODES, DEPLOY_RATE_LIMIT_WINDOW,
 )
 
 # Import and re-export DB operations from deploy_db for backward compatibility
@@ -564,6 +564,74 @@ def _resolve_deploy_mode(project: dict) -> str:
 
 
 # ============================================================================
+# Deploy Request Dedup & Rate Limit
+# ============================================================================
+
+def _find_pending_deploy(project_id: str):
+    """Find existing pending (non-expired) deploy request for the same project.
+
+    Returns the DDB item if found, None otherwise.
+    """
+    now = int(time.time())
+    try:
+        response = _db.table.query(
+            IndexName='status-created-index',
+            KeyConditionExpression='#st = :status',
+            FilterExpression='#act = :deploy AND project_id = :pid',
+            ExpressionAttributeNames={'#st': 'status', '#act': 'action'},
+            ExpressionAttributeValues={
+                ':status': 'pending_approval',
+                ':deploy': 'deploy',
+                ':pid': project_id,
+            },
+        )
+        for item in response.get('Items', []):
+            expiry = int(item.get('approval_expiry', 0))
+            if expiry == 0 or now < expiry:
+                return item
+    except Exception:  # noqa: BLE001 — fail-open: DDB error should not block deploy
+        logger.exception("_find_pending_deploy failed", extra={
+            "src_module": "deployer", "operation": "_find_pending_deploy",
+            "project_id": project_id,
+        })
+    return None
+
+
+def _is_deploy_rate_limited(project_id: str) -> bool:
+    """Check if a deploy request was created for this project within the rate limit window.
+
+    Queries pending_approval, approved, and denied statuses within the last
+    DEPLOY_RATE_LIMIT_WINDOW seconds.  Returns True if rate-limited.
+    """
+    now = int(time.time())
+    window = now - DEPLOY_RATE_LIMIT_WINDOW
+
+    try:
+        for status in ('pending_approval', 'approved', 'denied'):
+            response = _db.table.query(
+                IndexName='status-created-index',
+                KeyConditionExpression='#st = :status AND created_at >= :window',
+                FilterExpression='#act = :deploy AND project_id = :pid',
+                ExpressionAttributeNames={'#st': 'status', '#act': 'action'},
+                ExpressionAttributeValues={
+                    ':status': status,
+                    ':deploy': 'deploy',
+                    ':pid': project_id,
+                    ':window': window,
+                },
+                Select='COUNT',
+            )
+            if response.get('Count', 0) > 0:
+                return True
+    except Exception:  # noqa: BLE001 — fail-open for deploy rate limit
+        logger.exception("_is_deploy_rate_limited failed", extra={
+            "src_module": "deployer", "operation": "_is_deploy_rate_limited",
+            "project_id": project_id,
+        })
+    return False
+
+
+# ============================================================================
 # MCP Tool Handlers
 # ============================================================================
 
@@ -616,6 +684,39 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
                 'missing_secrets': missing_secrets
             }, ensure_ascii=False)}],
             'isError': True
+        })
+
+    # Deploy dedup: 同 project 已有 pending_approval deploy → 回傳既有 request
+    existing_pending = _find_pending_deploy(project_id)
+    if existing_pending:
+        logger.info("Deploy dedup: returning existing request", extra={
+            "src_module": "deployer", "operation": "mcp_tool_deploy",
+            "project_id": project_id,
+            "existing_request_id": existing_pending['request_id'],
+        })
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'pending_approval',
+                'request_id': existing_pending['request_id'],
+                'project_id': project_id,
+                'message': '已有同專案的待審批部署請求',
+                'duplicate': True,
+            }, ensure_ascii=False)}]
+        })
+
+    # Deploy rate limit: 同專案 N 分鐘內最多 1 個 deploy request
+    if _is_deploy_rate_limited(project_id):
+        logger.info("Deploy rate limited", extra={
+            "src_module": "deployer", "operation": "mcp_tool_deploy",
+            "project_id": project_id,
+        })
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'rate_limited',
+                'project_id': project_id,
+                'message': f'同專案 {DEPLOY_RATE_LIMIT_WINDOW // 60} 分鐘內只能建立 1 個部署請求',
+            }, ensure_ascii=False)}],
+            'isError': True,
         })
 
     # 檢查並行鎖
