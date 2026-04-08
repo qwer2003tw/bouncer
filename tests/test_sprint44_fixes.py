@@ -72,13 +72,14 @@ def test_cleanup_changeset_error_logging():
 
 # Test 4: deploy approval TTL is 7 days (s44-001)
 def test_deploy_approval_ttl_7_days():
-    """s44-001: Deploy approval request TTL should be 7 days"""
-    # Verify code change: deployer.py line 1134 now uses 7 days TTL
+    """s44-001: Deploy approval request TTL should be 7 days, separate from approval_expiry (#228)"""
     deployer_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'src', 'deployer.py')
     with open(deployer_path, 'r') as f:
         content = f.read()
-        # Verify TTL calculation is 7 days
-        assert 'ttl = int(time.time()) + 7 * 24 * 3600  # 7 days for history lookup' in content
+        # Verify TTL calculation is 7 days for DDB retention
+        assert 'ttl = now + 7 * 24 * 3600' in content
+        # Verify approval_expiry is separate from ttl (#228)
+        assert 'approval_expiry = now + APPROVAL_TIMEOUT_DEFAULT + APPROVAL_TTL_BUFFER' in content
 
 
 # Test 5: create_dry_run_changeset uses TemplateURL not TemplateBody (s44-009)

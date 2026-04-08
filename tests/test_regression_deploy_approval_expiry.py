@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 class TestRegressionDeployApprovalExpiry:
     """#228: deploy approval should expire after APPROVAL_TIMEOUT_DEFAULT, not 7 days."""
 
-    @patch('callbacks.start_deploy')
+    @patch('deployer.start_deploy')
     @patch('callbacks.update_message')
     @patch('callbacks.answer_callback')
     @patch('callbacks._update_request_status')
@@ -61,13 +61,13 @@ class TestRegressionDeployApprovalExpiry:
         mock_start.assert_not_called()
         mock_update_status.assert_not_called()
 
-    @patch('callbacks.start_deploy', return_value={'deploy_id': 'deploy-001', 'status': 'started'})
+    @patch('deployer.start_deploy', return_value={'deploy_id': 'deploy-001', 'status': 'started'})
     @patch('callbacks.update_message')
     @patch('callbacks.answer_callback')
     @patch('callbacks._update_request_status')
     @patch('callbacks._get_table')
     @patch('callbacks.pin_message')
-    @patch('callbacks.update_deploy_record')
+    @patch('deployer.update_deploy_record')
     def test_deploy_callback_allows_non_expired_approval(
         self, mock_update_deploy, mock_pin, mock_table, mock_update_status,
         mock_answer, mock_update_msg, mock_start
