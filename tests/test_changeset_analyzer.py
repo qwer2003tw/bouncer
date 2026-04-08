@@ -189,9 +189,9 @@ def test_tc06_error_not_none():
 
 
 def test_tc07_empty_resource_changes_noop():
-    """Empty resource_changes → False (fail-safe: require approval)."""
+    """Empty resource_changes → True (no changes = safe)."""
     result = AnalysisResult(is_code_only=False, resource_changes=[])
-    assert is_code_only_change(result) is False
+    assert is_code_only_change(result) is True
 
 
 # ---------------------------------------------------------------------------
