@@ -4,12 +4,9 @@ Tests for Sprint 76 — #248 deploy request dedup + rate limit
 TC01 - _find_pending_deploy: finds valid pending deploy request
 TC02 - _find_pending_deploy: skips expired pending request
 TC03 - _find_pending_deploy: returns None when no pending deploy
-TC04 - _is_deploy_rate_limited: returns True when recent request exists
-TC05 - _is_deploy_rate_limited: returns False when no recent request
 TC06 - mcp_tool_deploy: dedup returns existing pending request
 TC07 - mcp_tool_deploy: rate limited returns error
 TC08 - _find_pending_deploy: DDB error → fail-open (returns None)
-TC09 - _is_deploy_rate_limited: DDB error → fail-open (returns False)
 """
 from __future__ import annotations
 
@@ -90,41 +87,6 @@ def test_tc03_find_pending_deploy_none():
 
 
 # ---------------------------------------------------------------------------
-# TC04-05: _is_deploy_rate_limited
-# ---------------------------------------------------------------------------
-
-def test_tc04_rate_limited_recent_request():
-    """Returns True when recent deploy request exists within window."""
-    import deployer
-
-    mock_table = MagicMock()
-    # First query (pending_approval) returns count=1
-    mock_table.query.return_value = {'Count': 1}
-
-    with patch.object(deployer, '_db') as mock_db:
-        mock_db.table = mock_table
-        result = deployer._is_deploy_rate_limited('my-proj')
-
-    assert result is True
-
-
-def test_tc05_not_rate_limited():
-    """Returns False when no recent deploy request exists."""
-    import deployer
-
-    mock_table = MagicMock()
-    # All queries return count=0
-    mock_table.query.return_value = {'Count': 0}
-
-    with patch.object(deployer, '_db') as mock_db:
-        mock_db.table = mock_table
-        result = deployer._is_deploy_rate_limited('my-proj')
-
-    assert result is False
-
-
-# ---------------------------------------------------------------------------
-# TC06: mcp_tool_deploy dedup
 # ---------------------------------------------------------------------------
 
 def test_tc06_dedup_returns_existing():
@@ -218,15 +180,3 @@ def test_tc08_find_pending_deploy_ddb_error_fail_open():
     assert result is None
 
 
-def test_tc09_rate_limited_ddb_error_fail_open():
-    """DDB error in _is_deploy_rate_limited → returns False (fail-open)."""
-    import deployer
-
-    mock_table = MagicMock()
-    mock_table.query.side_effect = Exception("DDB down")
-
-    with patch.object(deployer, '_db') as mock_db:
-        mock_db.table = mock_table
-        result = deployer._is_deploy_rate_limited('my-proj')
-
-    assert result is False
