@@ -4,6 +4,7 @@ Bouncer - CloudWatch Logs 查詢工具
 bouncer_query_logs:      查詢 CloudWatch Log Insights（需在允許名單中）
 bouncer_logs_allowlist:  管理允許查詢的 log group 名單（add/remove/list/add_batch）
 """
+from __future__ import annotations
 
 import json
 import os
@@ -146,6 +147,28 @@ def _get_logs_client(region: str = None, assume_role_arn: str = None):
         )
 
     return boto3.client('logs', region_name=region)
+
+
+def _verify_log_group_exists(log_group: str, region: str = '', assume_role_arn: str = None) -> tuple[bool, str]:
+    """Verify that a CloudWatch log group exists.
+
+    Returns:
+        (exists, error_message) — exists=True if found, else error_message explains why.
+    """
+    try:
+        logs_client = _get_logs_client(region=region, assume_role_arn=assume_role_arn)
+        resp = logs_client.describe_log_groups(logGroupNamePrefix=log_group, limit=1)
+        for lg in resp.get('logGroups', []):
+            if lg.get('logGroupName') == log_group:
+                return True, ''
+        return False, f'Log group "{log_group}" 不存在'
+    except ClientError as e:
+        code = e.response['Error']['Code']
+        msg = e.response['Error']['Message']
+        logger.warning("Failed to verify log group existence: %s: %s", code, msg,
+                       extra={"src_module": "mcp_query_logs", "operation": "verify_log_group",
+                              "log_group": log_group, "error": f'{code}: {msg}'})
+        return False, f'無法驗證 log group 是否存在: {code}: {msg}'
 
 
 # ============================================================================
@@ -476,6 +499,15 @@ def mcp_tool_query_logs(req_id: str, arguments: dict) -> dict:
     # NOTE(#11): self-approval is by design — the operator who queries is
     # the same person who approves via Telegram.  Accepted risk for this tool.
     if not _check_allowlist(account_id, log_group):
+        # Verify log group exists before sending approval request
+        exists, verify_err = _verify_log_group_exists(log_group, region=region, assume_role_arn=assume_role_arn)
+        if not exists:
+            logger.info("Log group does not exist, skipping approval: %s (account=%s)",
+                        log_group, account_id,
+                        extra={"src_module": "mcp_query_logs", "operation": "log_group_not_found",
+                               "log_group": log_group, "account_id": account_id})
+            return mcp_error(req_id, -32602, verify_err)
+
         logger.info("Log group not in allowlist, sending approval request: %s (account=%s)",
                      log_group, account_id,
                      extra={"src_module": "mcp_query_logs", "operation": "allowlist_check",
@@ -649,6 +681,20 @@ def mcp_tool_logs_allowlist(req_id: str, arguments: dict) -> dict:
         if not valid:
             return mcp_error(req_id, -32602, err_msg)
 
+        # Verify log group exists before adding to allowlist
+        region = arguments.get('region', '')
+        account_id_resolved, assume_role_arn, acct_err = _resolve_account(account)
+        exists, verify_err = _verify_log_group_exists(
+            log_group, region=region,
+            assume_role_arn=assume_role_arn if not acct_err else None,
+        )
+        if not exists:
+            logger.info("Log group does not exist, rejecting allowlist add: %s (account=%s)",
+                        log_group, account_id,
+                        extra={"src_module": "mcp_query_logs", "operation": "allowlist_add_rejected",
+                               "log_group": log_group, "account_id": account_id})
+            return mcp_error(req_id, -32602, verify_err)
+
         source = arguments.get('source', '')
         _add_to_allowlist(account_id, log_group, added_by=source)
 
@@ -692,6 +738,8 @@ def mcp_tool_logs_allowlist(req_id: str, arguments: dict) -> dict:
             return mcp_error(req_id, -32602, 'log_groups 最多 50 個')
 
         source = arguments.get('source', '')
+        region = arguments.get('region', '')
+        _, assume_role_arn_batch, _ = _resolve_account(account)
         added = []
         errors = []
         for lg in log_groups:
@@ -699,6 +747,12 @@ def mcp_tool_logs_allowlist(req_id: str, arguments: dict) -> dict:
             valid, err_msg = _validate_log_group_name(lg_str)
             if not valid:
                 errors.append({'log_group': lg_str, 'error': err_msg})
+                continue
+            exists, verify_err = _verify_log_group_exists(
+                lg_str, region=region, assume_role_arn=assume_role_arn_batch,
+            )
+            if not exists:
+                errors.append({'log_group': lg_str, 'error': verify_err})
                 continue
             _add_to_allowlist(account_id, lg_str, added_by=source)
             added.append(lg_str)
