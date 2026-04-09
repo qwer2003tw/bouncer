@@ -21,7 +21,7 @@ os.environ.setdefault('TABLE_NAME', 'clawdbot-approval-requests')
 os.environ.setdefault('DEFAULT_ACCOUNT_ID', '190825685292')
 os.environ.setdefault('TELEGRAM_BOT_TOKEN', 'test-token')
 os.environ.setdefault('TELEGRAM_CHAT_ID', '-1234567890')
-os.environ.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
+os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'  # Must override any existing value
 os.environ.setdefault('SCHEDULER_ENABLED', 'false')
 
 from src.deployer import validate_template_s3_url  # noqa: E402
@@ -160,6 +160,18 @@ class TestS60004EscalationSchedule:
             }
 
             with patch('telegram.send_telegram_message_silent') as mock_send:
+                # Ensure src/app.py is imported (xdist isolation fix)
+                import sys
+                import os
+                src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
+                if src_path in sys.path:
+                    sys.path.remove(src_path)
+                sys.path.insert(0, src_path)
+                if 'app' in sys.modules:
+                    app_file = getattr(sys.modules['app'], '__file__', '')
+                    if 'deployer' in app_file:
+                        del sys.modules['app']
+                        import app  # Re-import from src/
                 from app import lambda_handler
                 response = lambda_handler(event, {})
 
@@ -199,6 +211,18 @@ class TestS60004EscalationSchedule:
             }
 
             with patch('telegram.send_telegram_message_silent') as mock_send:
+                # Ensure src/app.py is imported (xdist isolation fix)
+                import sys
+                import os
+                src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
+                if src_path in sys.path:
+                    sys.path.remove(src_path)
+                sys.path.insert(0, src_path)
+                if 'app' in sys.modules:
+                    app_file = getattr(sys.modules['app'], '__file__', '')
+                    if 'deployer' in app_file:
+                        del sys.modules['app']
+                        import app  # Re-import from src/
                 from app import lambda_handler
                 response = lambda_handler(event, {})
 

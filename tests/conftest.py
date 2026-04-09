@@ -46,6 +46,19 @@ BOUNCER_MODS = [
 # Fixtures
 # ============================================================================
 
+
+@pytest.fixture(autouse=True, scope="function")
+def _force_aws_region():
+    """Force AWS_DEFAULT_REGION=us-east-1 for all tests (prevents xdist env var pollution)."""
+    old = os.environ.get('AWS_DEFAULT_REGION')
+    os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'
+    yield
+    if old is not None:
+        os.environ['AWS_DEFAULT_REGION'] = old
+    elif 'AWS_DEFAULT_REGION' in os.environ:
+        del os.environ['AWS_DEFAULT_REGION']
+
+
 @pytest.fixture(scope="function")
 def clean_modules():
     """Clean Bouncer modules from sys.modules (Sprint 58 s58-001).

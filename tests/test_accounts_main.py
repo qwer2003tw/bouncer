@@ -102,6 +102,18 @@ class TestAccountsMore:
     
     def test_validate_account_id_too_short(self, app_module):
         """帳號 ID 太短"""
+        # Ensure src/app.py is imported (xdist isolation fix)
+        import sys
+        import os
+        src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
+        if src_path in sys.path:
+            sys.path.remove(src_path)
+        sys.path.insert(0, src_path)
+        if 'app' in sys.modules:
+            app_file = getattr(sys.modules['app'], '__file__', '')
+            if 'deployer' in app_file:
+                del sys.modules['app']
+                import app  # Re-import from src/
         from app import validate_account_id
         valid, error = validate_account_id('123')
         assert valid is False
@@ -109,6 +121,18 @@ class TestAccountsMore:
     
     def test_validate_account_id_non_numeric(self, app_module):
         """帳號 ID 非數字"""
+        # Ensure src/app.py is imported (xdist isolation fix)
+        import sys
+        import os
+        src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
+        if src_path in sys.path:
+            sys.path.remove(src_path)
+        sys.path.insert(0, src_path)
+        if 'app' in sys.modules:
+            app_file = getattr(sys.modules['app'], '__file__', '')
+            if 'deployer' in app_file:
+                del sys.modules['app']
+                import app  # Re-import from src/
         from app import validate_account_id
         valid, error = validate_account_id('12345678901a')
         assert valid is False

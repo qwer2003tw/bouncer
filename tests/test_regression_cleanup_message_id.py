@@ -124,6 +124,19 @@ class TestHandleCleanupExpiredFallback:
         mock_table = MagicMock()
         mock_table.get_item.return_value = {}  # no 'Item' key = not found
 
+        # Ensure src/app.py is imported (xdist isolation fix)
+        import sys
+        import os
+        src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
+        if src_path in sys.path:
+            sys.path.remove(src_path)
+        sys.path.insert(0, src_path)
+        if 'app' in sys.modules:
+            app_file = getattr(sys.modules['app'], '__file__', '')
+            if 'deployer' in app_file:
+                del sys.modules['app']
+                import app  # Re-import from src/
+
         with patch('app.table', mock_table), \
              patch('app.update_message') as mock_update:
             from app import handle_cleanup_expired
@@ -139,6 +152,19 @@ class TestHandleCleanupExpiredFallback:
         """DDB returns None, but event has telegram_message_id => clear buttons."""
         mock_table = MagicMock()
         mock_table.get_item.return_value = {}
+
+        # Ensure src/app.py is imported (xdist isolation fix)
+        import sys
+        import os
+        src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
+        if src_path in sys.path:
+            sys.path.remove(src_path)
+        sys.path.insert(0, src_path)
+        if 'app' in sys.modules:
+            app_file = getattr(sys.modules['app'], '__file__', '')
+            if 'deployer' in app_file:
+                del sys.modules['app']
+                import app  # Re-import from src/
 
         with patch('app.table', mock_table), \
              patch('app.update_message') as mock_update:
@@ -157,6 +183,19 @@ class TestHandleCleanupExpiredFallback:
         """Fallback update_message failure is swallowed, still returns ok."""
         mock_table = MagicMock()
         mock_table.get_item.return_value = {}
+
+        # Ensure src/app.py is imported (xdist isolation fix)
+        import sys
+        import os
+        src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
+        if src_path in sys.path:
+            sys.path.remove(src_path)
+        sys.path.insert(0, src_path)
+        if 'app' in sys.modules:
+            app_file = getattr(sys.modules['app'], '__file__', '')
+            if 'deployer' in app_file:
+                del sys.modules['app']
+                import app  # Re-import from src/
 
         with patch('app.table', mock_table), \
              patch('app.update_message', side_effect=Exception("Telegram 500")):
@@ -184,6 +223,19 @@ class TestHandleCleanupExpiredFallback:
                 'action': 'execute',
             }
         }
+
+        # Ensure src/app.py is imported (xdist isolation fix)
+        import sys
+        import os
+        src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
+        if src_path in sys.path:
+            sys.path.remove(src_path)
+        sys.path.insert(0, src_path)
+        if 'app' in sys.modules:
+            app_file = getattr(sys.modules['app'], '__file__', '')
+            if 'deployer' in app_file:
+                del sys.modules['app']
+                import app  # Re-import from src/
 
         with patch('app.table', mock_table), \
              patch('app.update_message') as mock_update, \
