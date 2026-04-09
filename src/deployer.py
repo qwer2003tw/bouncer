@@ -10,15 +10,13 @@ import uuid
 import boto3
 from botocore.exceptions import ClientError
 from metrics import emit_metric
-from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native, generate_display_summary
+from utils import mcp_result, mcp_error, decimal_to_native
 import db as _db
 import notifications
 from aws_lambda_powertools import Logger
 from telegram import unpin_message
 from constants import (
-    APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER,
-    DEPLOY_MODE_MANUAL, DEPLOY_MODE_AUTO_CODE, DEPLOY_MODE_AUTO_ALL,
-    VALID_DEPLOY_MODES,
+    DEPLOY_MODE_MANUAL, DEPLOY_MODE_AUTO_CODE, VALID_DEPLOY_MODES,
 )
 
 # Import and re-export DB operations from deploy_db for backward compatibility
