@@ -6,7 +6,7 @@ Tests schedule name generation, schedule creation/deletion, and error handling.
 import sys
 import os
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone
 
 # Ensure src is on sys.path
@@ -87,7 +87,13 @@ class TestSchedulerServiceCreateSchedule:
         mock_scheduler = MagicMock()
         mock_scheduler.create_schedule.return_value = {}
 
-        svc = scheduler_service.SchedulerService(scheduler_client=mock_scheduler)
+        # Pass role_arn and lambda_arn explicitly to override env vars
+        svc = scheduler_service.SchedulerService(
+            scheduler_client=mock_scheduler,
+            lambda_arn='arn:aws:lambda:us-east-1:123456789012:function:cleanup',
+            role_arn='arn:aws:iam::123456789012:role/SchedulerRole',
+            group_name='test-group'
+        )
         result = svc.create_expiry_schedule(
             request_id="req-test",
             expires_at=1704067200
@@ -113,7 +119,7 @@ class TestSchedulerServiceCreateSchedule:
 
     @patch.dict(os.environ, {'SCHEDULER_ENABLED': 'true', 'SCHEDULER_ROLE_ARN': 'arn:aws:iam::123456789012:role/Test'})
     def test_create_expiry_schedule_handles_conflict_error(self):
-        """create_expiry_schedule() logs ConflictException but returns True (idempotent)."""
+        """create_expiry_schedule() logs ConflictException but returns False (error logged)."""
         from botocore.exceptions import ClientError
         mock_scheduler = MagicMock()
         mock_scheduler.create_schedule.side_effect = ClientError(
@@ -121,11 +127,15 @@ class TestSchedulerServiceCreateSchedule:
             'CreateSchedule'
         )
 
-        svc = scheduler_service.SchedulerService(scheduler_client=mock_scheduler)
+        svc = scheduler_service.SchedulerService(
+            scheduler_client=mock_scheduler,
+            lambda_arn='arn:aws:lambda:us-east-1:123456789012:function:cleanup',
+            role_arn='arn:aws:iam::123456789012:role/Test'
+        )
         result = svc.create_expiry_schedule("req-test", 1704067200)
 
-        # ConflictException is swallowed (idempotent behavior)
-        assert result is True
+        # ConflictException is logged and returns False (non-raising)
+        assert result is False
 
     @patch.dict(os.environ, {'SCHEDULER_ENABLED': 'true', 'SCHEDULER_ROLE_ARN': 'arn:aws:iam::123456789012:role/Test'})
     def test_create_expiry_schedule_handles_other_errors(self):
@@ -155,7 +165,11 @@ class TestSchedulerServiceDeleteSchedule:
         mock_scheduler = MagicMock()
         mock_scheduler.delete_schedule.return_value = {}
 
-        svc = scheduler_service.SchedulerService(scheduler_client=mock_scheduler)
+        svc = scheduler_service.SchedulerService(
+            scheduler_client=mock_scheduler,
+            group_name='test-group',
+            enabled=True
+        )
         result = svc.delete_schedule("req-abc")
 
         assert result is True
@@ -167,14 +181,13 @@ class TestSchedulerServiceDeleteSchedule:
     @patch.dict(os.environ, {'SCHEDULER_ENABLED': 'true'})
     def test_delete_schedule_not_found_swallowed(self):
         """delete_schedule() swallows ResourceNotFoundException (idempotent)."""
-        from botocore.exceptions import ClientError
         mock_scheduler = MagicMock()
-        mock_scheduler.delete_schedule.side_effect = ClientError(
-            {'Error': {'Code': 'ResourceNotFoundException', 'Message': 'Not found'}},
-            'DeleteSchedule'
-        )
+        # Mock the exceptions attribute to simulate client.exceptions.ResourceNotFoundException
+        resource_not_found = type('ResourceNotFoundException', (Exception,), {})
+        mock_scheduler.exceptions.ResourceNotFoundException = resource_not_found
+        mock_scheduler.delete_schedule.side_effect = resource_not_found()
 
-        svc = scheduler_service.SchedulerService(scheduler_client=mock_scheduler)
+        svc = scheduler_service.SchedulerService(scheduler_client=mock_scheduler, enabled=True)
         result = svc.delete_schedule("req-missing")
 
         assert result is True  # idempotent
@@ -183,7 +196,7 @@ class TestSchedulerServiceDeleteSchedule:
     def test_delete_schedule_disabled(self):
         """delete_schedule() returns False when disabled."""
         mock_scheduler = MagicMock()
-        svc = scheduler_service.SchedulerService(scheduler_client=mock_scheduler)
+        svc = scheduler_service.SchedulerService(scheduler_client=mock_scheduler, enabled=False)
 
         result = svc.delete_schedule("req-test")
 

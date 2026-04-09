@@ -88,43 +88,43 @@ class TestFormatBouncerHelpText:
 class TestGetCommandHelp:
     """Test get_command_help() AWS CLI command parsing."""
 
-    @patch('help_command.botocore.session.get_session')
-    def test_get_command_help_success(self, mock_get_session):
+    def test_get_command_help_success(self):
         """get_command_help() parses ec2 describe-instances command."""
-        mock_session = MagicMock()
-        mock_service_model = MagicMock()
-        mock_operation_model = MagicMock()
+        with patch('botocore.session.get_session') as mock_get_session:
+            mock_session = MagicMock()
+            mock_service_model = MagicMock()
+            mock_operation_model = MagicMock()
 
-        mock_operation_model.documentation = "Describes EC2 instances"
-        mock_operation_model.input_shape = None
+            mock_operation_model.documentation = "Describes EC2 instances"
+            mock_operation_model.input_shape = None
 
-        mock_service_model.operation_model.return_value = mock_operation_model
-        mock_session.get_service_model.return_value = mock_service_model
-        mock_get_session.return_value = mock_session
+            mock_service_model.operation_model.return_value = mock_operation_model
+            mock_session.get_service_model.return_value = mock_service_model
+            mock_get_session.return_value = mock_session
 
-        result = help_command.get_command_help("ec2 describe-instances")
+            result = help_command.get_command_help("ec2 describe-instances")
 
-        assert result['service'] == 'ec2'
-        assert result['operation'] == 'describe-instances'
-        assert result['api_name'] == 'DescribeInstances'
-        assert 'description' in result
+            assert result['service'] == 'ec2'
+            assert result['operation'] == 'describe-instances'
+            assert result['api_name'] == 'DescribeInstances'
+            assert 'description' in result
 
-    @patch('help_command.botocore.session.get_session')
-    def test_get_command_help_with_aws_prefix(self, mock_get_session):
+    def test_get_command_help_with_aws_prefix(self):
         """get_command_help() strips 'aws' prefix from command."""
-        mock_session = MagicMock()
-        mock_service_model = MagicMock()
-        mock_operation_model = MagicMock()
-        mock_operation_model.documentation = "Test"
-        mock_operation_model.input_shape = None
+        with patch('botocore.session.get_session') as mock_get_session:
+            mock_session = MagicMock()
+            mock_service_model = MagicMock()
+            mock_operation_model = MagicMock()
+            mock_operation_model.documentation = "Test"
+            mock_operation_model.input_shape = None
 
-        mock_service_model.operation_model.return_value = mock_operation_model
-        mock_session.get_service_model.return_value = mock_service_model
-        mock_get_session.return_value = mock_session
+            mock_service_model.operation_model.return_value = mock_operation_model
+            mock_session.get_service_model.return_value = mock_service_model
+            mock_get_session.return_value = mock_session
 
-        result = help_command.get_command_help("aws s3 ls")
+            result = help_command.get_command_help("aws s3 ls")
 
-        assert result['service'] == 's3'
+            assert result['service'] == 's3'
 
     def test_get_command_help_invalid_format(self):
         """get_command_help() returns error for invalid command format."""
@@ -133,33 +133,33 @@ class TestGetCommandHelp:
         assert 'error' in result
         assert '無效命令格式' in result['error']
 
-    @patch('help_command.botocore.session.get_session')
-    def test_get_command_help_service_not_found(self, mock_get_session):
+    def test_get_command_help_service_not_found(self):
         """get_command_help() returns error for unknown service."""
-        mock_session = MagicMock()
-        mock_session.get_service_model.side_effect = Exception("Service not found")
-        mock_get_session.return_value = mock_session
+        with patch('botocore.session.get_session') as mock_get_session:
+            mock_session = MagicMock()
+            mock_session.get_service_model.side_effect = Exception("Service not found")
+            mock_get_session.return_value = mock_session
 
-        result = help_command.get_command_help("invalid-service list")
+            result = help_command.get_command_help("invalid-service list")
 
-        assert 'error' in result
-        assert 'invalid-service' in result['error']
+            assert 'error' in result
+            assert 'invalid-service' in result['error']
 
-    @patch('help_command.botocore.session.get_session')
-    def test_get_command_help_operation_not_found(self, mock_get_session):
+    def test_get_command_help_operation_not_found(self):
         """get_command_help() suggests similar operations when not found."""
-        mock_session = MagicMock()
-        mock_service_model = MagicMock()
-        mock_service_model.operation_model.side_effect = Exception("Not found")
-        mock_service_model.operation_names = ['DescribeInstances', 'DescribeImages']
+        with patch('botocore.session.get_session') as mock_get_session:
+            mock_session = MagicMock()
+            mock_service_model = MagicMock()
+            mock_service_model.operation_model.side_effect = Exception("Not found")
+            mock_service_model.operation_names = ['DescribeInstances', 'DescribeImages']
 
-        mock_session.get_service_model.return_value = mock_service_model
-        mock_get_session.return_value = mock_session
+            mock_session.get_service_model.return_value = mock_service_model
+            mock_get_session.return_value = mock_session
 
-        result = help_command.get_command_help("ec2 describe-invalid")
+            result = help_command.get_command_help("ec2 describe-invalid")
 
-        assert 'error' in result
-        assert 'similar_operations' in result
+            assert 'error' in result
+            assert 'similar_operations' in result
 
 
 class TestCamelToKebab:

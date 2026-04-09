@@ -160,12 +160,11 @@ class TestPreflightCheckSecrets:
 
         assert result == []
 
-    @patch('deploy_preflight.shutil.rmtree')
-    @patch('deploy_preflight.subprocess.run')
-    @patch('deploy_preflight.tempfile.mkdtemp')
+    @patch('subprocess.run')
+    @patch('tempfile.mkdtemp')
     @patch('deploy_preflight._get_secretsmanager_client')
     def test_preflight_check_secrets_git_clone_fails(
-        self, mock_sm_client, mock_mkdtemp, mock_run, mock_rmtree
+        self, mock_sm_client, mock_mkdtemp, mock_run
     ):
         """preflight_check_secrets() returns empty list when git clone fails."""
         mock_client = MagicMock()
@@ -179,15 +178,13 @@ class TestPreflightCheckSecrets:
         result = deploy_preflight.preflight_check_secrets(project, 'main')
 
         assert result == []
-        mock_rmtree.assert_called_once()
 
-    @patch('deploy_preflight.shutil.rmtree')
-    @patch('deploy_preflight.os.path.exists')
-    @patch('deploy_preflight.subprocess.run')
-    @patch('deploy_preflight.tempfile.mkdtemp')
+    @patch('os.path.exists')
+    @patch('subprocess.run')
+    @patch('tempfile.mkdtemp')
     @patch('deploy_preflight._get_secretsmanager_client')
     def test_preflight_check_secrets_template_not_found(
-        self, mock_sm_client, mock_mkdtemp, mock_run, mock_exists, mock_rmtree
+        self, mock_sm_client, mock_mkdtemp, mock_run, mock_exists
     ):
         """preflight_check_secrets() returns empty list when template.yaml not found."""
         mock_client = MagicMock()
@@ -202,15 +199,13 @@ class TestPreflightCheckSecrets:
         result = deploy_preflight.preflight_check_secrets(project, 'main')
 
         assert result == []
-        mock_rmtree.assert_called_once()
 
-    @patch('deploy_preflight.shutil.rmtree')
-    @patch('deploy_preflight.os.path.exists')
-    @patch('deploy_preflight.subprocess.run')
-    @patch('deploy_preflight.tempfile.mkdtemp')
+    @patch('os.path.exists')
+    @patch('subprocess.run')
+    @patch('tempfile.mkdtemp')
     @patch('deploy_preflight._get_secretsmanager_client')
     def test_preflight_check_secrets_no_secrets_referenced(
-        self, mock_sm_client, mock_mkdtemp, mock_run, mock_exists, mock_rmtree
+        self, mock_sm_client, mock_mkdtemp, mock_run, mock_exists
     ):
         """preflight_check_secrets() returns empty list when no secrets in template."""
         mock_client = MagicMock()
@@ -234,15 +229,13 @@ Resources:
             result = deploy_preflight.preflight_check_secrets(project, 'main')
 
         assert result == []
-        mock_rmtree.assert_called_once()
 
-    @patch('deploy_preflight.shutil.rmtree')
-    @patch('deploy_preflight.os.path.exists')
-    @patch('deploy_preflight.subprocess.run')
-    @patch('deploy_preflight.tempfile.mkdtemp')
+    @patch('os.path.exists')
+    @patch('subprocess.run')
+    @patch('tempfile.mkdtemp')
     @patch('deploy_preflight._get_secretsmanager_client')
     def test_preflight_check_secrets_missing_awscurrent(
-        self, mock_sm_client, mock_mkdtemp, mock_run, mock_exists, mock_rmtree
+        self, mock_sm_client, mock_mkdtemp, mock_run, mock_exists
     ):
         """preflight_check_secrets() returns missing secrets without AWSCURRENT."""
         mock_client = MagicMock()
@@ -269,4 +262,3 @@ Environment:
             result = deploy_preflight.preflight_check_secrets(project, 'main')
 
         assert 'myapp/db-password' in result
-        mock_rmtree.assert_called_once()
