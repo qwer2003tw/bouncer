@@ -719,7 +719,7 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
                 'project_id': project_id,
                 'deploy_mode': 'auto_all',
                 'auto_approved': True,
-                'message': summary,
+                'message': 'auto_all deploy started',
             }, ensure_ascii=False)}]
         })
 
