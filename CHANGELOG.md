@@ -1,5 +1,9 @@
 # Changelog
 
+## v3.77.1 (2026-04-09)
+### Fixes
+- 移除所有 pre-flight auto-approve 通知（auto_all + auto_code 兩個路徑）— 修復「先自動批准後需審批」矛盾
+
 ## v3.77.0 (2026-04-09)
 ### Features
 - #256: bouncer_query_logs 加 aws-waf-logs prefix
