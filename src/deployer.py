@@ -711,15 +711,6 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
                 'isError': True
             })
 
-        changed_files = _get_changed_files()
-        summary = 'auto_all → skip template diff'
-        if changed_files:
-            preview_files = changed_files[:3]
-            file_list = ', '.join(preview_files)
-            if len(changed_files) > 3:
-                file_list += f' (+{len(changed_files) - 3} more)'
-            summary = f"{summary}\n📁 Changed: {file_list}"
-
         # No pre-flight notification — Step Functions AnalyzeChangeset handles it
         return mcp_result(req_id, {
             'content': [{'type': 'text', 'text': json.dumps({
@@ -750,17 +741,6 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
             )
 
             # Enhance changes_summary with git diff
-            base_summary = diff_result.diff_summary or 'template.yaml 無變動 → code-only'
-            changed_files = _get_changed_files()
-            if changed_files:
-                preview_files = changed_files[:3]
-                file_list = ', '.join(preview_files)
-                if len(changed_files) > 3:
-                    file_list += f' (+{len(changed_files) - 3} more)'
-                enhanced_summary = f"{base_summary}\n📁 Changed: {file_list}"
-            else:
-                enhanced_summary = base_summary
-
             # No pre-flight notification — Step Functions AnalyzeChangeset handles it
             return mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
