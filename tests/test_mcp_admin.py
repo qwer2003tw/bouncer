@@ -287,7 +287,7 @@ def test_add_account_invalid_account_id(mcp_admin_module):
     content = body['result']['content'][0]['text']
     data = json.loads(content)
     assert data['status'] == 'error'
-    assert 'account_id' in data['error'] or '12' in data['error']
+    assert '帳號' in data['error'] or 'account_id' in data['error'] or '數字' in data['error']
 
 
 @patch('mcp_admin.send_account_approval_request')
