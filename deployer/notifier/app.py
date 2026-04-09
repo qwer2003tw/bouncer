@@ -430,8 +430,10 @@ def handle_infra_approval_request(event):
     deploy_id = event.get('deploy_id', '')
     project_id = event.get('project_id', '')
     task_token = event.get('task_token', '')
-    change_count = event.get('change_count', 0)
-    resource_changes = event.get('resource_changes', [])
+    # analyze_result is nested in the SFN payload
+    analyze_result = event.get('analyze_result', {})
+    change_count = analyze_result.get('change_count', event.get('change_count', 0))
+    resource_changes = analyze_result.get('resource_changes', event.get('resource_changes', []))
 
     # Get deploy details from history
     history = get_history(deploy_id)
