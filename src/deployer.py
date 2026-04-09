@@ -603,7 +603,7 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
     reason = str(arguments.get('reason', '')).strip()
     source = arguments.get('source', None)  # noqa: F841 — used in send_deploy_approval_request below
     context = arguments.get('context', None)  # noqa: F841 — used in approval flow below
-    async_mode = arguments.get('async', True)
+    async_mode = arguments.get('async', True)  # noqa: F841 — used in sync/async response below
 
     if not project_id:
         return mcp_error(req_id, -32602, 'Missing required parameter: project')
