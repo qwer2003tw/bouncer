@@ -16,6 +16,15 @@ from unittest.mock import MagicMock, patch, call
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 import aws_clients
+import importlib
+
+
+@pytest.fixture(autouse=True)
+def _reload_aws_clients():
+    """Reload aws_clients before each test to avoid xdist mock pollution."""
+    importlib.reload(aws_clients)
+    yield
+    importlib.reload(aws_clients)
 
 
 FAKE_CREDS = {
