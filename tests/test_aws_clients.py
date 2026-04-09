@@ -17,6 +17,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 import aws_clients
 
+# Force all tests in this module to run in the same xdist worker
+# to prevent boto3 mock pollution from other test files
+pytestmark = pytest.mark.xdist_group("aws_clients")
+
 
 @pytest.fixture(autouse=True)
 def _clean_aws_clients_cache():
