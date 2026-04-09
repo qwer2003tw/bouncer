@@ -101,7 +101,6 @@ DEPLOY_MODE_AUTO_ALL = 'auto_all'
 VALID_DEPLOY_MODES = {DEPLOY_MODE_MANUAL, DEPLOY_MODE_AUTO_CODE, DEPLOY_MODE_AUTO_ALL}
 
 # Deploy Rate Limit (per-project)
-DEPLOY_RATE_LIMIT_WINDOW = 300  # 同專案 5 分鐘內最多 1 個 deploy request
 
 # ============================================================================
 # Trust Session - 連續批准功能

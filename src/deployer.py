@@ -17,8 +17,7 @@ from aws_lambda_powertools import Logger
 from telegram import unpin_message
 from constants import (
     APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER,
-    DEPLOY_MODE_MANUAL, DEPLOY_MODE_AUTO_CODE, DEPLOY_MODE_AUTO_ALL,
-    VALID_DEPLOY_MODES, DEPLOY_RATE_LIMIT_WINDOW,
+    DEPLOY_MODE_MANUAL, DEPLOY_MODE_AUTO_CODE, VALID_DEPLOY_MODES,
 )
 
 # Import and re-export DB operations from deploy_db for backward compatibility
@@ -597,44 +596,6 @@ def _find_pending_deploy(project_id: str):
     return None
 
 
-def _is_deploy_rate_limited(project_id: str) -> bool:
-    """Check if a deploy request was created for this project within the rate limit window.
-
-    Queries pending_approval, approved, and denied statuses within the last
-    DEPLOY_RATE_LIMIT_WINDOW seconds.  Returns True if rate-limited.
-    """
-    now = int(time.time())
-    window = now - DEPLOY_RATE_LIMIT_WINDOW
-
-    try:
-        for status in ('pending_approval', 'approved', 'denied'):
-            response = _db.table.query(
-                IndexName='status-created-index',
-                KeyConditionExpression='#st = :status AND created_at >= :window',
-                FilterExpression='#act = :deploy AND project_id = :pid',
-                ExpressionAttributeNames={'#st': 'status', '#act': 'action'},
-                ExpressionAttributeValues={
-                    ':status': status,
-                    ':deploy': 'deploy',
-                    ':pid': project_id,
-                    ':window': window,
-                },
-                Select='COUNT',
-            )
-            if response.get('Count', 0) > 0:
-                return True
-    except Exception:  # noqa: BLE001 — fail-open for deploy rate limit
-        logger.exception("_is_deploy_rate_limited failed", extra={
-            "src_module": "deployer", "operation": "_is_deploy_rate_limited",
-            "project_id": project_id,
-        })
-    return False
-
-
-# ============================================================================
-# MCP Tool Handlers
-# ============================================================================
-
 def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> dict:
     """MCP tool: bouncer_deploy（需要審批）"""
 
@@ -704,21 +665,6 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
             }, ensure_ascii=False)}]
         })
 
-    # Deploy rate limit: 同專案 N 分鐘內最多 1 個 deploy request
-    if _is_deploy_rate_limited(project_id):
-        logger.info("Deploy rate limited", extra={
-            "src_module": "deployer", "operation": "mcp_tool_deploy",
-            "project_id": project_id,
-        })
-        return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps({
-                'status': 'rate_limited',
-                'project_id': project_id,
-                'message': f'同專案 {DEPLOY_RATE_LIMIT_WINDOW // 60} 分鐘內只能建立 1 個部署請求',
-            }, ensure_ascii=False)}],
-            'isError': True,
-        })
-
     # 檢查並行鎖
     existing_lock = get_lock(project_id)
     if existing_lock:
@@ -743,54 +689,57 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
             'isError': True
         })
 
-    # Resolve deploy mode (backward compat: auto_approve_deploy → auto_code)
+    # Deploy mode resolution
     deploy_mode = _resolve_deploy_mode(project)
-    logger.info("Deploy mode resolved", extra={
-        "src_module": "deployer", "operation": "mcp_tool_deploy",
-        "project_id": project_id, "deploy_mode": deploy_mode,
-    })
 
-    # auto_all: start deploy directly, no approval needed
-    if deploy_mode == DEPLOY_MODE_AUTO_ALL:
+    # auto_all → start deploy directly (no template diff analysis needed)
+    if deploy_mode == 'auto_all':
         deploy_result = start_deploy(
             project_id,
             branch or project.get('default_branch', 'master'),
             source or 'auto-approve',
             reason,
         )
+
         if 'error' in deploy_result:
             return mcp_result(req_id, {
-                'content': [{'type': 'text', 'text': json.dumps(deploy_result, ensure_ascii=False)}],
-                'isError': True,
+                'content': [{'type': 'text', 'text': json.dumps({
+                    'status': 'error',
+                    'error': deploy_result['error'],
+                    'deploy_mode': 'auto_all',
+                }, ensure_ascii=False)}],
+                'isError': True
             })
-        changes_summary = 'deploy_mode=auto_all'
+
         changed_files = _get_changed_files()
+        summary = 'auto_all → skip template diff'
         if changed_files:
-            preview = changed_files[:3]
-            file_list = ', '.join(preview)
+            preview_files = changed_files[:3]
+            file_list = ', '.join(preview_files)
             if len(changed_files) > 3:
                 file_list += f' (+{len(changed_files) - 3} more)'
-            changes_summary += f'\n📁 Changed: {file_list}'
+            summary = f"{summary}\n📁 Changed: {file_list}"
+
         from notifications import send_auto_approve_deploy_notification
         send_auto_approve_deploy_notification(
             project_id=project_id,
             deploy_id=deploy_result.get('deploy_id', ''),
             source=source,
             reason=reason,
-            changes_summary=changes_summary,
+            changes_summary=summary,
         )
         return mcp_result(req_id, {
             'content': [{'type': 'text', 'text': json.dumps({
                 'status': 'started',
                 'deploy_id': deploy_result.get('deploy_id', ''),
                 'project_id': project_id,
-                'auto_approved': True,
                 'deploy_mode': 'auto_all',
-                'message': '全自動部署已啟動',
+                'auto_approved': True,
+                'message': summary,
             }, ensure_ascii=False)}]
         })
 
-    # auto_code: pre-flight template diff analysis
+    # auto_code → template diff analysis, auto-approve if safe
     if deploy_mode == DEPLOY_MODE_AUTO_CODE:
         from template_diff_analyzer import analyze_template_diff
         git_repo = project.get('git_repo', '')
@@ -799,20 +748,15 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
         diff_result = analyze_template_diff(git_repo, branch or project.get('default_branch', 'master'), github_pat_secret)
 
         if diff_result.is_safe:
-            # Safe: start deploy directly
+            # Auto-approve: start deploy directly
             deploy_result = start_deploy(
                 project_id,
                 branch or project.get('default_branch', 'master'),
                 source or 'auto-approve',
                 reason,
             )
-            if 'error' in deploy_result:
-                return mcp_result(req_id, {
-                    'content': [{'type': 'text', 'text': json.dumps(deploy_result, ensure_ascii=False)}],
-                    'isError': True,
-                })
 
-            # Enhance summary with git diff
+            # Enhance changes_summary with git diff
             base_summary = diff_result.diff_summary or 'template.yaml 無變動 → code-only'
             changed_files = _get_changed_files()
             if changed_files:
@@ -837,8 +781,8 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
                     'status': 'started',
                     'deploy_id': deploy_result.get('deploy_id', ''),
                     'project_id': project_id,
-                    'auto_approved': True,
                     'deploy_mode': 'auto_code',
+                    'auto_approved': True,
                     'message': diff_result.diff_summary,
                 }, ensure_ascii=False)}]
             })
@@ -852,6 +796,10 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
             else:
                 context = f"[需審批：{diff_result.diff_summary}] {context or ''}"
             # Fall through to normal approval flow below
+
+    # NOTE: auto_approve_code_only 路徑已移除 (Sprint 75, #243)
+    # Sprint 73 改由 Step Functions AnalyzeChangeset 統一處理 changeset 分析
+    # 舊的 create_dry_run_changeset 路徑與 AnalyzeChangeset 結果矛盾，已廢棄
 
     # 建立審批請求
     request_id = generate_request_id(f"deploy:{project_id}")
