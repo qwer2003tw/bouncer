@@ -1,5 +1,16 @@
 # Changelog
 
+## v3.77.0 (2026-04-09)
+### Features
+- #256: bouncer_query_logs 加 aws-waf-logs prefix
+- #238/#236: 22 個 0% coverage 檔案全補測試（~170 個新測試，3 batch）
+- xdist test isolation 根本修復（autouse _force_aws_region + module cache cleanup）
+
+### Fixes
+- bouncer_query_logs 發審批前驗證 log group 存在
+- allowlist add 也驗證 log group 存在
+- test_aws_clients xdist_group isolation
+
 ## v3.76.1 (2026-04-09)
 ### Fixes
 - deploy rate limit 移除（dedup + lock 已足夠）
