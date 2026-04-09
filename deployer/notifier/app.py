@@ -591,7 +591,7 @@ def unpin_telegram_message(message_id: int):
 def get_history(deploy_id: str) -> dict:
     """取得部署歷史"""
     try:
-        result = history_table.get_item(Key={'deploy_id': deploy_id})
+        result = history_table.get_item(Key={'deploy_id': deploy_id}, ConsistentRead=True)
         return result.get('Item', {})
     except Exception as e:
         print(f"Error getting history: {e}")
