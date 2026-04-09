@@ -1,3 +1,4 @@
+import json
 """
 Bouncer - callbacks_grant.py 測試
 覆蓋 Grant 審批 callback 的核心邏輯
@@ -101,7 +102,8 @@ def test_grant_approve_all_success(mock_update, mock_answer, mock_get, mock_appr
 
     # 驗證回應
     assert result['statusCode'] == 200
-    assert result['body']['ok'] is True
+    body = json.loads(result['body'])
+    assert body['ok'] is True
 
     # 驗證 approve_grant 被呼叫
     mock_approve.assert_called_once_with(grant_id, '123456', mode='all')
@@ -322,7 +324,8 @@ def test_grant_deny_success(mock_update, mock_answer, mock_deny, callbacks_grant
 
     # 驗證回應
     assert result['statusCode'] == 200
-    assert result['body']['ok'] is True
+    body = json.loads(result['body'])
+    assert body['ok'] is True
 
     # 驗證 deny_grant 被呼叫
     mock_deny.assert_called_once_with(grant_id)
