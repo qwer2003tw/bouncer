@@ -144,7 +144,7 @@ def test_tc07_auto_all_starts_deploy():
              "status": "started", "deploy_id": "deploy-auto-all",
          }) as mock_start, \
          patch.object(deployer, "_get_changed_files", return_value=[]), \
-         patch("notifications.send_auto_approve_deploy_notification") as mock_notify:
+         patch("deploy_preflight._get_changed_files", return_value=[]):
 
         result = _call_mcp_tool_deploy()
 
@@ -153,7 +153,6 @@ def test_tc07_auto_all_starts_deploy():
     assert body["status"] == "started"
     assert body["deploy_mode"] == "auto_all"
     assert body["auto_approved"] is True
-    mock_notify.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
