@@ -601,7 +601,7 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
     project_id = str(arguments.get('project', '')).strip()
     branch = str(arguments.get('branch', '')).strip() or None
     reason = str(arguments.get('reason', '')).strip()
-    source = arguments.get('source', None)
+    source = arguments.get('source', None)  # noqa: F841 — used in send_deploy_approval_request below
     context = arguments.get('context', None)
     async_mode = arguments.get('async', True)
 
