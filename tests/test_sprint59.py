@@ -142,6 +142,18 @@ class TestS59_001_PendingReminder:
             }
 
             with patch('telegram.send_telegram_message_silent') as mock_send:
+                # Ensure src/app.py is imported (xdist isolation fix)
+                import sys
+                import os
+                src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
+                if src_path in sys.path:
+                    sys.path.remove(src_path)
+                sys.path.insert(0, src_path)
+                if 'app' in sys.modules:
+                    app_file = getattr(sys.modules['app'], '__file__', '')
+                    if 'deployer' in app_file:
+                        del sys.modules['app']
+                        import app  # Re-import from src/
                 from app import lambda_handler
                 response = lambda_handler(event, {})
 
@@ -179,6 +191,18 @@ class TestS59_001_PendingReminder:
             }
 
             with patch('telegram.send_telegram_message_silent') as mock_send:
+                # Ensure src/app.py is imported (xdist isolation fix)
+                import sys
+                import os
+                src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
+                if src_path in sys.path:
+                    sys.path.remove(src_path)
+                sys.path.insert(0, src_path)
+                if 'app' in sys.modules:
+                    app_file = getattr(sys.modules['app'], '__file__', '')
+                    if 'deployer' in app_file:
+                        del sys.modules['app']
+                        import app  # Re-import from src/
                 from app import lambda_handler
                 response = lambda_handler(event, {})
 

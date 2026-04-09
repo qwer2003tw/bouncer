@@ -172,6 +172,19 @@ class TestE2ECleanupNormalPath:
             }
         }
 
+        # Ensure src/app.py is imported (xdist isolation fix)
+        import sys
+        import os
+        src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
+        if src_path in sys.path:
+            sys.path.remove(src_path)
+        sys.path.insert(0, src_path)
+        if 'app' in sys.modules:
+            app_file = getattr(sys.modules['app'], '__file__', '')
+            if 'deployer' in app_file:
+                del sys.modules['app']
+                import app  # Re-import from src/
+
         with patch('app.table', mock_table), \
              patch('app.update_message') as mock_update, \
              patch('app.emit_metric'):
@@ -238,6 +251,19 @@ class TestE2ECleanupNormalPath:
                 'action': 'execute',
             }
         }
+
+        # Ensure src/app.py is imported (xdist isolation fix)
+        import sys
+        import os
+        src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
+        if src_path in sys.path:
+            sys.path.remove(src_path)
+        sys.path.insert(0, src_path)
+        if 'app' in sys.modules:
+            app_file = getattr(sys.modules['app'], '__file__', '')
+            if 'deployer' in app_file:
+                del sys.modules['app']
+                import app  # Re-import from src/
 
         with patch('app.table', mock_table), \
              patch('app.update_message') as mock_update, \
@@ -310,6 +336,10 @@ class TestE2ECleanupFallbackPath:
         mock_table = MagicMock()
         mock_table.get_item.return_value = {}  # Item not found
 
+        # Clear cached app module to ensure correct import in xdist
+        import sys
+        sys.modules.pop('app', None)
+
         with patch('app.table', mock_table), \
              patch('app.update_message') as mock_update:
             from app import handle_cleanup_expired
@@ -363,6 +393,10 @@ class TestE2ECleanupFallbackPath:
         # Step 2: EventBridge fires -> DDB item NOT found (simulating TTL expiry)
         mock_table = MagicMock()
         mock_table.get_item.return_value = {}  # Item gone
+
+        # Clear cached app module to ensure correct import in xdist
+        import sys
+        sys.modules.pop('app', None)
 
         with patch('app.table', mock_table), \
              patch('app.update_message') as mock_update:

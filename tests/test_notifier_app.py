@@ -29,6 +29,19 @@ pytestmark = pytest.mark.xdist_group("notifier_app")
 @pytest.fixture(autouse=True)
 def mock_boto3_resources():
     """Mock boto3 DynamoDB resources to prevent real AWS calls."""
+    # Ensure deployer/notifier/app.py is imported (not src/app.py)
+    import sys
+    import os
+    notifier_path = os.path.join(os.path.dirname(__file__), '..', 'deployer', 'notifier')
+    if notifier_path in sys.path:
+        sys.path.remove(notifier_path)
+    sys.path.insert(0, notifier_path)
+    if 'app' in sys.modules:
+        app_file = getattr(sys.modules['app'], '__file__', '')
+        if 'notifier' not in app_file and 'src' in app_file:
+            del sys.modules['app']
+            import app  # Re-import from deployer/notifier/
+
     with patch('app.dynamodb'):
         with patch('app.history_table') as mock_history:
             with patch('app.locks_table') as mock_locks:
