@@ -21,7 +21,7 @@ os.environ.setdefault('TABLE_NAME', 'clawdbot-approval-requests')
 os.environ.setdefault('DEFAULT_ACCOUNT_ID', '190825685292')
 os.environ.setdefault('TELEGRAM_BOT_TOKEN', 'test-token')
 os.environ.setdefault('TELEGRAM_CHAT_ID', '-1234567890')
-os.environ.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
+os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'  # Must override any existing value
 os.environ.setdefault('SCHEDULER_ENABLED', 'false')
 
 from src.deployer import validate_template_s3_url  # noqa: E402
