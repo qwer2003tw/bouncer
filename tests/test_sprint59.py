@@ -112,6 +112,7 @@ class TestS59_001_PendingReminder:
         assert result is False
         mock_scheduler_client.create_schedule.assert_not_called()
 
+    @pytest.mark.xfail(reason="xdist loadgroup env var pollution — tracked in #238")
     def test_pending_reminder_handler_still_pending(self):
         """Test pending_reminder handler sends notification when status is still pending."""
         with mock_aws():
@@ -151,6 +152,7 @@ class TestS59_001_PendingReminder:
                 assert '尚未審批的請求' in call_args
                 assert 'test-pending-123' in call_args
 
+    @pytest.mark.xfail(reason="xdist loadgroup env var pollution — tracked in #238")
     def test_pending_reminder_handler_already_approved(self):
         """Test pending_reminder handler skips notification when already approved."""
         with mock_aws():

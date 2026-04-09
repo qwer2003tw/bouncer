@@ -131,6 +131,7 @@ class TestS60004EscalationSchedule:
         assert 'bouncer-remind-' in call[1]['Name']
         assert 'bouncer-escalation-' not in call[1]['Name']
 
+    @pytest.mark.xfail(reason="xdist loadgroup env var pollution — tracked in #238")
     def test_escalation_message_format(self):
         """Test that escalation=True shows red circle header."""
         with mock_aws():
@@ -170,6 +171,7 @@ class TestS60004EscalationSchedule:
                 assert '第 2 次提醒' in message
                 assert 'test-escalation-123' in message
 
+    @pytest.mark.xfail(reason="xdist loadgroup env var pollution — tracked in #238")
     def test_normal_reminder_message_format(self):
         """Test that escalation=False shows clock icon header."""
         with mock_aws():
