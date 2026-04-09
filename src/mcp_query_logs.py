@@ -50,6 +50,7 @@ ALLOWED_LOG_GROUP_PREFIXES = (
     '/ecs/',
     'bouncer',
     'API-Gateway-Execution-Logs',
+    'aws-waf-logs',
 )
 
 # Log group name validation regex (alphanum, slash, dash, dot, underscore)
