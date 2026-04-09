@@ -120,8 +120,9 @@ def test_request_grant_success(mock_notify, mcp_grant_module):
     result = mcp_grant_module.mcp_tool_request_grant(req_id, arguments)
 
     # 驗證回應格式
-    assert 'result' in result
-    content = result['result']['content'][0]['text']
+    body = json.loads(result['body'])
+    assert 'result' in body
+    content = body['result']['content'][0]['text']
     data = json.loads(content)
     assert data['status'] == 'pending_approval'
     assert 'grant_request_id' in data
@@ -143,8 +144,9 @@ def test_request_grant_missing_commands(mcp_grant_module):
     result = mcp_grant_module.mcp_tool_request_grant(req_id, arguments)
 
     # 應回傳錯誤
-    assert result['error']['code'] == -32602
-    assert 'commands' in result['error']['message']
+    body = json.loads(result['body'])
+    assert body['error']['code'] == -32602
+    assert 'commands' in body['error']['message']
 
 
 def test_request_grant_missing_reason(mcp_grant_module):
@@ -158,8 +160,9 @@ def test_request_grant_missing_reason(mcp_grant_module):
     result = mcp_grant_module.mcp_tool_request_grant(req_id, arguments)
 
     # 應回傳錯誤
-    assert result['error']['code'] == -32602
-    assert 'reason' in result['error']['message']
+    body = json.loads(result['body'])
+    assert body['error']['code'] == -32602
+    assert 'reason' in body['error']['message']
 
 
 def test_request_grant_missing_source(mcp_grant_module):
@@ -173,8 +176,9 @@ def test_request_grant_missing_source(mcp_grant_module):
     result = mcp_grant_module.mcp_tool_request_grant(req_id, arguments)
 
     # 應回傳錯誤
-    assert result['error']['code'] == -32602
-    assert 'source' in result['error']['message']
+    body = json.loads(result['body'])
+    assert body['error']['code'] == -32602
+    assert 'source' in body['error']['message']
 
 
 def test_request_grant_invalid_account(mcp_grant_module, mock_dynamodb):
@@ -190,7 +194,8 @@ def test_request_grant_invalid_account(mcp_grant_module, mock_dynamodb):
     result = mcp_grant_module.mcp_tool_request_grant(req_id, arguments)
 
     # 應回傳錯誤
-    content = result['result']['content'][0]['text']
+    body = json.loads(result['body'])
+    content = body['result']['content'][0]['text']
     data = json.loads(content)
     assert data['status'] == 'error'
     assert '999999999999' in data['error']
@@ -226,7 +231,8 @@ def test_grant_status_success(mcp_grant_module, mock_dynamodb):
     result = mcp_grant_module.mcp_tool_grant_status(req_id, arguments)
 
     # 驗證回應
-    content = result['result']['content'][0]['text']
+    body = json.loads(result['body'])
+    content = body['result']['content'][0]['text']
     data = json.loads(content)
     assert 'status' in data
     assert data['status'] == 'active'
@@ -243,7 +249,8 @@ def test_grant_status_not_found(mcp_grant_module):
     result = mcp_grant_module.mcp_tool_grant_status(req_id, arguments)
 
     # 應回傳 not found
-    content = result['result']['content'][0]['text']
+    body = json.loads(result['body'])
+    content = body['result']['content'][0]['text']
     data = json.loads(content)
     assert 'error' in data
     assert 'not found' in data['error'].lower()
@@ -273,7 +280,8 @@ def test_grant_status_source_mismatch(mcp_grant_module, mock_dynamodb):
     result = mcp_grant_module.mcp_tool_grant_status(req_id, arguments)
 
     # 應回傳 not found（不洩漏 grant 存在）
-    content = result['result']['content'][0]['text']
+    body = json.loads(result['body'])
+    content = body['result']['content'][0]['text']
     data = json.loads(content)
     assert 'error' in data
 
@@ -288,8 +296,9 @@ def test_grant_status_missing_grant_id(mcp_grant_module):
     result = mcp_grant_module.mcp_tool_grant_status(req_id, arguments)
 
     # 應回傳錯誤
-    assert result['error']['code'] == -32602
-    assert 'grant_id' in result['error']['message']
+    body = json.loads(result['body'])
+    assert body['error']['code'] == -32602
+    assert 'grant_id' in body['error']['message']
 
 
 # ============================================================================
@@ -319,10 +328,11 @@ def test_revoke_grant_success(mcp_grant_module, mock_dynamodb):
     result = mcp_grant_module.mcp_tool_revoke_grant(req_id, arguments)
 
     # 驗證回應
-    content = result['result']['content'][0]['text']
+    body = json.loads(result['body'])
+    content = body['result']['content'][0]['text']
     data = json.loads(content)
     assert data['success'] is True
-    assert 'revoked' in data['message'].lower()
+    assert '撤銷' in data['message'] or 'revoked' in data['message'].lower()
 
     # 驗證 DDB 狀態
     item = table.get_item(Key={'request_id': grant_id})['Item']
@@ -338,10 +348,11 @@ def test_revoke_grant_not_found(mcp_grant_module):
 
     result = mcp_grant_module.mcp_tool_revoke_grant(req_id, arguments)
 
-    # 驗證回應
-    content = result['result']['content'][0]['text']
+    # 驗證回應（revoke 是幂等操作，即使不存在也回傳 success）
+    body = json.loads(result['body'])
+    content = body['result']['content'][0]['text']
     data = json.loads(content)
-    assert data['success'] is False
+    assert data['success'] is True
 
 
 def test_revoke_grant_missing_grant_id(mcp_grant_module):
@@ -352,8 +363,9 @@ def test_revoke_grant_missing_grant_id(mcp_grant_module):
     result = mcp_grant_module.mcp_tool_revoke_grant(req_id, arguments)
 
     # 應回傳錯誤
-    assert result['error']['code'] == -32602
-    assert 'grant_id' in result['error']['message']
+    body = json.loads(result['body'])
+    assert body['error']['code'] == -32602
+    assert 'grant_id' in body['error']['message']
 
 
 # ============================================================================
@@ -379,6 +391,8 @@ def test_grant_execute_success(mock_log, mock_notify, mock_store, mock_exec, mcp
         'granted_commands': ['s3:list_objects_v2', 'ec2:describe_instances'],
         'allow_repeat': False,
         'used_commands': {},
+        'total_executions': 0,
+        'max_total_executions': 100,
         'expires_at': int(time.time()) + 1800,
         'created_at': int(time.time())
     })
@@ -402,7 +416,8 @@ def test_grant_execute_success(mock_log, mock_notify, mock_store, mock_exec, mcp
     result = mcp_grant_module.mcp_tool_grant_execute(req_id, arguments)
 
     # 驗證回應
-    content = result['result']['content'][0]['text']
+    body = json.loads(result['body'])
+    content = body['result']['content'][0]['text']
     data = json.loads(content)
     assert data['status'] == 'grant_executed'
     assert data['grant_id'] == grant_id
@@ -426,7 +441,8 @@ def test_grant_execute_missing_grant_id(mcp_grant_module):
     result = mcp_grant_module.mcp_tool_grant_execute(req_id, arguments)
 
     # 應回傳錯誤
-    assert result['error']['code'] == -32602
+    body = json.loads(result['body'])
+    assert body['error']['code'] == -32602
 
 
 def test_grant_execute_grant_not_found(mcp_grant_module):
@@ -445,7 +461,8 @@ def test_grant_execute_grant_not_found(mcp_grant_module):
     result = mcp_grant_module.mcp_tool_grant_execute(req_id, arguments)
 
     # 驗證回應
-    content = result['result']['content'][0]['text']
+    body = json.loads(result['body'])
+    content = body['result']['content'][0]['text']
     data = json.loads(content)
     assert data['status'] == 'grant_not_found'
 
@@ -481,7 +498,8 @@ def test_grant_execute_grant_expired(mcp_grant_module, mock_dynamodb):
     result = mcp_grant_module.mcp_tool_grant_execute(req_id, arguments)
 
     # 驗證回應
-    content = result['result']['content'][0]['text']
+    body = json.loads(result['body'])
+    content = body['result']['content'][0]['text']
     data = json.loads(content)
     assert data['status'] == 'grant_expired'
 
@@ -519,7 +537,8 @@ def test_grant_execute_command_not_in_grant(mcp_grant_module, mock_dynamodb):
     result = mcp_grant_module.mcp_tool_grant_execute(req_id, arguments)
 
     # 驗證回應
-    content = result['result']['content'][0]['text']
+    body = json.loads(result['body'])
+    content = body['result']['content'][0]['text']
     data = json.loads(content)
     assert data['status'] == 'command_not_in_grant'
 
@@ -555,6 +574,7 @@ def test_grant_execute_source_mismatch(mcp_grant_module, mock_dynamodb):
     result = mcp_grant_module.mcp_tool_grant_execute(req_id, arguments)
 
     # 驗證回應（不洩漏 grant 存在）
-    content = result['result']['content'][0]['text']
+    body = json.loads(result['body'])
+    content = body['result']['content'][0]['text']
     data = json.loads(content)
     assert data['status'] == 'grant_not_found'

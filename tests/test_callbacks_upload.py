@@ -122,7 +122,8 @@ def test_upload_callback_approve_success(mock_emit, mock_answer, mock_update, mo
 
     # 驗證回應
     assert result['statusCode'] == 200
-    assert result['body']['ok'] is True
+    body = json.loads(result['body'])
+    assert body['ok'] is True
 
     # 驗證 execute_upload 被呼叫
     mock_exec.assert_called_once_with(request_id, 'user123')
