@@ -151,7 +151,6 @@ class TestE2ECleanupNormalPath:
             telegram_message_id=FAKE_MESSAGE_ID,
         )
 
-    @pytest.mark.xfail(reason="xdist loadgroup env var pollution — tracked in #238")
     def test_cleanup_removes_buttons_using_ddb_message_id(self):
         """handle_cleanup_expired reads telegram_message_id from DDB and calls
         update_message with remove_buttons=True."""
@@ -328,7 +327,6 @@ class TestE2ECleanupFallbackPath:
             FAKE_MESSAGE_ID, "\u23f0 \u6b64\u8acb\u6c42\u5df2\u904e\u671f", remove_buttons=True
         )
 
-    @pytest.mark.xfail(reason="xdist loadgroup env var pollution — tracked in #238")
     def test_full_e2e_chain_fallback_path(self):
         """Full fallback chain: scheduler embeds message_id in EventBridge payload ->
         CLEANUP fires -> DDB item missing -> fallback clears buttons from payload.
