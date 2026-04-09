@@ -18,6 +18,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 import aws_clients
 
 
+@pytest.fixture(autouse=True)
+def _clean_aws_clients_cache():
+    """Reset aws_clients module-level caches before each test."""
+    # Clear any cached clients to prevent xdist cross-worker pollution
+    for attr in list(vars(aws_clients)):
+        if attr.startswith('_cached'):
+            setattr(aws_clients, attr, None)
+    yield
+
+
 FAKE_CREDS = {
     'AccessKeyId': 'AKIAIOSFODNN7EXAMPLE',
     'SecretAccessKey': 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
