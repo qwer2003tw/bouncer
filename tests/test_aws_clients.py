@@ -17,6 +17,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 import aws_clients
 
+# Force all tests in this module to run in the same xdist worker
+# to prevent boto3 mock pollution from other test files
+pytestmark = pytest.mark.xdist_group("aws_clients")
+
 
 @pytest.fixture(autouse=True)
 def _clean_aws_clients_cache():
@@ -37,7 +41,6 @@ FAKE_CREDS = {
 ROLE_ARN = 'arn:aws:iam::123456789012:role/TestRole'
 
 
-@pytest.mark.forked
 class TestGetS3ClientNoRole:
     """get_s3_client() without role_arn."""
 
@@ -67,7 +70,6 @@ class TestGetS3ClientNoRole:
         mock_boto3.client.assert_called_once_with('s3', region_name='ap-east-1')
 
 
-@pytest.mark.forked
 class TestGetS3ClientWithRole:
     """get_s3_client() with role_arn."""
 
@@ -146,7 +148,6 @@ class TestGetS3ClientWithRole:
             "region_name should not be in S3 call when region=None"
 
 
-@pytest.mark.forked
 class TestGetS3ClientCallerIsolation:
     """Confirm that mocking aws_clients.boto3 does NOT bleed into other modules."""
 
@@ -162,7 +163,6 @@ class TestGetS3ClientCallerIsolation:
             assert sys.modules['boto3'] is real_boto3
 
 
-@pytest.mark.forked
 class TestGetCloudfrontClient:
     """get_cloudfront_client() basic tests."""
 
@@ -201,7 +201,6 @@ class TestGetCloudfrontClient:
         )
 
 
-@pytest.mark.forked
 class TestGetS3ClientFactoryConsistency:
     """Sprint 58 s58-003: Verify factory returns consistent client objects."""
 
