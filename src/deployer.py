@@ -720,14 +720,7 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
                 file_list += f' (+{len(changed_files) - 3} more)'
             summary = f"{summary}\n📁 Changed: {file_list}"
 
-        from notifications import send_auto_approve_deploy_notification
-        send_auto_approve_deploy_notification(
-            project_id=project_id,
-            deploy_id=deploy_result.get('deploy_id', ''),
-            source=source,
-            reason=reason,
-            changes_summary=summary,
-        )
+        # No pre-flight notification — Step Functions AnalyzeChangeset handles it
         return mcp_result(req_id, {
             'content': [{'type': 'text', 'text': json.dumps({
                 'status': 'started',
@@ -768,14 +761,7 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
             else:
                 enhanced_summary = base_summary
 
-            from notifications import send_auto_approve_deploy_notification
-            send_auto_approve_deploy_notification(
-                project_id=project_id,
-                deploy_id=deploy_result.get('deploy_id', ''),
-                source=source,
-                reason=reason,
-                changes_summary=enhanced_summary,
-            )
+            # No pre-flight notification — Step Functions AnalyzeChangeset handles it
             return mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
                     'status': 'started',
