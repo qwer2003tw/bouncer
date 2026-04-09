@@ -1,5 +1,14 @@
 # Changelog
 
+## v3.76.1 (2026-04-09)
+### Fixes
+- deploy rate limit 移除（dedup + lock 已足夠）
+- bouncer_query_logs：發審批前驗證 log group 存在 + allowlist add 也驗證
+- ConsistentRead=True in get_history（修復 DDB eventually consistent read race condition）
+- auto_code 不再發 pre-flight「自動批准」通知（最終決策交給 AnalyzeChangeset）
+- handle_infra_approval 從 analyze_result 讀 change_count（修復顯示 0）
+- ztp-files / bouncer deploy_mode 設為 auto_code
+
 ## v3.76.0 (2026-04-09)
 ### Features
 - #249: deploy_mode enum (manual/auto_code/auto_all) 取代舊 auto_approve_deploy flag — 向後相容
