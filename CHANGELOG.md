@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.76.0 (2026-04-09)
+### Features
+- #249: deploy_mode enum (manual/auto_code/auto_all) 取代舊 auto_approve_deploy flag — 向後相容
+- #248: deploy request dedup — 同 commit 的 pending deploy 回傳既有 request_id，不發重複通知
+
+### Fixes
+- 移除 deploy rate limit（dedup + lock 已足夠）
+
 ## v3.75.0 (2026-04-08)
 ### Fixes
 - #243: 移除 auto_approve_code_only dry-run changeset path — changeset 分析統一由 Step Functions AnalyzeChangeset 處理
