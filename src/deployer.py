@@ -10,12 +10,13 @@ import uuid
 import boto3
 from botocore.exceptions import ClientError
 from metrics import emit_metric
-from utils import mcp_result, mcp_error, decimal_to_native
+from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native, generate_display_summary
 import db as _db
 import notifications
 from aws_lambda_powertools import Logger
 from telegram import unpin_message
 from constants import (
+    APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER,
     DEPLOY_MODE_MANUAL, DEPLOY_MODE_AUTO_CODE, VALID_DEPLOY_MODES,
 )
 
@@ -601,9 +602,9 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
     project_id = str(arguments.get('project', '')).strip()
     branch = str(arguments.get('branch', '')).strip() or None
     reason = str(arguments.get('reason', '')).strip()
-    source = arguments.get('source', None)  # noqa: F841 — used in send_deploy_approval_request below
-    context = arguments.get('context', None)  # noqa: F841 — used in approval flow below
-    async_mode = arguments.get('async', True)  # noqa: F841 — used in sync/async response below
+    source = arguments.get('source', None)
+    context = arguments.get('context', None)
+    async_mode = arguments.get('async', True)
 
     if not project_id:
         return mcp_error(req_id, -32602, 'Missing required parameter: project')
@@ -664,7 +665,190 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
             }, ensure_ascii=False)}]
         })
 
-    # Deploy rate limit: 同專案 N 分鐘內最多 1 個 deploy request
+    # 檢查並行鎖
+    existing_lock = get_lock(project_id)
+    if existing_lock:
+        locked_at_ts = existing_lock.get('locked_at')
+        started_at_iso = None
+        estimated_remaining = None
+        if locked_at_ts:
+            import datetime
+            started_at_iso = datetime.datetime.utcfromtimestamp(int(locked_at_ts)).strftime('%Y-%m-%dT%H:%M:%SZ')
+            elapsed = int(time.time()) - int(locked_at_ts)
+            avg_deploy_secs = 300  # 5 分鐘
+            estimated_remaining = max(0, avg_deploy_secs - elapsed)
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'conflict',
+                'message': '此專案有部署正在進行中',
+                'running_deploy_id': existing_lock.get('lock_id'),
+                'started_at': started_at_iso,
+                'estimated_remaining': estimated_remaining,
+                'hint': '用 bouncer_deploy_status 查詢進度，或 bouncer_deploy_cancel 取消',
+            }, ensure_ascii=False)}],
+            'isError': True
+        })
+
+    # Deploy mode resolution
+    deploy_mode = _resolve_deploy_mode(project)
+
+    # auto_all → start deploy directly (no template diff analysis needed)
+    if deploy_mode == 'auto_all':
+        deploy_result = start_deploy(
+            project_id,
+            branch or project.get('default_branch', 'master'),
+            source or 'auto-approve',
+            reason,
+        )
+
+        if 'error' in deploy_result:
+            return mcp_result(req_id, {
+                'content': [{'type': 'text', 'text': json.dumps({
+                    'status': 'error',
+                    'error': deploy_result['error'],
+                    'deploy_mode': 'auto_all',
+                }, ensure_ascii=False)}],
+                'isError': True
+            })
+
+        changed_files = _get_changed_files()
+        summary = 'auto_all → skip template diff'
+        if changed_files:
+            preview_files = changed_files[:3]
+            file_list = ', '.join(preview_files)
+            if len(changed_files) > 3:
+                file_list += f' (+{len(changed_files) - 3} more)'
+            summary = f"{summary}\n📁 Changed: {file_list}"
+
+        from notifications import send_auto_approve_deploy_notification
+        send_auto_approve_deploy_notification(
+            project_id=project_id,
+            deploy_id=deploy_result.get('deploy_id', ''),
+            source=source,
+            reason=reason,
+            changes_summary=summary,
+        )
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'started',
+                'deploy_id': deploy_result.get('deploy_id', ''),
+                'project_id': project_id,
+                'deploy_mode': 'auto_all',
+                'auto_approved': True,
+                'message': summary,
+            }, ensure_ascii=False)}]
+        })
+
+    # auto_code → template diff analysis, auto-approve if safe
+    if deploy_mode == DEPLOY_MODE_AUTO_CODE:
+        from template_diff_analyzer import analyze_template_diff
+        git_repo = project.get('git_repo', '')
+        github_pat_secret = project.get('github_pat_secret', 'sam-deployer/github-pat')
+
+        diff_result = analyze_template_diff(git_repo, branch or project.get('default_branch', 'master'), github_pat_secret)
+
+        if diff_result.is_safe:
+            # Auto-approve: start deploy directly
+            deploy_result = start_deploy(
+                project_id,
+                branch or project.get('default_branch', 'master'),
+                source or 'auto-approve',
+                reason,
+            )
+
+            # Enhance changes_summary with git diff
+            base_summary = diff_result.diff_summary or 'template.yaml 無變動 → code-only'
+            changed_files = _get_changed_files()
+            if changed_files:
+                preview_files = changed_files[:3]
+                file_list = ', '.join(preview_files)
+                if len(changed_files) > 3:
+                    file_list += f' (+{len(changed_files) - 3} more)'
+                enhanced_summary = f"{base_summary}\n📁 Changed: {file_list}"
+            else:
+                enhanced_summary = base_summary
+
+            from notifications import send_auto_approve_deploy_notification
+            send_auto_approve_deploy_notification(
+                project_id=project_id,
+                deploy_id=deploy_result.get('deploy_id', ''),
+                source=source,
+                reason=reason,
+                changes_summary=enhanced_summary,
+            )
+            return mcp_result(req_id, {
+                'content': [{'type': 'text', 'text': json.dumps({
+                    'status': 'started',
+                    'deploy_id': deploy_result.get('deploy_id', ''),
+                    'project_id': project_id,
+                    'deploy_mode': 'auto_code',
+                    'auto_approved': True,
+                    'message': diff_result.diff_summary,
+                }, ensure_ascii=False)}]
+            })
+        else:
+            # High-risk or analysis error → human approval with context
+            if diff_result.error:
+                context = f"[changeset 分析失敗: {diff_result.error}] {context or ''}"
+            elif diff_result.high_risk_findings:
+                findings_str = "; ".join(diff_result.high_risk_findings[:3])
+                context = f"[需審批：高風險 infra 變更 — {findings_str}] {context or ''}"
+            else:
+                context = f"[需審批：{diff_result.diff_summary}] {context or ''}"
+            # Fall through to normal approval flow below
+
+    # NOTE: auto_approve_code_only 路徑已移除 (Sprint 75, #243)
+    # Sprint 73 改由 Step Functions AnalyzeChangeset 統一處理 changeset 分析
+    # 舊的 create_dry_run_changeset 路徑與 AnalyzeChangeset 結果矛盾，已廢棄
+
+    # 建立審批請求
+    request_id = generate_request_id(f"deploy:{project_id}")
+    now = int(time.time())
+    ttl = now + 7 * 24 * 3600  # 7 days for DDB record retention (history lookup)
+    approval_expiry = now + APPROVAL_TIMEOUT_DEFAULT + APPROVAL_TTL_BUFFER  # 審批到期時間
+
+    item = {
+        'request_id': request_id,
+        'action': 'deploy',
+        'project_id': project_id,
+        'project_name': project.get('name', project_id),
+        'branch': branch or project.get('default_branch', 'master'),
+        'stack_name': project.get('stack_name', ''),
+        'reason': reason,
+        'source': source or 'mcp',  # GSI 不允許 NULL，用預設值
+        'context': context or '',
+        'status': 'pending_approval',
+        'created_at': now,
+        'ttl': ttl,
+        'approval_expiry': approval_expiry,
+        'mode': 'mcp',
+        'display_summary': generate_display_summary('deploy', project_id=project_id),
+    }
+    _db.table.put_item(Item=item)
+
+    # 發送 Telegram 審批請求
+    send_deploy_approval_request(request_id, project, branch, reason, source, context=context, expires_at=approval_expiry)
+
+    if async_mode:
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'pending_approval',
+                'request_id': request_id,
+                'project_id': project_id,
+                'message': '部署請求已發送，等待 Telegram 確認',
+                'expires_in': '600 seconds'
+            })}]
+        })
+
+    # 同步模式需要等待，但這裡不實作
+    return mcp_result(req_id, {
+        'content': [{'type': 'text', 'text': json.dumps({
+            'status': 'pending_approval',
+            'request_id': request_id
+        })}]
+    })
+
+
 def mcp_tool_deploy_status(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_deploy_status"""
 

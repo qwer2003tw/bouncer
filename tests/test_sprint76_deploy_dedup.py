@@ -1,11 +1,10 @@
 """
-Tests for Sprint 76 — #248 deploy request dedup + rate limit
+Tests for Sprint 76 — #248 deploy request dedup
 
 TC01 - _find_pending_deploy: finds valid pending deploy request
 TC02 - _find_pending_deploy: skips expired pending request
 TC03 - _find_pending_deploy: returns None when no pending deploy
 TC06 - mcp_tool_deploy: dedup returns existing pending request
-TC07 - mcp_tool_deploy: rate limited returns error
 TC08 - _find_pending_deploy: DDB error → fail-open (returns None)
 """
 from __future__ import annotations
@@ -126,40 +125,6 @@ def test_tc06_dedup_returns_existing():
     assert inner["status"] == "pending_approval"
     assert inner["request_id"] == "deploy:test-proj-existing"
     assert inner["duplicate"] is True
-
-
-# ---------------------------------------------------------------------------
-# TC07: mcp_tool_deploy rate limit
-# ---------------------------------------------------------------------------
-
-def test_tc07_rate_limited_returns_error():
-    """mcp_tool_deploy returns rate_limited error."""
-    import deployer
-
-    project = {
-        "project_id": "test-proj",
-        "name": "Test Project",
-        "stack_name": "test-stack",
-        "default_branch": "master",
-        "enabled": True,
-    }
-
-    with patch.object(deployer, "get_project", return_value=project), \
-         patch.object(deployer, "preflight_check_secrets", return_value=[]), \
-         patch.object(deployer, "_find_pending_deploy", return_value=None), \
-         patch.object(deployer, "_is_deploy_rate_limited", return_value=True):
-
-        raw = deployer.mcp_tool_deploy(
-            req_id="test-req",
-            arguments={"project": "test-proj", "reason": "test"},
-            table=MagicMock(),
-            send_approval_func=MagicMock(),
-        )
-
-    body = json.loads(raw["body"])
-    inner = json.loads(body["result"]["content"][0]["text"])
-    assert inner["status"] == "rate_limited"
-    assert body["result"]["isError"] is True
 
 
 # ---------------------------------------------------------------------------
