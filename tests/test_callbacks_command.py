@@ -6,6 +6,7 @@ Bouncer - callbacks_command.py 測試
 import sys
 import os
 import time
+import json
 import pytest
 from unittest.mock import patch
 
@@ -375,7 +376,8 @@ def test_handle_command_callback_approve_success(
 
     # 驗證回應
     assert result['statusCode'] == 200
-    assert result['body']['ok'] is True
+    body = json.loads(result['body'])
+    assert body['ok'] is True
 
     # 驗證 answer_callback 被呼叫
     mock_answer.assert_called()
@@ -423,7 +425,8 @@ def test_handle_command_callback_deny(mock_update, mock_answer, callbacks_module
 
     # 驗證回應
     assert result['statusCode'] == 200
-    assert result['body']['ok'] is True
+    body = json.loads(result['body'])
+    assert body['ok'] is True
 
     # 驗證 answer_callback 被呼叫
     mock_answer.assert_called_once()

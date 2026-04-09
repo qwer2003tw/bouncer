@@ -67,8 +67,8 @@ def callbacks_grant_module(mock_dynamodb):
 # Tests for handle_grant_approve (mode='all')
 # ============================================================================
 
-@patch('callbacks_grant.approve_grant')
-@patch('callbacks_grant.get_grant_session')
+@patch('grant.approve_grant')
+@patch('grant.get_grant_session')
 @patch('callbacks_grant.answer_callback')
 @patch('callbacks_grant.update_message')
 def test_grant_approve_all_success(mock_update, mock_answer, mock_get, mock_approve, callbacks_grant_module):
@@ -118,8 +118,8 @@ def test_grant_approve_all_success(mock_update, mock_answer, mock_get, mock_appr
     assert grant_id in call_args
 
 
-@patch('callbacks_grant.approve_grant')
-@patch('callbacks_grant.get_grant_session')
+@patch('grant.approve_grant')
+@patch('grant.get_grant_session')
 @patch('callbacks_grant.answer_callback')
 @patch('callbacks_grant.update_message')
 def test_grant_approve_all_with_dangerous_commands(mock_update, mock_answer, mock_get, mock_approve, callbacks_grant_module):
@@ -160,7 +160,7 @@ def test_grant_approve_all_with_dangerous_commands(mock_update, mock_answer, moc
     assert '⚠️' in call_args[0][1]
 
 
-@patch('callbacks_grant.approve_grant')
+@patch('grant.approve_grant')
 @patch('callbacks_grant.answer_callback')
 def test_grant_approve_not_found(mock_answer, mock_approve, callbacks_grant_module):
     """測試 handle_grant_approve grant 不存在"""
@@ -188,8 +188,8 @@ def test_grant_approve_not_found(mock_answer, mock_approve, callbacks_grant_modu
 # Tests for handle_grant_approve (mode='safe_only')
 # ============================================================================
 
-@patch('callbacks_grant.approve_grant')
-@patch('callbacks_grant.get_grant_session')
+@patch('grant.approve_grant')
+@patch('grant.get_grant_session')
 @patch('callbacks_grant.answer_callback')
 @patch('callbacks_grant.update_message')
 def test_grant_approve_safe_only_success(mock_update, mock_answer, mock_get, mock_approve, callbacks_grant_module):
@@ -235,8 +235,8 @@ def test_grant_approve_safe_only_success(mock_update, mock_answer, mock_get, moc
 # Tests for handle_grant_approve_all (alias)
 # ============================================================================
 
-@patch('callbacks_grant.approve_grant')
-@patch('callbacks_grant.get_grant_session')
+@patch('grant.approve_grant')
+@patch('grant.get_grant_session')
 @patch('callbacks_grant.answer_callback')
 @patch('callbacks_grant.update_message')
 def test_grant_approve_all_alias(mock_update, mock_answer, mock_get, mock_approve, callbacks_grant_module):
@@ -269,8 +269,8 @@ def test_grant_approve_all_alias(mock_update, mock_answer, mock_get, mock_approv
 # Tests for handle_grant_approve_safe (alias)
 # ============================================================================
 
-@patch('callbacks_grant.approve_grant')
-@patch('callbacks_grant.get_grant_session')
+@patch('grant.approve_grant')
+@patch('grant.get_grant_session')
 @patch('callbacks_grant.answer_callback')
 @patch('callbacks_grant.update_message')
 def test_grant_approve_safe_alias(mock_update, mock_answer, mock_get, mock_approve, callbacks_grant_module):
@@ -303,7 +303,7 @@ def test_grant_approve_safe_alias(mock_update, mock_answer, mock_get, mock_appro
 # Tests for handle_grant_deny
 # ============================================================================
 
-@patch('callbacks_grant.deny_grant')
+@patch('grant.deny_grant')
 @patch('callbacks_grant.answer_callback')
 @patch('callbacks_grant.update_message')
 def test_grant_deny_success(mock_update, mock_answer, mock_deny, callbacks_grant_module):
@@ -339,7 +339,7 @@ def test_grant_deny_success(mock_update, mock_answer, mock_deny, callbacks_grant
     assert grant_id in call_args
 
 
-@patch('callbacks_grant.deny_grant')
+@patch('grant.deny_grant')
 @patch('callbacks_grant.answer_callback')
 def test_grant_deny_failure(mock_answer, mock_deny, callbacks_grant_module):
     """測試 handle_grant_deny 拒絕失敗"""
@@ -367,8 +367,8 @@ def test_grant_deny_failure(mock_answer, mock_deny, callbacks_grant_module):
 # Tests for error handling
 # ============================================================================
 
-@patch('callbacks_grant.approve_grant')
-@patch('callbacks_grant.get_grant_session')
+@patch('grant.approve_grant')
+@patch('grant.get_grant_session')
 @patch('callbacks_grant.answer_callback')
 def test_grant_approve_client_error(mock_answer, mock_get, mock_approve, callbacks_grant_module):
     """測試 handle_grant_approve 處理 ClientError"""
@@ -400,7 +400,7 @@ def test_grant_approve_client_error(mock_answer, mock_get, mock_approve, callbac
     assert '失敗' in mock_answer.call_args[0][1]
 
 
-@patch('callbacks_grant.deny_grant')
+@patch('grant.deny_grant')
 @patch('callbacks_grant.answer_callback')
 def test_grant_deny_timeout_error(mock_answer, mock_deny, callbacks_grant_module):
     """測試 handle_grant_deny 處理 TimeoutError"""
@@ -428,8 +428,8 @@ def test_grant_deny_timeout_error(mock_answer, mock_deny, callbacks_grant_module
 # Tests for edge cases
 # ============================================================================
 
-@patch('callbacks_grant.approve_grant')
-@patch('callbacks_grant.get_grant_session')
+@patch('grant.approve_grant')
+@patch('grant.get_grant_session')
 @patch('callbacks_grant.answer_callback')
 @patch('callbacks_grant.update_message')
 def test_grant_approve_empty_granted_commands(mock_update, mock_answer, mock_get, mock_approve, callbacks_grant_module):
@@ -460,8 +460,8 @@ def test_grant_approve_empty_granted_commands(mock_update, mock_answer, mock_get
     assert '0 個' in call_args or '0個' in call_args
 
 
-@patch('callbacks_grant.approve_grant')
-@patch('callbacks_grant.get_grant_session')
+@patch('grant.approve_grant')
+@patch('grant.get_grant_session')
 @patch('callbacks_grant.answer_callback')
 @patch('callbacks_grant.update_message')
 def test_grant_approve_missing_user_id(mock_update, mock_answer, mock_get, mock_approve, callbacks_grant_module):

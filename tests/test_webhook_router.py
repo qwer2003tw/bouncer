@@ -6,6 +6,7 @@ Bouncer - webhook_router.py 測試
 import sys
 import os
 import time
+import json
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -145,8 +146,8 @@ def test_handle_show_page_invalid_page_number(mock_answer, webhook_router_module
 # Tests for handle_infra_approval
 # ============================================================================
 
-@patch('webhook_router.get_deploy_record')
-@patch('webhook_router.update_deploy_record')
+@patch('deployer.get_deploy_record')
+@patch('deployer.update_deploy_record')
 @patch('webhook_router.answer_callback')
 @patch('webhook_router.update_message')
 def test_handle_infra_approval_approve(mock_update, mock_answer, mock_update_rec, mock_get_rec, webhook_router_module):
@@ -164,7 +165,7 @@ def test_handle_infra_approval_approve(mock_update, mock_answer, mock_update_rec
         'infra_approval_token_ttl': int(time.time()) + 600  # 未過期
     }
 
-    with patch('webhook_router._boto3.client') as mock_boto:
+    with patch('boto3.client') as mock_boto:
         mock_sfn = MagicMock()
         mock_boto.return_value = mock_sfn
 
@@ -185,7 +186,7 @@ def test_handle_infra_approval_approve(mock_update, mock_answer, mock_update_rec
     mock_update_rec.assert_called_once()
 
 
-@patch('webhook_router.get_deploy_record')
+@patch('deployer.get_deploy_record')
 @patch('webhook_router.answer_callback')
 def test_handle_infra_approval_no_token(mock_answer, mock_get_rec, webhook_router_module):
     """測試 handle_infra_approval 沒有 task token"""
@@ -215,7 +216,7 @@ def test_handle_infra_approval_no_token(mock_answer, mock_get_rec, webhook_route
     assert 'token' in mock_answer.call_args[0][1].lower()
 
 
-@patch('webhook_router.get_deploy_record')
+@patch('deployer.get_deploy_record')
 @patch('webhook_router.answer_callback')
 @patch('webhook_router.update_message')
 def test_handle_infra_approval_expired_token(mock_update, mock_answer, mock_get_rec, webhook_router_module):
@@ -516,7 +517,8 @@ def test_handle_general_approval_expired_ttl(mock_update, mock_answer, webhook_r
 
     # 驗證回應
     assert result['statusCode'] == 200
-    assert result['body'].get('expired') is True
+    body = json.loads(result['body'])
+    assert body.get('expired') is True
 
     # 驗證 answer_callback 提示過期
     mock_answer.assert_called_once()
