@@ -1,0 +1,13 @@
+comment:
+  require_changes: true
+  after_n_builds: 1
+  layout: "condensed_header, diff, flags"
+
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
