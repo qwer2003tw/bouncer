@@ -50,21 +50,25 @@ def handle_start(event):
     project_id = event.get('project_id', '')
     branch = event.get('branch', 'master')
 
+    # 從 DDB 讀取現有的 telegram_message_id 和 reason（由 callbacks.py 儲存）
+    history = get_history(deploy_id)
+    existing_message_id = history.get('telegram_message_id') if history else None
+    reason = history.get('reason', '') if history else ''
+
+    reason_line = f"📝 *原因：* {reason}\n" if reason else ""
+
     text = (
         f"⏳ *部署開始*\n\n"
         f"📦 *專案：* {project_id}\n"
         f"🌿 *分支：* {branch}\n"
-        f"🆔 *ID：* `{deploy_id}`\n\n"
+        f"🆔 *ID：* `{deploy_id}`\n"
+        f"{reason_line}\n"
         f"📊 *進度：*\n"
         f"├── 🔄 初始化中...\n"
         f"├── ⏳ Template 掃描\n"
         f"├── ⏳ sam build\n"
         f"└── ⏳ sam deploy"
     )
-
-    # 從 DDB 讀取現有的 telegram_message_id（由 callbacks.py 儲存）
-    history = get_history(deploy_id)
-    existing_message_id = history.get('telegram_message_id') if history else None
 
     if existing_message_id:
         # 更新現有訊息（審批訊息）而非新建
@@ -179,15 +183,19 @@ def handle_success(event):
     message_id = history.get('telegram_message_id') if history else None
     started_at = history.get('started_at', 0) if history else 0
     branch = history.get('branch', 'master') if history else 'master'
+    reason = history.get('reason', '') if history else ''
 
     # 計算時間
     duration = int(time.time()) - int(started_at) if started_at else 0
+
+    reason_line = f"📝 *原因：* {reason}\n" if reason else ""
 
     text = (
         f"✅ *部署成功！*\n\n"
         f"📦 *專案：* {project_id}\n"
         f"🌿 *分支：* {branch}\n"
-        f"🆔 *ID：* `{deploy_id}`\n\n"
+        f"🆔 *ID：* `{deploy_id}`\n"
+        f"{reason_line}\n"
         f"📊 *進度：*\n"
         f"├── ✅ 初始化\n"
         f"├── ✅ Template 掃描\n"
@@ -442,6 +450,7 @@ def handle_infra_approval_request(event):
     # Get deploy details from history
     history = get_history(deploy_id)
     branch = history.get('branch', 'master') if history else 'master'
+    reason = history.get('reason', '') if history else ''
 
     # Store task_token in DDB with TTL (24h from now)
     ttl = int(time.time()) + 86400
@@ -454,13 +463,16 @@ def handle_infra_approval_request(event):
     # Format resource changes for display
     changes_detail = _format_resource_changes(resource_changes)
 
+    reason_line = f"📝 *原因：* {reason}\n" if reason else ""
+
     # Send Telegram notification with Approve/Deny buttons
     if changes_detail:
         text = (
             f"⚠️ *Infrastructure Changes Detected*\n\n"
             f"📦 *專案：* {project_id}\n"
             f"🌿 *分支：* {branch}\n"
-            f"🆔 *ID：* `{deploy_id}`\n\n"
+            f"🆔 *ID：* `{deploy_id}`\n"
+            f"{reason_line}\n"
             f"🔧 *CFN 變更：*\n{changes_detail}\n\n"
             f"⚡ 偵測到 infra 變更，需要人工確認才能繼續部署。"
         )
@@ -470,7 +482,8 @@ def handle_infra_approval_request(event):
             f"⚠️ *Infrastructure Changes Detected*\n\n"
             f"📦 *專案：* {project_id}\n"
             f"🌿 *分支：* {branch}\n"
-            f"🆔 *ID：* `{deploy_id}`\n\n"
+            f"🆔 *ID：* `{deploy_id}`\n"
+            f"{reason_line}\n"
             f"🔧 *變更數量：* {change_count}\n\n"
             f"⚡ 偵測到 infra 變更，需要人工確認才能繼續部署。"
         )
