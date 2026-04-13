@@ -921,3 +921,11 @@ All notable changes to this project will be documented in this file.
 
 ### Tests
 - Backend: 886 passed (+18 regression tests) / coverage 81.52%
+
+## v3.80.0 (Sprint 80) — Deploy UX
+
+### Fixed
+- **#277**: 移除中間進度通知（handle_start/handle_progress 不再發 Telegram），只收到審批或完成通知
+- **#283**: 通知順序異常 — #277 移除進度通知後自動解決
+- **#263**: MCP 錯誤訊息加 error_code + suggestion 欄位（MISSING_PARAM, COMPLIANCE_BLOCKED, RATE_LIMITED 等）
+- e2e test xdist patch isolation fix（patch.object on deployer module）
