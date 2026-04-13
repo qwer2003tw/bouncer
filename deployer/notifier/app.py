@@ -530,7 +530,9 @@ def send_telegram_message(text: str, reply_markup: dict = None) -> int:
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
             result = json.loads(resp.read().decode())
-            return result.get('result', {}).get('message_id', 0)
+            message_id = result.get('result', {}).get('message_id', 0)
+            print(f"[telegram] sendMessage → message_id={message_id}")
+            return message_id
     except Exception as e:
         print(f"Telegram send error: {e}")
         return 0
@@ -556,6 +558,7 @@ def update_telegram_message(message_id: int, text: str):
             method='POST'
         )
         urllib.request.urlopen(req, timeout=10)
+        print(f"[telegram] editMessageText message_id={message_id}")
     except Exception as e:
         print(f"Telegram update error: {e}")
 
