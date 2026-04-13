@@ -406,6 +406,10 @@ class TestHandleStatsCommand:
 
         called_with = []
 
+        # Reload module to ensure clean state (fixes flaky test under pytest-xdist)
+        import importlib
+        importlib.reload(tc_mod)
+
         # B's handle_stats_command accepts hours parameter; use a flexible mock
         with patch.object(tc_mod, 'handle_stats_command',
                           side_effect=lambda cid, **kwargs: called_with.append(cid) or {'statusCode': 200, 'body': '{}'}):
