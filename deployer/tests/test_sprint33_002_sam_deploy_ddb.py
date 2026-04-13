@@ -51,6 +51,7 @@ class TestRunSamPackage:
                 "--s3-bucket", "my-artifacts-bucket",
                 "--s3-prefix", "my-project/templates",
                 "--output-template-file", _PACKAGED_TEMPLATE,
+                "--force-upload",
             ],
             check=True,
         )
