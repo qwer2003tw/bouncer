@@ -166,6 +166,10 @@ def handle_progress(event):
 
 def handle_success(event):
     """部署成功通知"""
+    # Filter out build_result/deploy_result — success notification should not display raw CodeBuild JSON
+    event.pop('build_result', None)
+    event.pop('deploy_result', None)
+
     deploy_id = event.get('deploy_id', '')
     project_id = event.get('project_id', '')
     build_id = event.get('build_id', '')
