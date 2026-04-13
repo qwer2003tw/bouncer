@@ -144,8 +144,8 @@ def store_paged_output(request_id: str, output: str) -> PaginatedOutput:
     total_pages = len(chunks)
     ttl = int(time.time()) + OUTPUT_PAGE_TTL
 
-    # Write ALL pages (including page 1) to DDB so show_page callback can read any page
-    _write_all_pages(request_id, chunks, total_pages, ttl)
+    # Write pages 2..N (page 1 is returned inline)
+    _write_pages(request_id, chunks, total_pages, ttl)
 
     next_page_id = f"{request_id}:page:2" if total_pages > 1 else None
 
@@ -235,35 +235,9 @@ def _write_pages(
     total_pages: int,
     ttl: int,
 ) -> None:
-    """Write pages 2..N to DynamoDB (page 1 is returned inline, never stored).
-
-    Deprecated: use _write_all_pages instead.
-    """
+    """Write pages 2..N to DynamoDB (page 1 is returned inline, never stored)."""
     table = _get_table()
     for i, chunk in enumerate(chunks[1:], start=2):
-        table.put_item(Item={
-            'request_id': f"{request_id}:page:{i}",
-            'content': chunk,
-            'page': i,
-            'total_pages': total_pages,
-            'original_request': request_id,
-            'ttl': ttl,
-        })
-
-
-def _write_all_pages(
-    request_id: str,
-    chunks: list[str],
-    total_pages: int,
-    ttl: int,
-) -> None:
-    """Write ALL pages (1..N) to DynamoDB.
-
-    Page 1 is also written so that show_page callback can read it
-    without special-casing (fixes PR #276 regression).
-    """
-    table = _get_table()
-    for i, chunk in enumerate(chunks, start=1):
         table.put_item(Item={
             'request_id': f"{request_id}:page:{i}",
             'content': chunk,
