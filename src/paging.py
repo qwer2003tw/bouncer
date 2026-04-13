@@ -235,9 +235,35 @@ def _write_pages(
     total_pages: int,
     ttl: int,
 ) -> None:
-    """Write pages 2..N to DynamoDB (page 1 is returned inline, never stored)."""
+    """Write pages 2..N to DynamoDB (page 1 is returned inline, never stored).
+
+    Deprecated: use _write_all_pages instead.
+    """
     table = _get_table()
     for i, chunk in enumerate(chunks[1:], start=2):
+        table.put_item(Item={
+            'request_id': f"{request_id}:page:{i}",
+            'content': chunk,
+            'page': i,
+            'total_pages': total_pages,
+            'original_request': request_id,
+            'ttl': ttl,
+        })
+
+
+def _write_all_pages(
+    request_id: str,
+    chunks: list[str],
+    total_pages: int,
+    ttl: int,
+) -> None:
+    """Write ALL pages (1..N) to DynamoDB.
+
+    Page 1 is also written so that show_page callback can read it
+    without special-casing (fixes PR #276 regression).
+    """
+    table = _get_table()
+    for i, chunk in enumerate(chunks, start=1):
         table.put_item(Item={
             'request_id': f"{request_id}:page:{i}",
             'content': chunk,
