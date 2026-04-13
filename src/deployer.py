@@ -725,9 +725,32 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
 
     # auto_code → template diff analysis, auto-approve if safe
     if deploy_mode == DEPLOY_MODE_AUTO_CODE:
+        github_pat_secret = project.get('github_pat_secret', '')
+
+        # 如果没有配置 github_pat_secret，跳过 template diff 分析，
+        # 直接启动 deploy（让 Step Functions AnalyzeChangeset 做判断）
+        if not github_pat_secret:
+            deploy_result = start_deploy(
+                project_id,
+                branch or project.get('default_branch', 'master'),
+                source or 'auto-code-no-template-diff',
+                reason,
+            )
+
+            return mcp_result(req_id, {
+                'content': [{'type': 'text', 'text': json.dumps({
+                    'status': 'started',
+                    'deploy_id': deploy_result.get('deploy_id', ''),
+                    'project_id': project_id,
+                    'deploy_mode': 'auto_code',
+                    'auto_approved': True,
+                    'message': 'auto_code deploy started (no template diff - missing github_pat_secret)',
+                }, ensure_ascii=False)}]
+            })
+
+        # 有 github_pat_secret，进行 template diff 分析
         from template_diff_analyzer import analyze_template_diff
         git_repo = project.get('git_repo', '')
-        github_pat_secret = project.get('github_pat_secret', 'sam-deployer/github-pat')
 
         diff_result = analyze_template_diff(git_repo, branch or project.get('default_branch', 'master'), github_pat_secret)
 

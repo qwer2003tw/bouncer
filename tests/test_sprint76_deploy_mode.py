@@ -186,7 +186,7 @@ def test_tc08_auto_code_safe_starts_deploy():
 # ---------------------------------------------------------------------------
 
 def test_tc09_auto_code_unsafe_goes_to_approval():
-    project = _make_project(deploy_mode="auto_code")
+    project = _make_project(deploy_mode="auto_code", github_pat_secret="sam-deployer/github-pat")
 
     with patch.object(deployer, "get_project", return_value=project), \
          patch.object(deployer, "preflight_check_secrets", return_value=[]), \
