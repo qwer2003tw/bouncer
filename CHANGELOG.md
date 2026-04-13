@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.78.0 (2026-04-13)
+### Security
+- #265: DynamoDB KMS 加密（ApprovalRequestsTable SSEEnabled）
+- #267: compliance_checker import 失敗 → fail-closed（回 500 拒絕執行）
+
+### Fixes
+- #285: 過濾 CodeBuild raw JSON response（不再顯示 204K 字元）
+- #284: deploy 通知加 reason 欄位
+- #282: deployer Notifier Telegram API logging（sendMessage/editMessageText）
+
 ## v3.77.1 (2026-04-09)
 ### Fixes
 - 移除所有 pre-flight auto-approve 通知（auto_all + auto_code 兩個路徑）— 修復「先自動批准後需審批」矛盾
