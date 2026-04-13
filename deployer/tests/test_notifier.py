@@ -312,13 +312,14 @@ class TestHandleStartPin:
             result = app.handle_start(event)
 
             # Should send message
-            assert mock_send.called
+            assert not mock_send.called  # #277: no Telegram
 
             # pin was removed in Issue #119 (callbacks.py already pins at approval time)
             assert not mock_pin.called
 
             # Should return message_id
-            assert result['message_id'] == 789
+            # #277: handle_start returns 0 (no Telegram send)
+            assert result["message_id"] == 0
 
     def test_handle_start_no_message_id(self, mock_env, mock_dynamodb):
         """Test handle_start with no message_id (should not crash)"""
@@ -341,13 +342,13 @@ class TestHandleStartPin:
             result = app.handle_start(event)
 
             # Should send message
-            assert mock_send.called
+            assert not mock_send.called  # #277: no Telegram
 
             # Should NOT call pin (no message_id)
             assert not mock_pin.called
 
             # Should return None message_id
-            assert result['message_id'] is None
+            assert result['message_id'] == 0  # #277: no Telegram send
 
 
 class TestSprint39UX:
@@ -381,20 +382,20 @@ class TestSprint39UX:
             result = app.handle_progress(event)
 
             # Should update message
-            assert mock_update.called
-            text = mock_update.call_args[0][1]
-
-            # Should have 5 phases with ANALYZING as current (second phase)
-            assert '✅ 初始化' in text
-            assert '🔄' in text  # Current phase icon
-            assert 'Changeset 分析' in text
-            assert '⏳ Template 掃描' in text
-            assert '⏳ sam build' in text
-            assert '⏳ sam deploy' in text
-
-            # Should include elapsed time in current phase
-            assert '（已 10s）' in text
-
+            assert not mock_update.called  # #277: no Telegram
+#             text = mock_update.call_args[0][1]
+# 
+#             # Should have 5 phases with ANALYZING as current (second phase)
+#             assert '✅ 初始化' in text
+#             assert '🔄' in text  # Current phase icon
+#             assert 'Changeset 分析' in text
+#             assert '⏳ Template 掃描' in text
+#             assert '⏳ sam build' in text
+#             assert '⏳ sam deploy' in text
+# 
+#             # Should include elapsed time in current phase
+#             assert '（已 10s）' in text
+# 
     def test_handle_analyze_updates_phase_to_analyzing(self, mock_env, mock_dynamodb):
         """Test that handle_analyze sets phase=ANALYZING at the start."""
         mock_history, mock_locks = mock_dynamodb
@@ -448,7 +449,7 @@ class TestSprint39UX:
                 assert update_call[0][1] == {'phase': 'ANALYZING'}
 
                 # Should call handle_progress to update the message
-                assert mock_handle_progress.called
-                progress_event = mock_handle_progress.call_args[0][0]
-                assert progress_event['deploy_id'] == 'test-deploy-123'
-                assert progress_event['phase'] == 'ANALYZING'
+                assert not mock_handle_progress.called  # #277: removed
+                # progress_event assertions removed (#277)
+
+
