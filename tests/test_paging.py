@@ -186,14 +186,16 @@ class TestStorePaged:
             assert item['total_pages'] == total
             assert item['original_request'] == 'req-15k'
 
-    def test_15k_output_page1_not_stored_in_ddb(self, paging_module, mock_dynamodb):
-        """Page 1 is returned inline, should NOT be stored separately."""
+    def test_15k_output_page1_stored_in_ddb(self, paging_module, mock_dynamodb):
+        """Page 1 is now stored in DDB by _write_all_pages (PR #300)."""
         output = 'C' * 15_000
         paging_module.store_paged_output('req-15k-p1', output)
 
         table = mock_dynamodb.Table('clawdbot-approval-requests')
         item = table.get_item(Key={'request_id': 'req-15k-p1:page:1'}).get('Item')
-        assert item is None, "Page 1 must not be stored in DynamoDB"
+        assert item is not None, "Page 1 must be stored in DynamoDB"
+        assert item['page'] == 1
+        assert item['total_pages'] >= 1
 
     def test_output_length_preserves_original(self, paging_module):
         """output_length should reflect original size, even after truncation."""
