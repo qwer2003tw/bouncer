@@ -23,6 +23,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 # Feature 003 — T001: callbacks.py pin_message after approve
 # ---------------------------------------------------------------------------
 
+pytestmark = pytest.mark.xdist_group("test_sprint31_003_deploy_pin")
+
+
 class TestCallbacksDeployPin:
     """handle_deploy_callback (approve) calls pin_message after update_message."""
 

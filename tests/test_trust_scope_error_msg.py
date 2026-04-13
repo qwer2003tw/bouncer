@@ -4,6 +4,9 @@ import pytest
 from unittest.mock import patch
 
 
+pytestmark = pytest.mark.xdist_group("test_trust_scope_error_msg")
+
+
 class TestTrustScopeMissingErrorMessage:
     """Verify that a missing trust_scope returns a helpful, example-rich error message."""
 

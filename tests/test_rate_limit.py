@@ -12,6 +12,9 @@ from moto import mock_aws
 import boto3
 
 
+pytestmark = pytest.mark.xdist_group("test_rate_limit")
+
+
 class TestRateLimiting:
     """Rate Limiting 測試"""
     
