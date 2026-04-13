@@ -461,7 +461,17 @@ def _check_compliance(ctx: ExecuteContext) -> Optional[dict]:
                 'isError': True
             })
     except ImportError:
-        pass  # compliance_checker 模組不存在時跳過（向後兼容）
+        logger.error("compliance_checker module import failed - failing closed", extra={"src_module": "execute", "operation": "check_compliance"})
+        return mcp_result(ctx.req_id, {
+            'content': [{
+                'type': 'text',
+                'text': json.dumps({
+                    'status': 'error',
+                    'error': 'Compliance checker module unavailable - request rejected for safety',
+                })
+            }],
+            'isError': True
+        })
     return None
 
 

@@ -793,7 +793,10 @@ def handle_clawdbot_request(event: dict) -> dict:
                 }]
             })
     except ImportError:
-        pass  # compliance_checker 不存在時跳過
+        logger.error("compliance_checker module import failed - failing closed")
+        return response(500, {
+            'error': 'Compliance checker module unavailable - request rejected for safety'
+        })
 
     # Layer 1: BLOCKED
     block_reason = get_block_reason(command)
