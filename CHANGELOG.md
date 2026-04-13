@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.79.0 (2026-04-13)
+### Fixes
+- #288: auto_code skip template diff when github_pat_secret missing（讓 Step Functions AnalyzeChangeset 處理）
+- #292: sam package --force-upload（確保 Notifier Lambda code 每次都更新）
+- #291: 統一 Telegram API log prefix（pin/unpin）
+
 ## v3.78.0 (2026-04-13)
 ### Security
 - #265: DynamoDB KMS 加密（ApprovalRequestsTable SSEEnabled）
