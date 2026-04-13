@@ -432,6 +432,7 @@ def _run_sam_package(artifacts_bucket: str, project_id: str) -> None:
         "--s3-bucket", artifacts_bucket,
         "--s3-prefix", f"{project_id}/templates",
         "--output-template-file", _PACKAGED_TEMPLATE,
+        "--force-upload",  # Always upload even if hash matches (fix #292)
     ]
     print(f"[package] sam package → s3://{artifacts_bucket}/{project_id}/templates/")
     subprocess.run(cmd, check=True)
