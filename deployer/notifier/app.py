@@ -582,7 +582,7 @@ def pin_telegram_message(message_id: int):
             method='POST'
         )
         urllib.request.urlopen(req, timeout=10)
-        print(f"Pinned message {message_id}")
+        print(f"[telegram] pinChatMessage message_id={message_id}")
     except Exception as e:
         print(f"Telegram pin error: {e}")
 
@@ -605,7 +605,7 @@ def unpin_telegram_message(message_id: int):
             method='POST'
         )
         urllib.request.urlopen(req, timeout=10)
-        print(f"Unpinned message {message_id}")
+        print(f"[telegram] unpinChatMessage message_id={message_id}")
     except Exception as e:
         print(f"Telegram unpin error (ignored): {e}")
 
