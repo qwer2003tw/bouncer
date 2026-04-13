@@ -72,9 +72,10 @@ class TestE2ECleanupNormalPath:
 
         mock_post_setup = MagicMock()
 
+        from deployer import send_deploy_approval_request
+        import deployer as _deployer_mod
         with patch('telegram.send_telegram_message', return_value=mock_tg_response), \
-             patch('notifications.post_notification_setup', mock_post_setup):
-            from deployer import send_deploy_approval_request
+             patch.object(_deployer_mod.notifications, 'post_notification_setup', mock_post_setup):
             send_deploy_approval_request(
                 request_id=FAKE_REQUEST_ID,
                 project={
@@ -221,9 +222,10 @@ class TestE2ECleanupNormalPath:
             """Simulate post_notification_setup storing message_id."""
             ddb_stored_message_id[request_id] = telegram_message_id
 
+        from deployer import send_deploy_approval_request
+        import deployer as _deployer_mod
         with patch('telegram.send_telegram_message', return_value=mock_tg_response), \
-             patch('notifications.post_notification_setup', side_effect=capture_post_setup):
-            from deployer import send_deploy_approval_request
+             patch.object(_deployer_mod.notifications, 'post_notification_setup', side_effect=capture_post_setup):
             send_deploy_approval_request(
                 request_id=FAKE_REQUEST_ID,
                 project={'project_id': 'bouncer', 'name': 'Bouncer', 'stack_name': 'x'},
