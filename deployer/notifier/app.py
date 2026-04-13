@@ -45,131 +45,39 @@ def lambda_handler(event, context):
 
 
 def handle_start(event):
-    """部署開始通知：更新現有審批訊息 + pin"""
-    deploy_id = event.get('deploy_id', '')
-    project_id = event.get('project_id', '')
-    branch = event.get('branch', 'master')
+    """部署開始：僅更新 DDB，不發 Telegram 通知（#277）
 
-    # 從 DDB 讀取現有的 telegram_message_id 和 reason（由 callbacks.py 儲存）
+    保留 telegram_message_id 讀取邏輯，供 handle_success 更新訊息用。
+    """
+    deploy_id = event.get('deploy_id', '')
+
+    # 從 DDB 讀取現有的 telegram_message_id（由 callbacks.py 儲存）
     history = get_history(deploy_id)
     existing_message_id = history.get('telegram_message_id') if history else None
-    reason = history.get('reason', '') if history else ''
 
-    reason_line = f"📝 *原因：* {reason}\n" if reason else ""
-
-    text = (
-        f"⏳ *部署開始*\n\n"
-        f"📦 *專案：* {project_id}\n"
-        f"🌿 *分支：* {branch}\n"
-        f"🆔 *ID：* `{deploy_id}`\n"
-        f"{reason_line}\n"
-        f"📊 *進度：*\n"
-        f"├── 🔄 初始化中...\n"
-        f"├── ⏳ Template 掃描\n"
-        f"├── ⏳ sam build\n"
-        f"└── ⏳ sam deploy"
-    )
-
-    if existing_message_id:
-        # 更新現有訊息（審批訊息）而非新建
-        update_telegram_message(int(existing_message_id), text)
-        message_id = int(existing_message_id)
-    else:
-        # 若無現有訊息（例如直接觸發），則新建
-        message_id = send_telegram_message(text)
-
-    # 更新歷史記錄
+    # 更新歷史記錄：只更新 DDB，不發 Telegram 訊息
     update_history(deploy_id, {
         'status': 'RUNNING',
-        'telegram_message_id': message_id,
+        'telegram_message_id': existing_message_id or 0,
         'phase': 'INITIALIZING'
     })
 
-    # NOTE: Do NOT pin here. callbacks.py already pins the message when the deploy
-    # is approved (handle_deploy_callback). Pinning again in handle_start would
-    # cause a double-pin regression (Issue #119).
-
-    return {'message_id': message_id}
+    return {'message_id': existing_message_id or 0}
 
 
 def handle_progress(event):
-    """部署進度更新"""
+    """部署進度更新：僅更新 DDB，不發 Telegram 通知（#277）"""
     deploy_id = event.get('deploy_id', '')
-    project_id = event.get('project_id', '')
-    branch = event.get('branch', 'master')
     phase = event.get('phase', '')
-    elapsed_seconds = event.get('elapsed_seconds', 0)
 
-    # 取得之前的 message_id
-    history = get_history(deploy_id)
+    # 更新歷史：只記錄 phase，不發 Telegram 訊息
+    update_history(deploy_id, {'phase': phase})
 
-    # Fallback: read project_id/branch from deploy history if not in event
-    if not project_id and history:
-        project_id = history.get('project_id', '')
-    if branch == 'master' and history and history.get('branch'):
-        branch = history.get('branch', 'master')
-    message_id = history.get('telegram_message_id') if history else None
-
-    # 根據 phase 建立進度顯示
-    phases = {
-        'INITIALIZING': ('🔄', '⏳', '⏳', '⏳', '⏳'),
-        'ANALYZING':    ('✅', '🔄', '⏳', '⏳', '⏳'),
-        'SCANNING':     ('✅', '✅', '🔄', '⏳', '⏳'),
-        'BUILDING':     ('✅', '✅', '✅', '🔄', '⏳'),
-        'DEPLOYING':    ('✅', '✅', '✅', '✅', '🔄'),
-    }
-
-    icons = list(phases.get(phase, ('⏳', '⏳', '⏳', '⏳', '⏳')))
-
-    # Calculate elapsed time and append to current phase
-    started_at = history.get('started_at') or history.get('created_at')
-    elapsed = ''
-    if started_at:
-        try:
-            elapsed_secs = int(time.time()) - int(started_at)
-            if elapsed_secs > 0:
-                elapsed = f"（已 {elapsed_secs}s）"
-        except (ValueError, TypeError):
-            pass
-
-    # Append elapsed to the currently-active phase (the one with 🔄)
-    for i, icon in enumerate(icons):
-        if icon == '🔄':
-            icons[i] = f'🔄{elapsed}'
-            break
-
-    icons = tuple(icons)
-
-    text = (
-        f"⏳ *部署進行中*\n\n"
-        f"📦 *專案：* {project_id}\n"
-        f"🌿 *分支：* {branch}\n"
-        f"🆔 *ID：* `{deploy_id}`\n\n"
-        f"📊 *進度：*\n"
-        f"├── {icons[0]} 初始化\n"
-        f"├── {icons[1]} Changeset 分析\n"
-        f"├── {icons[2]} Template 掃描\n"
-        f"├── {icons[3]} sam build\n"
-        f"└── {icons[4]} sam deploy\n\n"
-        f"⏱️ *已執行：* {format_duration(elapsed_seconds)}"
-    )
-
-    if message_id:
-        update_telegram_message(message_id, text)
-    else:
-        message_id = send_telegram_message(text)
-
-    # 更新歷史
-    update_history(deploy_id, {
-        'phase': phase,
-        'telegram_message_id': message_id
-    })
-
-    return {'message_id': message_id}
+    return {'phase': phase}
 
 
 def handle_success(event):
-    """部署成功通知"""
+    """部署成功通知：簡潔的成功訊息，無進度 checklist（#277）"""
     # Filter out build_result/deploy_result — success notification should not display raw CodeBuild JSON
     event.pop('build_result', None)
     event.pop('deploy_result', None)
@@ -182,26 +90,16 @@ def handle_success(event):
     history = get_history(deploy_id)
     message_id = history.get('telegram_message_id') if history else None
     started_at = history.get('started_at', 0) if history else 0
-    branch = history.get('branch', 'master') if history else 'master'
-    reason = history.get('reason', '') if history else ''
 
     # 計算時間
     duration = int(time.time()) - int(started_at) if started_at else 0
 
-    reason_line = f"📝 *原因：* {reason}\n" if reason else ""
-
+    # 簡潔的成功通知（無進度 checklist）
     text = (
-        f"✅ *部署成功！*\n\n"
-        f"📦 *專案：* {project_id}\n"
-        f"🌿 *分支：* {branch}\n"
-        f"🆔 *ID：* `{deploy_id}`\n"
-        f"{reason_line}\n"
-        f"📊 *進度：*\n"
-        f"├── ✅ 初始化\n"
-        f"├── ✅ Template 掃描\n"
-        f"├── ✅ sam build\n"
-        f"└── ✅ sam deploy\n\n"
-        f"⏱️ *總時間：* {format_duration(duration)}"
+        f"✅ *部署成功*\n\n"
+        f"📦 專案：{project_id}\n"
+        f"⏱ {duration}s\n"
+        f"🆔 `{deploy_id}`"
     )
 
     if message_id:
@@ -299,12 +197,8 @@ def handle_analyze(event):
     deploy_id = event.get('deploy_id', '')
     project_id = event.get('project_id', '')
 
-    # Update progress: now analyzing changeset
+    # Update progress: now analyzing changeset (no Telegram notification per #277)
     update_history(deploy_id, {'phase': 'ANALYZING'})
-    # Try to send a progress update message
-    history = get_history(deploy_id)
-    if history.get('telegram_message_id'):
-        handle_progress({'deploy_id': deploy_id, 'project_id': project_id, 'branch': event.get('branch', 'master'), 'phase': 'ANALYZING'})
 
     # Special case: bouncer-deployer updates itself — always treat as safe (infra changes are intentional)
     SELF_DEPLOYING_PROJECTS = {'bouncer-deployer'}
@@ -320,6 +214,7 @@ def handle_analyze(event):
         }
 
     # Read changeset info from DDB (written by Phase 1 CodeBuild via sam_deploy.py)
+    history = get_history(deploy_id)
     changeset_name = history.get('changeset_name', '')
     no_changes = history.get('no_changes', False)
 

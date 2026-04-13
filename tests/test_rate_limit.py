@@ -95,7 +95,7 @@ class TestRateLimitErrors:
 
             content = json.loads(body['result']['content'][0]['text'])
             assert content['status'] == 'pending_limit_exceeded'
-            assert 'hint' in content
+            assert 'suggestion' in content
 
 
 # ============================================================================

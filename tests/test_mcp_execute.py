@@ -329,14 +329,18 @@ class TestMCPToolExecuteEdgeCases:
         from mcp_execute import mcp_tool_execute
         result = mcp_tool_execute('test-1', {'command': ''})
         body = json.loads(result['body'])
-        assert 'error' in body
+        assert body['result']['isError'] is True
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['error_code'] == 'MISSING_PARAM'
 
     def test_execute_whitespace_command(self, app_module):
         """只有空白的命令"""
         from mcp_execute import mcp_tool_execute
         result = mcp_tool_execute('test-1', {'command': '   '})
         body = json.loads(result['body'])
-        assert 'error' in body
+        assert body['result']['isError'] is True
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['error_code'] == 'MISSING_PARAM'
 
 
 # ============================================================================
@@ -1624,7 +1628,9 @@ class TestMCPCompliancePaths:
 
         # Should return an error result
         body = json.loads(result['body'])
-        assert 'error' in body  # MCP error response
+        assert body['result']['isError'] is True
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['error_code'] == 'MISSING_PARAM'
 
     def test_execute_missing_trust_scope(self, app_module):
         """bouncer_execute without trust_scope returns error."""
@@ -1638,7 +1644,9 @@ class TestMCPCompliancePaths:
 
         # Should return an error result
         body = json.loads(result['body'])
-        assert 'error' in body  # MCP error response
+        assert body['result']['isError'] is True
+        content = json.loads(body['result']['content'][0]['text'])
+        assert content['error_code'] == 'MISSING_PARAM'
 
 
 # ============================================================================

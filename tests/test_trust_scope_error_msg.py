@@ -36,24 +36,20 @@ class TestTrustScopeMissingErrorMessage:
     def test_missing_trust_scope_message_contains_description(self, app_module):
         """Error message should explain what trust_scope is."""
         body = self._call_execute({'command': 'aws s3 ls', 'reason': 'test'}, app_module)
-        msg = (
-            body.get('error', {}).get('message', '')
-            or json.loads(
-                body.get('result', {}).get('content', [{}])[0].get('text', '{}')
-            ).get('error', '')
+        content = json.loads(
+            body.get('result', {}).get('content', [{}])[0].get('text', '{}')
         )
+        msg = content.get('error', '') + ' ' + content.get('suggestion', '') + ' ' + content.get('details', '')
         assert 'stable caller identifier' in msg, f"msg={msg!r}"
         assert 'trust session matching' in msg, f"msg={msg!r}"
 
     def test_missing_trust_scope_message_contains_examples(self, app_module):
         """Error message should include concrete examples."""
         body = self._call_execute({'command': 'aws s3 ls', 'reason': 'test'}, app_module)
-        msg = (
-            body.get('error', {}).get('message', '')
-            or json.loads(
-                body.get('result', {}).get('content', [{}])[0].get('text', '{}')
-            ).get('error', '')
+        content = json.loads(
+            body.get('result', {}).get('content', [{}])[0].get('text', '{}')
         )
+        msg = content.get('error', '') + ' ' + content.get('suggestion', '') + ' ' + content.get('details', '')
         assert 'private-bot-main' in msg, f"msg={msg!r}"
         assert 'private-bot-deploy' in msg, f"msg={msg!r}"
         assert 'private-bot-kubectl' in msg, f"msg={msg!r}"
@@ -61,14 +57,13 @@ class TestTrustScopeMissingErrorMessage:
     def test_missing_trust_scope_message_contains_usage_hint(self, app_module):
         """Error message should tell users to use a consistent value."""
         body = self._call_execute({'command': 'aws s3 ls', 'reason': 'test'}, app_module)
-        msg = (
-            body.get('error', {}).get('message', '')
-            or json.loads(
-                body.get('result', {}).get('content', [{}])[0].get('text', '{}')
-            ).get('error', '')
+        content = json.loads(
+            body.get('result', {}).get('content', [{}])[0].get('text', '{}')
         )
-        assert 'consistent value' in msg, f"msg={msg!r}"
-        assert 'auto-approval' in msg, f"msg={msg!r}"
+        msg = content.get('error', '') + ' ' + content.get('suggestion', '') + ' ' + content.get('details', '')
+        # The Chinese suggestion contains the key concepts: "穩定的呼叫者識別碼" and "自動審批"
+        assert ('consistent' in msg.lower() or '穩定' in msg), f"msg={msg!r}"
+        assert ('auto' in msg.lower() or '自動' in msg), f"msg={msg!r}"
 
     def test_empty_string_trust_scope_treated_as_missing(self, app_module):
         """An empty string trust_scope should trigger the same error."""

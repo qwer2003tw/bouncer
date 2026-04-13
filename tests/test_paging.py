@@ -14,6 +14,8 @@ import sys
 import os
 import time
 import pytest
+
+pytestmark = pytest.mark.xdist_group("paging")
 from unittest.mock import patch, MagicMock, call
 from decimal import Decimal
 from moto import mock_aws
