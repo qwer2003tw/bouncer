@@ -384,8 +384,9 @@ class TestS59_002_TrustRateDetection:
                         # Should return MCP error result (not None)
                         assert result is not None
                         body = json.loads(result['body'])
-                        assert 'error' in body
-                        assert body['error']['code'] == 'TRUST_RATE_EXCEEDED'
+                        assert body['result']['isError'] is True
+                        content = json.loads(body['result']['content'][0]['text'])
+                        assert content['error_code'] == 'TRUST_RATE_EXCEEDED'
 
                         # Should emit TrustRateExceeded metric
                         mock_metric.assert_called()
