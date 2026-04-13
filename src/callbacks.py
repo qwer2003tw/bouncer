@@ -878,8 +878,7 @@ def handle_show_page_callback(query: dict, request_id: str, page_num: int) -> di
 
     callback_data 格式：show_page:{request_id}:{page_num}
 
-    Page 1 is stored inline in the original request record (not in paging DDB),
-    so we read it from the request item's 'result' field. Pages 2+ are in paging DDB.
+    All pages (including page 1) are stored in paging DDB by _write_all_pages().
 
     Args:
         query: Telegram callback query dict
@@ -888,32 +887,16 @@ def handle_show_page_callback(query: dict, request_id: str, page_num: int) -> di
     """
     callback_id = query.get('id', '')
 
-    if page_num == 1:
-        # Page 1: read full result from original request record
-        try:
-            table = _get_table()
-            item = table.get_item(Key={'request_id': request_id}).get('Item')
-            if not item or 'result' not in item:
-                answer_callback(callback_id, '❌ 頁面不存在或已過期')
-                return response(200, {'ok': True})
-            content_text = item['result']
-            total_pages = int(item.get('total_pages', 1))
-            has_more = total_pages > 1
-        except Exception as e:  # noqa: BLE001
-            logger.error("show_page page 1 error: %s", e, extra={"src_module": "callbacks", "operation": "show_page", "request_id": request_id})
-            answer_callback(callback_id, '❌ 讀取失敗')
-            return response(200, {'ok': True})
-    else:
-        page_id = f"{request_id}:page:{page_num}"
-        page_data = get_paged_output(page_id)
+    page_id = f"{request_id}:page:{page_num}"
+    page_data = get_paged_output(page_id)
 
-        if 'error' in page_data:
-            answer_callback(callback_id, '❌ 頁面不存在或已過期')
-            return response(200, {'ok': True})
+    if 'error' in page_data:
+        answer_callback(callback_id, '❌ 頁面不存在或已過期')
+        return response(200, {'ok': True})
 
-        total_pages = page_data.get('total_pages', page_num)
-        has_more = page_num < total_pages
-        content_text = page_data.get('result', '')
+    total_pages = page_data.get('total_pages', page_num)
+    has_more = page_num < total_pages
+    content_text = page_data.get('result', '')
 
     # Build Next Page button if more pages remain
     if has_more:
