@@ -114,8 +114,8 @@ class TestNotifierHandleStart:
     def _make_event(self, deploy_id='deploy-notifier-001', project_id='test-project', branch='main'):
         return {'action': 'start', 'deploy_id': deploy_id, 'project_id': project_id, 'branch': branch}
 
-    def test_handle_start_updates_existing_message(self):
-        """When DDB has telegram_message_id, handle_start updates it (not sends new)."""
+    def test_handle_start_updates_ddb_only(self):
+        """handle_start only updates DDB status (no Telegram notification since #277)."""
         import importlib, types
 
         # Patch notifier app at module level
@@ -159,12 +159,11 @@ class TestNotifierHandleStart:
 
         result = notifier.handle_start(self._make_event())
 
-        # Must update existing message, not send new
-        assert 55555 in update_calls, "Expected update_telegram_message to be called with existing message_id"
-        assert len(send_calls) == 0, "Must not send new message when existing message_id is available"
-        # Must NOT pin — callbacks.py already pinned on approve; double-pin is a regression (Issue #119)
-        assert len(pin_calls) == 0, "handle_start must NOT call pin_telegram_message (callbacks.py pins on approve)"
-        assert result['message_id'] == 55555
+        # #277: handle_start no longer sends/updates Telegram — only DDB
+        assert len(update_calls) == 0, "handle_start should NOT update Telegram (#277)"
+        assert len(send_calls) == 0, "handle_start should NOT send Telegram (#277)"
+        assert len(pin_calls) == 0, "handle_start should NOT pin (#277)"
+        assert 'message_id' in result
 
     def test_handle_start_sends_new_when_no_existing_message(self):
         """When DDB has no telegram_message_id, handle_start does NOT send Telegram (changed by #277)."""
