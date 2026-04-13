@@ -50,8 +50,6 @@ def handle_start(event):
     保留 telegram_message_id 讀取邏輯，供 handle_success 更新訊息用。
     """
     deploy_id = event.get('deploy_id', '')
-    project_id = event.get('project_id', '')
-    branch = event.get('branch', 'master')
 
     # 從 DDB 讀取現有的 telegram_message_id（由 callbacks.py 儲存）
     history = get_history(deploy_id)
@@ -216,6 +214,7 @@ def handle_analyze(event):
         }
 
     # Read changeset info from DDB (written by Phase 1 CodeBuild via sam_deploy.py)
+    history = get_history(deploy_id)
     changeset_name = history.get('changeset_name', '')
     no_changes = history.get('no_changes', False)
 

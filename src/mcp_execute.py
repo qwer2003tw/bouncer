@@ -19,7 +19,7 @@ from botocore.exceptions import ClientError
 
 
 
-from utils import mcp_result, mcp_error, generate_request_id, log_decision, generate_display_summary, record_execution_error, extract_exit_code
+from utils import mcp_result, generate_request_id, log_decision, generate_display_summary, record_execution_error, extract_exit_code
 from commands import get_block_reason, is_auto_approve, execute_command, execute_boto3_native
 from chain_analyzer import check_chain_risks
 from accounts import (
@@ -223,18 +223,33 @@ def _parse_execute_request(req_id, arguments: dict) -> 'dict | ExecuteContext':
     sync_mode = arguments.get('sync', False)
 
     if not command:
-        return mcp_error(req_id, -32602, 'Missing required parameter: command')
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'error',
+                'error_code': 'MISSING_PARAM',
+                'error': 'Missing required parameter: command',
+                'suggestion': '請提供要執行的命令。範例：aws s3 ls'
+            })}],
+            'isError': True
+        })
 
     if not trust_scope:
-        return mcp_error(req_id, -32602, (
-            'Missing required parameter: trust_scope\n\n'
-            'trust_scope is a stable caller identifier used for trust session matching.\n'
-            'Examples:\n'
-            '  - "private-bot-main"        (for general usage)\n'
-            '  - "private-bot-deploy"      (for deployment tasks)\n'
-            '  - "private-bot-kubectl"     (for kubectl operations)\n\n'
-            'Use a consistent value per bot/task to enable trust session auto-approval.'
-        ))
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'error',
+                'error_code': 'MISSING_PARAM',
+                'error': 'Missing required parameter: trust_scope',
+                'suggestion': '設定 trust_scope 為穩定的呼叫者識別碼（如 "private-bot-main"）以啟用信任時段自動審批',
+                'details': (
+                    'trust_scope is a stable caller identifier used for trust session matching.\n'
+                    'Examples:\n'
+                    '  - "private-bot-main"        (for general usage)\n'
+                    '  - "private-bot-deploy"      (for deployment tasks)\n'
+                    '  - "private-bot-kubectl"     (for kubectl operations)'
+                )
+            })}],
+            'isError': True
+        })
 
     # 初始化預設帳號
     init_default_account()
@@ -254,8 +269,10 @@ def _parse_execute_request(req_id, arguments: dict) -> 'dict | ExecuteContext':
             return mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
                     'status': 'error',
+                    'error_code': 'ACCOUNT_NOT_FOUND',
                     'error': f'帳號 {account_id} 未配置',
-                    'available_accounts': available
+                    'available_accounts': available,
+                    'suggestion': f'使用可用帳號之一：{", ".join(available)}，或聯繫管理員新增此帳號'
                 })}],
                 'isError': True
             })
@@ -264,7 +281,9 @@ def _parse_execute_request(req_id, arguments: dict) -> 'dict | ExecuteContext':
             return mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
                     'status': 'error',
-                    'error': f'帳號 {account_id} 已停用'
+                    'error_code': 'ACCOUNT_DISABLED',
+                    'error': f'帳號 {account_id} 已停用',
+                    'suggestion': '聯繫管理員啟用此帳號，或使用其他已啟用的帳號'
                 })}],
                 'isError': True
             })
@@ -451,11 +470,13 @@ def _check_compliance(ctx: ExecuteContext) -> Optional[dict]:
                     'type': 'text',
                     'text': json.dumps({
                         'status': 'compliance_violation',
+                        'error_code': 'COMPLIANCE_BLOCKED',
                         'rule_id': violation.rule_id,
                         'rule_name': violation.rule_name,
                         'description': violation.description,
                         'remediation': violation.remediation,
                         'command': ctx.command[:200],
+                        'suggestion': f'命令被安全規則 {violation.rule_id} 攔截。{violation.remediation}'
                     })
                 }],
                 'isError': True
@@ -467,7 +488,9 @@ def _check_compliance(ctx: ExecuteContext) -> Optional[dict]:
                 'type': 'text',
                 'text': json.dumps({
                     'status': 'error',
+                    'error_code': 'SYSTEM_ERROR',
                     'error': 'Compliance checker module unavailable - request rejected for safety',
+                    'suggestion': '請聯繫管理員檢查 compliance_checker 模組是否正常部署'
                 })
             }],
             'isError': True
@@ -498,6 +521,7 @@ def _check_blocked(ctx: ExecuteContext) -> Optional[dict]:
                 'type': 'text',
                 'text': json.dumps({
                     'status': 'blocked',
+                    'error_code': 'BLOCKED_COMMAND',
                     'error': '命令被安全規則封鎖',
                     'block_reason': block_reason,
                     'command': ctx.command[:200],
@@ -793,9 +817,11 @@ def _check_rate_limit(ctx: ExecuteContext) -> Optional[dict]:
                 'type': 'text',
                 'text': json.dumps({
                     'status': 'rate_limited',
+                    'error_code': 'RATE_LIMITED',
                     'error': str(e),
                     'command': ctx.command,
-                    'retry_after': RATE_LIMIT_WINDOW
+                    'retry_after': RATE_LIMIT_WINDOW,
+                    'suggestion': f'請等待 {RATE_LIMIT_WINDOW} 秒後再試，或等待現有請求完成'
                 })
             }],
             'isError': True
@@ -806,9 +832,10 @@ def _check_rate_limit(ctx: ExecuteContext) -> Optional[dict]:
                 'type': 'text',
                 'text': json.dumps({
                     'status': 'pending_limit_exceeded',
+                    'error_code': 'PENDING_LIMIT_EXCEEDED',
                     'error': str(e),
                     'command': ctx.command,
-                    'hint': '請等待 pending 請求處理後再試'
+                    'suggestion': '請等待現有審批請求處理完成後再試，或拒絕/批准現有請求'
                 })
             }],
             'isError': True
@@ -830,11 +857,18 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
     except TrustRateExceeded as exc:
         logger.warning("Trust rate exceeded: %s", exc, extra={"src_module": "mcp_execute", "operation": "trust_auto_approve", "trust_id": trust_session['request_id']})
         emit_metric('Bouncer', 'TrustRateExceeded', 1, dimensions={'Event': 'rate_exceeded'})
-        return mcp_error(
-            ctx.req_id,
-            'TRUST_RATE_EXCEEDED',
-            f'信任時段命令速率過高，請稍候再試。{str(exc)}',
-        )
+        return mcp_result(ctx.req_id, {
+            'content': [{
+                'type': 'text',
+                'text': json.dumps({
+                    'status': 'error',
+                    'error_code': 'TRUST_RATE_EXCEEDED',
+                    'error': f'信任時段命令速率過高，請稍候再試。{str(exc)}',
+                    'suggestion': '等待幾秒後重試，或降低命令執行頻率'
+                })
+            }],
+            'isError': True
+        })
 
     # 執行命令
     request_id = generate_request_id(ctx.command)
@@ -995,8 +1029,10 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
                 'type': 'text',
                 'text': json.dumps({
                     'status': 'error',
+                    'error_code': 'NOTIFICATION_FAILED',
                     'error': 'Telegram notification failed; approval request was not created. Please retry.',
                     'detail': str(tg_err),
+                    'suggestion': '請重試，或聯繫管理員檢查 Telegram Bot 設定是否正常'
                 })
             }],
             'isError': True,
@@ -1120,14 +1156,21 @@ def mcp_tool_execute(req_id: str, arguments: dict) -> dict:
 def mcp_tool_eks_get_token(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_eks_get_token — generate kubectl EKS token via STS presigned URL."""
     from commands import generate_eks_token
-    from utils import mcp_result, mcp_error
 
     cluster_name = arguments.get('cluster_name', '').strip()
     region = arguments.get('region', 'us-east-1').strip()
     account = arguments.get('account', '').strip()
 
     if not cluster_name:
-        return mcp_error(req_id, -32602, 'Missing required parameter: cluster_name')
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'error',
+                'error_code': 'MISSING_PARAM',
+                'error': 'Missing required parameter: cluster_name',
+                'suggestion': '請提供 EKS cluster 名稱。範例：my-eks-cluster'
+            })}],
+            'isError': True
+        })
 
     # Resolve assume_role_arn from account
     assume_role_arn = None
@@ -1171,7 +1214,15 @@ def mcp_tool_execute_native(req_id: str, arguments: dict) -> dict:
     # Parse aws section
     aws_section = arguments.get('aws', {})
     if not aws_section:
-        return mcp_error(req_id, -32602, 'Missing required parameter: aws')
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'error',
+                'error_code': 'MISSING_PARAM',
+                'error': 'Missing required parameter: aws',
+                'suggestion': '請提供 aws 區段，包含 service, operation, params 等欄位'
+            })}],
+            'isError': True
+        })
 
     service = str(aws_section.get('service', '')).strip()
     operation = str(aws_section.get('operation', '')).strip()
@@ -1180,11 +1231,35 @@ def mcp_tool_execute_native(req_id: str, arguments: dict) -> dict:
     account_id = aws_section.get('account', None)
 
     if not service:
-        return mcp_error(req_id, -32602, 'Missing required parameter: aws.service')
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'error',
+                'error_code': 'MISSING_PARAM',
+                'error': 'Missing required parameter: aws.service',
+                'suggestion': '請提供 AWS 服務名稱。範例：eks, s3, ec2'
+            })}],
+            'isError': True
+        })
     if not operation:
-        return mcp_error(req_id, -32602, 'Missing required parameter: aws.operation')
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'error',
+                'error_code': 'MISSING_PARAM',
+                'error': 'Missing required parameter: aws.operation',
+                'suggestion': '請提供 boto3 操作名稱。範例：create_cluster, list_buckets'
+            })}],
+            'isError': True
+        })
     if not isinstance(params, dict):
-        return mcp_error(req_id, -32602, 'aws.params must be a dict')
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'error',
+                'error_code': 'INVALID_PARAM',
+                'error': 'aws.params must be a dict',
+                'suggestion': '請提供有效的 params 物件（dict/object），而非字串或陣列'
+            })}],
+            'isError': True
+        })
 
     # Parse bouncer section
     bouncer_section = arguments.get('bouncer', {})
@@ -1196,14 +1271,21 @@ def mcp_tool_execute_native(req_id: str, arguments: dict) -> dict:
     sync_mode = bouncer_section.get('sync', False)
 
     if not trust_scope:
-        return mcp_error(req_id, -32602, (
-            'Missing required parameter: bouncer.trust_scope\n\n'
-            'trust_scope is a stable caller identifier used for trust session matching.\n'
-            'Examples:\n'
-            '  - "agent-bouncer-exec"      (for general agent usage)\n'
-            '  - "private-bot-eks"         (for EKS operations)\n\n'
-            'Use a consistent value per bot/task to enable trust session auto-approval.'
-        ))
+        return mcp_result(req_id, {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'status': 'error',
+                'error_code': 'MISSING_PARAM',
+                'error': 'Missing required parameter: bouncer.trust_scope',
+                'suggestion': '設定 bouncer.trust_scope 為穩定的呼叫者識別碼（如 "agent-bouncer-exec"）以啟用信任時段自動審批',
+                'details': (
+                    'trust_scope is a stable caller identifier used for trust session matching.\n'
+                    'Examples:\n'
+                    '  - "agent-bouncer-exec"      (for general agent usage)\n'
+                    '  - "private-bot-eks"         (for EKS operations)'
+                )
+            })}],
+            'isError': True
+        })
 
     # Convert boto3 operation to kebab-case for synthetic command (for compliance checking)
     # e.g. create_cluster -> create-cluster
@@ -1233,8 +1315,10 @@ def mcp_tool_execute_native(req_id: str, arguments: dict) -> dict:
             return mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
                     'status': 'error',
+                    'error_code': 'ACCOUNT_NOT_FOUND',
                     'error': f'帳號 {account_id} 未配置',
-                    'available_accounts': available
+                    'available_accounts': available,
+                    'suggestion': f'使用可用帳號之一：{", ".join(available)}，或聯繫管理員新增此帳號'
                 })}],
                 'isError': True
             })
@@ -1243,7 +1327,9 @@ def mcp_tool_execute_native(req_id: str, arguments: dict) -> dict:
             return mcp_result(req_id, {
                 'content': [{'type': 'text', 'text': json.dumps({
                     'status': 'error',
-                    'error': f'帳號 {account_id} 已停用'
+                    'error_code': 'ACCOUNT_DISABLED',
+                    'error': f'帳號 {account_id} 已停用',
+                    'suggestion': '聯繫管理員啟用此帳號，或使用其他已啟用的帳號'
                 })}],
                 'isError': True
             })
