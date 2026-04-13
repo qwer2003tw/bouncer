@@ -167,7 +167,7 @@ class TestNotifierHandleStart:
         assert result['message_id'] == 55555
 
     def test_handle_start_sends_new_when_no_existing_message(self):
-        """When DDB has no telegram_message_id, handle_start sends a new message."""
+        """When DDB has no telegram_message_id, handle_start does NOT send Telegram (changed by #277)."""
         import importlib
 
         notifier_path = os.path.join(os.path.dirname(__file__), '..', 'deployer', 'notifier', 'app.py')
@@ -204,11 +204,13 @@ class TestNotifierHandleStart:
 
         result = notifier.handle_start({'deploy_id': 'deploy-no-existing', 'project_id': 'proj', 'branch': 'main'})
 
-        # Should send new message
-        assert len(send_calls) == 1, "Expected send_telegram_message to be called"
-        assert len(update_calls) == 0, "Must not call update when no existing message"
+        # After #277: handle_start does NOT send/update Telegram messages
+        assert len(send_calls) == 0, "handle_start must NOT send Telegram messages (#277)"
+        assert len(update_calls) == 0, "handle_start must NOT update Telegram messages (#277)"
         # Must NOT pin — callbacks.py already pinned on approve; double-pin is a regression (Issue #119)
         notifier.pin_telegram_message.assert_not_called()
+        # Should return message_id = 0 when no existing message
+        assert result['message_id'] == 0
 
 
 class TestNotifierHandleSuccess:
