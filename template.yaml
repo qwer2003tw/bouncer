@@ -312,6 +312,72 @@ Resources:
           Value: "no"
 
   # ============================================================
+  # IAM - Public Bot Execution Role (Sprint 81 ABAC)
+  # ============================================================
+  PublicBotExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: bouncer-public-bot-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !GetAtt ApprovalFunctionRole.Arn
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ZtpFilesTagBased
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AllowTaggedResources
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:BatchGetItem
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:DescribeTable
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                  - s3:DeleteObject
+                  - cloudfront:CreateInvalidation
+                  - cloudfront:GetDistribution
+                  - logs:StartQuery
+                  - logs:GetQueryResults
+                  - logs:StopQuery
+                  - lambda:GetFunction
+                  - lambda:ListFunctions
+                  - lambda:GetFunctionConfiguration
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    aws:ResourceTag/Project: ztp-files
+              - Sid: AllowS3BucketsByPrefix
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource: 'arn:aws:s3:::ztp-files-*'
+              - Sid: AllowS3ObjectsByPrefix
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: 'arn:aws:s3:::ztp-files-*/*'
+      Tags:
+        - Key: Project
+          Value: bouncer
+        - Key: Purpose
+          Value: public-bot-execution
+
+  # ============================================================
   # S3 - Staging Uploads Bucket
   # ============================================================
   # SEC-004b: Staging bucket with lifecycle rules for automatic cleanup.
