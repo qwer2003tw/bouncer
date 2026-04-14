@@ -491,6 +491,11 @@ Resources:
               Effect: Allow
               Action: sts:AssumeRole
               Resource: 'arn:aws:iam::*:role/*-frontend-deploy-role'
+            # Sprint 81: Public bot execution role for ABAC
+            - Sid: AssumePublicBotRole
+              Effect: Allow
+              Action: sts:AssumeRole
+              Resource: !GetAtt PublicBotExecutionRole.Arn
             # Step Functions for deployer
             - Sid: StepFunctionsAccess
               Effect: Allow
@@ -851,6 +856,35 @@ Resources:
       ApiStages:
         - ApiId: !Ref BouncerApi
           Stage: prod
+
+  # ============================================================
+  # API Gateway - API Keys (Sprint 81)
+  # ============================================================
+  PrivateBotApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name: bouncer-private-bot
+      Enabled: true
+
+  PublicBotApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name: bouncer-public-bot
+      Enabled: true
+
+  PrivateBotUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref PrivateBotApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref ApiUsagePlan
+
+  PublicBotUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref PublicBotApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref ApiUsagePlan
 
   # ============================================================
   # EventBridge Scheduler (sprint7-002)
