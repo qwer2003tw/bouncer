@@ -323,7 +323,7 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              AWS: !GetAtt ApprovalFunctionRole.Arn
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:role/clawdbot-bouncer-ApprovalFunctionRo*'
             Action: sts:AssumeRole
       Policies:
         - PolicyName: ZtpFilesTagBased
@@ -495,7 +495,7 @@ Resources:
             - Sid: AssumePublicBotRole
               Effect: Allow
               Action: sts:AssumeRole
-              Resource: !GetAtt PublicBotExecutionRole.Arn
+              Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/bouncer-public-bot-role'
             # Step Functions for deployer
             - Sid: StepFunctionsAccess
               Effect: Allow
