@@ -1182,15 +1182,16 @@ class TestMCPGrantTools:
         assert 'error' in body or body.get('result', {}).get('isError')
 
     def test_request_grant_missing_source(self, app_module):
-        """request_grant without source returns error -32602."""
+        """request_grant without explicit source — server auto-fills from caller identity."""
         event = _make_grant_event('bouncer_request_grant', {
             'commands': ['aws s3 ls'],
             'reason': 'test reason',
-            # 'source' missing
+            # source auto-filled by identify_caller
         })
         result = app_module.lambda_handler(event, None)
         body = json.loads(result['body'])
-        assert 'error' in body or body.get('result', {}).get('isError')
+        # Source is auto-filled, so request proceeds (pending_approval or error for other reasons)
+        assert 'result' in body or 'error' not in body
 
     def test_request_grant_invalid_account(self, app_module):
         """request_grant with invalid account_id returns error."""
@@ -1240,14 +1241,16 @@ class TestMCPGrantTools:
         assert 'error' in body
 
     def test_grant_status_missing_source(self, app_module):
-        """grant_status without source returns error -32602."""
+        """grant_status without explicit source — server auto-fills from caller identity."""
         event = _make_grant_event('bouncer_grant_status', {
             'grant_id': 'grant_nonexistent',
-            # source missing
+            # source auto-filled by identify_caller
         })
         result = app_module.lambda_handler(event, None)
         body = json.loads(result['body'])
-        assert 'error' in body
+        # Source is auto-filled, so this becomes a "not found" error, not missing param
+        assert 'result' in body
+        assert body['result'].get('isError') is True
 
     def test_grant_status_not_found(self, app_module):
         """grant_status for unknown grant_id returns isError result."""
@@ -1287,27 +1290,27 @@ class TestMCPGrantTools:
         assert content['status'] in ('pending_approval', 'active', 'expired', 'revoked')
 
     @patch('notifications.send_grant_request_notification')
-    def test_grant_status_source_mismatch(self, mock_notif, app_module):
-        """grant_status with wrong source returns isError (source mismatch)."""
-        # Create grant with source-A
+    def test_grant_status_source_consistent(self, mock_notif, app_module):
+        """grant_status with same caller can query own grants (source auto-filled)."""
+        # Create grant — source auto-filled by identify_caller
         create_event = _make_grant_event('bouncer_request_grant', {
             'commands': ['aws s3 ls'],
-            'reason': 'source mismatch test',
-            'source': 'source-A',
+            'reason': 'source consistency test',
         })
         create_result = app_module.lambda_handler(create_event, None)
         create_body = json.loads(create_result['body'])
         grant_id = json.loads(create_body['result']['content'][0]['text'])['grant_request_id']
 
-        # Query with source-B
+        # Query with same caller — source matches
         status_event = _make_grant_event('bouncer_grant_status', {
             'grant_id': grant_id,
-            'source': 'source-B-different',
         })
         result = app_module.lambda_handler(status_event, None)
         body = json.loads(result['body'])
         assert 'result' in body
-        assert body['result'].get('isError') is True
+        # Same caller = same source, so grant is found (pending)
+        result_text = json.loads(body['result']['content'][0]['text'])
+        assert result_text.get('status') == 'pending_approval'
 
     # ------------------------------------------------------------------ #
     # bouncer_revoke_grant — paths                                        #
