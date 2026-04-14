@@ -323,7 +323,7 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:role/clawdbot-bouncer-ApprovalFunctionRo*'
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:role/clawdbot-bouncer-ApprovalFunctionRole-dqfIQ7TSKjkG'
             Action: sts:AssumeRole
       Policies:
         - PolicyName: ZtpFilesTagBased
