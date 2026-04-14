@@ -36,6 +36,7 @@ from accounts import (  # noqa: F401
     init_bot_commands, validate_account_id,
     init_default_account, list_accounts, validate_role_arn,
 )
+from caller_identity import identify_caller
 from rate_limit import check_rate_limit, RateLimitExceeded, PendingLimitExceeded  # noqa: F401
 from paging import store_paged_output, get_paged_output  # noqa: F401
 from utils import response, generate_request_id, decimal_to_native, mcp_result, mcp_error, get_header, log_decision, generate_display_summary
@@ -561,9 +562,10 @@ def handle_mcp_request(event) -> dict:
     """處理 MCP JSON-RPC 請求"""
     headers = event.get('headers', {})
 
-    # 驗證 secret
-    if get_header(headers, 'x-approval-secret') != REQUEST_SECRET:
-        return mcp_error(None, -32600, 'Invalid secret')
+    # 驗證 secret and identify caller
+    caller = identify_caller(get_header(headers, 'x-approval-secret'))
+    if caller is None:
+        return mcp_error(None, -32600, 'Invalid credentials')
 
     # Extract caller_ip from API Gateway event for trust session IP binding
     caller_ip = (
@@ -613,6 +615,9 @@ def handle_mcp_request(event) -> dict:
     elif method == 'tools/call':
         tool_name = params.get('name', '')
         arguments = params.get('arguments', {})
+        # Inject caller info and override source
+        arguments['_caller'] = caller
+        arguments['source'] = caller.get('source', arguments.get('source', 'unknown'))
         return handle_mcp_tool_call(req_id, tool_name, arguments, caller_ip)
 
     else:
@@ -716,8 +721,9 @@ def handle_status_query(event, path):
     """查詢請求狀態 - GET /status/{request_id}"""
     headers = event.get('headers', {})
 
-    if get_header(headers, 'x-approval-secret') != REQUEST_SECRET:
-        return response(403, {'error': 'Invalid secret'})
+    caller = identify_caller(get_header(headers, 'x-approval-secret'))
+    if caller is None:
+        return response(403, {'error': 'Invalid credentials'})
 
     parts = path.split('/status/')
     if len(parts) < 2:
@@ -745,8 +751,9 @@ def handle_clawdbot_request(event: dict) -> dict:
     """處理 REST API 的命令執行請求（向後兼容）"""
     headers = event.get('headers', {})
 
-    if get_header(headers, 'x-approval-secret') != REQUEST_SECRET:
-        return response(403, {'error': 'Invalid secret'})
+    caller = identify_caller(get_header(headers, 'x-approval-secret'))
+    if caller is None:
+        return response(403, {'error': 'Invalid credentials'})
 
     if ENABLE_HMAC:
         body_str = event.get('body', '')
@@ -761,7 +768,7 @@ def handle_clawdbot_request(event: dict) -> dict:
 
     command = unicodedata.normalize('NFKC', body.get('command', '')).strip()
     reason = body.get('reason', 'No reason provided')
-    source = body.get('source', None)  # 來源（哪個 agent/系統）
+    source = caller.get('source', body.get('source', 'unknown'))  # Override with caller source
     assume_role = body.get('assume_role', None)  # 目標帳號 role ARN
     timeout = min(body.get('timeout', APPROVAL_TIMEOUT_DEFAULT), MCP_MAX_WAIT)
 
