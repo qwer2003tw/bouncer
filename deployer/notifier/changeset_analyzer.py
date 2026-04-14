@@ -90,6 +90,22 @@ def is_code_only_change(result: AnalysisResult) -> bool:
         "AWS::Scheduler::ScheduleGroup",
     }
 
+    # Infrastructure types where Modify is safe (no IAM/delete risk)
+    _SAFE_INFRA_MODIFY_TYPES = {
+        "AWS::DynamoDB::Table",              # GSI/capacity/TTL changes
+        "AWS::DynamoDB::GlobalTable",
+        "AWS::CloudFront::Distribution",     # behavior/origin changes
+        "AWS::S3::Bucket",                   # policy/lifecycle changes
+        "AWS::S3::BucketPolicy",
+        "AWS::WAFv2::WebACL",                # rule updates
+        "AWS::WAFv2::RuleGroup",
+        "AWS::CloudWatch::Alarm",            # threshold changes
+        "AWS::CloudWatch::Dashboard",
+        "AWS::SNS::Topic",
+        "AWS::SNS::Subscription",
+        "AWS::SQS::Queue",
+    }
+
     # Resource types that SAM auto-creates and are safe to add
     _SAFE_ADD_TYPES = {
         "AWS::Logs::LogGroup",
@@ -110,6 +126,10 @@ def is_code_only_change(result: AnalysisResult) -> bool:
 
         # SAM auto-created resources (e.g. LogGroup Add) are safe
         if resource_type in _SAFE_ADD_TYPES and action == "Add":
+            continue
+
+        # Infrastructure Modify (no Add/Delete) — safe for dev stacks
+        if resource_type in _SAFE_INFRA_MODIFY_TYPES and action == "Modify":
             continue
 
         # Lambda Function must be Modify-only
