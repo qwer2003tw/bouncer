@@ -296,6 +296,11 @@ def _parse_execute_request(req_id, arguments: dict) -> 'dict | ExecuteContext':
         assume_role = account.get('role_arn') if account else None
         account_name = account.get('name', 'Default') if account else 'Default'
 
+    # Sprint 81: Override assume_role with caller's role_arn if provided
+    caller = arguments.get('_caller', {})
+    if caller.get('role_arn'):
+        assume_role = caller['role_arn']
+
     return ExecuteContext(
         req_id=req_id,
         command=command,
@@ -1341,6 +1346,11 @@ def mcp_tool_execute_native(req_id: str, arguments: dict) -> dict:
         account = get_account(account_id) if account_id else None
         assume_role = account.get('role_arn') if account else None
         account_name = account.get('name', 'Default') if account else 'Default'
+
+    # Sprint 81: Override assume_role with caller's role_arn if provided
+    caller = arguments.get('_caller', {})
+    if caller.get('role_arn'):
+        assume_role = caller['role_arn']
 
     # Create ExecuteContext with native mode enabled
     ctx = ExecuteContext(
