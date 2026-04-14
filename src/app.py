@@ -565,7 +565,13 @@ def handle_mcp_request(event) -> dict:
     # 驗證 secret and identify caller
     caller = identify_caller(get_header(headers, 'x-approval-secret'))
     if caller is None:
+        logger.warning("Authentication failed", extra={"src_module": "mcp", "operation": "authenticate", "path": "/mcp"})
         return mcp_error(None, -32600, 'Invalid credentials')
+
+    logger.info("Caller identified", extra={
+        "src_module": "mcp", "operation": "identify_caller",
+        "bot_id": caller.get('bot_id'), "source": caller.get('source'),
+    })
 
     # Extract caller_ip from API Gateway event for trust session IP binding
     caller_ip = (
@@ -723,7 +729,13 @@ def handle_status_query(event, path):
 
     caller = identify_caller(get_header(headers, 'x-approval-secret'))
     if caller is None:
+        logger.warning("Authentication failed", extra={"src_module": "rest", "operation": "authenticate", "path": "/status"})
         return response(403, {'error': 'Invalid credentials'})
+
+    logger.info("Caller identified", extra={
+        "src_module": "rest", "operation": "identify_caller",
+        "bot_id": caller.get('bot_id'), "source": caller.get('source'), "path": "/status",
+    })
 
     parts = path.split('/status/')
     if len(parts) < 2:
@@ -753,7 +765,13 @@ def handle_clawdbot_request(event: dict) -> dict:
 
     caller = identify_caller(get_header(headers, 'x-approval-secret'))
     if caller is None:
+        logger.warning("Authentication failed", extra={"src_module": "rest", "operation": "authenticate", "path": "/execute"})
         return response(403, {'error': 'Invalid credentials'})
+
+    logger.info("Caller identified", extra={
+        "src_module": "rest", "operation": "identify_caller",
+        "bot_id": caller.get('bot_id'), "source": caller.get('source'), "path": "/execute",
+    })
 
     if ENABLE_HMAC:
         body_str = event.get('body', '')
