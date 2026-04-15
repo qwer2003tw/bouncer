@@ -151,33 +151,33 @@ class TestStorePaged:
         c = _constants()
         output = 'x' * (c.OUTPUT_MAX_INLINE + 1)
         result = paging_module.store_paged_output('req-over', output)
-        assert result['paged'] is True
-        assert result['page'] == 1
-        assert result['total_pages'] >= 1
+        # MCP never paged, but Telegram pages stored in DDB
+        assert result['paged'] is False
+        assert result['telegram_pages'] >= 1
 
     def test_5k_output(self, paging_module):
-        """5 000-char output → 2 pages (4K + 1K with page_size=4000)"""
+        """5 000-char output → 2 Telegram pages (3800 + 1200 with telegram_page_size=3800)"""
         output = 'A' * 5000
         result = paging_module.store_paged_output('req-5k', output)
-        assert result['paged'] is True
-        assert result['total_pages'] == 2
-        assert result['output_length'] == 5000
-        assert result['next_page'] == 'req-5k:page:2'
-        # First page must be exactly OUTPUT_PAGE_SIZE chars
-        c = _constants()
-        assert len(result['result']) == c.OUTPUT_PAGE_SIZE
+        # MCP never paged, returns full result
+        assert result['paged'] is False
+        assert result['telegram_pages'] == 2  # 5000 / 3800 = 2 pages
+        assert result.output_length == 5000
+        # MCP returns full result
+        assert len(result['result']) == 5000
 
     def test_15k_output_all_pages_stored(self, paging_module, mock_dynamodb):
-        """15 000-char output → 4 pages (4K×3 + 3K); all stored in DynamoDB."""
+        """15 000-char output → 4 Telegram pages (3800×3 + 3600); all stored in DynamoDB."""
         output = 'B' * 15_000
         result = paging_module.store_paged_output('req-15k', output)
 
-        assert result['paged'] is True
-        total = result['total_pages']
-        assert total == 4  # ceil(15000/4000) = 4
+        # MCP never paged, but Telegram pages stored in DDB
+        assert result['paged'] is False
+        total = result.telegram_pages
+        assert total == 4  # ceil(15000/3800) = 4
 
         table = mock_dynamodb.Table('clawdbot-approval-requests')
-        for page_num in range(2, total + 1):
+        for page_num in range(1, total + 1):
             item = table.get_item(
                 Key={'request_id': f'req-15k:page:{page_num}'}
             ).get('Item')
@@ -187,15 +187,15 @@ class TestStorePaged:
             assert item['original_request'] == 'req-15k'
 
     def test_15k_output_page1_stored_in_ddb(self, paging_module, mock_dynamodb):
-        """Page 1 is now stored in DDB by _write_all_pages (PR #300)."""
+        """Page 1 is stored in DDB by _write_all_pages for Telegram pagination."""
         output = 'C' * 15_000
-        paging_module.store_paged_output('req-15k-p1', output)
+        result = paging_module.store_paged_output('req-15k-p1', output)
 
         table = mock_dynamodb.Table('clawdbot-approval-requests')
         item = table.get_item(Key={'request_id': 'req-15k-p1:page:1'}).get('Item')
         assert item is not None, "Page 1 must be stored in DynamoDB"
         assert item['page'] == 1
-        assert item['total_pages'] >= 1
+        assert item['total_pages'] == result.telegram_pages
 
     def test_output_length_preserves_original(self, paging_module):
         """output_length should reflect original size, even after truncation."""
@@ -205,20 +205,19 @@ class TestStorePaged:
         assert result.output_length == len(original)
 
     def test_page_content_completeness(self, paging_module, mock_dynamodb):
-        """Concatenating all pages must reproduce the stored text."""
+        """Concatenating all DDB pages must reproduce the full output."""
         c = _constants()
-        # Use a 12K output split across 3 pages of 4K each
-        segment = 'X' * c.OUTPUT_PAGE_SIZE
-        output = segment * 3  # exactly 3 pages
-        paging_module.store_paged_output('req-concat', output)
-
-        table = mock_dynamodb.Table('clawdbot-approval-requests')
-        pages = [paging_module.store_paged_output.__module__]  # placeholder
-
+        # Use 11400 chars (exactly 3 pages at 3800 each)
+        output = 'X' * 11400
         result = paging_module.store_paged_output('req-concat2', output)
-        all_content = result['result']  # page 1 inline
 
-        for page_num in range(2, result['total_pages'] + 1):
+        # MCP returns full result
+        assert result['result'] == output
+
+        # Verify all Telegram pages in DDB reconstruct the same output
+        table = mock_dynamodb.Table('clawdbot-approval-requests')
+        all_content = ''
+        for page_num in range(1, result.telegram_pages + 1):
             item = table.get_item(
                 Key={'request_id': f'req-concat2:page:{page_num}'}
             ).get('Item')
@@ -242,10 +241,8 @@ class TestHardCap:
         # Verify the actual stored data doesn't exceed hard cap by much
         # (we allow for the truncation notice appended)
         total_chars = len(result['result'])
-        if result['paged']:
-            assert total_chars <= c.OUTPUT_PAGE_SIZE + 500  # first page only
-        else:
-            assert total_chars <= c.OUTPUT_HARD_CAP_BYTES + 1000
+        # MCP never paged, returns capped result + notice
+        assert total_chars <= c.OUTPUT_HARD_CAP_BYTES + 1000
 
     def test_truncation_notice_present(self, paging_module):
         """Truncation notice must appear somewhere in the output."""
@@ -259,12 +256,14 @@ class TestHardCap:
         assert '⚠️' in full_result or '[輸出已截斷]' in full_result or result.truncated is True
 
     def test_200k_output(self, paging_module):
-        """200K output must be capped, not crash."""
+        """200K output is within cap (300K), should not be truncated."""
         c = _constants()
-        oversized = 'V' * 200_000
-        result = paging_module.store_paged_output('req-200k', oversized)
-        assert result.truncated is True
-        assert result['paged'] is True or result['paged'] is False  # must not raise
+        large_output = 'V' * 200_000
+        result = paging_module.store_paged_output('req-200k', large_output)
+        # 200K < 300K hard cap, so not truncated
+        assert result.truncated is False
+        assert result['paged'] is False  # MCP never paged
+        assert len(result['result']) == 200_000
 
     def test_output_within_cap_not_truncated(self, paging_module):
         """Output at exactly HARD_CAP should NOT be truncated."""
@@ -276,12 +275,12 @@ class TestHardCap:
     def test_ddb_item_stays_under_400kb(self, paging_module, mock_dynamodb):
         """Each DynamoDB item must be well under 400 KB."""
         c = _constants()
-        # 50K chars — should produce ~13 pages of 4K each
+        # 50K chars — should produce ~14 Telegram pages of 3800 each
         output = 'D' * 50_000
         result = paging_module.store_paged_output('req-ddb-size', output)
 
         table = mock_dynamodb.Table('clawdbot-approval-requests')
-        for page_num in range(2, result['total_pages'] + 1):
+        for page_num in range(1, result.telegram_pages + 1):
             item = table.get_item(
                 Key={'request_id': f'req-ddb-size:page:{page_num}'}
             ).get('Item')
@@ -297,23 +296,25 @@ class TestHardCap:
 
 class TestGetPagedOutput:
     def test_retrieve_page2(self, paging_module, mock_dynamodb):
-        """Retrieve page 2 after storing a 15K output."""
+        """Retrieve Telegram page 2 after storing a 15K output."""
         output = 'E' * 15_000
-        paging_module.store_paged_output('req-get-p2', output)
+        stored = paging_module.store_paged_output('req-get-p2', output)
 
         result = paging_module.get_paged_output('req-get-p2:page:2')
         assert 'error' not in result
         assert result['page'] == 2
-        assert result['total_pages'] == 4
+        assert result['total_pages'] == stored.telegram_pages
         assert len(result['result']) > 0
 
     def test_next_page_chain(self, paging_module):
-        """Follow the next_page chain until the last page returns None."""
+        """Follow the next_page chain in DDB until the last page returns None."""
         output = 'F' * 15_000
         stored = paging_module.store_paged_output('req-chain', output)
 
-        current = stored['next_page']
-        visited_pages = [1]
+        # Start from page 1 in DDB (not from MCP result which has no next_page)
+        page_data = paging_module.get_paged_output('req-chain:page:1')
+        visited_pages = [page_data['page']]
+        current = page_data['next_page']
 
         while current is not None:
             page_data = paging_module.get_paged_output(current)
@@ -321,14 +322,14 @@ class TestGetPagedOutput:
             visited_pages.append(page_data['page'])
             current = page_data['next_page']
 
-        # Should have visited all pages
-        assert visited_pages == list(range(1, stored['total_pages'] + 1))
+        # Should have visited all Telegram pages
+        assert visited_pages == list(range(1, stored.telegram_pages + 1))
 
     def test_last_page_has_no_next(self, paging_module):
-        """Last page must return next_page=None."""
+        """Last Telegram page must return next_page=None."""
         output = 'G' * 8_000
         stored = paging_module.store_paged_output('req-last', output)
-        last_page_id = f"req-last:page:{stored['total_pages']}"
+        last_page_id = f"req-last:page:{stored.telegram_pages}"
 
         result = paging_module.get_paged_output(last_page_id)
         assert result['next_page'] is None
@@ -339,23 +340,30 @@ class TestGetPagedOutput:
         assert 'error' in result
 
     def test_retrieve_all_pages_reconstruct(self, paging_module):
-        """Reconstructing all pages must equal the original output."""
+        """Reconstructing all DDB pages must equal the original output."""
         c = _constants()
+        # Use TELEGRAM_PAGE_SIZE for reconstruction test
         original = ''.join(
-            chr(ord('A') + i % 26) * c.OUTPUT_PAGE_SIZE
+            chr(ord('A') + i % 26) * c.TELEGRAM_PAGE_SIZE
             for i in range(4)
-        )  # 4 × 4K = 16K
+        )  # 4 × 3800 = 15200 chars
 
         stored = paging_module.store_paged_output('req-reconstruct', original)
-        reconstructed = stored['result']
 
-        current = stored['next_page']
+        # Reconstruct from DDB pages (MCP already has full result)
+        reconstructed = ''
+        page_data = paging_module.get_paged_output('req-reconstruct:page:1')
+        reconstructed += page_data['result']
+        current = page_data['next_page']
+
         while current:
             page = paging_module.get_paged_output(current)
             reconstructed += page['result']
             current = page['next_page']
 
         assert reconstructed == original
+        # Also verify MCP result matches
+        assert stored['result'] == original
 
 
 # ===========================================================================
@@ -370,31 +378,31 @@ class TestSendRemainingPages:
             mock_send.assert_not_called()
 
     def test_two_pages_sends_page2(self, paging_module, mock_dynamodb):
-        """2-page output → sends page 2 exactly once."""
+        """2 Telegram pages → sends page 2 exactly once."""
         output = 'H' * 6_000
         stored = paging_module.store_paged_output('req-send-2', output)
 
         with patch('paging.send_telegram_message_silent') as mock_send:
-            paging_module.send_remaining_pages('req-send-2', stored['total_pages'])
-            assert mock_send.call_count == stored['total_pages'] - 1
+            paging_module.send_remaining_pages('req-send-2', stored.telegram_pages)
+            assert mock_send.call_count == stored.telegram_pages - 1
 
     def test_four_pages_sends_pages_2_3_4(self, paging_module, mock_dynamodb):
-        """4-page output → sends pages 2, 3, 4 (exactly 3 sends)."""
+        """4+ Telegram pages → sends pages 2, 3, 4... (N-1 sends)."""
         output = 'I' * 16_000
         stored = paging_module.store_paged_output('req-send-4', output)
-        assert stored['total_pages'] == 4
+        total = stored.telegram_pages
 
         with patch('paging.send_telegram_message_silent') as mock_send:
-            paging_module.send_remaining_pages('req-send-4', 4)
-            assert mock_send.call_count == 3
+            paging_module.send_remaining_pages('req-send-4', total)
+            assert mock_send.call_count == total - 1
 
     def test_page_content_in_telegram_message(self, paging_module, mock_dynamodb):
         """Page content must appear inside the Telegram message."""
-        unique = 'UNIQUE_MARKER_XYZ_' * 300  # 5400 chars → 2 pages
+        unique = 'UNIQUE_MARKER_XYZ_' * 300  # 5400 chars → 2 Telegram pages
         stored = paging_module.store_paged_output('req-marker', unique)
 
         with patch('paging.send_telegram_message_silent') as mock_send:
-            paging_module.send_remaining_pages('req-marker', stored['total_pages'])
+            paging_module.send_remaining_pages('req-marker', stored.telegram_pages)
             assert mock_send.call_count >= 1
             first_call_arg = mock_send.call_args_list[0][0][0]
             assert '第 2/' in first_call_arg
@@ -444,19 +452,21 @@ class TestEdgeCases:
         """Unicode CJK chars (3-4 bytes each) must not cause issues."""
         output = '中文輸出測試' * 1000  # ~6000 chars
         result = paging_module.store_paged_output('req-unicode', output)
-        assert result['paged'] is True or result['paged'] is False  # must not raise
+        # MCP never paged
+        assert result['paged'] is False
         assert isinstance(result['result'], str)
 
     def test_newlines_preserved(self, paging_module, mock_dynamodb):
-        """Newlines inside content must be preserved across pages."""
+        """Newlines inside content must be preserved across Telegram pages."""
         c = _constants()
         lines = '\n'.join(f'line {i}' for i in range(1000))
-        if len(lines) <= c.OUTPUT_MAX_INLINE:
-            lines = lines * 3
         result = paging_module.store_paged_output('req-newlines', lines)
 
-        if result['paged']:
-            # Retrieve page 2 and verify it contains newlines
+        # MCP returns full result with newlines
+        assert '\n' in result['result']
+
+        # Verify DDB page 2 also has newlines if multi-page
+        if result.telegram_pages > 1:
             p2 = paging_module.get_paged_output(f'req-newlines:page:2')
             assert '\n' in p2['result'] or len(p2['result']) > 0
 
@@ -466,11 +476,13 @@ class TestEdgeCases:
         assert result['result'] == 'X'
 
     def test_request_id_with_colons(self, paging_module, mock_dynamodb):
-        """Request IDs that already contain colons must paginate correctly."""
+        """Request IDs that already contain colons must store Telegram pages correctly."""
         output = 'L' * 10_000
         req_id = 'prefix:suffix:extra'
         result = paging_module.store_paged_output(req_id, output)
-        assert result['paged'] is True
+        # MCP never paged
+        assert result['paged'] is False
+        assert result.telegram_pages > 1
 
         table = mock_dynamodb.Table('clawdbot-approval-requests')
         p2 = table.get_item(
@@ -483,7 +495,8 @@ class TestEdgeCases:
         output = 'M' * 10_000
         paging_module.store_paged_output('req-idem', output)
         result2 = paging_module.store_paged_output('req-idem', output)
-        assert result2['paged'] is True  # no exception raised
+        # MCP never paged
+        assert result2['paged'] is False  # no exception raised
 
     def test_get_paged_output_invalid_format(self, paging_module):
         """get_paged_output with an ID that doesn't exist returns error."""
@@ -491,16 +504,23 @@ class TestEdgeCases:
         assert 'error' in result
 
     def test_15k_output_all_content_retrievable_by_char(self, paging_module):
-        """15K output with distinct chars per page: verify next_page chain returns all content."""
+        """15K output with distinct chars per page: verify DDB pages reconstruct correctly."""
         c = _constants()
-        ps = c.OUTPUT_PAGE_SIZE
-        # Build output with distinct char per page-sized segment
+        ps = c.TELEGRAM_PAGE_SIZE
+        # Build output with distinct char per Telegram page-sized segment
         output = 'A' * ps + 'B' * ps + 'C' * ps + 'D' * (15_000 - 3 * ps)
         result = paging_module.store_paged_output('req-15k-chars', output)
 
-        assert result['paged'] is True
-        collected = result['result']
-        next_id = result['next_page']
+        # MCP returns full result
+        assert result['paged'] is False
+        assert result['result'] == output
+
+        # Verify DDB pages also reconstruct correctly
+        collected = ''
+        page = paging_module.get_paged_output('req-15k-chars:page:1')
+        collected += page['result']
+        next_id = page['next_page']
+
         while next_id is not None:
             page = paging_module.get_paged_output(next_id)
             assert 'error' not in page
@@ -516,14 +536,14 @@ class TestEdgeCases:
 
 class TestTTL:
     def test_ttl_is_set(self, paging_module, mock_dynamodb):
-        """All stored pages must have a TTL attribute."""
+        """All stored Telegram pages must have a TTL attribute."""
         c = _constants()
         output = 'N' * 10_000
         result = paging_module.store_paged_output('req-ttl', output)
 
         table = mock_dynamodb.Table('clawdbot-approval-requests')
         before = int(time.time())
-        for page_num in range(2, result['total_pages'] + 1):
+        for page_num in range(1, result.telegram_pages + 1):
             item = table.get_item(
                 Key={'request_id': f'req-ttl:page:{page_num}'}
             ).get('Item')
@@ -543,11 +563,12 @@ class TestOnDemandPagination:
         """show_page callback: sends page 2 with Next Page button when more pages exist"""
         import time as _time
 
-        # Create a paged output in DDB (3 pages)
-        output = 'X' * 12_000  # large enough for 3 pages
+        # Create Telegram pages in DDB (3+ pages)
+        output = 'X' * 12_000  # large enough for 3+ Telegram pages
         paged = paging_module.store_paged_output('req-on-demand-001', output)
-        assert paged.paged is True
-        assert paged.total_pages >= 3
+        # MCP never paged, but Telegram pages stored
+        assert paged.paged is False
+        assert paged.telegram_pages >= 3
 
         query = {'id': 'cb-show-001', 'from': {'id': 999999999}, 'message': {'message_id': 1}}
 
@@ -569,10 +590,10 @@ class TestOnDemandPagination:
         assert 'inline_keyboard' in markup
 
     def test_handle_show_page_callback_last_page_no_button(self, paging_module, mock_dynamodb, app_module):
-        """show_page callback: last page has no Next Page button"""
+        """show_page callback: last Telegram page has no Next Page button"""
         output = 'Y' * 12_000
         paged = paging_module.store_paged_output('req-on-demand-002', output)
-        total = paged.total_pages
+        total = paged.telegram_pages
 
         query = {'id': 'cb-show-002', 'from': {'id': 999999999}, 'message': {'message_id': 2}}
 
