@@ -270,7 +270,7 @@ def test_execute_and_store_result_success(mock_emit, mock_store, mock_exec, call
     # Mock 執行結果
     mock_exec.return_value = "bucket1\nbucket2"
     from paging import PaginatedOutput
-    mock_store.return_value = PaginatedOutput(paged=False, result='output')
+    mock_store.return_value = PaginatedOutput(paged=False, result='bucket1\nbucket2', telegram_pages=1)
 
     result = callbacks_module._execute_and_store_result(
         command='aws s3 ls',
@@ -283,7 +283,8 @@ def test_execute_and_store_result_success(mock_emit, mock_store, mock_exec, call
     )
 
     assert result['result'] == "bucket1\nbucket2"
-    assert result['paged'] == {'paged': False}
+    assert isinstance(result['paged'], PaginatedOutput)
+    assert not result['paged'].paged
     assert result['decision_latency_ms'] >= 10000  # >= 10 秒
     assert 'stale' not in result
 

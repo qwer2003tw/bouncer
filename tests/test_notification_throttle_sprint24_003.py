@@ -158,12 +158,13 @@ class TestNotificationThrottling:
     def test_mcp_execute_auto_approve_throttled(self):
         """Test that auto-approve in mcp_execute respects throttling."""
         from mcp_execute import _check_auto_approve, ExecuteContext
+        from paging import PaginatedOutput
         from unittest.mock import MagicMock, patch
 
         # Mock dependencies
         with patch('mcp_execute.is_auto_approve', return_value=True), \
              patch('mcp_execute.execute_command', return_value='command output'), \
-             patch('mcp_execute.store_paged_output', return_value={'result': 'output', 'paged': False}), \
+             patch('mcp_execute.store_paged_output', return_value=PaginatedOutput(paged=False, result='output', telegram_pages=1)), \
              patch('mcp_execute.send_telegram_message_silent') as mock_send_tg, \
              patch('mcp_execute.log_decision'), \
              patch('mcp_execute.emit_metric'), \

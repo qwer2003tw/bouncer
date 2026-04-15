@@ -12,6 +12,10 @@ import pytest
 from unittest.mock import patch, MagicMock
 from moto import mock_aws
 import boto3
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+from paging import PaginatedOutput
 
 
 @pytest.fixture
@@ -171,7 +175,7 @@ def test_check_grant_session_uses_grant_assume_role(mock_dynamodb):
          patch('mcp_execute.log_decision') as mock_log:
 
         mock_execute.return_value = 'output'
-        mock_store.return_value = {'result': 'output', 'paged': False}
+        mock_store.return_value = PaginatedOutput(paged=False, result='output', telegram_pages=1)
 
         result = _check_grant_session(ctx)
 
@@ -229,7 +233,7 @@ def test_check_grant_session_fallback_to_ctx_assume_role(mock_dynamodb):
          patch('mcp_execute.log_decision') as mock_log:
 
         mock_execute.return_value = 'output'
-        mock_store.return_value = {'result': 'output', 'paged': False}
+        mock_store.return_value = PaginatedOutput(paged=False, result='output', telegram_pages=1)
 
         result = _check_grant_session(ctx)
 

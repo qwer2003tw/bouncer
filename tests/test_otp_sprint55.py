@@ -10,6 +10,7 @@ from moto import mock_aws
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+from paging import PaginatedOutput
 
 os.environ.setdefault('TABLE_NAME', 'clawdbot-approval-requests')
 os.environ.setdefault('DEFAULT_ACCOUNT_ID', '190825685292')
@@ -184,8 +185,8 @@ class TestOTPCommandCallback:
             'risk_score': 20,  # Low risk
         })
 
-        with patch('callbacks_command._execute_and_store_result', return_value={'result': 's3://bucket', 'paged': {'paged': False}}) as mock_exec, \
-             patch('callbacks_command.store_paged_output', return_value={'paged': False, 'result': 's3://bucket', 'page': 1, 'total_pages': 1, 'output_length': 12}), \
+        with patch('callbacks_command._execute_and_store_result', return_value={'result': 's3://bucket', 'paged': PaginatedOutput(paged=False, result='s3://bucket', telegram_pages=1)}) as mock_exec, \
+             patch('callbacks_command.store_paged_output', return_value=PaginatedOutput(paged=False, result='s3://bucket', telegram_pages=1)), \
              patch('callbacks_command.answer_callback'), \
              patch('callbacks_command.update_message'), \
              patch('callbacks_command.send_telegram_message_silent'), \
@@ -220,7 +221,7 @@ class TestOTPCommandCallback:
         app_module.table.put_item(Item=item)
 
         with patch('callbacks_command.execute_command', return_value='role deleted') as mock_exec, \
-             patch('callbacks_command.store_paged_output', return_value={'paged': False, 'result': 'role deleted', 'page': 1, 'total_pages': 1, 'output_length': 12}), \
+             patch('callbacks_command.store_paged_output', return_value=PaginatedOutput(paged=False, result='role deleted', telegram_pages=1)), \
              patch('callbacks_command.answer_callback'), \
              patch('callbacks_command.update_message'), \
              patch('callbacks_command.send_telegram_message_silent'), \
