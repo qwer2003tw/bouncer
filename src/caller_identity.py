@@ -4,6 +4,7 @@ Identifies callers by their secret and maps them to bot configurations.
 Both private-bot and public-bot secrets are stored in Secrets Manager.
 REQUEST_SECRET env var is kept as fallback for backward compatibility.
 """
+import hmac
 import json
 import logging
 import os
@@ -79,6 +80,6 @@ def identify_caller(secret: str) -> dict | None:
         return None
     registry = _load_registry()
     for bot_id, config in registry['bots'].items():
-        if config['secret'] == secret:
+        if hmac.compare_digest(config['secret'], secret):
             return {"bot_id": bot_id, **config}
     return None

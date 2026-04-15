@@ -1,5 +1,6 @@
 """OTP (One-Time Password) module for high-risk command second-factor verification."""
 
+import hmac
 import random
 import string
 import time
@@ -126,7 +127,7 @@ def validate_otp(request_id: str, provided_code: str) -> tuple[bool, str]:
     if attempts >= OTP_MAX_ATTEMPTS:
         return False, f"OTP 嘗試次數超過上限（{OTP_MAX_ATTEMPTS}次），請重新審批"
 
-    if item.get('otp_code') != provided_code:
+    if not hmac.compare_digest(str(item.get('otp_code', '')), str(provided_code)):
         # Increment attempts
         table.update_item(
             Key={'request_id': otp_key},

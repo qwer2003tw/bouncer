@@ -932,7 +932,7 @@ def handle_telegram_webhook(event: dict) -> dict:
 
     if TELEGRAM_WEBHOOK_SECRET:
         received_secret = get_header(headers, 'x-telegram-bot-api-secret-token') or ''
-        if received_secret != TELEGRAM_WEBHOOK_SECRET:
+        if not hmac.compare_digest(received_secret, TELEGRAM_WEBHOOK_SECRET):
             return response(403, {'error': 'Invalid webhook signature'})
 
     try:
