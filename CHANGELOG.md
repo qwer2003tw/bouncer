@@ -969,3 +969,15 @@ All notable changes to this project will be documented in this file.
 - `OUTPUT_HARD_CAP_BYTES` raised from 100K to 300K
 - Removed `bouncer_get_page` MCP tool
 - Button correctly points to page 2
+
+## v3.84.0 (Sprint 84) — Audit Completeness + Security Hardening
+
+### Security
+- **#321**: All secret/OTP comparisons use hmac.compare_digest (timing-safe)
+- **#320**: EKS token generation audit log
+
+### Audit
+- **#323**: Deploy lock acquire/release audit
+- **#324**: infra_approve/infra_deny unified audit
+- **#325**: add/remove account MCP audit
+- **#326**: Unified audit schema — all logs have src_module, operation, bot_id/source/user_id
