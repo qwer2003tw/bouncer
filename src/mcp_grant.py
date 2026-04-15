@@ -119,9 +119,9 @@ def mcp_tool_request_grant(req_id: str, arguments: dict) -> dict:
             'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': str(e)})}],
             'isError': True
         })
-    except Exception as e:  # noqa: BLE001 — MCP tool entry point
-        logger.exception(f"[MCP] request_grant error: {e}")
-        return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
+    except Exception:  # noqa: BLE001 — MCP tool entry point
+        logger.exception("Internal error", extra={"src_module": "mcp_grant", "operation": "request_grant"})
+        return mcp_error(req_id, -32603, 'Internal server error')
 
 
 def mcp_tool_grant_status(req_id: str, arguments: dict) -> dict:
@@ -151,9 +151,9 @@ def mcp_tool_grant_status(req_id: str, arguments: dict) -> dict:
             'content': [{'type': 'text', 'text': json.dumps(status)}]
         })
 
-    except Exception as e:  # noqa: BLE001 — MCP tool entry point
-        logger.exception(f"[MCP] grant_status error: {e}")
-        return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
+    except Exception:  # noqa: BLE001 — MCP tool entry point
+        logger.exception("Internal error", extra={"src_module": "mcp_grant", "operation": "grant_status"})
+        return mcp_error(req_id, -32603, 'Internal server error')
 
 
 def mcp_tool_revoke_grant(req_id: str, arguments: dict) -> dict:
@@ -179,9 +179,9 @@ def mcp_tool_revoke_grant(req_id: str, arguments: dict) -> dict:
             'isError': not success
         })
 
-    except Exception as e:  # noqa: BLE001 — MCP tool entry point
-        logger.exception(f"[MCP] revoke_grant error: {e}")
-        return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
+    except Exception:  # noqa: BLE001 — MCP tool entry point
+        logger.exception("Internal error", extra={"src_module": "mcp_grant", "operation": "revoke_grant"})
+        return mcp_error(req_id, -32603, 'Internal server error')
 
 
 def mcp_tool_grant_execute(req_id: str, arguments: dict) -> dict:
@@ -435,6 +435,6 @@ def mcp_tool_grant_execute(req_id: str, arguments: dict) -> dict:
             'isError': False
         })
 
-    except Exception as e:
-        logger.exception(f"[GRANT_EXECUTE] Internal error: {e}")
-        return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
+    except Exception:
+        logger.exception("Internal error", extra={"src_module": "mcp_grant", "operation": "grant_execute"})
+        return mcp_error(req_id, -32603, 'Internal server error')

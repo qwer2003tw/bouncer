@@ -210,19 +210,36 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
 
             _update_request_status(table, request_id, 'approved', user_id)
 
+            logger.info("Approval action", extra={
+                "src_module": "callbacks", "operation": "approval_action",
+                "action": "approve",
+                "request_id": request_id,
+                "request_type": "add_account",
+                "user_id": str(user_id),
+            })
+
             _send_status_update(
                 message_id, '✅', '已新增帳號',
                 {'request_id': request_id, 'source': source, 'context': context},
                 extra_lines=f"{detail_lines}\n🔗 *Role：* `{role_arn}`"
             )
 
-        except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError) as e:
-            answer_callback(callback_id, f'❌ 新增失敗: {str(e)[:50]}')
-            return response(500, {'error': str(e)})
+        except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError):
+            logger.exception("Internal error", extra={"src_module": "callbacks", "operation": "add_account"})
+            answer_callback(callback_id, '❌ 新增失敗')
+            return response(500, {'error': 'Internal server error'})
 
     elif action == 'deny':
         answer_callback(callback_id, '❌ 已拒絕')
         _update_request_status(table, request_id, 'denied', user_id)
+
+        logger.info("Approval action", extra={
+            "src_module": "callbacks", "operation": "approval_action",
+            "action": "deny",
+            "request_id": request_id,
+            "request_type": "add_account",
+            "user_id": str(user_id),
+        })
 
         _send_status_update(
             message_id, '❌', '已拒絕新增帳號',
@@ -271,19 +288,36 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
 
             _update_request_status(table, request_id, 'approved', user_id)
 
+            logger.info("Approval action", extra={
+                "src_module": "callbacks", "operation": "approval_action",
+                "action": "approve",
+                "request_id": request_id,
+                "request_type": "remove_account",
+                "user_id": str(user_id),
+            })
+
             _send_status_update(
                 message_id, '✅', '已移除帳號',
                 {'request_id': request_id, 'source': source, 'context': context},
                 extra_lines=detail_lines
             )
 
-        except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError) as e:
-            answer_callback(callback_id, f'❌ 移除失敗: {str(e)[:50]}')
-            return response(500, {'error': str(e)})
+        except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError):
+            logger.exception("Internal error", extra={"src_module": "callbacks", "operation": "remove_account"})
+            answer_callback(callback_id, '❌ 移除失敗')
+            return response(500, {'error': 'Internal server error'})
 
     elif action == 'deny':
         answer_callback(callback_id, '❌ 已拒絕')
         _update_request_status(table, request_id, 'denied', user_id)
+
+        logger.info("Approval action", extra={
+            "src_module": "callbacks", "operation": "approval_action",
+            "action": "deny",
+            "request_id": request_id,
+            "request_type": "remove_account",
+            "user_id": str(user_id),
+        })
 
         _send_status_update(
             message_id, '❌', '已拒絕移除帳號',
@@ -328,6 +362,14 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
     if action == 'approve':
         answer_callback(callback_id, '🚀 啟動部署中...')
         _update_request_status(table, request_id, 'approved', user_id)
+
+        logger.info("Approval action", extra={
+            "src_module": "callbacks", "operation": "approval_action",
+            "action": "approve",
+            "request_id": request_id,
+            "request_type": "deploy",
+            "user_id": str(user_id),
+        })
 
         # Immediate feedback: remove buttons before start_deploy (best-effort)
         try:
@@ -402,6 +444,14 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
     elif action == 'deny':
         answer_callback(callback_id, '❌ 已拒絕')
         _update_request_status(table, request_id, 'denied', user_id)
+
+        logger.info("Approval action", extra={
+            "src_module": "callbacks", "operation": "approval_action",
+            "action": "deny",
+            "request_id": request_id,
+            "request_type": "deploy",
+            "user_id": str(user_id),
+        })
 
         update_message(
             message_id,
@@ -525,6 +575,15 @@ def _handle_deploy_frontend_deny(table, request_id: str, callback_id: str, messa
     """
     answer_callback(callback_id, '❌ 已拒絕')
     _update_request_status(table, request_id, 'rejected', user_id)
+
+    logger.info("Approval action", extra={
+        "src_module": "callbacks", "operation": "approval_action",
+        "action": "deny",
+        "request_id": request_id,
+        "request_type": "deploy_frontend",
+        "user_id": str(user_id),
+    })
+
     update_message(
         message_id,
         f"❌ *已拒絕前端部署*\n\n"
@@ -823,6 +882,14 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
         answer_callback(callback_id, '❌ 審批已過期，請重新發起前端部署')
         update_message(message_id, '❌ *審批已過期*\n\n`' + request_id + '`\n\n請重新呼叫 bouncer_confirm_frontend_deploy。', remove_buttons=True)
         return response(200, {'ok': True})
+
+    logger.info("Approval action", extra={
+        "src_module": "callbacks", "operation": "approval_action",
+        "action": "approve",
+        "request_id": request_id,
+        "request_type": "deploy_frontend",
+        "user_id": str(user_id),
+    })
 
     try:
         files_manifest = _json.loads(params['files_json'])

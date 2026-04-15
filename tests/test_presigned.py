@@ -1,3 +1,7 @@
+import pytest
+
+pytestmark = pytest.mark.xdist_group("presigned")
+
 """
 Tests for mcp_tool_request_presigned (Approach C - dataclass pipeline style).
 

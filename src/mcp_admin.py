@@ -10,6 +10,7 @@ import json
 import time
 
 from botocore.exceptions import ClientError
+from aws_lambda_powertools import Logger
 
 
 from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native, generate_display_summary
@@ -26,6 +27,9 @@ from constants import (
     APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER,
     AUTO_APPROVE_PREFIXES, BLOCKED_PATTERNS,
 )
+
+
+logger = Logger(service="bouncer")
 
 
 def mcp_tool_status(req_id: str, arguments: dict) -> dict:
@@ -69,8 +73,9 @@ def mcp_tool_status(req_id: str, arguments: dict) -> dict:
             }]
         })
 
-    except ClientError as e:
-        return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
+    except ClientError:
+        logger.exception("Internal error", extra={"src_module": "mcp_admin", "operation": "database_error"})
+        return mcp_error(req_id, -32603, 'Internal server error')
 
 
 def mcp_tool_help(req_id: str, arguments: dict) -> dict:
@@ -154,8 +159,9 @@ def mcp_tool_trust_status(req_id: str, arguments: dict) -> dict:
             }]
         })
 
-    except ClientError as e:
-        return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
+    except ClientError:
+        logger.exception("Internal error", extra={"src_module": "mcp_admin", "operation": "database_error"})
+        return mcp_error(req_id, -32603, 'Internal server error')
 
 
 def mcp_tool_trust_revoke(req_id: str, arguments: dict) -> dict:
@@ -340,8 +346,9 @@ def mcp_tool_list_pending(req_id: str, arguments: dict) -> dict:
             }]
         })
 
-    except ClientError as e:
-        return mcp_error(req_id, -32603, f'Internal error: {str(e)}')
+    except ClientError:
+        logger.exception("Internal error", extra={"src_module": "mcp_admin", "operation": "database_error"})
+        return mcp_error(req_id, -32603, 'Internal server error')
 
 
 def mcp_tool_remove_account(req_id: str, arguments: dict) -> dict:

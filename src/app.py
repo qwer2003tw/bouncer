@@ -688,6 +688,12 @@ def _get_deployer_handler(tool_name: str):
 
 def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict, caller_ip: str = '') -> dict:
     """處理 MCP tool 呼叫"""
+    logger.info("MCP tool call", extra={
+        "src_module": "mcp", "operation": "tool_dispatch",
+        "tool_name": tool_name,
+        "bot_id": arguments.get('_caller', {}).get('bot_id', 'unknown'),
+        "source": arguments.get('source', 'unknown'),
+    })
     emit_metric('Bouncer', 'ToolCall', 1, dimensions={'ToolName': tool_name})
     send_chat_action('typing')
 
@@ -754,9 +760,9 @@ def handle_status_query(event, path):
 
         return response(200, decimal_to_native(item))
 
-    except Exception as e:  # noqa: BLE001 — Lambda handler entry point
-        logger.exception(f"[Lambda] get_request error: {e}")
-        return response(500, {'error': str(e)})
+    except Exception:  # noqa: BLE001 — Lambda handler entry point
+        logger.exception("Internal error", extra={"src_module": "app", "operation": "handle_status_query"})
+        return response(500, {'error': 'Internal server error'})
 
 
 def handle_clawdbot_request(event: dict) -> dict:
@@ -946,11 +952,17 @@ def handle_telegram_webhook(event: dict) -> dict:
         return response(200, {'ok': True})
 
     user_id = str(callback.get('from', {}).get('id', ''))
+    callback_data = callback.get('data', '')
     if user_id not in APPROVED_CHAT_IDS:
+        logger.warning("Unauthorized callback attempt", extra={
+            "src_module": "webhook", "operation": "unauthorized_callback",
+            "user_id": str(user_id),
+            "callback_data": callback_data[:50] if callback_data else "",
+        })
         answer_callback(callback['id'], '❌ 你沒有審批權限')
         return response(403, {'error': 'Unauthorized user'})
 
-    data = callback.get('data', '')
+    data = callback_data
     if ':' not in data:
         return response(400, {'error': 'Invalid callback data'})
 

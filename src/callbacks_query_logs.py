@@ -82,6 +82,14 @@ def _handle_deny(request_id: str, item: dict, message_id: int, callback_id: str,
     answer_callback(callback_id, '❌ 已拒絕')
     _update_request_status(table, request_id, 'denied', user_id)
 
+    logger.info("Approval action", extra={
+        "src_module": "callbacks", "operation": "approval_action",
+        "action": "deny",
+        "request_id": request_id,
+        "request_type": "query_logs",
+        "user_id": str(user_id),
+    })
+
     log_group = item.get('log_group', '')
     account_id = item.get('account_id', '')
 
@@ -206,6 +214,14 @@ def _handle_approve(action: str, request_id: str, item: dict, message_id: int,
         extra_attrs['added_to_allowlist'] = True
 
     _update_request_status(table, request_id, 'approved', user_id, extra_attrs=extra_attrs)
+
+    logger.info("Approval action", extra={
+        "src_module": "callbacks", "operation": "approval_action",
+        "action": "approve" if action != 'approve_add_allowlist' else "approve_add_allowlist",
+        "request_id": request_id,
+        "request_type": "query_logs",
+        "user_id": str(user_id),
+    })
 
     # Build approval message
     if action == 'approve_add_allowlist':
