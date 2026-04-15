@@ -553,6 +553,7 @@ Resources:
               Action: iam:PassRole
               Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/bouncer-${Environment}-scheduler-invoke"
             # Sprint 36: git diff auto-approve (#123) — read GitHub PAT for template diff analysis
+            # Sprint 85 #270: Telegram token migration to Secrets Manager
             - Sid: SecretsManagerReadGithubPat
               Effect: Allow
               Action:
@@ -561,6 +562,8 @@ Resources:
                 - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:sam-deployer/github-pat*"
                 - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bouncer/public-bot-secret*"
                 - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bouncer/private-bot-secret*"
+                - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bouncer/telegram-bot-token*"
+                - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bouncer/telegram-webhook-secret*"
             # Sprint 72: bouncer_query_logs — CloudWatch Log Insights query on default account
             - Sid: CloudWatchLogsQuery
               Effect: Allow

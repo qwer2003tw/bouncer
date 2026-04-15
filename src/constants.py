@@ -4,6 +4,42 @@ Bouncer Constants
 """
 import os
 
+
+def _load_secrets_batch():
+    """Load multiple secrets from Secrets Manager, fallback to env vars.
+
+    Tries to load TELEGRAM_BOT_TOKEN and TELEGRAM_WEBHOOK_SECRET from
+    Secrets Manager first. If SM read fails (e.g., secrets not yet created,
+    SM API unavailable), falls back to environment variables.
+
+    This enables gradual migration: deploy code first, create SM secrets later.
+    """
+    secrets = {}
+    secret_mapping = [
+        ('bouncer/telegram-bot-token', 'TELEGRAM_BOT_TOKEN'),
+        ('bouncer/telegram-webhook-secret', 'TELEGRAM_WEBHOOK_SECRET'),
+    ]
+
+    try:
+        import boto3
+        sm = boto3.client('secretsmanager', region_name='us-east-1')
+
+        for sm_name, env_name in secret_mapping:
+            try:
+                resp = sm.get_secret_value(SecretId=sm_name)
+                # SecretString may be plain string or JSON — use as-is
+                secrets[env_name] = resp['SecretString']
+            except Exception:
+                # Secret not found or no access — fallback to env var
+                secrets[env_name] = os.environ.get(env_name, '')
+    except Exception:
+        # boto3 import or client creation failed — fallback to env vars
+        for _, env_name in secret_mapping:
+            secrets[env_name] = os.environ.get(env_name, '')
+
+    return secrets
+
+
 # ============================================================================
 # 版本
 # ============================================================================
@@ -14,8 +50,9 @@ VERSION = '3.84.0'
 # 環境變數 - Telegram
 # ============================================================================
 
-TELEGRAM_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
-TELEGRAM_WEBHOOK_SECRET = os.environ.get('TELEGRAM_WEBHOOK_SECRET', '')
+_secrets = _load_secrets_batch()
+TELEGRAM_TOKEN = _secrets['TELEGRAM_BOT_TOKEN']
+TELEGRAM_WEBHOOK_SECRET = _secrets['TELEGRAM_WEBHOOK_SECRET']
 TELEGRAM_API_BASE = "https://api.telegram.org/bot"
 
 # 審批者 Chat ID（支援多個，逗號分隔）
