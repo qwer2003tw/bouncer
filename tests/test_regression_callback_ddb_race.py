@@ -15,6 +15,8 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
+from paging import PaginatedOutput
+
 
 class TestRegressionCallbackDdbRace:
     """#242: DDB update should fail gracefully when status is no longer pending_approval."""
@@ -40,7 +42,7 @@ class TestRegressionCallbackDdbRace:
             {'Error': {'Code': 'ConditionalCheckFailedException', 'Message': 'condition not met'}},
             'UpdateItem'
         )
-        mock_paged.return_value = {'paged': False, 'result': 'ok'}
+        mock_paged.return_value = PaginatedOutput(paged=False, result='ok')
 
         item = {
             'created_at': int(time.time()) - 10,
@@ -80,7 +82,7 @@ class TestRegressionCallbackDdbRace:
             {'Error': {'Code': 'ConditionalCheckFailedException', 'Message': 'condition not met'}},
             'UpdateItem'
         )
-        mock_paged.return_value = {'paged': False, 'result': 'ok'}
+        mock_paged.return_value = PaginatedOutput(paged=False, result='ok')
 
         item = {
             'command': 'aws s3 ls',

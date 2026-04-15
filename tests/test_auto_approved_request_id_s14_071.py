@@ -12,6 +12,8 @@ from unittest.mock import patch, MagicMock, call
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
+from paging import PaginatedOutput
+
 
 def _parse_mcp_response(result: dict) -> dict:
     """Extract content dict from mcp_result response (Lambda body → jsonrpc result → content text)."""
@@ -42,7 +44,7 @@ class TestAutoApprovedRequestId:
              patch('mcp_execute.execute_command', return_value='output'), \
              patch('mcp_execute.emit_metric'), \
              patch('mcp_execute.store_paged_output',
-                   return_value={'result': 'output', 'paged': False}), \
+                   return_value=PaginatedOutput(paged=False, result='output')), \
              patch('mcp_execute.send_telegram_message_silent'), \
              patch('mcp_execute.log_decision'), \
              patch('mcp_execute.record_execution_error'), \
@@ -85,7 +87,7 @@ class TestAutoApprovedRequestId:
              patch('mcp_execute.execute_command', return_value='copied'), \
              patch('mcp_execute.emit_metric'), \
              patch('mcp_execute.store_paged_output',
-                   return_value={'result': 'copied', 'paged': False}), \
+                   return_value=PaginatedOutput(paged=False, result='copied')), \
              patch('mcp_execute.send_trust_auto_approve_notification'), \
              patch('mcp_execute.log_decision'), \
              patch('mcp_execute.track_command_executed'), \
@@ -137,7 +139,7 @@ class TestAutoApprovedRequestId:
              patch('mcp_execute.execute_command', return_value='bucket-contents'), \
              patch('mcp_execute.emit_metric'), \
              patch('mcp_execute.store_paged_output',
-                   return_value={'result': 'bucket-contents', 'paged': False}), \
+                   return_value=PaginatedOutput(paged=False, result='bucket-contents')), \
              patch('mcp_execute.send_grant_execute_notification'), \
              patch('mcp_execute.log_decision'), \
              patch('mcp_execute.record_execution_error'), \

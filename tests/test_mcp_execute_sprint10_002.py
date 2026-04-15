@@ -22,6 +22,8 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
+from paging import PaginatedOutput
+
 
 # ---------------------------------------------------------------------------
 # Unit tests: extract_exit_code() in utils.py
@@ -105,9 +107,9 @@ class TestAutoApproveAwsCliFailure:
         with patch('mcp_execute.is_auto_approve', return_value=True), \
              patch('mcp_execute.execute_command', return_value=cmd_result), \
              patch('mcp_execute.emit_metric'), \
-             patch('mcp_execute.store_paged_output', return_value={
-                 'result': cmd_result, 'paged': False
-             }), \
+             patch('mcp_execute.store_paged_output', return_value=PaginatedOutput(
+                 paged=False, result=cmd_result
+             )), \
              patch('mcp_execute.send_telegram_message_silent'), \
              patch('mcp_execute.log_decision'), \
              patch('mcp_execute.record_execution_error') as mock_record, \
@@ -178,9 +180,9 @@ class TestTrustSessionAwsCliFailure:
              patch('mcp_execute.increment_trust_command_count', return_value=1), \
              patch('mcp_execute.execute_command', return_value=cmd_result), \
              patch('mcp_execute.emit_metric'), \
-             patch('mcp_execute.store_paged_output', return_value={
-                 'result': cmd_result, 'paged': False
-             }), \
+             patch('mcp_execute.store_paged_output', return_value=PaginatedOutput(
+                 paged=False, result=cmd_result
+             )), \
              patch('mcp_execute.send_trust_auto_approve_notification'), \
              patch('mcp_execute.log_decision'), \
              patch('mcp_execute.record_execution_error') as mock_record, \
@@ -250,9 +252,9 @@ class TestGrantSessionAwsCliFailure:
              patch('grant.try_use_grant_command', return_value=True), \
              patch('mcp_execute.execute_command', return_value=cmd_result), \
              patch('mcp_execute.emit_metric'), \
-             patch('mcp_execute.store_paged_output', return_value={
-                 'result': cmd_result, 'paged': False
-             }), \
+             patch('mcp_execute.store_paged_output', return_value=PaginatedOutput(
+                 paged=False, result=cmd_result
+             )), \
              patch('mcp_execute.send_grant_execute_notification'), \
              patch('mcp_execute.log_decision'), \
              patch('mcp_execute.record_execution_error') as mock_record, \

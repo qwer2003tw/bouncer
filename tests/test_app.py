@@ -516,6 +516,7 @@ class TestAppModuleMore:
             if content.get('paged'):
                 assert content['total_pages'] >= 2
     
+    @pytest.mark.skip(reason="Sprint 83: bouncer_get_page removed - MCP no longer uses pagination")
     def test_mcp_get_page(self, app_module):
         """取得分頁"""
         # 先建立分頁
@@ -526,7 +527,7 @@ class TestAppModuleMore:
             'total_pages': 3,
             'original_request': 'get-page-test'
         })
-        
+
         event = {
             'rawPath': '/mcp',
             'headers': {'x-approval-secret': 'test-secret'},
@@ -543,11 +544,11 @@ class TestAppModuleMore:
             }),
             'requestContext': {'http': {'method': 'POST'}}
         }
-        
+
         result = app_module.lambda_handler(event, None)
         body = json.loads(result['body'])
         content = json.loads(body['result']['content'][0]['text'])
-        
+
         assert content['page'] == 2
         assert content['result'] == 'Page 2 data'
     
@@ -730,7 +731,6 @@ class TestCoverage80Sprint:
             'bouncer_deploy_status',
             'bouncer_trust_status',
             'bouncer_trust_revoke',
-            'bouncer_get_page',
             'bouncer_list_pending'
         ]
         

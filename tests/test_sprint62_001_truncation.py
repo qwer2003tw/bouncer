@@ -61,7 +61,6 @@ class TestFormatApprovalResponseTruncationNotice:
         assert '輸出已截斷' in sent_text
         assert '顯示前 1000 字元' in sent_text
         assert f'共 {len(long_output)} 字元' in sent_text
-        assert 'bouncer_get_page' in sent_text
 
     def test_truncation_notice_for_approve_trust_action(self):
         """For approve_trust action, max_preview is 800 chars."""
@@ -108,6 +107,7 @@ class TestFormatApprovalResponseTruncationNotice:
         assert '✂️' not in sent_text
         assert '輸出已截斷' not in sent_text
 
+    @pytest.mark.skip(reason="Sprint 83: MCP no longer uses pagination, page_id removed from response")
     def test_paged_output_shows_paging_notice_not_truncation_notice(self):
         """When paged=True, show pagination notice instead of truncation notice."""
         long_output = 'x' * 5000
