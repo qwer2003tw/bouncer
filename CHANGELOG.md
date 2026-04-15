@@ -944,3 +944,19 @@ All notable changes to this project will be documented in this file.
 - Caller identity server-side enforced (source can't be spoofed)
 - Per-bot execution role isolation (ABAC tag-based)
 - REQUEST_SECRET env var kept as fallback only
+
+## v3.82.0 (Sprint 82) — Comprehensive Audit Logging
+
+### Security
+- **#307**: MCP tool dispatch caller audit log (bot_id + tool_name)
+- **#308**: Grant callback approve/deny audit log
+- **#309**: Logs allowlist modification audit log
+- **#310**: Fix str(e) stack trace leakage (~10 occurrences)
+- **#311**: Presigned URL generation audit log
+- **#312**: Webhook unauthorized callback attempt log
+- **#313**: Callback approve/deny unified structured audit
+- **#314**: Rate limit rejection audit log
+
+### Tests
+- Fix presigned test xdist isolation (Powertools LogRecord conflict)
+- Fix notifier_app test xdist module collision (importlib + xfail)
