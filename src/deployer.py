@@ -207,7 +207,7 @@ def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str) -
 
     except Exception as e:  # noqa: BLE001 — fail-closed deployment trigger with cleanup
         # 失敗時釋放鎖
-        release_lock(project_id)
+        release_lock(project_id, deploy_id)
         update_deploy_record(deploy_id, {
             'status': 'FAILED',
             'error_message': str(e)
@@ -236,7 +236,7 @@ def cancel_deploy(deploy_id: str) -> dict:
             logger.error("Error stopping execution: %s", e, extra={"src_module": "deployer", "operation": "cancel_deploy", "error": str(e)})
 
     # 釋放鎖
-    release_lock(record.get('project_id'))
+    release_lock(record.get('project_id'), deploy_id)
 
     # 更新記錄
     update_deploy_record(deploy_id, {
@@ -478,7 +478,7 @@ def get_deploy_status(deploy_id: str) -> dict:
                     emit_metric('Bouncer', 'DeployDuration', duration_seconds, unit='Seconds', dimensions={'Project': project_id})
 
                 # 釋放鎖
-                release_lock(record.get('project_id'))
+                release_lock(record.get('project_id'), deploy_id)
 
                 # --- 通知 Telegram (failure only) ---
                 if sfn_status == 'FAILED':
@@ -496,7 +496,7 @@ def get_deploy_status(deploy_id: str) -> dict:
             # Release lock on ClientError to prevent permanent lockout
             project_id = record.get('project_id')
             if project_id:
-                release_lock(project_id)
+                release_lock(project_id, deploy_id)
             logger.error("Error getting execution status: %s", e, extra={"src_module": "deployer", "operation": "get_execution_status", "deploy_id": deploy_id, "error": str(e)})
 
     # Add timing fields to response

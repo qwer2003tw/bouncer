@@ -1176,6 +1176,17 @@ def mcp_tool_eks_get_token(req_id: str, arguments: dict) -> dict:
 
     result = generate_eks_token(cluster_name, region=region, assume_role_arn=assume_role_arn)
 
+    # Audit log: EKS token generated
+    body = arguments
+    logger.info("EKS token generated", extra={
+        "src_module": "mcp_execute", "operation": "eks_get_token",
+        "cluster_name": cluster_name,
+        "region": region,
+        "account_id": account,
+        "source": body.get('source', 'unknown'),
+        "bot_id": body.get('_caller', {}).get('bot_id', 'unknown'),
+    })
+
     return mcp_result(req_id, {
         'content': [{
             'type': 'text',

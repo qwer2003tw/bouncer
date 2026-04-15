@@ -120,6 +120,14 @@ def handle_infra_approval(action: str, request_id: str, callback: dict, user_id:
             output=_json.dumps({'approved': True, 'deploy_id': deploy_id}),
         )
         update_deploy_record(deploy_id, {'infra_approval_status': 'APPROVED'})
+        # Audit log: infra approval action
+        logger.info("Approval action", extra={
+            "src_module": "callbacks", "operation": "approval_action",
+            "action": "infra_approve",
+            "request_id": deploy_id,
+            "request_type": "deploy_infra",
+            "user_id": str(user_id),
+        })
         answer_callback(callback['id'], '✅ 已批准，繼續部署')
         update_message(msg_id, '✅ *Infra 變更已批准*\n\n`' + deploy_id + '`\n\n正在繼續部署...', remove_buttons=True)
     else:
@@ -129,6 +137,14 @@ def handle_infra_approval(action: str, request_id: str, callback: dict, user_id:
             cause=f'Denied by {user_id}',
         )
         update_deploy_record(deploy_id, {'infra_approval_status': 'DENIED'})
+        # Audit log: infra denial action
+        logger.info("Approval action", extra={
+            "src_module": "callbacks", "operation": "approval_action",
+            "action": "infra_deny",
+            "request_id": deploy_id,
+            "request_type": "deploy_infra",
+            "user_id": str(user_id),
+        })
         answer_callback(callback['id'], '❌ 已拒絕部署')
         update_message(msg_id, '❌ *Infra 變更已拒絕*\n\n`' + deploy_id + '`', remove_buttons=True)
     return response(200, {'ok': True})

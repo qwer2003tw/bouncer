@@ -199,6 +199,11 @@ def acquire_lock(project_id: str, deploy_id: str, locked_by: str) -> bool:
             },
             ConditionExpression='attribute_not_exists(project_id)'
         )
+        logger.info("Deploy lock acquired", extra={
+            "src_module": "deploy_db", "operation": "acquire_lock",
+            "project_id": project_id,
+            "deploy_id": deploy_id,
+        })
         return True
     except ClientError as e:
         if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
@@ -206,10 +211,15 @@ def acquire_lock(project_id: str, deploy_id: str, locked_by: str) -> bool:
         raise
 
 
-def release_lock(project_id: str) -> bool:
+def release_lock(project_id: str, deploy_id: str = None) -> bool:
     """釋放部署鎖"""
     try:
         _get_locks_table().delete_item(Key={'project_id': project_id})
+        logger.info("Deploy lock released", extra={
+            "src_module": "deploy_db", "operation": "release_lock",
+            "project_id": project_id,
+            "deploy_id": deploy_id or "unknown",
+        })
         return True
     except ClientError:
         logger.exception("release_lock failed", extra={"src_module": "deploy_db", "operation": "release_lock", "project_id": project_id, "error_type": "ClientError"})
@@ -228,7 +238,7 @@ def get_lock(project_id: str) -> dict:
         ttl = item.get('ttl', 0)
         if ttl and int(time.time()) > ttl:
             # Lock 已過期，自動清理
-            release_lock(project_id)
+            release_lock(project_id, item.get('lock_id'))
             return None
 
         return item

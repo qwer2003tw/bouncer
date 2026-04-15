@@ -208,6 +208,15 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
                 'created_by': user_id
             })
 
+            # Audit log: account modified
+            logger.info("Account modified", extra={
+                "src_module": "mcp_admin", "operation": "add_account",
+                "account_id": account_id,
+                "account_name": account_name,
+                "source": source,
+                "bot_id": "telegram_callback",
+            })
+
             _update_request_status(table, request_id, 'approved', user_id)
 
             logger.info("Approval action", extra={
@@ -239,6 +248,7 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
             "request_id": request_id,
             "request_type": "add_account",
             "user_id": str(user_id),
+            "source": source,
         })
 
         _send_status_update(
@@ -286,6 +296,15 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
         try:
             accounts_table.delete_item(Key={'account_id': account_id})
 
+            # Audit log: account modified
+            logger.info("Account modified", extra={
+                "src_module": "mcp_admin", "operation": "remove_account",
+                "account_id": account_id,
+                "account_name": account_name,
+                "source": source,
+                "bot_id": "telegram_callback",
+            })
+
             _update_request_status(table, request_id, 'approved', user_id)
 
             logger.info("Approval action", extra={
@@ -317,6 +336,7 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
             "request_id": request_id,
             "request_type": "remove_account",
             "user_id": str(user_id),
+            "source": source,
         })
 
         _send_status_update(
@@ -451,6 +471,7 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
             "request_id": request_id,
             "request_type": "deploy",
             "user_id": str(user_id),
+            "source": item.get('source', ''),
         })
 
         update_message(

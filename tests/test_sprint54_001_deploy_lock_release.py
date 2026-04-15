@@ -45,7 +45,7 @@ class TestDeployLockReleaseOnClientError:
                     result = deployer.get_deploy_status('deploy-test-001')
 
                     # Verify release_lock was called with the project_id
-                    mock_release.assert_called_once_with('test-project')
+                    mock_release.assert_called_once_with('test-project', 'deploy-test-001')
 
         # Result should still return the record (not crash)
         assert result['deploy_id'] == 'deploy-test-001'
