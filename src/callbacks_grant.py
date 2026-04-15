@@ -50,6 +50,13 @@ def handle_grant_approve(query: dict, grant_id: str, mode: str = 'all') -> dict:
         granted = grant.get('granted_commands', [])
         ttl_minutes = grant.get('ttl_minutes', 30)
 
+        logger.info("Grant callback", extra={
+            "src_module": "callbacks", "operation": "grant_callback",
+            "action": "approve_all" if mode == 'all' else "approve_safe",
+            "grant_id": grant_id,
+            "user_id": str(user_id),
+        })
+
         logger.info(
             "Grant approved, ready for execution",
             extra={
@@ -108,6 +115,13 @@ def handle_grant_deny(query: dict, grant_id: str) -> dict:
         if not success:
             answer_callback(callback_id, '❌ 拒絕失敗')
             return response(200, {'ok': True})
+
+        logger.info("Grant callback", extra={
+            "src_module": "callbacks", "operation": "grant_callback",
+            "action": "deny",
+            "grant_id": grant_id,
+            "user_id": str(user_id),
+        })
 
         answer_callback(callback_id, '❌ 已拒絕')
         update_message(
