@@ -929,3 +929,18 @@ All notable changes to this project will be documented in this file.
 - **#283**: 通知順序異常 — #277 移除進度通知後自動解決
 - **#263**: MCP 錯誤訊息加 error_code + suggestion 欄位（MISSING_PARAM, COMPLIANCE_BLOCKED, RATE_LIMITED 等）
 - e2e test xdist patch isolation fix（patch.object on deployer module）
+
+## v3.81.0 (Sprint 81) — Per-bot Auth + ABAC
+
+### Added
+- **Per-bot authentication**: `caller_identity.py` identifies callers by secret, auto-fills source
+- **PublicBotExecutionRole**: tag-based ABAC role for ztp-files resources only
+- **API Gateway API Keys**: private-bot + public-bot keys (not yet enforced)
+- **Secrets Manager**: all bot secrets stored in SM (private-bot + public-bot)
+- **Audit logging**: every request logs bot_id + source; auth failures logged as warnings
+- **Expanded code-only whitelist**: DDB/CloudFront/S3/WAF/CW Modify auto-approve
+
+### Security
+- Caller identity server-side enforced (source can't be spoofed)
+- Per-bot execution role isolation (ABAC tag-based)
+- REQUEST_SECRET env var kept as fallback only
