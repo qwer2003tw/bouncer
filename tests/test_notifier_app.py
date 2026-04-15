@@ -8,8 +8,17 @@ import os
 import pytest
 from unittest.mock import patch
 
-# Ensure deployer/notifier is on sys.path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'deployer', 'notifier'))
+# Ensure deployer/notifier is on sys.path (before src/)
+_notifier_dir = os.path.join(os.path.dirname(__file__), '..', 'deployer', 'notifier')
+# Remove src/ from sys.path temporarily to avoid loading wrong app module
+_saved_paths = [p for p in sys.path if p.endswith('/src') or p.endswith('\\src')]
+for p in _saved_paths:
+    sys.path.remove(p)
+sys.path.insert(0, _notifier_dir)
+
+# Remove any cached 'app' module from other test files
+if 'app' in sys.modules:
+    del sys.modules['app']
 
 # Mock environment before importing app
 with patch.dict(os.environ, {
@@ -22,6 +31,10 @@ with patch.dict(os.environ, {
     'DEPLOYS_TABLE': 'test-deploys'
 }):
     import app
+
+# Restore src/ paths
+for p in _saved_paths:
+    sys.path.append(p)
 
 pytestmark = pytest.mark.xdist_group("notifier_app")
 
