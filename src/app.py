@@ -688,6 +688,12 @@ def _get_deployer_handler(tool_name: str):
 
 def handle_mcp_tool_call(req_id, tool_name: str, arguments: dict, caller_ip: str = '') -> dict:
     """處理 MCP tool 呼叫"""
+    logger.info("MCP tool call", extra={
+        "src_module": "mcp", "operation": "tool_dispatch",
+        "tool_name": tool_name,
+        "bot_id": arguments.get('_caller', {}).get('bot_id', 'unknown'),
+        "source": arguments.get('source', 'unknown'),
+    })
     emit_metric('Bouncer', 'ToolCall', 1, dimensions={'ToolName': tool_name})
     send_chat_action('typing')
 
