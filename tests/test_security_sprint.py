@@ -13,6 +13,8 @@ from botocore.exceptions import ClientError
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
+from paging import PaginatedOutput
+
 # Set env before any AWS calls
 os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'
 os.environ['AWS_ACCESS_KEY_ID'] = 'testing'
@@ -596,7 +598,7 @@ class TestSEC013AutoExecutePendingCompliance:
             cb_cmd_mod._db.table = table
 
             with patch('src.callbacks_command.execute_command', return_value='OK output') as mock_exec, \
-                 patch('src.callbacks_command.store_paged_output', return_value={'result': 'OK', 'paged': False}), \
+                 patch('src.callbacks_command.store_paged_output', return_value=PaginatedOutput(paged=False, result='OK')), \
                  patch('src.callbacks_command.increment_trust_command_count', return_value=1), \
                  patch('src.utils.log_decision'), \
                  patch('src.callbacks_command.send_trust_auto_approve_notification'), \
@@ -698,7 +700,7 @@ class TestSEC013AutoExecutePendingCompliance:
             cb_cmd_mod._db.table = table
 
             with patch('src.callbacks_command.execute_command', return_value='OK output'), \
-                 patch('src.callbacks_command.store_paged_output', return_value={'result': 'OK', 'paged': False}), \
+                 patch('src.callbacks_command.store_paged_output', return_value=PaginatedOutput(paged=False, result='OK')), \
                  patch('src.callbacks_command.increment_trust_command_count', return_value=1), \
                  patch('src.utils.log_decision'), \
                  patch('src.callbacks_command.send_trust_auto_approve_notification'), \

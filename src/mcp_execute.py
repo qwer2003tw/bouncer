@@ -49,6 +49,7 @@ from constants import (
     APPROVAL_TTL_BUFFER,
     AUDIT_TTL_SHORT,
     GRANT_SESSION_ENABLED,
+    TELEGRAM_PAGE_SIZE,
 )
 from aws_lambda_powertools import Logger
 
@@ -660,19 +661,14 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
             'command': ctx.command,
             'account': ctx.account_id,
             'account_name': ctx.account_name,
-            'result': result,  # full result for MCP caller
+            'result': paged.result,  # full result for MCP caller
             'grant_id': grant_id,
             'remaining': remaining_info,
         }
         if is_failed:
             response_data['exit_code'] = _exit_code
 
-        if paged.get('paged'):
-            response_data['paged'] = True
-            response_data['page'] = paged['page']
-            response_data['total_pages'] = paged['total_pages']
-            response_data['output_length'] = paged['output_length']
-            response_data['next_page'] = paged.get('next_page')
+        # No paging metadata in MCP response (Sprint 83)
 
         return mcp_result(ctx.req_id, {
             'content': [{
@@ -731,36 +727,23 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
             )
             footer = "\n```"
 
-            # Telegram 4096 limit: dynamically calculate max result preview
-            TG_LIMIT = 4096
-            SAFETY_MARGIN = 200  # for markdown escaping overhead + truncation hint
-            max_result_chars = TG_LIMIT - len(header) - len(footer) - SAFETY_MARGIN
-            max_result_chars = max(500, min(max_result_chars, 3500))  # clamp
+            # Telegram 4096 limit: use TELEGRAM_PAGE_SIZE to match DDB pages (no gap)
+            max_result_chars = TELEGRAM_PAGE_SIZE  # 3800 chars
 
             result_text = result or '(無輸出)'
-            truncated = len(result_text) > max_result_chars
-            result_preview = result_text[:max_result_chars].strip() if truncated else result_text.strip()
+            result_preview = result_text[:max_result_chars].strip()
 
-            truncation_hint = ""
-            if truncated:
-                truncation_hint = f"\n_（結果共 {len(result_text)} 字，顯示前 {max_result_chars} 字）_"
+            _notif_text = f"{header}{result_preview}{footer}"
 
-            _notif_text = f"{header}{result_preview}{footer}{truncation_hint}"
-
-            # Add Next Page button if paged OR if result was truncated
+            # Add Next Page button if Telegram pages exist
             _reply_markup = None
-            if paged.get('paged') or truncated:
-                if not paged.get('paged'):
-                    paged = store_paged_output(request_id, result)
-                if paged.get('paged'):
-                    # Preview is shorter than page 1 → button shows "View Full" (page 1)
-                    # This prevents gap between preview end and page 2 start
-                    _reply_markup = {
-                        'inline_keyboard': [[{
-                            'text': f'📄 查看完整結果 (1/{paged["total_pages"]})',
-                            'callback_data': f'show_page:{request_id}:1',
-                        }]]
-                    }
+            if paged.telegram_pages > 1:
+                _reply_markup = {
+                    'inline_keyboard': [[{
+                        'text': f'📄 下一頁 (2/{paged.telegram_pages})',
+                        'callback_data': f'show_page:{request_id}:2',
+                    }]]
+                }
             send_telegram_message_silent(_notif_text, reply_markup=_reply_markup)
         except Exception:  # noqa: BLE001 — notification is best-effort
             logger.warning("[EXECUTE] Result notification failed (non-critical)", exc_info=True, extra={"src_module": "execute", "operation": "auto_approve_notification"})
@@ -794,17 +777,12 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
         'command': ctx.command,
         'account': ctx.account_id,
         'account_name': ctx.account_name,
-        'result': result,
+        'result': paged.result,  # full result
     }
     if is_failed:
         response_data['exit_code'] = _exit_code
 
-    if paged.get('paged'):
-        response_data['paged'] = True
-        response_data['page'] = paged['page']
-        response_data['total_pages'] = paged['total_pages']
-        response_data['output_length'] = paged['output_length']
-        response_data['next_page'] = paged.get('next_page')
+    # No paging metadata in MCP response (Sprint 83)
 
     return mcp_result(ctx.req_id, {
         'content': [{
@@ -949,7 +927,7 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
         'command': ctx.command,
         'account': ctx.account_id,
         'account_name': ctx.account_name,
-        'result': result,  # full result for MCP caller
+        'result': paged.result,  # full result for MCP caller
         'trust_session': trust_session['request_id'],
         'remaining': remaining_str,
         'command_count': f"{new_count}/{TRUST_SESSION_MAX_COMMANDS}"
@@ -957,12 +935,7 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
     if is_failed:
         response_data['exit_code'] = _exit_code
 
-    if paged.get('paged'):
-        response_data['paged'] = True
-        response_data['page'] = paged['page']
-        response_data['total_pages'] = paged['total_pages']
-        response_data['output_length'] = paged['output_length']
-        response_data['next_page'] = paged.get('next_page')
+    # No paging metadata in MCP response (Sprint 83)
 
     return mcp_result(ctx.req_id, {
         'content': [{

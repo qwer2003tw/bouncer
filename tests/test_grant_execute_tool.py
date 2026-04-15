@@ -497,6 +497,7 @@ class TestGrantExecuteExecution:
         assert content['status'] == 'grant_executed'
 
     @patch('compliance_checker.check_compliance')
+    @pytest.mark.skip(reason="Sprint 83: MCP no longer uses pagination, page_id removed from response")
     @patch('mcp_grant.execute_boto3_native')
     @patch('mcp_grant.send_grant_execute_notification')
     @patch('mcp_grant.store_paged_output')

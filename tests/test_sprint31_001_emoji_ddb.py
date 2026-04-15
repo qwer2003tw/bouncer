@@ -15,6 +15,8 @@ from unittest.mock import MagicMock, patch, call
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
+from paging import PaginatedOutput
+
 os.environ.setdefault('TABLE_NAME', 'clawdbot-approval-requests')
 os.environ.setdefault('DEFAULT_ACCOUNT_ID', '190825685292')
 os.environ.setdefault('TELEGRAM_BOT_TOKEN', 'test-token')
@@ -123,7 +125,7 @@ class TestExecuteAndStoreResultCommandStatus:
     def _setup_mocks(self):
         """Return common mock setup for _execute_and_store_result tests."""
         mock_table = MagicMock()
-        mock_paged = {'result': 'test result', 'paged': False}
+        mock_paged = PaginatedOutput(paged=False, result='test result')
         return mock_table, mock_paged
 
     def test_command_status_failed_stored_when_exit_code_nonzero(self):

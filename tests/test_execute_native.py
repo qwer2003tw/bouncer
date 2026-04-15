@@ -7,6 +7,11 @@ from unittest.mock import patch, MagicMock, Mock
 from moto import mock_aws
 import boto3
 from botocore.exceptions import ClientError
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from paging import PaginatedOutput
 
 
 @pytest.fixture
@@ -267,14 +272,14 @@ class TestMcpToolExecuteNative:
              patch('mcp_execute.store_paged_output') as mock_paging:
             mock_auto_approve.return_value = True
             mock_execute.return_value = '{"Buckets": [{"Name": "test-bucket-auto"}]}'
-            mock_paging.return_value = {
-                'result': '{"Buckets": [{"Name": "test-bucket-auto"}]}',
-                'paged': False,
-                'page': 1,
-                'total_pages': 1,
-                'output_length': 50,
-                'truncated': False,
-            }
+            mock_paging.return_value = PaginatedOutput(
+                paged=False,
+                result='{"Buckets": [{"Name": "test-bucket-auto"}]}',
+                page=1,
+                total_pages=1,
+                output_length=50,
+                truncated=False,
+            )
 
             result = mcp_tool_execute_native('req-123', {
                 'aws': {

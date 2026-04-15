@@ -20,6 +20,8 @@ import time
 import pytest
 from unittest.mock import patch, MagicMock
 
+from paging import PaginatedOutput
+
 
 
 def _make_webhook_event(callback_data, user_id=999999999,
@@ -66,7 +68,7 @@ def _put_pending_command(table, request_id, command='aws s3 ls',
 class TestAuditTrailApprove:
 
     @patch('callbacks_command.execute_command', return_value='s3://bucket/key\n')
-    @patch('callbacks_command.store_paged_output', return_value={'result': 'ok', 'paged': False})
+    @patch('callbacks_command.store_paged_output', return_value=PaginatedOutput(paged=False, result='ok'))
     @patch('callbacks_command.answer_callback')
     @patch('callbacks_command.update_message')
     @patch('callbacks_command.send_telegram_message_silent')
@@ -96,7 +98,7 @@ class TestAuditTrailApprove:
         assert int(item['duration_ms']) >= 0, 'duration_ms should be >= 0: %s' % item['duration_ms']
 
     @patch('callbacks_command.execute_command', return_value='output\n')
-    @patch('callbacks_command.store_paged_output', return_value={'result': 'ok', 'paged': False})
+    @patch('callbacks_command.store_paged_output', return_value=PaginatedOutput(paged=False, result='ok'))
     @patch('callbacks_command.answer_callback')
     @patch('callbacks_command.update_message')
     @patch('callbacks_command.send_telegram_message_silent')
@@ -136,7 +138,7 @@ class TestAuditTrailApprove:
 class TestAuditTrailApprove_FunctionURL:
 
     @patch('callbacks_command.execute_command', return_value='result\n')
-    @patch('callbacks_command.store_paged_output', return_value={'result': 'ok', 'paged': False})
+    @patch('callbacks_command.store_paged_output', return_value=PaginatedOutput(paged=False, result='ok'))
     @patch('callbacks_command.answer_callback')
     @patch('callbacks_command.update_message')
     @patch('callbacks_command.send_telegram_message_silent')
@@ -205,7 +207,7 @@ class TestAuditTrailDeny:
 class TestAuditTrailDurationMs:
 
     @patch('callbacks_command.execute_command', return_value='output\n')
-    @patch('callbacks_command.store_paged_output', return_value={'result': 'ok', 'paged': False})
+    @patch('callbacks_command.store_paged_output', return_value=PaginatedOutput(paged=False, result='ok'))
     @patch('callbacks_command.answer_callback')
     @patch('callbacks_command.update_message')
     @patch('callbacks_command.send_telegram_message_silent')
@@ -231,7 +233,7 @@ class TestAuditTrailDurationMs:
 class TestHandleCommandCallbackDirectly:
 
     @patch('callbacks_command.execute_command', return_value='aws output\n')
-    @patch('callbacks_command.store_paged_output', return_value={'result': 'ok', 'paged': False})
+    @patch('callbacks_command.store_paged_output', return_value=PaginatedOutput(paged=False, result='ok'))
     @patch('callbacks_command.answer_callback')
     @patch('callbacks_command.update_message')
     @patch('callbacks_command.send_telegram_message_silent')
@@ -259,7 +261,7 @@ class TestHandleCommandCallbackDirectly:
         assert str(stored.get('approved_by')) == '999999999'
 
     @patch('callbacks_command.execute_command', return_value='output\n')
-    @patch('callbacks_command.store_paged_output', return_value={'result': 'ok', 'paged': False})
+    @patch('callbacks_command.store_paged_output', return_value=PaginatedOutput(paged=False, result='ok'))
     @patch('callbacks_command.answer_callback')
     @patch('callbacks_command.update_message')
     @patch('callbacks_command.send_telegram_message_silent')

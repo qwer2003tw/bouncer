@@ -3,7 +3,7 @@ Bouncer - Admin / Query MCP Tools
 
 mcp_tool_status, mcp_tool_help, mcp_tool_trust_status, mcp_tool_trust_revoke,
 mcp_tool_add_account, mcp_tool_list_accounts, mcp_tool_remove_account,
-mcp_tool_get_page, mcp_tool_list_pending, mcp_tool_list_safelist
+mcp_tool_list_pending, mcp_tool_list_safelist
 """
 
 import json
@@ -18,7 +18,6 @@ from accounts import (
     init_default_account, get_account, list_accounts,
     validate_account_id, validate_role_arn,
 )
-from paging import get_paged_output
 from trust import revoke_trust_session
 from db import table
 from notifications import send_account_approval_request
@@ -262,26 +261,6 @@ def mcp_tool_list_accounts(req_id: str, arguments: dict) -> dict:
                 'default_account': DEFAULT_ACCOUNT_ID
             }, indent=2, ensure_ascii=False)
         }]
-    })
-
-
-def mcp_tool_get_page(req_id: str, arguments: dict) -> dict:
-    """MCP tool: bouncer_get_page - 取得長輸出的下一頁"""
-    page_id = str(arguments.get('page_id', '')).strip()
-
-    if not page_id:
-        return mcp_error(req_id, -32602, 'Missing required parameter: page_id')
-
-    result = get_paged_output(page_id)
-
-    if 'error' in result:
-        return mcp_result(req_id, {
-            'content': [{'type': 'text', 'text': json.dumps(result)}],
-            'isError': True
-        })
-
-    return mcp_result(req_id, {
-        'content': [{'type': 'text', 'text': json.dumps(result)}]
     })
 
 
