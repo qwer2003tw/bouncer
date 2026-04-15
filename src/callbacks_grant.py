@@ -85,10 +85,10 @@ def handle_grant_approve(query: dict, grant_id: str, mode: str = 'all') -> dict:
 
         return response(200, {'ok': True})
 
-    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError) as e:
-        logger.error(f"[GRANT] handle_grant_approve error (mode={mode}): {e}", extra={"src_module": "grant", "operation": "handle_grant_approve", "mode": mode, "error": str(e)})
-        answer_callback(callback_id, f'❌ 批准失敗: {str(e)[:50]}')
-        return response(500, {'error': str(e)})
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError):
+        logger.exception("Internal error", extra={"src_module": "callbacks_grant", "operation": "handle_grant_approve", "mode": mode})
+        answer_callback(callback_id, '❌ 批准失敗')
+        return response(500, {'error': 'Internal server error'})
 
 
 # Backward-compatible aliases
@@ -133,7 +133,7 @@ def handle_grant_deny(query: dict, grant_id: str) -> dict:
 
         return response(200, {'ok': True})
 
-    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError) as e:
-        logger.error(f"[GRANT] handle_grant_deny error: {e}", extra={"src_module": "grant", "operation": "handle_grant_deny", "error": str(e)})
-        answer_callback(callback_id, f'❌ 處理失敗: {str(e)[:50]}')
-        return response(500, {'error': str(e)})
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError):
+        logger.exception("Internal error", extra={"src_module": "callbacks_grant", "operation": "handle_grant_deny"})
+        answer_callback(callback_id, '❌ 處理失敗')
+        return response(500, {'error': 'Internal server error'})

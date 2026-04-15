@@ -216,9 +216,10 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
                 extra_lines=f"{detail_lines}\n🔗 *Role：* `{role_arn}`"
             )
 
-        except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError) as e:
-            answer_callback(callback_id, f'❌ 新增失敗: {str(e)[:50]}')
-            return response(500, {'error': str(e)})
+        except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError):
+            logger.exception("Internal error", extra={"src_module": "callbacks", "operation": "add_account"})
+            answer_callback(callback_id, '❌ 新增失敗')
+            return response(500, {'error': 'Internal server error'})
 
     elif action == 'deny':
         answer_callback(callback_id, '❌ 已拒絕')
@@ -277,9 +278,10 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
                 extra_lines=detail_lines
             )
 
-        except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError) as e:
-            answer_callback(callback_id, f'❌ 移除失敗: {str(e)[:50]}')
-            return response(500, {'error': str(e)})
+        except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError):
+            logger.exception("Internal error", extra={"src_module": "callbacks", "operation": "remove_account"})
+            answer_callback(callback_id, '❌ 移除失敗')
+            return response(500, {'error': 'Internal server error'})
 
     elif action == 'deny':
         answer_callback(callback_id, '❌ 已拒絕')

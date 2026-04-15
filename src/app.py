@@ -760,9 +760,9 @@ def handle_status_query(event, path):
 
         return response(200, decimal_to_native(item))
 
-    except Exception as e:  # noqa: BLE001 — Lambda handler entry point
-        logger.exception(f"[Lambda] get_request error: {e}")
-        return response(500, {'error': str(e)})
+    except Exception:  # noqa: BLE001 — Lambda handler entry point
+        logger.exception("Internal error", extra={"src_module": "app", "operation": "handle_status_query"})
+        return response(500, {'error': 'Internal server error'})
 
 
 def handle_clawdbot_request(event: dict) -> dict:

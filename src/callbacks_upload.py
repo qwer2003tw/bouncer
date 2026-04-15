@@ -151,15 +151,16 @@ def _setup_callback_s3_clients(assume_role, table, request_id: str, user_id: str
         s3_staging = get_s3_client(role_arn=None, session_name='bouncer-batch-upload-staging')
         s3_target = get_s3_client(role_arn=assume_role, session_name='bouncer-batch-upload')
         return (s3_staging, s3_target)
-    except ClientError as e:
-        _update_request_status(table, request_id, 'error', user_id, extra_attrs={'error_message': str(e)})
+    except ClientError:
+        logger.exception("Internal error", extra={"src_module": "callbacks_upload", "operation": "init_s3_clients"})
+        _update_request_status(table, request_id, 'error', user_id, extra_attrs={'error_message': 'S3 connection error'})
         update_message(
             message_id,
             f"❌ *批量上傳失敗*（S3 連線錯誤）\n\n"
             f"📋 *請求 ID：* `{request_id}`\n"
-            f"❗ *錯誤：* {str(e)[:200]}",
+            f"❗ *錯誤：* Internal server error",
         )
-        return response(500, {'error': str(e)})
+        return response(500, {'error': 'Internal server error'})
 
 
 def _execute_callback_upload_batch(
