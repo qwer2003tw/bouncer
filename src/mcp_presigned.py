@@ -44,6 +44,7 @@ class PresignedContext:
     source: str
     account_id: str
     expires_in: int
+    bot_id: str = field(default="unknown")
     # Resolved in _resolve_presigned_target
     bucket: str = field(default="")
     s3_key: str = field(default="")
@@ -91,6 +92,7 @@ def _parse_presigned_request(
     reason = str(arguments.get("reason", "")).strip()
     source = str(arguments.get("source", "")).strip()
     account_id = str(arguments.get("account", DEFAULT_ACCOUNT_ID or "")).strip()
+    bot_id = arguments.get('_caller', {}).get('bot_id', 'unknown')
 
     try:
         expires_in = int(arguments.get("expires_in", _DEFAULT_EXPIRES_IN))
@@ -208,6 +210,7 @@ def _parse_presigned_request(
         source=source,
         account_id=account_id or DEFAULT_ACCOUNT_ID or "",
         expires_in=expires_in,
+        bot_id=bot_id,
     )
 
 
@@ -273,6 +276,14 @@ def _generate_presigned_url(ctx: PresignedContext) -> dict:
         )
     except Exception as _notify_exc:  # noqa: BLE001 — fire-and-forget
         logger.error("Presigned notification error (non-fatal): %s", _notify_exc, extra={"src_module": "presigned", "operation": "send_notification", "error": str(_notify_exc)})
+
+    logger.info("Presigned URL generated", extra={
+        "src_module": "mcp_presigned", "operation": "generate_presigned",
+        "filename": ctx.filename,
+        "bucket": ctx.bucket,
+        "source": ctx.source,
+        "bot_id": ctx.bot_id,
+    })
 
     payload = {
         "status": "ready",
@@ -350,6 +361,7 @@ class PresignedBatchContext:
     source: str
     account_id: str
     expires_in: int
+    bot_id: str = field(default="unknown")
     # Resolved in _resolve_batch_target
     batch_id: str = field(default="")
     bucket: str = field(default="")
@@ -381,6 +393,7 @@ def _parse_presigned_batch_request(
     account_id = str(
         arguments.get("account", DEFAULT_ACCOUNT_ID or "")
     ).strip() or (DEFAULT_ACCOUNT_ID or "")
+    bot_id = arguments.get('_caller', {}).get('bot_id', 'unknown')
 
     if not reason:
         return _error("reason is required")
@@ -434,6 +447,7 @@ def _parse_presigned_batch_request(
         source=source,
         account_id=account_id,
         expires_in=expires_in,
+        bot_id=bot_id,
     )
 
 
@@ -545,6 +559,14 @@ def _generate_presigned_batch_urls(ctx: PresignedBatchContext) -> dict:
         )
     except Exception as _notify_exc:  # noqa: BLE001 — fire-and-forget
         logger.error("Presigned batch notification error (non-fatal): %s", _notify_exc, extra={"src_module": "presigned", "operation": "send_batch_notification", "error": str(_notify_exc)})
+
+    logger.info("Presigned URL generated", extra={
+        "src_module": "mcp_presigned", "operation": "generate_presigned",
+        "filename": f"batch_{len(file_results)}_files",
+        "bucket": ctx.bucket,
+        "source": ctx.source,
+        "bot_id": ctx.bot_id,
+    })
 
     payload = {
         "status": "ready",
