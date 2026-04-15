@@ -753,12 +753,12 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
                 if not paged.get('paged'):
                     paged = store_paged_output(request_id, result)
                 if paged.get('paged'):
-                    # Preview is shorter than page 1 → button shows "View Full" (page 1)
-                    # This prevents gap between preview end and page 2 start
+                    # Preview already shows page 1 content → button jumps to page 2
+                    # User already saw the beginning in the notification
                     _reply_markup = {
                         'inline_keyboard': [[{
-                            'text': f'📄 查看完整結果 (1/{paged["total_pages"]})',
-                            'callback_data': f'show_page:{request_id}:1',
+                            'text': f'📄 下一頁 (2/{paged["total_pages"]})',
+                            'callback_data': f'show_page:{request_id}:2',
                         }]]
                     }
             send_telegram_message_silent(_notif_text, reply_markup=_reply_markup)
