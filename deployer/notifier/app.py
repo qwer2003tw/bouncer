@@ -383,6 +383,14 @@ def handle_infra_approval_request(event):
             f"⚡ 偵測到 infra 變更，需要人工確認才能繼續部署。"
         )
 
+    # Telegram message limit: 4096 chars. Reserve space for inline keyboard metadata.
+    TG_LIMIT = 4096
+    BUTTON_RESERVE = 200
+    max_text_len = TG_LIMIT - BUTTON_RESERVE
+
+    if len(text) > max_text_len:
+        text = text[:max_text_len - 60] + "\n\n_...變更詳情已截斷（超過 Telegram 限制）_"
+
     keyboard = {
         "inline_keyboard": [[
             {"text": "✅ Approve Deploy", "callback_data": f"infra_approve:{deploy_id}", "style": "success"},
@@ -390,7 +398,22 @@ def handle_infra_approval_request(event):
         ]]
     }
 
-    message_id = send_telegram_message(text, reply_markup=keyboard)
+    # Try to send message with fallback on failure
+    try:
+        message_id = send_telegram_message(text, reply_markup=keyboard)
+        if not message_id:
+            # send_telegram_message returned 0 (failure) — try fallback
+            raise Exception("send_telegram_message returned 0")
+    except Exception as e:
+        print(f"[infra_approval] Failed to send notification: {e}")
+        # Fallback: send shorter message without changes_detail
+        fallback_text = (
+            f"⚠️ *Infrastructure Changes*\n\n"
+            f"📦 {project_id}\n"
+            f"🆔 `{deploy_id}`\n\n"
+            f"⚡ {change_count} 個 infra 變更需要確認。"
+        )
+        message_id = send_telegram_message(fallback_text, reply_markup=keyboard)
 
     # Update history with notification message_id
     update_history(deploy_id, {
