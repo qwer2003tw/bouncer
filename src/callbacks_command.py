@@ -193,7 +193,7 @@ def _execute_and_store_result(
 
     decision_type = 'manual_approved_trust' if action == 'approve_trust' else 'manual_approved'
 
-    # 存入 DynamoDB（包含分頁資訊 + audit trail #74）
+    # Store full result in DynamoDB (Sprint 83: no paging metadata)
     update_expr = (
         'SET #s = :s, #r = :r, approved_at = :t, approver = :a, '
         'approved_by = :aby, duration_ms = :dms, source_ip = :sip, '
@@ -203,7 +203,7 @@ def _execute_and_store_result(
     expr_names = {'#s': 'status', '#r': 'result', '#ttl': 'ttl'}
     expr_values = {
         ':s': 'approved',
-        ':r': result,  # full result, not paged first page
+        ':r': paged.result,  # full result
         ':t': now,
         ':a': user_id,
         ':aby': user_id,                         # audit trail: who approved (Telegram user_id)
@@ -216,12 +216,7 @@ def _execute_and_store_result(
         ':ttl': now + RESULT_TTL
     }
 
-    if paged.get('paged'):
-        update_expr += ', paged = :p, total_pages = :tp, output_length = :ol, next_page = :np'
-        expr_values[':p'] = True
-        expr_values[':tp'] = paged['total_pages']
-        expr_values[':ol'] = paged['output_length']
-        expr_values[':np'] = paged.get('next_page')
+    # No paging metadata in DDB (Sprint 83: MCP always returns full result)
 
     # ConditionExpression: only update if status is still pending_approval
     # Prevents race condition where concurrent callbacks overwrite each other
@@ -484,7 +479,7 @@ def _format_approval_response(
     Args:
         action: approve 或 approve_trust
         result: 執行結果
-        paged: 分頁資訊
+        paged: PaginatedOutput dict (telegram_pages field for button logic)
         trust_line: 信任時段資訊
         request_id: 請求 ID
         info: _format_command_info 返回的 dict
@@ -493,23 +488,23 @@ def _format_approval_response(
     max_preview = 800 if action == 'approve_trust' else 1000
     result_preview = result[:max_preview] if len(result) > max_preview else result
 
-    if paged.get('paged'):
+    telegram_pages = paged.get('telegram_pages', 1)
+    if telegram_pages > 1:
         truncate_notice = (
-            f"\n\n📄 *共 {paged['total_pages']} 頁* ({paged['output_length']} 字元)\n"
-            f"用 `bouncer_get_page` 查看更多，或點下方按鈕"
+            f"\n\n📄 *共 {telegram_pages} 頁* ({len(result)} 字元)\n"
+            f"點下方按鈕查看更多"
         )
         next_page_button = {
             'inline_keyboard': [[{
-                'text': f'➡️ Next Page (2/{paged["total_pages"]})',
+                'text': f'➡️ Next Page (2/{telegram_pages})',
                 'callback_data': f'show_page:{request_id}:2',
             }]]
         }
     else:
         if len(result) > max_preview:
-            # Output was truncated but not paged (between max_preview and 4000 chars)
+            # Output was truncated for preview
             truncate_notice = (
-                f"\n\n✂️ *輸出已截斷*（顯示前 {max_preview} 字元，共 {len(result)} 字元）\n"
-                f"用 `bouncer_get_page` 查看完整輸出"
+                f"\n\n✂️ *輸出已截斷*（顯示前 {max_preview} 字元，共 {len(result)} 字元）"
             )
         else:
             truncate_notice = ""

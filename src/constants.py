@@ -220,14 +220,17 @@ OTP_RISK_THRESHOLD = 66  # Commands with risk_score >= this require OTP
 # Output Paging - 長輸出分頁
 # ============================================================================
 
-OUTPUT_PAGE_SIZE = 4000         # 每頁字元數（提高至 4K）
-OUTPUT_MAX_INLINE = 4000        # 直接回傳的最大長度（與 PAGE_SIZE 對齊）
+OUTPUT_PAGE_SIZE = 4000         # 每頁字元數（提高至 4K）— only used for Telegram pages
+OUTPUT_MAX_INLINE = 300_000     # MCP never paged, always return full result (300K chars)
 OUTPUT_PAGE_TTL = 3600          # 分頁資料保留 1 小時
 
 # Hard cap: outputs larger than this will be truncated with a notice.
 # DynamoDB item limit = 400 KB; keeping total stored data well below that.
-# 100 KB of *characters* is generous for CloudWatch log output and safe for DDB.
-OUTPUT_HARD_CAP_BYTES = 100_000  # 100K chars
+# 300 KB of *characters* is generous for CloudWatch log output and safe for DDB.
+OUTPUT_HARD_CAP_BYTES = 300_000  # 300K chars
+
+# Telegram page size for show_page callback (Telegram 4096 limit - header/footer margin)
+TELEGRAM_PAGE_SIZE = 3800  # Telegram pages stored in DDB for button navigation
 
 OUTPUT_TRUNCATION_NOTICE_TEMPLATE = (
     "\n\n⚠️ [輸出已截斷] 原始輸出 {original_length:,} 字元，"

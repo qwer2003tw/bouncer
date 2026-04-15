@@ -386,10 +386,9 @@ def mcp_tool_grant_execute(req_id: str, arguments: dict) -> dict:
             region=region, assume_role_arn=assume_role,
         )
 
-        # 14. 分頁輸出（大輸出時）
+        # 14. Store Telegram pages (Sprint 83: MCP never paged)
         paged = store_paged_output(req_id, result)
-        result_text = paged.result
-        page_id = paged.next_page if paged.paged else None
+        result_text = paged.result  # full result
 
         # 15. Telegram 通知（best-effort）
         display_cmd = f"{service}.{operation}"
@@ -417,15 +416,13 @@ def mcp_tool_grant_execute(req_id: str, arguments: dict) -> dict:
             result_summary=result_text[:200]
         )
 
-        # 17. 回傳
+        # 17. Return full result (Sprint 83: no page_id)
         response = {
             'status': 'grant_executed',
             'result': result_text,
             'request_id': req_id,
             'grant_id': grant_id,
         }
-        if page_id:
-            response['page_id'] = page_id
 
         return mcp_result(req_id, {
             'content': [{
