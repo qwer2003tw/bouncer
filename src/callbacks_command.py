@@ -581,6 +581,14 @@ def _handle_deny_callback(
         'decision_latency_ms': decision_latency_ms,
     })
 
+    logger.info("Approval action", extra={
+        "src_module": "callbacks", "operation": "approval_action",
+        "action": "deny",
+        "request_id": request_id,
+        "request_type": "command",
+        "user_id": str(user_id),
+    })
+
     # Sprint 58 s58-004: Session lifecycle audit log
     logger.info(
         "session_lifecycle",
@@ -694,6 +702,14 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
             answer_callback(callback_id, '✅ 執行中 + 🔓 信任啟動')
         else:
             answer_callback(callback_id, '✅ 執行中...')
+
+        logger.info("Approval action", extra={
+            "src_module": "callbacks", "operation": "approval_action",
+            "action": "approve" if action == 'approve' else "approve_trust",
+            "request_id": request_id,
+            "request_type": "command",
+            "user_id": str(user_id),
+        })
 
         # Immediate feedback: remove buttons before execute_command (best-effort)
         try:

@@ -106,6 +106,14 @@ def handle_upload_callback(action: str, request_id: str, item: dict, message_id:
         answer_callback(callback_id, '❌ 已拒絕')
         _update_request_status(table, request_id, 'denied', user_id)
 
+        logger.info("Approval action", extra={
+            "src_module": "callbacks", "operation": "approval_action",
+            "action": "deny",
+            "request_id": request_id,
+            "request_type": "upload",
+            "user_id": str(user_id),
+        })
+
         update_message(
             message_id,
             f"❌ *已拒絕上傳*\n\n"
@@ -289,6 +297,15 @@ def _finalize_callback_upload(
         'total_files': total_files,
         'verification_failed': _json.dumps(verification_failed),
     })
+
+    logger.info("Approval action", extra={
+        "src_module": "callbacks", "operation": "approval_action",
+        "action": "approve",
+        "request_id": request_id,
+        "request_type": "upload",
+        "user_id": str(user_id),
+    })
+
     emit_metric('Bouncer', 'Upload', 1, dimensions={'Status': 'approved', 'Type': 'batch'})
 
     return upload_status
@@ -416,6 +433,14 @@ def handle_upload_batch_callback(action: str, request_id: str, item: dict, messa
         emit_metric('Bouncer', 'Upload', 1, dimensions={'Status': 'denied', 'Type': 'batch'})
         answer_callback(callback_id, '❌ 已拒絕')
         _update_request_status(table, request_id, 'denied', user_id)
+
+        logger.info("Approval action", extra={
+            "src_module": "callbacks", "operation": "approval_action",
+            "action": "deny",
+            "request_id": request_id,
+            "request_type": "upload",
+            "user_id": str(user_id),
+        })
 
         update_message(
             message_id,
