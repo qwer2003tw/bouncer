@@ -191,6 +191,7 @@ class ExecuteContext:
     timeout: int
     sync_mode: bool
     caller_ip: str = ''  # IP address of the caller (from Lambda event)
+    bot_id: str = 'unknown'  # Bot ID for audit trail
     smart_decision: object = None  # smart_approval result (or None)
     mode: str = 'mcp'
     grant_id: Optional[str] = None
@@ -314,6 +315,7 @@ def _parse_execute_request(req_id, arguments: dict) -> 'dict | ExecuteContext':
         timeout=timeout,
         sync_mode=sync_mode,
         caller_ip=arguments.get('caller_ip', ''),
+        bot_id=arguments.get('_caller', {}).get('bot_id', 'unknown'),
         grant_id=arguments.get('grant_id', None),
         cli_input_json=arguments.get('cli_input_json') or None,
     )
@@ -817,6 +819,12 @@ def _check_rate_limit(ctx: ExecuteContext) -> Optional[dict]:
     try:
         check_rate_limit(ctx.source)
     except RateLimitExceeded as e:
+        logger.warning("Rate limited", extra={
+            "src_module": "mcp_execute", "operation": "rate_limited",
+            "source": ctx.source or 'unknown',
+            "bot_id": ctx.bot_id,
+            "limit_type": "rate",
+        })
         return mcp_result(ctx.req_id, {
             'content': [{
                 'type': 'text',
@@ -832,6 +840,12 @@ def _check_rate_limit(ctx: ExecuteContext) -> Optional[dict]:
             'isError': True
         })
     except PendingLimitExceeded as e:
+        logger.warning("Rate limited", extra={
+            "src_module": "mcp_execute", "operation": "rate_limited",
+            "source": ctx.source or 'unknown',
+            "bot_id": ctx.bot_id,
+            "limit_type": "pending",
+        })
         return mcp_result(ctx.req_id, {
             'content': [{
                 'type': 'text',
@@ -1366,6 +1380,7 @@ def mcp_tool_execute_native(req_id: str, arguments: dict) -> dict:
         timeout=timeout,
         sync_mode=sync_mode,
         caller_ip=arguments.get('caller_ip', ''),
+        bot_id=arguments.get('_caller', {}).get('bot_id', 'unknown'),
         # Native execution fields
         is_native=True,
         native_service=service,
