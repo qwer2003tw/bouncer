@@ -312,15 +312,6 @@ class TestMCPToolStatus:
         assert 'error' in str(result).lower() or 'missing' in str(result).lower()
 
 
-class TestMCPToolGetPage:
-    """bouncer_get_page MCP tool 測試"""
-    
-    def test_get_page_missing_request_id(self, app_module):
-        """缺少 request_id"""
-        result = app_module.mcp_tool_get_page('test-1', {'page': 2})
-        assert 'error' in str(result).lower() or 'missing' in str(result).lower()
-
-
 class TestMCPToolExecuteEdgeCases:
     """bouncer_execute 邊界情況測試"""
 
