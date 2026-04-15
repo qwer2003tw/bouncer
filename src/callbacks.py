@@ -208,6 +208,15 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
                 'created_by': user_id
             })
 
+            # Audit log: account modified
+            logger.info("Account modified", extra={
+                "src_module": "mcp_admin", "operation": "add_account",
+                "account_id": account_id,
+                "account_name": account_name,
+                "source": source,
+                "bot_id": "telegram_callback",
+            })
+
             _update_request_status(table, request_id, 'approved', user_id)
 
             logger.info("Approval action", extra={
@@ -285,6 +294,15 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
         answer_callback(callback_id, '✅ 處理中...')
         try:
             accounts_table.delete_item(Key={'account_id': account_id})
+
+            # Audit log: account modified
+            logger.info("Account modified", extra={
+                "src_module": "mcp_admin", "operation": "remove_account",
+                "account_id": account_id,
+                "account_name": account_name,
+                "source": source,
+                "bot_id": "telegram_callback",
+            })
 
             _update_request_status(table, request_id, 'approved', user_id)
 
