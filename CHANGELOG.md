@@ -981,3 +981,11 @@ All notable changes to this project will be documented in this file.
 - **#324**: infra_approve/infra_deny unified audit
 - **#325**: add/remove account MCP audit
 - **#326**: Unified audit schema — all logs have src_module, operation, bot_id/source/user_id
+
+## v3.85.0 (Sprint 85) — Bug Fix + Security
+
+### Fixed
+- **#301**: Infra approval notification truncated to 4096 chars + fallback on failure (was silently failing)
+
+### Security
+- **#270**: TELEGRAM_BOT_TOKEN + WEBHOOK_SECRET read from Secrets Manager (env var fallback)
