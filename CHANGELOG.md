@@ -960,3 +960,12 @@ All notable changes to this project will be documented in this file.
 ### Tests
 - Fix presigned test xdist isolation (Powertools LogRecord conflict)
 - Fix notifier_app test xdist module collision (importlib + xfail)
+
+## v3.83.0 (Sprint 83) — Unified Pagination
+
+### Changed
+- **#328**: MCP response returns full result (no pagination)
+- Telegram notification uses dedicated pagination (3800 chars/page, zero gap)
+- `OUTPUT_HARD_CAP_BYTES` raised from 100K to 300K
+- Removed `bouncer_get_page` MCP tool
+- Button correctly points to page 2
