@@ -277,13 +277,15 @@ def _generate_presigned_url(ctx: PresignedContext) -> dict:
     except Exception as _notify_exc:  # noqa: BLE001 — fire-and-forget
         logger.error("Presigned notification error (non-fatal): %s", _notify_exc, extra={"src_module": "presigned", "operation": "send_notification", "error": str(_notify_exc)})
 
-    logger.info("Presigned URL generated", extra={
-        "src_module": "mcp_presigned", "operation": "generate_presigned",
-        "filename": ctx.filename,
-        "bucket": ctx.bucket,
-        "source": ctx.source,
-        "bot_id": ctx.bot_id,
-    })
+    logger.info(
+        "Presigned URL generated",
+        src_module="mcp_presigned",
+        operation="generate_presigned",
+        presigned_file=ctx.filename,
+        bucket=ctx.bucket,
+        source=ctx.source,
+        bot_id=ctx.bot_id,
+    )
 
     payload = {
         "status": "ready",
@@ -560,13 +562,15 @@ def _generate_presigned_batch_urls(ctx: PresignedBatchContext) -> dict:
     except Exception as _notify_exc:  # noqa: BLE001 — fire-and-forget
         logger.error("Presigned batch notification error (non-fatal): %s", _notify_exc, extra={"src_module": "presigned", "operation": "send_batch_notification", "error": str(_notify_exc)})
 
-    logger.info("Presigned URL generated", extra={
-        "src_module": "mcp_presigned", "operation": "generate_presigned",
-        "filename": f"batch_{len(file_results)}_files",
-        "bucket": ctx.bucket,
-        "source": ctx.source,
-        "bot_id": ctx.bot_id,
-    })
+    logger.info(
+        "Presigned URL generated",
+        src_module="mcp_presigned",
+        operation="generate_presigned",
+        presigned_file=f"batch_{len(file_results)}_files",
+        bucket=ctx.bucket,
+        source=ctx.source,
+        bot_id=ctx.bot_id,
+    )
 
     payload = {
         "status": "ready",
