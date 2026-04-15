@@ -952,11 +952,17 @@ def handle_telegram_webhook(event: dict) -> dict:
         return response(200, {'ok': True})
 
     user_id = str(callback.get('from', {}).get('id', ''))
+    callback_data = callback.get('data', '')
     if user_id not in APPROVED_CHAT_IDS:
+        logger.warning("Unauthorized callback attempt", extra={
+            "src_module": "webhook", "operation": "unauthorized_callback",
+            "user_id": str(user_id),
+            "callback_data": callback_data[:50] if callback_data else "",
+        })
         answer_callback(callback['id'], '❌ 你沒有審批權限')
         return response(403, {'error': 'Unauthorized user'})
 
-    data = callback.get('data', '')
+    data = callback_data
     if ':' not in data:
         return response(400, {'error': 'Invalid callback data'})
 
