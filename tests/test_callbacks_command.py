@@ -269,7 +269,8 @@ def test_execute_and_store_result_success(mock_emit, mock_store, mock_exec, call
 
     # Mock 執行結果
     mock_exec.return_value = "bucket1\nbucket2"
-    mock_store.return_value = {'paged': False}
+    from paging import PaginatedOutput
+    mock_store.return_value = PaginatedOutput(paged=False, result='output')
 
     result = callbacks_module._execute_and_store_result(
         command='aws s3 ls',
@@ -309,7 +310,8 @@ def test_execute_and_store_result_stale_status(mock_store, mock_exec, callbacks_
     })
 
     mock_exec.return_value = "output"
-    mock_store.return_value = {'paged': False}
+    from paging import PaginatedOutput
+    mock_store.return_value = PaginatedOutput(paged=False, result='output')
 
     result = callbacks_module._execute_and_store_result(
         command='aws s3 ls',
@@ -361,7 +363,8 @@ def test_handle_command_callback_approve_success(
 
     # Mock 執行結果
     mock_exec.return_value = "bucket1\nbucket2 (exit code: 0)"
-    mock_store.return_value = {'paged': False}
+    from paging import PaginatedOutput
+    mock_store.return_value = PaginatedOutput(paged=False, result='output')
 
     item = table.get_item(Key={'request_id': request_id})['Item']
     result = callbacks_module.handle_command_callback(
