@@ -699,6 +699,14 @@ def mcp_tool_logs_allowlist(req_id: str, arguments: dict) -> dict:
         source = arguments.get('source', '')
         _add_to_allowlist(account_id, log_group, added_by=source)
 
+        logger.info("Allowlist modified", extra={
+            "src_module": "mcp_query_logs", "operation": "allowlist_modify",
+            "action": "add",
+            "log_group": log_group,
+            "source": arguments.get('source', 'unknown'),
+            "bot_id": arguments.get('_caller', {}).get('bot_id', 'unknown'),
+        })
+
         logger.info("Allowlist entry added: %s for account %s", log_group, account_id,
                      extra={"src_module": "mcp_query_logs", "operation": "allowlist_add",
                             "account_id": account_id, "log_group": log_group})
@@ -718,6 +726,15 @@ def mcp_tool_logs_allowlist(req_id: str, arguments: dict) -> dict:
 
         existed = _remove_from_allowlist(account_id, log_group)
         status = 'removed' if existed else 'not_found'
+
+        if existed:
+            logger.info("Allowlist modified", extra={
+                "src_module": "mcp_query_logs", "operation": "allowlist_modify",
+                "action": "remove",
+                "log_group": log_group,
+                "source": arguments.get('source', 'unknown'),
+                "bot_id": arguments.get('_caller', {}).get('bot_id', 'unknown'),
+            })
 
         logger.info("Allowlist entry %s: %s for account %s", status, log_group, account_id,
                      extra={"src_module": "mcp_query_logs", "operation": "allowlist_remove",
@@ -756,6 +773,13 @@ def mcp_tool_logs_allowlist(req_id: str, arguments: dict) -> dict:
                 errors.append({'log_group': lg_str, 'error': verify_err})
                 continue
             _add_to_allowlist(account_id, lg_str, added_by=source)
+            logger.info("Allowlist modified", extra={
+                "src_module": "mcp_query_logs", "operation": "allowlist_modify",
+                "action": "add",
+                "log_group": lg_str,
+                "source": arguments.get('source', 'unknown'),
+                "bot_id": arguments.get('_caller', {}).get('bot_id', 'unknown'),
+            })
             added.append(lg_str)
 
         logger.info("Allowlist batch add: %d added, %d errors for account %s",
