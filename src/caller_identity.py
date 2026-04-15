@@ -1,8 +1,8 @@
 """Per-bot caller identification.
 
 Identifies callers by their secret and maps them to bot configurations.
-Private bot uses REQUEST_SECRET env var (backward compat).
-Additional bots use Secrets Manager entries.
+Both private-bot and public-bot secrets are stored in Secrets Manager.
+REQUEST_SECRET env var is kept as fallback for backward compatibility.
 """
 import json
 import logging
@@ -17,16 +17,26 @@ _registry_cache = None
 _registry_loaded_at = 0
 _CACHE_TTL = 300  # 5 minutes
 
-# Public bot config from Secrets Manager
-_PUBLIC_BOT_SECRET_NAME = 'bouncer/public-bot-secret'
-_PUBLIC_BOT_ROLE_ARN = os.environ.get(
-    'PUBLIC_BOT_ROLE_ARN',
-    'arn:aws:iam::190825685292:role/bouncer-public-bot-role'
-)
+_SM_REGION = 'us-east-1'
+_BOT_SECRETS = {
+    'private-bot': {
+        'sm_name': 'bouncer/private-bot-secret',
+        'default_source': 'Private Bot',
+        'default_role_arn': None,
+    },
+    'public-bot': {
+        'sm_name': 'bouncer/public-bot-secret',
+        'default_source': 'Public Bot',
+        'default_role_arn': os.environ.get(
+            'PUBLIC_BOT_ROLE_ARN',
+            'arn:aws:iam::190825685292:role/bouncer-public-bot-role',
+        ),
+    },
+}
 
 
 def _load_registry():
-    """Build bot registry from env vars + Secrets Manager."""
+    """Build bot registry from Secrets Manager + env var fallback."""
     global _registry_cache, _registry_loaded_at
 
     now = time.time()
@@ -34,38 +44,29 @@ def _load_registry():
         return _registry_cache
 
     bots = {}
+    sm = boto3.client('secretsmanager', region_name=_SM_REGION)
 
-    # Private bot: uses existing REQUEST_SECRET (always available)
-    request_secret = os.environ.get('REQUEST_SECRET', '')
-    if request_secret:
-        bots['private-bot'] = {
-            'secret': request_secret,
-            'source': 'Private Bot',
-            'role_arn': None,
-        }
+    for bot_id, config in _BOT_SECRETS.items():
+        try:
+            resp = sm.get_secret_value(SecretId=config['sm_name'])
+            secret_data = json.loads(resp['SecretString'])
+            bots[bot_id] = {
+                'secret': secret_data['secret'],
+                'source': secret_data.get('source', config['default_source']),
+                'role_arn': secret_data.get('role_arn', config['default_role_arn']),
+            }
+        except Exception:  # noqa: BLE001
+            logger.debug("Secret %s not loaded", config['sm_name'])
 
-    # Public bot: load from Secrets Manager
-    try:
-        sm = boto3.client('secretsmanager', region_name='us-east-1')
-        resp = sm.get_secret_value(SecretId=_PUBLIC_BOT_SECRET_NAME)
-        secret_data = json.loads(resp['SecretString'])
-        bots['public-bot'] = {
-            'secret': secret_data.get('secret', ''),
-            'source': secret_data.get('source', 'Public Bot'),
-            'role_arn': secret_data.get('role_arn', _PUBLIC_BOT_ROLE_ARN),
-        }
-    except Exception:  # noqa: BLE001
-        # Secret not found or access denied — public bot not configured
-        logger.debug("Public bot secret not loaded (not configured or access denied)")
-
-    # Legacy fallback: if REQUEST_SECRET matches but no bot entry,
-    # treat as legacy caller
-    if not bots:
-        bots['legacy'] = {
-            'secret': request_secret,
-            'source': 'Legacy',
-            'role_arn': None,
-        }
+    # Fallback: if private-bot not loaded from SM, use REQUEST_SECRET env var
+    if 'private-bot' not in bots:
+        request_secret = os.environ.get('REQUEST_SECRET', '')
+        if request_secret:
+            bots['private-bot'] = {
+                'secret': request_secret,
+                'source': 'Private Bot',
+                'role_arn': None,
+            }
 
     _registry_cache = {'bots': bots}
     _registry_loaded_at = now
