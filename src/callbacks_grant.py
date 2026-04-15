@@ -54,6 +54,7 @@ def handle_grant_approve(query: dict, grant_id: str, mode: str = 'all') -> dict:
             "src_module": "callbacks", "operation": "grant_callback",
             "action": "approve_all" if mode == 'all' else "approve_safe",
             "grant_id": grant_id,
+            "request_type": "grant",
             "user_id": str(user_id),
         })
 
@@ -120,6 +121,7 @@ def handle_grant_deny(query: dict, grant_id: str) -> dict:
             "src_module": "callbacks", "operation": "grant_callback",
             "action": "deny",
             "grant_id": grant_id,
+            "request_type": "grant",
             "user_id": str(user_id),
         })
 

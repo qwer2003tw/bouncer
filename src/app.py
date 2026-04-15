@@ -571,6 +571,7 @@ def handle_mcp_request(event) -> dict:
     logger.info("Caller identified", extra={
         "src_module": "mcp", "operation": "identify_caller",
         "bot_id": caller.get('bot_id'), "source": caller.get('source'),
+        "path": "/mcp",
     })
 
     # Extract caller_ip from API Gateway event for trust session IP binding

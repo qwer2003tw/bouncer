@@ -248,6 +248,7 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
             "request_id": request_id,
             "request_type": "add_account",
             "user_id": str(user_id),
+            "source": source,
         })
 
         _send_status_update(
@@ -335,6 +336,7 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
             "request_id": request_id,
             "request_type": "remove_account",
             "user_id": str(user_id),
+            "source": source,
         })
 
         _send_status_update(
@@ -469,6 +471,7 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
             "request_id": request_id,
             "request_type": "deploy",
             "user_id": str(user_id),
+            "source": item.get('source', ''),
         })
 
         update_message(
