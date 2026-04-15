@@ -19,11 +19,10 @@ from aws_lambda_powertools import Logger
 import db as _db
 
 from constants import (
-    OUTPUT_MAX_INLINE,
-    OUTPUT_PAGE_SIZE,
     OUTPUT_PAGE_TTL,
     OUTPUT_HARD_CAP_BYTES,
     OUTPUT_TRUNCATION_NOTICE_TEMPLATE,
+    TELEGRAM_PAGE_SIZE,
 )
 from telegram import send_telegram_message_silent
 
@@ -57,13 +56,14 @@ class PaginatedOutput:
 
     Fields
     ------
-    paged        : True when output was split into multiple pages
-    result       : First-page content (always present)
-    page         : Page number of *result* (always 1)
-    total_pages  : Total number of pages (1 when not paged)
+    paged        : Always False (MCP never paged, returns full result)
+    result       : Full command output (always present)
+    page         : Always 1
+    total_pages  : Always 1 (MCP doesn't page)
     output_length: Length of the *original* output before any truncation
-    next_page    : DynamoDB key for the next page, or None
+    next_page    : Always None (MCP doesn't page)
     truncated    : True when the original output was capped at OUTPUT_HARD_CAP_BYTES
+    telegram_pages: Number of Telegram pages stored in DDB for show_page callback
     """
     paged: bool
     result: str
@@ -72,12 +72,14 @@ class PaginatedOutput:
     output_length: int = 0
     next_page: Optional[str] = None
     truncated: bool = False
+    telegram_pages: int = 1  # New field: number of Telegram pages in DDB
 
     def to_dict(self) -> dict:
         """Backwards-compatible dict for callers that use dict-access."""
         d: dict = {
             'paged': self.paged,
             'result': self.result,
+            'telegram_pages': self.telegram_pages,
         }
         if self.paged:
             d.update({
@@ -102,19 +104,16 @@ class PaginatedOutput:
 # ---------------------------------------------------------------------------
 
 def store_paged_output(request_id: str, output: str) -> PaginatedOutput:
-    """Store long output with pagination.
+    """Store long output with Telegram pagination.
 
-    Strategy
+    Strategy (Sprint 83: Unified Paging)
     --------
-    1. Output ≤ OUTPUT_MAX_INLINE  → return as-is (no DynamoDB writes)
-    2. Output ≤ OUTPUT_HARD_CAP_BYTES → chunk into OUTPUT_PAGE_SIZE pages,
-       write pages 2..N to DynamoDB, return page-1 metadata
-    3. Output > OUTPUT_HARD_CAP_BYTES → cap + append truncation notice,
-       then apply same chunking as step 2
+    1. MCP always returns full result (no pagination)
+    2. Telegram pages are stored separately in DDB at TELEGRAM_PAGE_SIZE chunks
+    3. Output > OUTPUT_HARD_CAP_BYTES → cap + append truncation notice
 
-    DynamoDB item size is kept well under 400 KB because each page is at most
-    OUTPUT_PAGE_SIZE characters (default 4 000 chars ≈ 4 KB UTF-8 worst-case,
-    far below the 400 KB per-item limit).
+    This eliminates the gap between MCP pagination (was 4000) and Telegram
+    truncation (was 3500), ensuring users can see all output via show_page.
     """
     truncated = False
     original_length = len(output)
@@ -128,35 +127,24 @@ def store_paged_output(request_id: str, output: str) -> PaginatedOutput:
         )
         output = output[:OUTPUT_HARD_CAP_BYTES] + "\n" + notice
 
-    # --- Step 2: check inline threshold ---
-    if len(output) <= OUTPUT_MAX_INLINE:
-        return PaginatedOutput(
-            paged=False,
-            result=output,
-            page=1,
-            total_pages=1,
-            output_length=original_length,
-            truncated=truncated,
-        )
+    # --- Step 2: Store Telegram pages for show_page callback ---
+    # Chunk at TELEGRAM_PAGE_SIZE (3800 chars) so Telegram buttons can navigate
+    tg_chunks = _split_chunks(output, TELEGRAM_PAGE_SIZE)
+    tg_total = len(tg_chunks)
 
-    # --- Step 3: chunk ---
-    chunks = _split_chunks(output, OUTPUT_PAGE_SIZE)
-    total_pages = len(chunks)
-    ttl = int(time.time()) + OUTPUT_PAGE_TTL
+    if tg_total > 1:
+        ttl = int(time.time()) + OUTPUT_PAGE_TTL
+        _write_all_pages(request_id, tg_chunks, tg_total, ttl)
 
-    # Write ALL pages including page 1 to DDB
-    _write_all_pages(request_id, chunks, total_pages, ttl)
-
-    next_page_id = f"{request_id}:page:2" if total_pages > 1 else None
-
+    # --- Step 3: Return full result (MCP never paged) ---
     return PaginatedOutput(
-        paged=True,
-        result=chunks[0],
+        paged=False,  # MCP never paged
+        result=output,  # full result for MCP
         page=1,
-        total_pages=total_pages,
+        total_pages=1,
         output_length=original_length,
-        next_page=next_page_id,
         truncated=truncated,
+        telegram_pages=tg_total,  # new field for Telegram button logic
     )
 
 

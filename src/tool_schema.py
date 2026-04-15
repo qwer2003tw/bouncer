@@ -175,19 +175,6 @@ MCP_TOOLS = {
             'properties': {}
         }
     },
-    'bouncer_get_page': {
-        'description': '取得長輸出的下一頁（當結果有 paged=true 時使用）',
-        'parameters': {
-            'type': 'object',
-            'properties': {
-                'page_id': {
-                    'type': 'string',
-                    'description': '分頁 ID（從 next_page 欄位取得）'
-                }
-            },
-            'required': ['page_id']
-        }
-    },
     'bouncer_list_pending': {
         'description': '列出待審批的請求',
         'parameters': {

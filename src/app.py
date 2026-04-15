@@ -51,7 +51,7 @@ from mcp_presigned import mcp_tool_request_presigned, mcp_tool_request_presigned
 from mcp_confirm import handle_confirm_upload
 from mcp_admin import (
     mcp_tool_status, mcp_tool_help, mcp_tool_trust_status, mcp_tool_trust_revoke,
-    mcp_tool_add_account, mcp_tool_list_accounts, mcp_tool_get_page,
+    mcp_tool_add_account, mcp_tool_list_accounts,
     mcp_tool_list_pending, mcp_tool_remove_account, mcp_tool_list_safelist,
 )
 from mcp_history import mcp_tool_history, mcp_tool_stats
@@ -644,7 +644,6 @@ TOOL_HANDLERS = {
     'bouncer_trust_revoke': mcp_tool_trust_revoke,
     'bouncer_add_account': mcp_tool_add_account,
     'bouncer_list_accounts': mcp_tool_list_accounts,
-    'bouncer_get_page': mcp_tool_get_page,
     'bouncer_list_pending': mcp_tool_list_pending,
     'bouncer_remove_account': mcp_tool_remove_account,
     'bouncer_upload': mcp_tool_upload,
