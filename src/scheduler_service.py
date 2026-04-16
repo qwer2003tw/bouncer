@@ -195,7 +195,7 @@ class SchedulerService:
 
         except ClientError as exc:
             # Scheduler creation is non-critical; log but don't propagate
-            logger.error(
+            logger.exception(
                 "Failed to create schedule for %s: %s", request_id, exc,
                 extra={"src_module": "scheduler", "operation": "create_expiry_schedule", "request_id": request_id, "error": str(exc)},
             )
@@ -273,7 +273,7 @@ class SchedulerService:
             return True
 
         except ClientError as exc:
-            logger.error(
+            logger.exception(
                 "Failed to create warning schedule for %s: %s", request_id, exc,
                 extra={"src_module": "scheduler", "operation": "create_expiry_warning_schedule", "request_id": request_id, "error": str(exc)},
             )
@@ -405,7 +405,7 @@ class SchedulerService:
             return True
 
         except ClientError as exc:
-            logger.error(
+            logger.exception(
                 "Failed to create reminder schedule for %s: %s", request_id, exc,
                 extra={"src_module": "scheduler", "operation": "create_pending_reminder_schedule", "request_id": request_id, "error": str(exc)},
             )
@@ -430,7 +430,7 @@ class SchedulerService:
             # Already deleted or never created — treat as success
             return True
         except ClientError as exc:
-            logger.error("Failed to delete schedule for %s: %s", request_id, exc, extra={"src_module": "scheduler", "operation": "delete_schedule", "request_id": request_id, "error": str(exc)})
+            logger.exception("Failed to delete schedule for %s: %s", request_id, exc, extra={"src_module": "scheduler", "operation": "delete_schedule", "request_id": request_id, "error": str(exc)})
             return False
 
     def delete_warning_schedule(self, request_id: str) -> bool:
@@ -451,7 +451,7 @@ class SchedulerService:
         except client.exceptions.ResourceNotFoundException:  # type: ignore[attr-defined]
             return True
         except ClientError as exc:
-            logger.error("Failed to delete warning schedule for %s: %s", request_id, exc, extra={"src_module": "scheduler", "operation": "delete_warning_schedule", "request_id": request_id, "error": str(exc)})
+            logger.exception("Failed to delete warning schedule for %s: %s", request_id, exc, extra={"src_module": "scheduler", "operation": "delete_warning_schedule", "request_id": request_id, "error": str(exc)})
             return False
 
     def delete_reminder_schedule(self, request_id: str) -> bool:
@@ -472,7 +472,7 @@ class SchedulerService:
         except client.exceptions.ResourceNotFoundException:  # type: ignore[attr-defined]
             return True
         except ClientError as exc:
-            logger.error("Failed to delete reminder schedule for %s: %s", request_id, exc, extra={"src_module": "scheduler", "operation": "delete_reminder_schedule", "request_id": request_id, "error": str(exc)})
+            logger.exception("Failed to delete reminder schedule for %s: %s", request_id, exc, extra={"src_module": "scheduler", "operation": "delete_reminder_schedule", "request_id": request_id, "error": str(exc)})
             return False
 
     def delete_escalation_schedule(self, request_id: str) -> bool:
@@ -493,7 +493,7 @@ class SchedulerService:
         except client.exceptions.ResourceNotFoundException:  # type: ignore[attr-defined]
             return True
         except ClientError as exc:
-            logger.error("Failed to delete escalation schedule for %s: %s", request_id, exc, extra={"src_module": "scheduler", "operation": "delete_escalation_schedule", "request_id": request_id, "error": str(exc)})
+            logger.exception("Failed to delete escalation schedule for %s: %s", request_id, exc, extra={"src_module": "scheduler", "operation": "delete_escalation_schedule", "request_id": request_id, "error": str(exc)})
             return False
 
     # ── private helpers ───────────────────────────────────────────────────────
@@ -635,7 +635,7 @@ class TrustExpiryNotifier:
             return True
 
         except ClientError as exc:
-            logger.error(
+            logger.exception(
                 "Failed to create expiry schedule for trust %s: %s",
                 trust_id, exc,
                 extra={"src_module": "scheduler", "operation": "trust_expiry_schedule", "trust_id": trust_id, "error": str(exc)},
@@ -674,7 +674,7 @@ class TrustExpiryNotifier:
                     extra={"src_module": "scheduler", "operation": "cancel_trust_schedule", "trust_id": trust_id},
                 )
                 return True
-            logger.error(
+            logger.exception(
                 "Failed to cancel trust expiry schedule for trust %s: %s",
                 trust_id, exc,
                 extra={"src_module": "scheduler", "operation": "cancel_trust_schedule", "trust_id": trust_id, "error": str(exc)},

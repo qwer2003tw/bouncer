@@ -100,7 +100,7 @@ def _telegram_request(method: str, data: dict, timeout: int = 5, json_body: bool
             return result
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, json.JSONDecodeError, ValueError) as e:
         elapsed = (time.time() - start_time) * 1000
-        logger.error("Telegram %s error (%.0fms): %s", method, elapsed, e, extra={
+        logger.exception("Telegram %s error (%.0fms): %s", method, elapsed, e, extra={
             "src_module": "telegram", "operation": "call_api",
             "method": method, "elapsed_ms": elapsed, "error": str(e)
         })

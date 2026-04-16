@@ -131,7 +131,7 @@ def evaluate_command(
 
     except Exception as e:  # noqa: BLE001
         # Fail-closed: 任何錯誤都 fallback 到人工審批
-        logger.error("Risk evaluation failed: %s", e, extra={"src_module": "smart_approval", "operation": "evaluate_command", "error": str(e)})
+        logger.exception("Risk evaluation failed: %s", e, extra={"src_module": "smart_approval", "operation": "evaluate_command", "error": str(e)})
         emit_metric('Bouncer', 'SmartApprovalError', 1)
         fallback_result = RiskResult(
             score=70,

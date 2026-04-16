@@ -101,7 +101,7 @@ def mcp_tool_request_grant(req_id: str, arguments: dict) -> dict:
                 project=project,
             )
         except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
-            logger.error(f"[GRANT] Failed to send notification: {e}", extra={"src_module": "grant", "operation": "send_notification", "error": str(e)})
+            logger.exception(f"[GRANT] Failed to send notification: {e}", extra={"src_module": "grant", "operation": "send_notification", "error": str(e)})
         return mcp_result(req_id, {
             'content': [{
                 'type': 'text',

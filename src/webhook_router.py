@@ -66,7 +66,7 @@ def _is_grant_expired(request_id: str, callback: dict) -> bool:
                 logger.warning("[GRANT EXPIRY] Failed to update DDB status=timeout for request_id=%s", request_id, extra={"src_module": "grant_expiry", "operation": "mark_timeout", "request_id": request_id}, exc_info=True)
             return True
     except ClientError as e:
-        logger.error("Error checking grant TTL: %s", e, extra={"src_module": "grant_expiry", "operation": "check_ttl", "request_id": request_id, "error": str(e)})
+        logger.exception("Error checking grant TTL: %s", e, extra={"src_module": "grant_expiry", "operation": "check_ttl", "request_id": request_id, "error": str(e)})
     return False
 
 
@@ -176,7 +176,7 @@ def handle_revoke_trust(request_id: str, callback: dict) -> dict:
             try:
                 send_trust_session_summary(trust_item_for_summary)
             except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as _se:
-                logger.error('send_trust_session_summary error: %s', _se, extra={"src_module": "webhook", "operation": "revoke_trust_summary", "request_id": request_id, "error": str(_se)})
+                logger.exception('send_trust_session_summary error: %s', _se, extra={"src_module": "webhook", "operation": "revoke_trust_summary", "request_id": request_id, "error": str(_se)})
     else:
         answer_callback(callback['id'], '❌ 撤銷失敗')
     return response(200, {'ok': True})
@@ -226,7 +226,7 @@ def handle_general_approval(action: str, request_id: str, callback: dict, user_i
         item = table.get_item(Key={'request_id': request_id}).get('Item')
         logger.debug("DynamoDB get_item: %dms", (time.time() - db_start) * 1000, extra={"src_module": "webhook", "operation": "get_item", "request_id": request_id})
     except ClientError as e:
-        logger.error("DynamoDB get_item error: %s", e, extra={"src_module": "webhook", "operation": "get_item", "request_id": request_id, "error": str(e)})
+        logger.exception("DynamoDB get_item error: %s", e, extra={"src_module": "webhook", "operation": "get_item", "request_id": request_id, "error": str(e)})
         item = None
 
     if not item:

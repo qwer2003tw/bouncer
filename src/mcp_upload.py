@@ -355,7 +355,7 @@ def _check_upload_trust(ctx: UploadContext) -> Optional[dict]:
         })
 
     except ClientError as e:
-        logger.error("Trust upload execution error: %s", e, extra={"src_module": "upload", "operation": "trust_upload", "error": str(e)})
+        logger.exception("Trust upload execution error: %s", e, extra={"src_module": "upload", "operation": "trust_upload", "error": str(e)})
         return None  # Fall through to human approval
 
 
@@ -483,8 +483,8 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
         try:
             table.delete_item(Key={'request_id': ctx.request_id})
         except ClientError as del_err:
-            logger.error("Failed to delete DDB record %s: %s", ctx.request_id, del_err, extra={"src_module": "upload", "operation": "orphan_cleanup", "request_id": ctx.request_id, "error": str(del_err)})
-        logger.error("Telegram notification failed for upload %s: %s", ctx.request_id, tg_err, extra={"src_module": "upload", "operation": "orphan_cleanup", "request_id": ctx.request_id, "error": str(tg_err)})
+            logger.exception("Failed to delete DDB record %s: %s", ctx.request_id, del_err, extra={"src_module": "upload", "operation": "orphan_cleanup", "request_id": ctx.request_id, "error": str(del_err)})
+        logger.exception("Telegram notification failed for upload %s: %s", ctx.request_id, tg_err, extra={"src_module": "upload", "operation": "orphan_cleanup", "request_id": ctx.request_id, "error": str(tg_err)})
         return mcp_result(ctx.req_id, {
             'content': [{'type': 'text', 'text': json.dumps({
                 'status': 'error',
@@ -866,7 +866,7 @@ def _try_trust_auto_approve_batch(
                 'content': [{'type': 'text', 'text': json.dumps(result_payload)}],
             })
     except ClientError as e:
-        logger.error("Batch trust upload error: %s", e, extra={"src_module": "upload", "operation": "batch_trust_upload", "error": str(e)})
+        logger.exception("Batch trust upload error: %s", e, extra={"src_module": "upload", "operation": "batch_trust_upload", "error": str(e)})
 
     return None
 

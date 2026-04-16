@@ -232,7 +232,7 @@ def cancel_deploy(deploy_id: str) -> dict:
                 cause='User cancelled'
             )
         except ClientError as e:
-            logger.error("Error stopping execution: %s", e, extra={"src_module": "deployer", "operation": "cancel_deploy", "error": str(e)})
+            logger.exception("Error stopping execution: %s", e, extra={"src_module": "deployer", "operation": "cancel_deploy", "error": str(e)})
 
     # 釋放鎖
     release_lock(record.get('project_id'), deploy_id)
@@ -496,7 +496,7 @@ def get_deploy_status(deploy_id: str) -> dict:
             project_id = record.get('project_id')
             if project_id:
                 release_lock(project_id, deploy_id)
-            logger.error("Error getting execution status: %s", e, extra={"src_module": "deployer", "operation": "get_execution_status", "deploy_id": deploy_id, "error": str(e)})
+            logger.exception("Error getting execution status: %s", e, extra={"src_module": "deployer", "operation": "get_execution_status", "deploy_id": deploy_id, "error": str(e)})
 
     # Add timing fields to response
     status = record.get('status', '')
@@ -1000,7 +1000,7 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
                     expires_at=expires_at,
                 )
             except Exception as exc:  # noqa: BLE001
-                logger.error("post_notification_setup failed for %s: %s", request_id, exc, extra={"src_module": "deployer", "operation": "post_notification_setup", "request_id": request_id, "error": str(exc)})
+                logger.exception("post_notification_setup failed for %s: %s", request_id, exc, extra={"src_module": "deployer", "operation": "post_notification_setup", "request_id": request_id, "error": str(exc)})
 
 
 # ============================================================================

@@ -417,7 +417,7 @@ def _submit_deploy_frontend_approval(
         try:
             table.delete_item(Key={"request_id": request_id})
         except ClientError as del_err:
-            logger.error("DDB cleanup failed for %s: %s", request_id, del_err, extra={"src_module": "deploy_frontend", "operation": "submit_deploy_frontend", "request_id": request_id, "error": str(del_err)})
+            logger.exception("DDB cleanup failed for %s: %s", request_id, del_err, extra={"src_module": "deploy_frontend", "operation": "submit_deploy_frontend", "request_id": request_id, "error": str(del_err)})
         for rk in staged_keys:
             try:
                 s3.delete_object(Bucket=staging_bucket, Key=rk)
@@ -537,7 +537,7 @@ def _execute_deploy_frontend_approved(
         else:
             s3_target = get_s3_client()
     except ClientError as exc:
-        logger.error("[DEPLOY-FRONTEND] Trust deploy AssumeRole failed for %s: %s", deploy_role_arn, exc, extra={"src_module": "deploy_frontend", "operation": "trust_deploy_assume_role", "role_arn": deploy_role_arn, "error": str(exc)})
+        logger.exception("[DEPLOY-FRONTEND] Trust deploy AssumeRole failed for %s: %s", deploy_role_arn, exc, extra={"src_module": "deploy_frontend", "operation": "trust_deploy_assume_role", "role_arn": deploy_role_arn, "error": str(exc)})
         return mcp_result(req_id, {
             "content": [{"type": "text", "text": json.dumps({
                 "status": "error",
@@ -570,7 +570,7 @@ def _execute_deploy_frontend_approved(
             deployed.append(filename)
             logger.info("Trust deploy file %s -> %s", filename, frontend_bucket, extra={"src_module": "deploy_frontend", "operation": "trust_deploy_file", "file_name": filename, "bucket": frontend_bucket})
         except ClientError as exc:
-            logger.error("Trust deploy failed for %s: %s", filename, exc, extra={"src_module": "deploy_frontend", "operation": "trust_deploy_file", "file_name": filename, "error": str(exc)})
+            logger.exception("Trust deploy failed for %s: %s", filename, exc, extra={"src_module": "deploy_frontend", "operation": "trust_deploy_file", "file_name": filename, "error": str(exc)})
             failed.append({"filename": filename, "reason": str(exc)})
 
     # 5. CloudFront invalidation
@@ -588,7 +588,7 @@ def _execute_deploy_frontend_approved(
             )
             logger.info("[DEPLOY-FRONTEND] Trust deploy CloudFront invalidation created for %s", distribution_id, extra={"src_module": "deploy_frontend", "operation": "cloudfront_invalidation", "distribution_id": distribution_id})
         except ClientError as exc:
-            logger.error("[DEPLOY-FRONTEND] Trust deploy CloudFront invalidation failed: %s", exc, extra={"src_module": "deploy_frontend", "operation": "cloudfront_invalidation", "distribution_id": distribution_id})
+            logger.exception("[DEPLOY-FRONTEND] Trust deploy CloudFront invalidation failed: %s", exc, extra={"src_module": "deploy_frontend", "operation": "cloudfront_invalidation", "distribution_id": distribution_id})
             cf_invalidation_failed = True
 
     # 6. Increment trust command count (s59-002: catch rate exceeded)
@@ -643,7 +643,7 @@ def _execute_deploy_frontend_approved(
         }
         deployer_history_table.put_item(Item=history_item)
     except ClientError as exc:
-        logger.error("[DEPLOY-FRONTEND] Trust deploy history write failed for %s: %s", request_id, exc, extra={"src_module": "deploy_frontend", "operation": "trust_deploy_history_write", "request_id": request_id, "error": str(exc)})
+        logger.exception("[DEPLOY-FRONTEND] Trust deploy history write failed for %s: %s", request_id, exc, extra={"src_module": "deploy_frontend", "operation": "trust_deploy_history_write", "request_id": request_id, "error": str(exc)})
     # 9. Send silent trust notification
     remaining = int(trust_session.get("expires_at", 0)) - now
     remaining_str = f"{remaining // 60}:{remaining % 60:02d}" if remaining > 0 else "0:00"

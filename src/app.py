@@ -114,7 +114,7 @@ def handle_cleanup_expired(event: dict) -> dict:
     try:
         item = table.get_item(Key={'request_id': request_id}).get('Item')
     except ClientError as e:
-        logger.error("DynamoDB error for request_id=%s: %s", request_id, e, extra={"src_module": "cleanup", "operation": "get_item", "request_id": request_id, "error": str(e)})
+        logger.exception("DynamoDB error for request_id=%s: %s", request_id, e, extra={"src_module": "cleanup", "operation": "get_item", "request_id": request_id, "error": str(e)})
         return response(200, {'ok': True, 'skipped': True, 'reason': 'db_error'})
 
     if not item:
@@ -204,7 +204,7 @@ def _mark_request_timeout(request_id: str) -> None:
             ExpressionAttributeValues={':s': 'timeout'},
         )
     except ClientError as exc:
-        logger.error("Failed to update DynamoDB status for %s: %s", request_id, exc, extra={"src_module": "cleanup", "operation": "mark_timeout", "request_id": request_id, "error": str(exc)})
+        logger.exception("Failed to update DynamoDB status for %s: %s", request_id, exc, extra={"src_module": "cleanup", "operation": "mark_timeout", "request_id": request_id, "error": str(exc)})
 
 
 # ============================================================================
@@ -240,7 +240,7 @@ def handle_trust_expiry(event: dict) -> dict:
     try:
         trust_item = table.get_item(Key={'request_id': trust_id}).get('Item')
     except ClientError as exc:
-        logger.error("DynamoDB error fetching trust session %s: %s", trust_id, exc, extra={"src_module": "trust_expiry", "operation": "get_item", "trust_id": trust_id, "error": str(exc)})
+        logger.exception("DynamoDB error fetching trust session %s: %s", trust_id, exc, extra={"src_module": "trust_expiry", "operation": "get_item", "trust_id": trust_id, "error": str(exc)})
         return response(200, {'ok': True, 'skipped': True, 'reason': 'db_error'})
 
     if not trust_item:
@@ -268,7 +268,7 @@ def handle_trust_expiry(event: dict) -> dict:
         except ClientError as _mark_exc:
             logger.warning("Failed to mark summary_sent for %s: %s", trust_id, _mark_exc, extra={"src_module": "trust_expiry", "operation": "mark_summary_sent", "trust_id": trust_id, "error": str(_mark_exc)})
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as _sum_exc:
-        logger.error("send_trust_session_summary error for %s: %s", trust_id, _sum_exc, extra={"src_module": "trust_expiry", "operation": "send_summary", "trust_id": trust_id, "error": str(_sum_exc)})
+        logger.exception("send_trust_session_summary error for %s: %s", trust_id, _sum_exc, extra={"src_module": "trust_expiry", "operation": "send_summary", "trust_id": trust_id, "error": str(_sum_exc)})
 
     # Query pending requests that match source + trust_scope
     pending_requests = _query_pending_for_trust(source=source, trust_scope=trust_scope)
@@ -330,7 +330,7 @@ def _query_pending_for_trust(source: str, trust_scope: str) -> list:
         logger.info("Found %d pending_approval items for source=%r", len(items), effective_source, extra={"src_module": "trust_expiry", "operation": "query_pending", "count": len(items)})
         return items
     except ClientError as exc:
-        logger.error("Failed to query pending requests for source=%r: %s", effective_source, exc, extra={"src_module": "trust_expiry", "operation": "query_pending", "error": str(exc)})
+        logger.exception("Failed to query pending requests for source=%r: %s", effective_source, exc, extra={"src_module": "trust_expiry", "operation": "query_pending", "error": str(exc)})
         return []
 
 
@@ -391,7 +391,7 @@ def _send_trust_expiry_notification(
             send_telegram_message_silent(text)  # silent: no action needed
         logger.info("Sent expiry notification for trust_id=%s (pending=%d, ring=%s)", trust_id, pending_count, pending_count > 0, extra={"src_module": "trust_expiry", "operation": "send_notification", "trust_id": trust_id, "pending_count": pending_count})
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as exc:
-        logger.error("Failed to send Telegram notification for trust %s: %s", trust_id, exc, extra={"src_module": "trust_expiry", "operation": "send_notification", "trust_id": trust_id, "error": str(exc)})
+        logger.exception("Failed to send Telegram notification for trust %s: %s", trust_id, exc, extra={"src_module": "trust_expiry", "operation": "send_notification", "trust_id": trust_id, "error": str(exc)})
 
 
 # ============================================================================
@@ -424,7 +424,7 @@ def lambda_handler(event: dict, context) -> dict:
                 logger.info("Skipped expiry warning for %s (status=%s)", request_id, item.get('status') if item else 'not_found', extra={"src_module": "app", "operation": "expiry_warning", "request_id": request_id})
                 return {'statusCode': 200, 'body': json.dumps({'status': 'skipped'})}
         except Exception as exc:
-            logger.error("Failed to check status for expiry warning %s: %s", request_id, exc, extra={"src_module": "app", "operation": "expiry_warning", "request_id": request_id})
+            logger.exception("Failed to check status for expiry warning %s: %s", request_id, exc, extra={"src_module": "app", "operation": "expiry_warning", "request_id": request_id})
             # On error, skip warning (conservative approach)
             return {'statusCode': 200, 'body': json.dumps({'status': 'error'})}
 
@@ -487,7 +487,7 @@ def lambda_handler(event: dict, context) -> dict:
                 logger.info("Skipped reminder for %s (status=%s)", request_id, item.get('status') if item else 'not_found', extra={"src_module": "app", "operation": "pending_reminder", "request_id": request_id})
                 return {'statusCode': 200, 'body': json.dumps({'status': 'skipped'})}
         except Exception as exc:
-            logger.error("Failed to check status for reminder %s: %s", request_id, exc, extra={"src_module": "app", "operation": "pending_reminder", "request_id": request_id})
+            logger.exception("Failed to check status for reminder %s: %s", request_id, exc, extra={"src_module": "app", "operation": "pending_reminder", "request_id": request_id})
             return {'statusCode': 200, 'body': json.dumps({'status': 'error'})}
 
         # Send Telegram reminder
@@ -585,7 +585,7 @@ def handle_mcp_request(event) -> dict:
     try:
         body = json.loads(event.get('body', '{}'))
     except (json.JSONDecodeError, ValueError) as e:
-        logger.error("JSON parse error: %s", e, extra={"src_module": "mcp", "operation": "handle_mcp_request", "error": str(e)})
+        logger.exception("JSON parse error: %s", e, extra={"src_module": "mcp", "operation": "handle_mcp_request", "error": str(e)})
         return mcp_error(None, -32700, 'Parse error')
 
     jsonrpc = body.get('jsonrpc')
@@ -787,7 +787,7 @@ def handle_clawdbot_request(event: dict) -> dict:
     try:
         body = json.loads(event.get('body', '{}'))
     except (json.JSONDecodeError, ValueError) as e:
-        logger.error("JSON parse error: %s", e, extra={"src_module": "rest", "operation": "handle_clawdbot_request", "error": str(e)})
+        logger.exception("JSON parse error: %s", e, extra={"src_module": "rest", "operation": "handle_clawdbot_request", "error": str(e)})
         return response(400, {'error': 'Invalid JSON'})
 
     command = unicodedata.normalize('NFKC', body.get('command', '')).strip()
@@ -824,7 +824,7 @@ def handle_clawdbot_request(event: dict) -> dict:
                 }]
             })
     except ImportError:
-        logger.error("compliance_checker module import failed - failing closed")
+        logger.exception("compliance_checker module import failed - failing closed")
         return response(500, {
             'error': 'Compliance checker module unavailable - request rejected for safety'
         })
@@ -939,7 +939,7 @@ def handle_telegram_webhook(event: dict) -> dict:
     try:
         body = json.loads(event.get('body', '{}'))
     except (json.JSONDecodeError, ValueError) as e:
-        logger.error("JSON parse error in webhook: %s", e, extra={"src_module": "webhook", "operation": "handle_telegram_webhook", "error": str(e)})
+        logger.exception("JSON parse error in webhook: %s", e, extra={"src_module": "webhook", "operation": "handle_telegram_webhook", "error": str(e)})
         return response(400, {'error': 'Invalid JSON'})
 
     # 處理文字訊息（指令）
@@ -1006,7 +1006,7 @@ def verify_hmac(headers: dict, body: str) -> bool:
         if abs(time.time() - ts) > TELEGRAM_TIMESTAMP_MAX_AGE:
             return False
     except ValueError as e:
-        logger.error("HMAC timestamp parse error: %s", e, extra={"src_module": "hmac", "operation": "verify_hmac", "error": str(e)})
+        logger.exception("HMAC timestamp parse error: %s", e, extra={"src_module": "hmac", "operation": "verify_hmac", "error": str(e)})
         return False
 
     payload = f"{timestamp}.{nonce}.{body}"

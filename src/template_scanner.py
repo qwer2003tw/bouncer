@@ -670,7 +670,7 @@ def scan_command_payloads(
 
     # Fail-closed: extraction error requires manual review (s61-001)
     if extraction_failed:
-        logger.error(
+        logger.exception(
             "template_scanner: extraction error detected",
             extra={
                 "src_module": "template_scanner",

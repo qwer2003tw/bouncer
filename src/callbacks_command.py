@@ -459,7 +459,7 @@ def _handle_trust_session(
     try:
         _auto_execute_pending_requests(trust_scope, account_id, assume_role, trust_id, source)
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError) as e:
-        logger.error(f"[TRUST] Auto-execute pending error: {e}", extra={"src_module": "trust", "operation": "auto_execute_pending", "error": str(e)})
+        logger.exception(f"[TRUST] Auto-execute pending error: {e}", extra={"src_module": "trust", "operation": "auto_execute_pending", "error": str(e)})
     return trust_line
 
 

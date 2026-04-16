@@ -259,7 +259,7 @@ def _list_allowlist(account_id: str) -> list:
             kwargs['ExclusiveStartKey'] = last_key
         return items
     except ClientError as e:
-        logger.error("Failed to list allowlist: %s", e,
+        logger.exception("Failed to list allowlist: %s", e,
                      extra={"src_module": "mcp_query_logs", "operation": "list_allowlist",
                             "account_id": account_id, "error": str(e)})
         return []
@@ -413,12 +413,12 @@ def execute_log_insights(log_group: str, query_with_limit: str, start_time: int,
     except ClientError as e:
         code = e.response['Error']['Code']
         msg = e.response['Error']['Message']
-        logger.error("Log query error: %s: %s", code, msg,
+        logger.exception("Log query error: %s: %s", code, msg,
                      extra={"src_module": "mcp_query_logs", "operation": "query_error",
                             "log_group": log_group, "error": f'{code}: {msg}'})
         return {'status': 'error', 'error': f'CloudWatch Logs 錯誤: {code}: {msg}'}
     except Exception as e:  # noqa: BLE001 — query execution entry point
-        logger.error("Log query unexpected error: %s", e,
+        logger.exception("Log query unexpected error: %s", e,
                      extra={"src_module": "mcp_query_logs", "operation": "query_error",
                             "log_group": log_group, "error": str(e)})
         return {'status': 'error', 'error': f'查詢錯誤: {str(e)}'}

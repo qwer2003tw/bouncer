@@ -140,7 +140,7 @@ def _parse_callback_files_manifest(item: dict, callback_id: str) -> 'list | dict
         files_manifest = _json.loads(item.get('files', '[]'))
         return files_manifest
     except _json.JSONDecodeError as e:
-        logger.error("Failed to parse files manifest: %s", e, extra={"src_module": "callbacks", "operation": "parse_files_manifest", "error": str(e)}, exc_info=True)
+        logger.exception("Failed to parse files manifest: %s", e, extra={"src_module": "callbacks", "operation": "parse_files_manifest", "error": str(e)}, exc_info=True)
         answer_callback(callback_id, '❌ 檔案清單解析失敗')
         return response(500, {'error': 'Failed to parse files manifest'})
 

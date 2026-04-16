@@ -288,7 +288,7 @@ def update_deploy_record(deploy_id: str, updates: dict):
             ExpressionAttributeValues=expr_values
         )
     except ClientError as e:
-        logger.error(f"Error updating deploy record: {e}", extra={"src_module": "deploy_db", "operation": "update_deploy_record", "deploy_id": deploy_id})
+        logger.exception(f"Error updating deploy record: {e}", extra={"src_module": "deploy_db", "operation": "update_deploy_record", "deploy_id": deploy_id})
 
 
 def get_deploy_record(deploy_id: str) -> dict:
@@ -312,5 +312,5 @@ def get_deploy_history(project_id: str, limit: int = 10) -> list:
         )
         return result.get('Items', [])
     except ClientError as e:
-        logger.error("Error getting deploy history: %s", e, extra={"src_module": "deploy_db", "operation": "get_deploy_history", "error": str(e)})
+        logger.exception("Error getting deploy history: %s", e, extra={"src_module": "deploy_db", "operation": "get_deploy_history", "error": str(e)})
         return []

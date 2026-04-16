@@ -223,7 +223,7 @@ def get_trust_session(
         return item
 
     except ClientError as e:
-        logger.error("Trust session check error: %s", e, extra={"src_module": "trust", "operation": "get_active_trust_session", "trust_id": trust_id, "error": str(e)})
+        logger.exception("Trust session check error: %s", e, extra={"src_module": "trust", "operation": "get_active_trust_session", "trust_id": trust_id, "error": str(e)})
         return None
 
 
@@ -293,7 +293,7 @@ def create_trust_session(
         from scheduler_service import get_trust_expiry_notifier
         get_trust_expiry_notifier().schedule(trust_id=trust_id, expires_at=expires_at)
     except ClientError as exc:  # pragma: no cover
-        logger.error("Failed to schedule trust expiry notification for %s: %s", trust_id, exc, extra={"src_module": "trust", "operation": "create_trust_session", "trust_id": trust_id, "error": str(exc)})
+        logger.exception("Failed to schedule trust expiry notification for %s: %s", trust_id, exc, extra={"src_module": "trust", "operation": "create_trust_session", "trust_id": trust_id, "error": str(exc)})
 
     return trust_id
 
@@ -320,11 +320,11 @@ def revoke_trust_session(trust_id: str) -> bool:
             from scheduler_service import get_trust_expiry_notifier
             get_trust_expiry_notifier().cancel(trust_id=trust_id)
         except ClientError as exc:  # pragma: no cover
-            logger.error("Failed to cancel trust expiry schedule for %s: %s", trust_id, exc, extra={"src_module": "trust", "operation": "revoke_trust_session", "trust_id": trust_id, "error": str(exc)})
+            logger.exception("Failed to cancel trust expiry schedule for %s: %s", trust_id, exc, extra={"src_module": "trust", "operation": "revoke_trust_session", "trust_id": trust_id, "error": str(exc)})
 
         return True
     except ClientError as e:
-        logger.error("Revoke trust session error: %s", e, extra={"src_module": "trust", "operation": "revoke_trust_session", "trust_id": trust_id, "error": str(e)})
+        logger.exception("Revoke trust session error: %s", e, extra={"src_module": "trust", "operation": "revoke_trust_session", "trust_id": trust_id, "error": str(e)})
         return False
 
 
@@ -409,7 +409,7 @@ def increment_trust_command_count(trust_id: str) -> int:
             logger.warning("Trust command count conditional update failed for %s (limit or expired)", trust_id, extra={"src_module": "trust", "operation": "increment_trust_command_count", "trust_id": trust_id})
             return 0
         except ClientError as e:
-            logger.error("Increment trust command count error: %s", e, extra={"src_module": "trust", "operation": "increment_trust_command_count", "trust_id": trust_id, "error": str(e)})
+            logger.exception("Increment trust command count error: %s", e, extra={"src_module": "trust", "operation": "increment_trust_command_count", "trust_id": trust_id, "error": str(e)})
             return 0
 
     # Rate limiting disabled: use original logic
@@ -435,7 +435,7 @@ def increment_trust_command_count(trust_id: str) -> int:
         logger.warning("Trust command count conditional update failed for %s (limit or expired)", trust_id, extra={"src_module": "trust", "operation": "increment_trust_command_count", "trust_id": trust_id})
         return 0
     except ClientError as e:
-        logger.error("Increment trust command count error: %s", e, extra={"src_module": "trust", "operation": "increment_trust_command_count", "trust_id": trust_id, "error": str(e)})
+        logger.exception("Increment trust command count error: %s", e, extra={"src_module": "trust", "operation": "increment_trust_command_count", "trust_id": trust_id, "error": str(e)})
         return 0
 
 
@@ -577,7 +577,7 @@ def track_command_executed(trust_id: str, command: str, success: bool) -> None:
             },
         )
     except Exception as exc:  # noqa: BLE001 — swallow errors, best-effort tracking
-        logger.error('track_command_executed failed for %s: %s', trust_id, exc, extra={"src_module": "trust", "operation": "track_command_executed", "trust_id": trust_id, "error": str(exc)})
+        logger.exception('track_command_executed failed for %s: %s', trust_id, exc, extra={"src_module": "trust", "operation": "track_command_executed", "trust_id": trust_id, "error": str(exc)})
 
 
 # ============================================================================
@@ -696,5 +696,5 @@ def increment_trust_upload_count(trust_id: str, content_size: int) -> bool:
         logger.warning("Trust upload conditional update failed for %s", trust_id, extra={"src_module": "trust", "operation": "increment_trust_upload_count", "trust_id": trust_id})
         return False
     except ClientError as e:
-        logger.error("Increment trust upload count error: %s", e, extra={"src_module": "trust", "operation": "increment_trust_upload_count", "trust_id": trust_id, "error": str(e)})
+        logger.exception("Increment trust upload count error: %s", e, extra={"src_module": "trust", "operation": "increment_trust_upload_count", "trust_id": trust_id, "error": str(e)})
         return False

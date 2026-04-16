@@ -65,7 +65,7 @@ def init_bot_commands():
         _bot_commands_initialized = True
         logger.info("Bot commands initialized", extra={"src_module": "accounts", "operation": "init_bot_commands"})
     except (OSError, TimeoutError, ConnectionError) as e:
-        logger.error("Failed to set bot commands: %s", e, extra={"src_module": "accounts", "operation": "init_bot_commands", "error": str(e)})
+        logger.exception("Failed to set bot commands: %s", e, extra={"src_module": "accounts", "operation": "init_bot_commands", "error": str(e)})
 
 
 def init_default_account():
@@ -82,7 +82,7 @@ def init_default_account():
                 'created_at': int(time.time())
             })
     except ClientError as e:
-        logger.error("Error initializing default account: %s", e, extra={"src_module": "accounts", "operation": "init_default_account", "error": str(e)})
+        logger.exception("Error initializing default account: %s", e, extra={"src_module": "accounts", "operation": "init_default_account", "error": str(e)})
 
 
 def get_account(account_id: str) -> Optional[dict]:
@@ -91,7 +91,7 @@ def get_account(account_id: str) -> Optional[dict]:
         result = _get_accounts_table().get_item(Key={'account_id': account_id})
         return result.get('Item')
     except ClientError as e:
-        logger.error("get_account error: %s", e, extra={"src_module": "accounts", "operation": "get_account", "account_id": account_id, "error": str(e)})
+        logger.exception("get_account error: %s", e, extra={"src_module": "accounts", "operation": "get_account", "account_id": account_id, "error": str(e)})
         return None
 
 
@@ -101,7 +101,7 @@ def list_accounts() -> list:
         result = _get_accounts_table().scan()
         return result.get('Items', [])
     except ClientError as e:
-        logger.error("list_accounts error: %s", e, extra={"src_module": "accounts", "operation": "list_accounts", "error": str(e)})
+        logger.exception("list_accounts error: %s", e, extra={"src_module": "accounts", "operation": "list_accounts", "error": str(e)})
         return []
 
 

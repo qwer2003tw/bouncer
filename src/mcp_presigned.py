@@ -274,7 +274,7 @@ def _generate_presigned_url(ctx: PresignedContext) -> dict:
             expires_at=expires_at_iso,
         )
     except Exception as _notify_exc:  # noqa: BLE001 — fire-and-forget
-        logger.error("Presigned notification error (non-fatal): %s", _notify_exc, extra={"src_module": "presigned", "operation": "send_notification", "error": str(_notify_exc)})
+        logger.exception("Presigned notification error (non-fatal): %s", _notify_exc, extra={"src_module": "presigned", "operation": "send_notification", "error": str(_notify_exc)})
 
     logger.info(
         "Presigned URL generated",
@@ -559,7 +559,7 @@ def _generate_presigned_batch_urls(ctx: PresignedBatchContext) -> dict:
             expires_at=expires_at_iso,
         )
     except Exception as _notify_exc:  # noqa: BLE001 — fire-and-forget
-        logger.error("Presigned batch notification error (non-fatal): %s", _notify_exc, extra={"src_module": "presigned", "operation": "send_batch_notification", "error": str(_notify_exc)})
+        logger.exception("Presigned batch notification error (non-fatal): %s", _notify_exc, extra={"src_module": "presigned", "operation": "send_batch_notification", "error": str(_notify_exc)})
 
     logger.info(
         "Presigned URL generated",

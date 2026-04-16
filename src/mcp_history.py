@@ -237,7 +237,7 @@ def _query_requests_table(
         last_key = resp.get("LastEvaluatedKey")
 
     except ClientError as e:
-        logger.error("query/scan requests error: %s", e, extra={"src_module": "history", "operation": "query_requests", "error": str(e)})
+        logger.exception("query/scan requests error: %s", e, extra={"src_module": "history", "operation": "query_requests", "error": str(e)})
         return [], 0, None
 
     # Trim to desired limit
@@ -292,7 +292,7 @@ def _query_command_history_table(
         scanned = resp.get("ScannedCount", 0)
         return items, scanned
     except ClientError as e:
-        logger.error("query command-history GSI error: %s", e, extra={"src_module": "history", "operation": "query_command_history", "error": str(e)})
+        logger.exception("query command-history GSI error: %s", e, extra={"src_module": "history", "operation": "query_command_history", "error": str(e)})
         return [], 0
 
 

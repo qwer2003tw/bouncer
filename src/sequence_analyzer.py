@@ -579,7 +579,7 @@ def record_command(
         )
 
     except ClientError as e:
-        logger.error("Failed to record command: %s", e, extra={"src_module": "sequence_analyzer", "operation": "record_command", "error": str(e)})
+        logger.exception("Failed to record command: %s", e, extra={"src_module": "sequence_analyzer", "operation": "record_command", "error": str(e)})
         return None
 
 
@@ -630,7 +630,7 @@ def get_recent_commands(
         return records
 
     except ClientError as e:
-        logger.error("Failed to get recent commands: %s", e, extra={"src_module": "sequence_analyzer", "operation": "get_recent_commands", "error": str(e)})
+        logger.exception("Failed to get recent commands: %s", e, extra={"src_module": "sequence_analyzer", "operation": "get_recent_commands", "error": str(e)})
         return []
 
 

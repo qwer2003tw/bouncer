@@ -545,7 +545,7 @@ def _write_frontend_deploy_history(
         _get_history_table().put_item(Item=history_item)
         logger.info("deploy_history written deploy_id=frontend-%s project=%s status=%s", request_id, project, history_status, extra={"src_module": "callbacks", "operation": "write_deploy_history", "request_id": request_id, "project": project, "status": history_status})
     except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to write deploy_history for %s: %s", request_id, exc, extra={"src_module": "callbacks", "operation": "write_deploy_history", "request_id": request_id, "error": str(exc)})
+        logger.exception("Failed to write deploy_history for %s: %s", request_id, exc, extra={"src_module": "callbacks", "operation": "write_deploy_history", "request_id": request_id, "error": str(exc)})
 
 
 def _parse_deploy_frontend_params(item: dict) -> dict:
@@ -631,7 +631,7 @@ def _assume_deploy_role(deploy_role_arn: str, request_id: str, files_manifest: l
         s3_target = get_s3_client(role_arn=deploy_role_arn, session_name=f"bouncer-deploy-{request_id[:16]}")
         return s3_target, None
     except ClientError as e:
-        logger.error("AssumeRole failed for %s: %s", deploy_role_arn, e, extra={"src_module": "callbacks", "operation": "assume_role", "deploy_role_arn": deploy_role_arn, "error": str(e)})
+        logger.exception("AssumeRole failed for %s: %s", deploy_role_arn, e, extra={"src_module": "callbacks", "operation": "assume_role", "deploy_role_arn": deploy_role_arn, "error": str(e)})
         failed = [
             {'filename': fm.get('filename', 'unknown'), 'reason': f'AssumeRole failed: {e}'}
             for fm in files_manifest
@@ -716,7 +716,7 @@ def _deploy_files_to_frontend(files_manifest: list, s3_staging, s3_target, reque
             deployed.append({'filename': filename, 's3_key': filename})
             logger.info("uploaded file=%s size=%d content_type=%s request_id=%s project=%s", filename, len(body), content_type, request_id, project, extra={"src_module": "callbacks", "operation": "deploy_frontend_upload", "file_name": filename, "request_id": request_id, "project": project})
         except Exception as e:  # noqa: BLE001
-            logger.error("upload_failed file=%s error=%s request_id=%s project=%s", filename, str(e)[:200], request_id, project, extra={"src_module": "callbacks", "operation": "deploy_frontend_upload", "file_name": filename, "request_id": request_id, "project": project, "error": str(e)[:200]})
+            logger.exception("upload_failed file=%s error=%s request_id=%s project=%s", filename, str(e)[:200], request_id, project, extra={"src_module": "callbacks", "operation": "deploy_frontend_upload", "file_name": filename, "request_id": request_id, "project": project, "error": str(e)[:200]})
             failed.append({'filename': filename, 'reason': str(e)[:200]})
 
         # Progress update every 5 files
@@ -755,7 +755,7 @@ def _invalidate_cloudfront(success_count: int, deploy_role_arn: str, distributio
         )
         return False
     except ClientError as e:
-        logger.error("CloudFront invalidation failed for dist=%s: %s", distribution_id, e, extra={"src_module": "callbacks", "operation": "cloudfront_invalidation", "distribution_id": distribution_id, "error": str(e)})
+        logger.exception("CloudFront invalidation failed for dist=%s: %s", distribution_id, e, extra={"src_module": "callbacks", "operation": "cloudfront_invalidation", "distribution_id": distribution_id, "error": str(e)})
         return True
 
 
@@ -912,7 +912,7 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
     try:
         files_manifest = _json.loads(params['files_json'])
     except _json.JSONDecodeError as e:
-        logger.error("Failed to parse files manifest for deploy-frontend: %s", e, extra={"src_module": "callbacks", "operation": "handle_deploy_frontend_callback", "error": str(e)}, exc_info=True)
+        logger.exception("Failed to parse files manifest for deploy-frontend: %s", e, extra={"src_module": "callbacks", "operation": "handle_deploy_frontend_callback", "error": str(e)}, exc_info=True)
         answer_callback(callback_id, '❌ 檔案清單解析失敗')
         return response(500, {'error': 'Failed to parse files manifest'})
 

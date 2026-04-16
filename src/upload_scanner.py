@@ -93,7 +93,7 @@ def scan_upload(filename: str, content_bytes: bytes, content_type: str = '') -> 
         # Fail-closed: scanner error requires human review (s60-001)
         error_type = type(exc).__name__
         error_msg = str(exc)[:200]
-        logger.error("upload_scanner: unexpected error during scan", extra={
+        logger.exception("upload_scanner: unexpected error during scan", extra={
             "src_module": "upload_scanner",
             "operation": "scan_upload",
             "upload_filename": filename,
