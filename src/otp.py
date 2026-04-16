@@ -35,7 +35,7 @@ def create_otp_record(request_id: str, user_id: str, otp_code: str, message_id: 
         otp_code: Generated OTP code
         message_id: Telegram message ID of the approval request (for updating after verification)
     """
-    table = _db.table
+    table = _get_table()
     now = int(time.time())
     table.put_item(Item={
         'request_id': f'otp#{request_id}',
@@ -57,7 +57,7 @@ def get_pending_otp(user_id: str) -> Optional[dict]:
     Queries user-id-created-index GSI for otp# records belonging to user_id that haven't expired.
     Returns None if no pending OTP found.
     """
-    table = _db.table
+    table = _get_table()
     now = int(time.time())
     all_items = []
     query_kwargs = {
@@ -102,7 +102,7 @@ def validate_otp(request_id: str, provided_code: str) -> tuple[bool, str]:
     On success: marks record as used.
     On failure: increments attempts. If max attempts reached, marks as failed.
     """
-    table = _db.table
+    table = _get_table()
     otp_key = f'otp#{request_id}'
     now = int(time.time())
 

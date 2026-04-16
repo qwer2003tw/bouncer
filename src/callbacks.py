@@ -176,7 +176,7 @@ def _send_status_update(message_id: int, status_emoji: str, title: str, item: di
 
 def handle_account_add_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str) -> dict:
     """處理新增帳號的審批 callback"""
-    table = _db.table
+    table = _get_table()
     accounts_table = _get_accounts_table()
 
     account_id = item.get('account_id', '')
@@ -274,7 +274,7 @@ def handle_account_add_callback(action: str, request_id: str, item: dict, messag
 
 def handle_account_remove_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str) -> dict:
     """處理移除帳號的審批 callback"""
-    table = _db.table
+    table = _get_table()
     accounts_table = _get_accounts_table()
 
     account_id = item.get('account_id', '')
@@ -363,7 +363,7 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
 def handle_deploy_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str) -> dict:
     """處理部署的審批 callback"""
     from deployer import start_deploy
-    table = _db.table
+    table = _get_table()
 
     project_id = item.get('project_id', '')
     project_name = item.get('project_name', project_id)
@@ -892,7 +892,7 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
     """
     import json as _json
 
-    table = _db.table
+    table = _get_table()
     params = _parse_deploy_frontend_params(item)
 
     logger.info("deploy_frontend_callback received", extra={"src_module": "callbacks", "operation": "handle_deploy_frontend_callback", "request_id": request_id, "action": action, "user_id": user_id})

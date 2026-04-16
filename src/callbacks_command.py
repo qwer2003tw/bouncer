@@ -164,7 +164,7 @@ def _execute_and_store_result(
     Returns:
         dict: 包含 result, paged, decision_latency_ms
     """
-    table = _db.table
+    table = _get_table()
 
     # 執行命令（native boto3 or awscli based on stored action_type）
     if item.get('action_type') == 'native':
@@ -281,7 +281,7 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
     if not trust_scope:
         return
 
-    table = _db.table
+    table = _get_table()
 
     # 查 pending 請求，用 status-created-index + filter by trust_scope + account
     response_data = table.query(
@@ -568,7 +568,7 @@ def _handle_deny_callback(
         message_id: Telegram message ID
         info: _format_command_info 返回的 dict
     """
-    table = _db.table
+    table = _get_table()
 
     now = int(time.time())
     created_at = int(item.get('created_at', 0))
