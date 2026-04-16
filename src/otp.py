@@ -8,6 +8,7 @@ from typing import Optional
 
 from aws_lambda_powertools import Logger
 from botocore.exceptions import ClientError
+import db as _db
 
 logger = Logger(service="bouncer")
 
@@ -15,10 +16,9 @@ OTP_TTL = 300  # 5 minutes
 OTP_MAX_ATTEMPTS = 3
 OTP_LENGTH = 6
 
-
 def _get_table():
-    import db as _db
     return _db.table
+
 
 
 def generate_otp() -> str:
@@ -92,7 +92,7 @@ def get_pending_otp(user_id: str) -> Optional[dict]:
         logger.info("Found pending OTP", extra={"src_module": "otp", "operation": "get_pending_otp", "user_id": user_id, "found": True, "request_id": otp.get('original_request_id')})
         return otp
     except ClientError as e:
-        logger.error("Failed to query OTP records: %s", e, extra={"src_module": "otp", "operation": "get_pending_otp", "user_id": user_id, "error": str(e)})
+        logger.exception("Failed to query OTP records: %s", e, extra={"src_module": "otp", "operation": "get_pending_otp", "user_id": user_id, "error": str(e)})
         return None
 
 
@@ -109,7 +109,7 @@ def validate_otp(request_id: str, provided_code: str) -> tuple[bool, str]:
     try:
         item = table.get_item(Key={'request_id': otp_key}).get('Item')
     except ClientError as e:
-        logger.error("Failed to get OTP record: %s", e)
+        logger.exception("Failed to get OTP record: %s", e)
         return False, "系統錯誤，請重試"
 
     if not item:

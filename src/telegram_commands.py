@@ -20,7 +20,6 @@ logger = Logger(service="bouncer")
 
 
 def _get_table():
-    """取得 DynamoDB table"""
     return _db.table
 
 
@@ -65,7 +64,7 @@ def handle_telegram_command(message: dict) -> dict:
             try:
                 hours = int(parts[1])
             except ValueError:
-                pass
+                logger.debug("Invalid hours parameter for /stats command", exc_info=True)
         return handle_stats_command(chat_id, hours=hours)
 
     # /otp {code} - OTP 驗證
@@ -124,7 +123,7 @@ def handle_trust_command(chat_id: str) -> dict:
         )
         items = resp.get('Items', [])
     except ClientError as e:
-        logger.error("Query trust sessions error: %s", e, extra={"src_module": "telegram_commands", "operation": "handle_trust_command", "error": str(e)})
+        logger.exception("Query trust sessions error: %s", e, extra={"src_module": "telegram_commands", "operation": "handle_trust_command", "error": str(e)})
         items = []
 
     if not items:
@@ -162,7 +161,7 @@ def handle_pending_command(chat_id: str) -> dict:
         # Sort merged results by created_at descending
         items.sort(key=lambda x: int(x.get('created_at', 0)), reverse=True)
     except ClientError as e:
-        logger.error("Query pending requests error: %s", e, extra={"src_module": "telegram_commands", "operation": "handle_pending_command", "error": str(e)})
+        logger.exception("Query pending requests error: %s", e, extra={"src_module": "telegram_commands", "operation": "handle_pending_command", "error": str(e)})
         items = []
 
     if not items:
@@ -231,7 +230,7 @@ def handle_stats_command(chat_id: str, hours: int = 24) -> dict:
                 )
                 items.extend(resp.get('Items', []))
     except ClientError as e:
-        logger.error("Stats query error: %s", e, extra={"src_module": "telegram_commands", "operation": "handle_stats", "error": str(e)})
+        logger.exception("Stats query error: %s", e, extra={"src_module": "telegram_commands", "operation": "handle_stats", "error": str(e)})
         items = []
 
     total = len(items)
@@ -344,7 +343,7 @@ def handle_otp_command(chat_id: str, user_id: str, provided_code: str) -> dict:
     try:
         item = table.get_item(Key={'request_id': original_request_id}).get('Item')
     except Exception as e:
-        logger.error("Failed to get original request: %s", e, extra={"src_module": "telegram_commands", "operation": "handle_otp", "request_id": original_request_id})
+        logger.exception("Failed to get original request: %s", e, extra={"src_module": "telegram_commands", "operation": "handle_otp", "request_id": original_request_id})
         send_telegram_message_to(chat_id, f"❌ 找不到原始請求：{original_request_id}")
         return response(200, {'ok': True})
 

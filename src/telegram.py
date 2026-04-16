@@ -100,7 +100,7 @@ def _telegram_request(method: str, data: dict, timeout: int = 5, json_body: bool
             return result
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, json.JSONDecodeError, ValueError) as e:
         elapsed = (time.time() - start_time) * 1000
-        logger.error("Telegram %s error (%.0fms): %s", method, elapsed, e, extra={
+        logger.exception("Telegram %s error (%.0fms): %s", method, elapsed, e, extra={
             "src_module": "telegram", "operation": "call_api",
             "method": method, "elapsed_ms": elapsed, "error": str(e)
         })
@@ -108,7 +108,7 @@ def _telegram_request(method: str, data: dict, timeout: int = 5, json_body: bool
             from metrics import emit_metric
             emit_metric('Bouncer', 'NotificationFailure', 1, dimensions={'Method': method})
         except Exception:  # noqa: BLE001
-            pass
+            logger.debug("Failed to emit NotificationFailure metric", exc_info=True)
 
         # Fallback: if sendMessage fails with Markdown, retry without parse_mode
         if method == 'sendMessage' and 'parse_mode' in data and '400' in str(e):

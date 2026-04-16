@@ -11,6 +11,7 @@ import os
 import time
 
 import boto3
+from constants import DEFAULT_REGION
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ _registry_cache = None
 _registry_loaded_at = 0
 _CACHE_TTL = 300  # 5 minutes
 
-_SM_REGION = 'us-east-1'
+_SM_REGION = DEFAULT_REGION
 _BOT_SECRETS = {
     'private-bot': {
         'sm_name': 'bouncer/private-bot-secret',

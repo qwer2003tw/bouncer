@@ -23,7 +23,7 @@ Check IDs:
 import json
 import os
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 from aws_lambda_powertools import Logger
 from metrics import emit_metric
@@ -71,7 +71,7 @@ SECRET_KEY_PATTERN = re.compile(
 # JSON Payload Extraction
 # ============================================================================
 
-def extract_json_payloads(command: str) -> Tuple[List[Tuple[str, dict]], bool]:
+def extract_json_payloads(command: str) -> tuple[list[tuple[str, dict]], bool]:
     """
     從 AWS CLI 命令中提取 JSON payload
 
@@ -116,7 +116,7 @@ def extract_json_payloads(command: str) -> Tuple[List[Tuple[str, dict]], bool]:
     return (results, extraction_failed)
 
 
-def _extract_param_json(command: str, param: str) -> List[dict]:
+def _extract_param_json(command: str, param: str) -> list[dict]:
     """
     從命令中提取指定參數的 JSON 值
 
@@ -154,7 +154,7 @@ def _extract_param_json(command: str, param: str) -> List[dict]:
                 if isinstance(parsed, (dict, list)):
                     results.append(parsed)
             except (json.JSONDecodeError, ValueError):
-                pass
+                logger.debug("Failed to parse JSON payload from command", exc_info=True)
 
         idx = command.find(param, idx + len(param))
 
@@ -254,7 +254,7 @@ def _is_wildcard(value: Any) -> bool:
     return False
 
 
-def _iter_statements(payload: Any) -> List[dict]:
+def _iter_statements(payload: Any) -> list[dict]:
     """從 policy payload 中迭代所有 Statement"""
     statements = []
     if isinstance(payload, dict):
@@ -266,7 +266,7 @@ def _iter_statements(payload: Any) -> List[dict]:
     return statements
 
 
-def check_action_wildcard(payload: dict) -> Optional[Tuple[int, str]]:
+def check_action_wildcard(payload: dict) -> Optional[tuple[int, str]]:
     """
     TP-001: 檢查 IAM Policy 中的 Action:*
 
@@ -280,7 +280,7 @@ def check_action_wildcard(payload: dict) -> Optional[Tuple[int, str]]:
     return None
 
 
-def check_resource_wildcard(payload: dict) -> Optional[Tuple[int, str]]:
+def check_resource_wildcard(payload: dict) -> Optional[tuple[int, str]]:
     """
     TP-002: 檢查 IAM Policy 中的 Resource:*
 
@@ -294,7 +294,7 @@ def check_resource_wildcard(payload: dict) -> Optional[Tuple[int, str]]:
     return None
 
 
-def check_principal_wildcard(payload: dict) -> Optional[Tuple[int, str]]:
+def check_principal_wildcard(payload: dict) -> Optional[tuple[int, str]]:
     """
     TP-003: 檢查 Trust/Bucket Policy 中的 Principal:*
 
@@ -316,7 +316,7 @@ def check_principal_wildcard(payload: dict) -> Optional[Tuple[int, str]]:
 def check_external_account_trust(
     payload: dict,
     known_accounts: Optional[set] = None,
-) -> Optional[Tuple[int, str]]:
+) -> Optional[tuple[int, str]]:
     """
     TP-004: 檢查 Trust Policy 含外部 AWS 帳號
 
@@ -349,7 +349,7 @@ def check_external_account_trust(
     return None
 
 
-def _extract_principal_arns(principal: Any) -> List[str]:
+def _extract_principal_arns(principal: Any) -> list[str]:
     """從 Principal 值中提取所有 ARN"""
     arns = []
     if isinstance(principal, str):
@@ -366,7 +366,7 @@ def _extract_principal_arns(principal: Any) -> List[str]:
     return arns
 
 
-def check_open_ingress(payload: Any) -> Optional[Tuple[int, str]]:
+def check_open_ingress(payload: Any) -> Optional[tuple[int, str]]:
     """
     TP-005: 檢查 Security Group 是否開放 0.0.0.0/0 或 ::/0
 
@@ -392,7 +392,7 @@ def check_open_ingress(payload: Any) -> Optional[Tuple[int, str]]:
     return None
 
 
-def check_high_risk_port(payload: Any) -> Optional[Tuple[int, str]]:
+def check_high_risk_port(payload: Any) -> Optional[tuple[int, str]]:
     """
     TP-006: 檢查 Security Group 高危端口 + 0.0.0.0/0
 
@@ -436,7 +436,7 @@ def check_high_risk_port(payload: Any) -> Optional[Tuple[int, str]]:
     return None
 
 
-def _normalize_ip_permissions(payload: Any) -> List[dict]:
+def _normalize_ip_permissions(payload: Any) -> list[dict]:
     """將 ip-permissions payload 正規化為 list of dicts"""
     if isinstance(payload, list):
         return [p for p in payload if isinstance(p, dict)]
@@ -452,7 +452,7 @@ def _normalize_ip_permissions(payload: Any) -> List[dict]:
     return []
 
 
-def check_hardcoded_secret(payload: Any) -> Optional[Tuple[int, str]]:
+def check_hardcoded_secret(payload: Any) -> Optional[tuple[int, str]]:
     """
     TP-007: 檢查 Lambda 環境變數中的硬編碼密碼
 
@@ -476,7 +476,7 @@ def check_hardcoded_secret(payload: Any) -> Optional[Tuple[int, str]]:
     return None
 
 
-def _extract_env_variables(payload: Any) -> Dict[str, str]:
+def _extract_env_variables(payload: Any) -> dict[str, str]:
     """從 Lambda environment payload 提取環境變數"""
     if isinstance(payload, dict):
         # 格式: {"Variables": {"KEY": "VALUE"}}
@@ -490,7 +490,7 @@ def _extract_env_variables(payload: Any) -> Dict[str, str]:
     return {}
 
 
-def check_admin_policy(payload: dict) -> Optional[Tuple[int, str]]:
+def check_admin_policy(payload: dict) -> Optional[tuple[int, str]]:
     """
     TP-008: 檢查完全管理員 Policy
 
@@ -513,7 +513,7 @@ def check_admin_policy(payload: dict) -> Optional[Tuple[int, str]]:
     return None
 
 
-def check_public_access(payload: dict) -> Optional[Tuple[int, str]]:
+def check_public_access(payload: dict) -> Optional[tuple[int, str]]:
     """
     TP-009: 檢查公開存取 Policy
 
@@ -596,8 +596,8 @@ CHECK_REGISTRY = {
 def scan_payload(
     param_name: str,
     payload: dict,
-    rules: List[dict],
-) -> List[RiskFactor]:
+    rules: list[dict],
+) -> list[RiskFactor]:
     """
     對單一 payload 執行所有適用的 template 規則
 
@@ -650,8 +650,8 @@ def scan_payload(
 
 def scan_command_payloads(
     command: str,
-    rules: List[dict],
-) -> Tuple[int, List[RiskFactor]]:
+    rules: list[dict],
+) -> tuple[int, list[RiskFactor]]:
     """
     掃描命令中所有 JSON payload 的主入口
 
@@ -670,7 +670,7 @@ def scan_command_payloads(
 
     # Fail-closed: extraction error requires manual review (s61-001)
     if extraction_failed:
-        logger.error(
+        logger.exception(
             "template_scanner: extraction error detected",
             extra={
                 "src_module": "template_scanner",

@@ -6,12 +6,15 @@ import os
 import re
 import threading
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
 import boto3
 from botocore.exceptions import ClientError
+from aws_lambda_powertools import Logger
 
-from constants import BLOCKED_PATTERNS, DANGEROUS_PATTERNS, AUTO_APPROVE_PREFIXES
+from constants import BLOCKED_PATTERNS, DANGEROUS_PATTERNS, AUTO_APPROVE_PREFIXES, DEFAULT_REGION
+
+logger = Logger(service="bouncer")
 
 # Lock: Lambda warm start 下 os.environ credential swap 必須 atomic
 _execute_lock = threading.Lock()
@@ -60,7 +63,7 @@ class CommandChainResult:
         results:   per-sub-command results in execution order
         stopped_at: index of the first failed sub-command (None = all succeeded)
     """
-    results: List[SubCommandResult] = field(default_factory=list)
+    results: list[SubCommandResult] = field(default_factory=list)
     stopped_at: Optional[int] = None
 
     @property
@@ -76,7 +79,7 @@ class CommandChainResult:
         return '\n'.join(p for p in parts if p)
 
     @property
-    def sub_commands(self) -> List[str]:
+    def sub_commands(self) -> list[str]:
         return [r.command for r in self.results]
 
 
@@ -85,7 +88,7 @@ def _normalize_whitespace(command: str) -> str:
     return re.sub(r'\s+', ' ', command).strip()
 
 
-def _split_chain(command: str) -> List[str]:
+def _split_chain(command: str) -> list[str]:
     """Split a command string on unquoted ``&&`` operators.
 
     Understands shell-style quoting (single/double quotes, backticks) and
@@ -118,14 +121,14 @@ def _split_chain(command: str) -> List[str]:
     if not command:
         return []
 
-    parts: List[str] = []
-    current: List[str] = []
+    parts: list[str] = []
+    current: list[str] = []
     i = 0
     n = len(command)
 
     OPEN_BRACKETS = {'(', '[', '{'}
     CLOSE_MAP = {'(': ')', '[': ']', '{': '}'}
-    bracket_stack: List[str] = []
+    bracket_stack: list[str] = []
 
     while i < n:
         c = command[i]
@@ -556,7 +559,7 @@ def execute_command(command: str, assume_role_arn: str = None,
 
 
 
-def generate_eks_token(cluster_name: str, region: str = 'us-east-1', assume_role_arn: str = None) -> str:
+def generate_eks_token(cluster_name: str, region: str = None, assume_role_arn: str = None) -> str:
     """Generate EKS kubectl token (k8s-aws-v1.* format) via STS presigned URL.
 
     Uses SigV4QueryAuth to include x-k8s-aws-id header in the signed URL.
@@ -639,7 +642,7 @@ def execute_boto3_native(
     """
     import json
 
-    region = region or os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+    region = region or DEFAULT_REGION
 
     # Build boto3 client with optional assume role
     if assume_role_arn:
@@ -726,7 +729,7 @@ def _chain_failure_output(chain_result: CommandChainResult) -> str:
     return '\n'.join(p for p in lines if p)
 
 
-def _execute_chain(sub_cmds: List[str], assume_role_arn: Optional[str],
+def _execute_chain(sub_cmds: list[str], assume_role_arn: Optional[str],
                    _executor: Optional[Callable] = None,
                    cli_input_json: dict = None) -> CommandChainResult:
     """Execute a list of sub-commands sequentially with && semantics."""
@@ -902,4 +905,4 @@ def _execute_locked(command: str, assume_role_arn: str = None,
                 import os as _os
                 _os.unlink(_cli_input_tmp)
             except Exception:  # noqa: BLE001
-                pass
+                logger.debug("Failed to delete temporary CLI input file", exc_info=True)

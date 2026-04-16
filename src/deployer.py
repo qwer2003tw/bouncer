@@ -18,6 +18,7 @@ from telegram import unpin_message
 from constants import (
     APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER,
     DEPLOY_MODE_MANUAL, DEPLOY_MODE_AUTO_CODE, VALID_DEPLOY_MODES,
+    DEFAULT_REGION, TTL_7_DAYS, DEFAULT_DEPLOY_AVG_SECS,
 )
 
 # Import and re-export DB operations from deploy_db for backward compatibility
@@ -70,16 +71,14 @@ secretsmanager_client = None
 def _get_sfn_client():
     global sfn_client
     if sfn_client is None:
-        region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
-        sfn_client = boto3.client('stepfunctions', region_name=region)
+        sfn_client = boto3.client('stepfunctions', region_name=DEFAULT_REGION)
     return sfn_client
 
 
 def _get_cfn_client():
     global cfn_client
     if cfn_client is None:
-        region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
-        cfn_client = boto3.client('cloudformation', region_name=region)
+        cfn_client = boto3.client('cloudformation', region_name=DEFAULT_REGION)
     return cfn_client
 
 
@@ -139,7 +138,7 @@ def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str) -
             import datetime
             started_at_iso = datetime.datetime.utcfromtimestamp(int(locked_at_ts)).strftime('%Y-%m-%dT%H:%M:%SZ')
             elapsed = int(time.time()) - int(locked_at_ts)
-            avg_deploy_secs = 300  # 5 分鐘
+            avg_deploy_secs = DEFAULT_DEPLOY_AVG_SECS  # 5 分鐘
             estimated_remaining = max(0, avg_deploy_secs - elapsed)
         return {
             'status': 'conflict',
@@ -233,7 +232,7 @@ def cancel_deploy(deploy_id: str) -> dict:
                 cause='User cancelled'
             )
         except ClientError as e:
-            logger.error("Error stopping execution: %s", e, extra={"src_module": "deployer", "operation": "cancel_deploy", "error": str(e)})
+            logger.exception("Error stopping execution: %s", e, extra={"src_module": "deployer", "operation": "cancel_deploy", "error": str(e)})
 
     # 釋放鎖
     release_lock(record.get('project_id'), deploy_id)
@@ -497,7 +496,7 @@ def get_deploy_status(deploy_id: str) -> dict:
             project_id = record.get('project_id')
             if project_id:
                 release_lock(project_id, deploy_id)
-            logger.error("Error getting execution status: %s", e, extra={"src_module": "deployer", "operation": "get_execution_status", "deploy_id": deploy_id, "error": str(e)})
+            logger.exception("Error getting execution status: %s", e, extra={"src_module": "deployer", "operation": "get_execution_status", "deploy_id": deploy_id, "error": str(e)})
 
     # Add timing fields to response
     status = record.get('status', '')
@@ -675,7 +674,7 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
             import datetime
             started_at_iso = datetime.datetime.utcfromtimestamp(int(locked_at_ts)).strftime('%Y-%m-%dT%H:%M:%SZ')
             elapsed = int(time.time()) - int(locked_at_ts)
-            avg_deploy_secs = 300  # 5 分鐘
+            avg_deploy_secs = DEFAULT_DEPLOY_AVG_SECS  # 5 分鐘
             estimated_remaining = max(0, avg_deploy_secs - elapsed)
         return mcp_result(req_id, {
             'content': [{'type': 'text', 'text': json.dumps({
@@ -793,7 +792,7 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
     # 建立審批請求
     request_id = generate_request_id(f"deploy:{project_id}")
     now = int(time.time())
-    ttl = now + 7 * 24 * 3600  # 7 days for DDB record retention (history lookup)
+    ttl = now + TTL_7_DAYS  # 7 days for DDB record retention (history lookup)
     approval_expiry = now + APPROVAL_TIMEOUT_DEFAULT + APPROVAL_TTL_BUFFER  # 審批到期時間
 
     item = {
@@ -949,7 +948,7 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
             try:
                 target_account = target_role_arn.split(':iam::')[1].split(':')[0]
             except (IndexError, AttributeError):
-                pass
+                logger.debug("Failed to parse target account from role ARN", exc_info=True)
 
     branch = branch or project.get('default_branch', 'master')
     # build_info_lines escapes internally; pass raw values
@@ -1001,7 +1000,7 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
                     expires_at=expires_at,
                 )
             except Exception as exc:  # noqa: BLE001
-                logger.error("post_notification_setup failed for %s: %s", request_id, exc, extra={"src_module": "deployer", "operation": "post_notification_setup", "request_id": request_id, "error": str(exc)})
+                logger.exception("post_notification_setup failed for %s: %s", request_id, exc, extra={"src_module": "deployer", "operation": "post_notification_setup", "request_id": request_id, "error": str(exc)})
 
 
 # ============================================================================

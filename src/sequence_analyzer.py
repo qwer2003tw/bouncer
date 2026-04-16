@@ -21,7 +21,7 @@ import time
 import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Optional
 
 from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
@@ -85,10 +85,10 @@ class CommandRecord:
     command: str
     service: str
     action: str
-    resource_ids: List[str] = field(default_factory=list)
+    resource_ids: list[str] = field(default_factory=list)
     account_id: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """轉換為字典格式"""
         return {
             'source': self.source,
@@ -101,7 +101,7 @@ class CommandRecord:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'CommandRecord':
+    def from_dict(cls, data: dict[str, Any]) -> 'CommandRecord':
         """從字典建立"""
         return cls(
             source=data.get('source', ''),
@@ -128,13 +128,13 @@ class SequenceAnalysis:
         matched_resources: 匹配的資源 ID 列表
     """
     has_prior_query: bool
-    related_commands: List[str]
+    related_commands: list[str]
     risk_modifier: float
     reason: str
     resource_match: bool = False
-    matched_resources: List[str] = field(default_factory=list)
+    matched_resources: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """轉換為字典格式"""
         return {
             'has_prior_query': self.has_prior_query,
@@ -151,7 +151,7 @@ class SequenceAnalysis:
 # ============================================================================
 
 # 安全模式：危險操作 → 相關的前置查詢操作
-SAFE_PATTERNS: Dict[str, List[str]] = {
+SAFE_PATTERNS: dict[str, list[str]] = {
     # EC2
     'terminate-instances': [
         'describe-instances',
@@ -320,7 +320,7 @@ SAFE_PATTERNS: Dict[str, List[str]] = {
 }
 
 # 服務別名映射（處理 aws s3 vs aws s3api）
-SERVICE_ALIASES: Dict[str, str] = {
+SERVICE_ALIASES: dict[str, str] = {
     's3api': 's3',
     'apigatewayv2': 'apigateway',
     'stepfunctions': 'states',
@@ -332,7 +332,7 @@ SERVICE_ALIASES: Dict[str, str] = {
 # Resource ID Extraction Patterns
 # ============================================================================
 
-RESOURCE_ID_PATTERNS: List[Dict[str, Any]] = [
+RESOURCE_ID_PATTERNS: list[dict[str, Any]] = [
     # EC2
     {
         'pattern': r'--instance-ids?\s+([i]-[a-f0-9]+(?:\s+[i]-[a-f0-9]+)*)',
@@ -461,7 +461,7 @@ RESOURCE_ID_PATTERNS: List[Dict[str, Any]] = [
 # Core Functions
 # ============================================================================
 
-def extract_resource_ids(command: str) -> List[str]:
+def extract_resource_ids(command: str) -> list[str]:
     """
     從命令中提取資源 ID
 
@@ -491,7 +491,7 @@ def extract_resource_ids(command: str) -> List[str]:
     return list(set(resource_ids))  # 去重
 
 
-def parse_action_from_command(command: str) -> Tuple[str, str]:
+def parse_action_from_command(command: str) -> tuple[str, str]:
     """
     從命令解析服務和動作
 
@@ -579,14 +579,14 @@ def record_command(
         )
 
     except ClientError as e:
-        logger.error("Failed to record command: %s", e, extra={"src_module": "sequence_analyzer", "operation": "record_command", "error": str(e)})
+        logger.exception("Failed to record command: %s", e, extra={"src_module": "sequence_analyzer", "operation": "record_command", "error": str(e)})
         return None
 
 
 def get_recent_commands(
     source: str,
     minutes: int = DEFAULT_HISTORY_MINUTES,
-) -> List[CommandRecord]:
+) -> list[CommandRecord]:
     """
     取得最近 N 分鐘的命令記錄
 
@@ -630,7 +630,7 @@ def get_recent_commands(
         return records
 
     except ClientError as e:
-        logger.error("Failed to get recent commands: %s", e, extra={"src_module": "sequence_analyzer", "operation": "get_recent_commands", "error": str(e)})
+        logger.exception("Failed to get recent commands: %s", e, extra={"src_module": "sequence_analyzer", "operation": "get_recent_commands", "error": str(e)})
         return []
 
 
@@ -742,7 +742,7 @@ def get_sequence_risk_modifier(
     source: str,
     command: str,
     account_id: str = "",
-) -> Tuple[float, str]:
+) -> tuple[float, str]:
     """
     取得序列分析的風險修正值（供 risk_scorer 使用）
 

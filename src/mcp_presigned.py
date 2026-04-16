@@ -9,13 +9,12 @@ import json
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import List
 
 from aws_lambda_powertools import Logger
 from aws_clients import get_s3_client
 from botocore.exceptions import ClientError
 
-from constants import DEFAULT_ACCOUNT_ID
+from constants import DEFAULT_ACCOUNT_ID, TTL_1_HOUR
 from db import table
 from notifications import send_presigned_notification, send_presigned_batch_notification
 from rate_limit import PendingLimitExceeded, RateLimitExceeded, check_rate_limit
@@ -30,7 +29,7 @@ logger = Logger(service="bouncer")
 
 _MIN_EXPIRES_IN = 60
 _DEFAULT_EXPIRES_IN = 900
-_MAX_EXPIRES_IN = 3600
+_MAX_EXPIRES_IN = TTL_1_HOUR
 
 
 @dataclass
@@ -275,7 +274,7 @@ def _generate_presigned_url(ctx: PresignedContext) -> dict:
             expires_at=expires_at_iso,
         )
     except Exception as _notify_exc:  # noqa: BLE001 — fire-and-forget
-        logger.error("Presigned notification error (non-fatal): %s", _notify_exc, extra={"src_module": "presigned", "operation": "send_notification", "error": str(_notify_exc)})
+        logger.exception("Presigned notification error (non-fatal): %s", _notify_exc, extra={"src_module": "presigned", "operation": "send_notification", "error": str(_notify_exc)})
 
     logger.info(
         "Presigned URL generated",
@@ -358,7 +357,7 @@ class PresignedBatchContext:
     """Pipeline context for mcp_tool_request_presigned_batch."""
 
     req_id: str
-    files: List[dict]          # validated [{filename, content_type}]
+    files: list[dict]          # validated [{filename, content_type}]
     reason: str
     source: str
     account_id: str
@@ -427,7 +426,7 @@ def _parse_presigned_batch_request(
             f"files exceeds maximum of {_BATCH_MAX_FILES} items"
         )
 
-    validated_files: List[dict] = []
+    validated_files: list[dict] = []
     for i, entry in enumerate(files_raw):
         if not isinstance(entry, dict):
             return _error(f"files[{i}] must be an object")
@@ -560,7 +559,7 @@ def _generate_presigned_batch_urls(ctx: PresignedBatchContext) -> dict:
             expires_at=expires_at_iso,
         )
     except Exception as _notify_exc:  # noqa: BLE001 — fire-and-forget
-        logger.error("Presigned batch notification error (non-fatal): %s", _notify_exc, extra={"src_module": "presigned", "operation": "send_batch_notification", "error": str(_notify_exc)})
+        logger.exception("Presigned batch notification error (non-fatal): %s", _notify_exc, extra={"src_module": "presigned", "operation": "send_batch_notification", "error": str(_notify_exc)})
 
     logger.info(
         "Presigned URL generated",

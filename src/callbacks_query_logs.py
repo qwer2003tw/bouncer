@@ -41,7 +41,7 @@ def handle_query_logs_callback(action: str, request_id: str, callback: dict, use
     try:
         item = table.get_item(Key={'request_id': request_id}).get('Item')
     except ClientError as e:
-        logger.error("DynamoDB get_item error: %s", e,
+        logger.exception("DynamoDB get_item error: %s", e,
                      extra={"src_module": "callbacks_query_logs", "operation": "get_item",
                             "request_id": request_id, "error": str(e)})
         item = None

@@ -7,7 +7,7 @@ moto mock isolation issues in tests and reduce cold-start OOM risk.
 
 import os
 import boto3
-from constants import TABLE_NAME, ACCOUNTS_TABLE_NAME
+from constants import TABLE_NAME, ACCOUNTS_TABLE_NAME, DEFAULT_REGION
 
 
 class _LazyTable:
@@ -24,8 +24,7 @@ class _LazyTable:
 
     def _get(self):
         if self._table is None:
-            region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
-            dynamodb = boto3.resource('dynamodb', region_name=region)
+            dynamodb = boto3.resource('dynamodb', region_name=DEFAULT_REGION)
             table_name = os.environ.get(self._table_name_env, self._default_table_name)
             self._table = dynamodb.Table(table_name)
         return self._table

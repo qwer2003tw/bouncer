@@ -18,7 +18,7 @@ from paging import store_paged_output
 from trust import create_trust_session, track_command_executed, increment_trust_command_count, TrustRateExceeded
 from telegram import escape_markdown, update_message, answer_callback, send_telegram_message_silent, send_chat_action, send_telegram_message_to
 from notifications import send_trust_auto_approve_notification
-from constants import DEFAULT_ACCOUNT_ID, RESULT_TTL, TRUST_SESSION_MAX_UPLOADS, TRUST_SESSION_MAX_COMMANDS, OTP_RISK_THRESHOLD
+from constants import DEFAULT_ACCOUNT_ID, DEFAULT_REGION, RESULT_TTL, TRUST_SESSION_MAX_UPLOADS, TRUST_SESSION_MAX_COMMANDS, OTP_RISK_THRESHOLD
 from metrics import emit_metric
 
 # DynamoDB tables from db.py (no circular dependency)
@@ -27,9 +27,16 @@ import db as _db
 logger = Logger(service="bouncer")
 
 
-def _get_table():
-    return _db.table
+# DynamoDB - via db.py (lazy init)
+# Tests may inject directly: callbacks_command._table = mock_table
+_table = None
 
+
+def _get_table():
+    """Get table, with test override support. Unified fallback via db.table."""
+    if _table is not None:
+        return _table
+    return _db.table
 
 def _is_execute_failed(output: str) -> bool:
     """判斷 execute_command 輸出是否代表失敗。
@@ -166,7 +173,7 @@ def _execute_and_store_result(
         native_service = item.get('native_service', '')
         native_operation = item.get('native_operation', '')
         native_params_str = item.get('native_params', '{}')
-        native_region = item.get('native_region', 'us-east-1') or 'us-east-1'
+        native_region = item.get('native_region', DEFAULT_REGION) or DEFAULT_REGION
         try:
             native_params = _json.loads(native_params_str) if isinstance(native_params_str, str) else native_params_str
         except Exception:
@@ -274,7 +281,7 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
     if not trust_scope:
         return
 
-    table = _db.table
+    table = _get_table()
 
     # 查 pending 請求，用 status-created-index + filter by trust_scope + account
     response_data = table.query(
@@ -461,7 +468,7 @@ def _handle_trust_session(
     try:
         _auto_execute_pending_requests(trust_scope, account_id, assume_role, trust_id, source)
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError, ClientError) as e:
-        logger.error(f"[TRUST] Auto-execute pending error: {e}", extra={"src_module": "trust", "operation": "auto_execute_pending", "error": str(e)})
+        logger.exception(f"[TRUST] Auto-execute pending error: {e}", extra={"src_module": "trust", "operation": "auto_execute_pending", "error": str(e)})
     return trust_line
 
 

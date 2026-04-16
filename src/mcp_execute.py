@@ -43,8 +43,7 @@ from notifications import (
 from telegram import send_telegram_message_silent, escape_markdown
 from metrics import emit_metric
 from constants import (
-
-    DEFAULT_ACCOUNT_ID, MCP_MAX_WAIT, RATE_LIMIT_WINDOW,
+    DEFAULT_ACCOUNT_ID, DEFAULT_REGION, MCP_MAX_WAIT, RATE_LIMIT_WINDOW,
     TRUST_SESSION_MAX_COMMANDS,
     APPROVAL_TTL_BUFFER,
     AUDIT_TTL_SHORT,
@@ -170,7 +169,7 @@ def _log_smart_approval_shadow(
         logger.info("Shadow logged: %s -> %s (score=%s, actual=%s)", shadow_id, smart_decision.decision, smart_decision.final_score, actual_decision, extra={"src_module": "shadow", "operation": "log_shadow", "shadow_id": shadow_id, "decision": smart_decision.decision})
     except ClientError as e:
         # Shadow 記錄失敗不影響主流程
-        logger.error("Shadow log failed: %s", e, extra={"src_module": "shadow", "operation": "log_shadow", "error": str(e)})
+        logger.exception("Shadow log failed: %s", e, extra={"src_module": "shadow", "operation": "log_shadow", "error": str(e)})
 
 
 # =============================================================================
@@ -337,7 +336,7 @@ def _score_risk(ctx: ExecuteContext) -> None:
             enable_sequence_analysis=False,
         )
     except Exception as e:  # noqa: BLE001 — shadow smart approval, non-blocking
-        logger.error("Smart approval error: %s", e, extra={"src_module": "shadow", "operation": "score_risk", "error": str(e)})
+        logger.exception("Smart approval error: %s", e, extra={"src_module": "shadow", "operation": "score_risk", "error": str(e)})
 
 
 def _scan_template(ctx: ExecuteContext) -> None:
@@ -406,7 +405,7 @@ def _scan_template(ctx: ExecuteContext) -> None:
     except ImportError as e:
         logger.warning("template_scanner or load_risk_rules not available: %s", e, extra={"src_module": "execute", "operation": "scan_template", "error": str(e)})
     except (ValueError, TypeError, OSError) as e:
-        logger.error("Template scan error (non-fatal): %s", e, extra={"src_module": "execute", "operation": "scan_template", "error": str(e)})
+        logger.exception("Template scan error (non-fatal): %s", e, extra={"src_module": "execute", "operation": "scan_template", "error": str(e)})
 
 
 def _extract_actual_decision(result: dict) -> str:
@@ -490,7 +489,7 @@ def _check_compliance(ctx: ExecuteContext) -> Optional[dict]:
                 'isError': True
             })
     except ImportError:
-        logger.error("compliance_checker module import failed - failing closed", extra={"src_module": "execute", "operation": "check_compliance"})
+        logger.exception("compliance_checker module import failed - failing closed", extra={"src_module": "execute", "operation": "check_compliance"})
         return mcp_result(ctx.req_id, {
             'content': [{
                 'type': 'text',
@@ -679,7 +678,7 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
 
     except ClientError as e:
         # Grant 失敗不影響主流程 → fallthrough
-        logger.error("_check_grant_session error", extra={"src_module": "grant", "operation": "_check_grant_session", "error": str(e)})
+        logger.exception("_check_grant_session error", extra={"src_module": "grant", "operation": "_check_grant_session", "error": str(e)})
         return None
 
 
@@ -1014,8 +1013,8 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
         try:
             table.delete_item(Key={'request_id': request_id})
         except ClientError as del_err:
-            logger.error("Failed to delete DDB record %s: %s", request_id, del_err, extra={"src_module": "execute", "operation": "orphan_cleanup", "request_id": request_id, "error": str(del_err)})
-        logger.error("Telegram notification failed for %s: %s", request_id, tg_err, extra={"src_module": "execute", "operation": "orphan_cleanup", "request_id": request_id, "error": str(tg_err)})
+            logger.exception("Failed to delete DDB record %s: %s", request_id, del_err, extra={"src_module": "execute", "operation": "orphan_cleanup", "request_id": request_id, "error": str(del_err)})
+        logger.exception("Telegram notification failed for %s: %s", request_id, tg_err, extra={"src_module": "execute", "operation": "orphan_cleanup", "request_id": request_id, "error": str(tg_err)})
         return mcp_result(ctx.req_id, {
             'content': [{
                 'type': 'text',
@@ -1150,7 +1149,7 @@ def mcp_tool_eks_get_token(req_id: str, arguments: dict) -> dict:
     from commands import generate_eks_token
 
     cluster_name = arguments.get('cluster_name', '').strip()
-    region = arguments.get('region', 'us-east-1').strip()
+    region = arguments.get('region', DEFAULT_REGION).strip()
     account = arguments.get('account', '').strip()
 
     if not cluster_name:
@@ -1202,7 +1201,7 @@ def mcp_tool_execute_native(req_id: str, arguments: dict) -> dict:
       "aws": {
         "service": "eks",
         "operation": "create_cluster",
-        "region": "us-east-1",
+        "region": DEFAULT_REGION,
         "account": "123456789012",
         "params": {...}
       },

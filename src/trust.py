@@ -10,7 +10,7 @@ Bouncer - Trust Session 模組
 import time
 import hashlib
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
+from typing import Any, Optional
 
 from botocore.exceptions import ClientError
 
@@ -62,6 +62,7 @@ _table = None
 
 
 def _get_table():
+    """Get table, with test override support. Unified fallback via db.table."""
     if _table is not None:
         return _table
     return _db.table
@@ -91,14 +92,14 @@ class TrustSession:
     bound_source: str = ''          # security-critical: bound at creation time
     creator_ip: str = ''            # IP of the approver at trust session creation time
     ttl: int = 0
-    _raw: Dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+    _raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     # ------------------------------------------------------------------
     # Factory
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_item(cls, item: Dict[str, Any]) -> 'TrustSession':
+    def from_item(cls, item: dict[str, Any]) -> 'TrustSession':
         """Construct a TrustSession from a raw DynamoDB item dict."""
         return cls(
             request_id=str(item.get('request_id', '')),
@@ -130,7 +131,7 @@ class TrustSession:
     def is_expired(self) -> bool:
         return self.remaining_seconds <= 0
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         """Return the underlying raw item dict (for backward-compatible callers)."""
         return self._raw
 
@@ -172,7 +173,7 @@ def get_trust_session(
     trust_scope: str,
     account_id: str,
     source: str = '',
-) -> Optional[Dict]:
+) -> Optional[dict]:
     """Query for an active trust session, validating source binding.
 
     Args:
@@ -222,7 +223,7 @@ def get_trust_session(
         return item
 
     except ClientError as e:
-        logger.error("Trust session check error: %s", e, extra={"src_module": "trust", "operation": "get_active_trust_session", "trust_id": trust_id, "error": str(e)})
+        logger.exception("Trust session check error: %s", e, extra={"src_module": "trust", "operation": "get_active_trust_session", "trust_id": trust_id, "error": str(e)})
         return None
 
 
@@ -292,7 +293,7 @@ def create_trust_session(
         from scheduler_service import get_trust_expiry_notifier
         get_trust_expiry_notifier().schedule(trust_id=trust_id, expires_at=expires_at)
     except ClientError as exc:  # pragma: no cover
-        logger.error("Failed to schedule trust expiry notification for %s: %s", trust_id, exc, extra={"src_module": "trust", "operation": "create_trust_session", "trust_id": trust_id, "error": str(exc)})
+        logger.exception("Failed to schedule trust expiry notification for %s: %s", trust_id, exc, extra={"src_module": "trust", "operation": "create_trust_session", "trust_id": trust_id, "error": str(exc)})
 
     return trust_id
 
@@ -319,11 +320,11 @@ def revoke_trust_session(trust_id: str) -> bool:
             from scheduler_service import get_trust_expiry_notifier
             get_trust_expiry_notifier().cancel(trust_id=trust_id)
         except ClientError as exc:  # pragma: no cover
-            logger.error("Failed to cancel trust expiry schedule for %s: %s", trust_id, exc, extra={"src_module": "trust", "operation": "revoke_trust_session", "trust_id": trust_id, "error": str(exc)})
+            logger.exception("Failed to cancel trust expiry schedule for %s: %s", trust_id, exc, extra={"src_module": "trust", "operation": "revoke_trust_session", "trust_id": trust_id, "error": str(exc)})
 
         return True
     except ClientError as e:
-        logger.error("Revoke trust session error: %s", e, extra={"src_module": "trust", "operation": "revoke_trust_session", "trust_id": trust_id, "error": str(e)})
+        logger.exception("Revoke trust session error: %s", e, extra={"src_module": "trust", "operation": "revoke_trust_session", "trust_id": trust_id, "error": str(e)})
         return False
 
 
@@ -408,7 +409,7 @@ def increment_trust_command_count(trust_id: str) -> int:
             logger.warning("Trust command count conditional update failed for %s (limit or expired)", trust_id, extra={"src_module": "trust", "operation": "increment_trust_command_count", "trust_id": trust_id})
             return 0
         except ClientError as e:
-            logger.error("Increment trust command count error: %s", e, extra={"src_module": "trust", "operation": "increment_trust_command_count", "trust_id": trust_id, "error": str(e)})
+            logger.exception("Increment trust command count error: %s", e, extra={"src_module": "trust", "operation": "increment_trust_command_count", "trust_id": trust_id, "error": str(e)})
             return 0
 
     # Rate limiting disabled: use original logic
@@ -434,7 +435,7 @@ def increment_trust_command_count(trust_id: str) -> int:
         logger.warning("Trust command count conditional update failed for %s (limit or expired)", trust_id, extra={"src_module": "trust", "operation": "increment_trust_command_count", "trust_id": trust_id})
         return 0
     except ClientError as e:
-        logger.error("Increment trust command count error: %s", e, extra={"src_module": "trust", "operation": "increment_trust_command_count", "trust_id": trust_id, "error": str(e)})
+        logger.exception("Increment trust command count error: %s", e, extra={"src_module": "trust", "operation": "increment_trust_command_count", "trust_id": trust_id, "error": str(e)})
         return 0
 
 
@@ -524,7 +525,7 @@ def should_trust_approve(
                 from metrics import emit_metric
                 emit_metric('Bouncer', 'TrustIPBlocked', 1, dimensions={'Event': 'blocked', 'Mode': 'strict'})
             except Exception:  # noqa: BLE001 — best-effort metrics
-                pass
+                logger.debug("Failed to emit TrustIPBlocked metric", exc_info=True)
             return False, session, f"IP mismatch blocked (strict mode): creator={creator_ip} caller={caller_ip}"
         else:
             # Default 'warn' mode: log warning + metric but allow the request
@@ -538,7 +539,7 @@ def should_trust_approve(
                 from metrics import emit_metric
                 emit_metric('Bouncer', 'TrustIPMismatch', 1, dimensions={'Event': 'mismatch', 'Mode': 'warn'})
             except Exception:  # noqa: BLE001 — best-effort metrics
-                pass
+                logger.debug("Failed to emit TrustIPMismatch metric", exc_info=True)
 
     return True, session, f"Trust session active ({remaining}s remaining)"
 
@@ -576,7 +577,7 @@ def track_command_executed(trust_id: str, command: str, success: bool) -> None:
             },
         )
     except Exception as exc:  # noqa: BLE001 — swallow errors, best-effort tracking
-        logger.error('track_command_executed failed for %s: %s', trust_id, exc, extra={"src_module": "trust", "operation": "track_command_executed", "trust_id": trust_id, "error": str(exc)})
+        logger.exception('track_command_executed failed for %s: %s', trust_id, exc, extra={"src_module": "trust", "operation": "track_command_executed", "trust_id": trust_id, "error": str(exc)})
 
 
 # ============================================================================
@@ -695,5 +696,5 @@ def increment_trust_upload_count(trust_id: str, content_size: int) -> bool:
         logger.warning("Trust upload conditional update failed for %s", trust_id, extra={"src_module": "trust", "operation": "increment_trust_upload_count", "trust_id": trust_id})
         return False
     except ClientError as e:
-        logger.error("Increment trust upload count error: %s", e, extra={"src_module": "trust", "operation": "increment_trust_upload_count", "trust_id": trust_id, "error": str(e)})
+        logger.exception("Increment trust upload count error: %s", e, extra={"src_module": "trust", "operation": "increment_trust_upload_count", "trust_id": trust_id, "error": str(e)})
         return False

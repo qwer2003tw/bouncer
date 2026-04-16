@@ -205,7 +205,7 @@ def analyze_changeset(
             )
         except ClientError as e:
             error_msg = str(e)
-            logger.error(
+            logger.exception(
                 "describe_changeset_error",
                 extra={
                     "src_module": "changeset_analyzer",

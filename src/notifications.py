@@ -134,7 +134,7 @@ def post_notification_setup(
         )
         logger.info("Stored telegram_message_id=%s for request %s", telegram_message_id, request_id, extra={"src_module": "notifications", "operation": "post_notification_setup", "request_id": request_id, "message_id": telegram_message_id})
     except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to store telegram_message_id for %s: %s", request_id, exc, extra={"src_module": "notifications", "operation": "post_notification_setup", "request_id": request_id, "error": str(exc)})
+        logger.exception("Failed to store telegram_message_id for %s: %s", request_id, exc, extra={"src_module": "notifications", "operation": "post_notification_setup", "request_id": request_id, "error": str(exc)})
 
     # 2. Schedule EventBridge expiry trigger (embed telegram_message_id as fallback)
     try:
@@ -147,7 +147,7 @@ def post_notification_setup(
             telegram_message_id=telegram_message_id,
         )
     except ClientError as exc:
-        logger.error("Failed to create expiry schedule for %s: %s", request_id, exc, extra={"src_module": "notifications", "operation": "post_notification_setup", "request_id": request_id, "error": str(exc)})
+        logger.exception("Failed to create expiry schedule for %s: %s", request_id, exc, extra={"src_module": "notifications", "operation": "post_notification_setup", "request_id": request_id, "error": str(exc)})
 
 
 def _store_notification_snapshot(request_id: str, text: str, message_id: int) -> None:
@@ -170,7 +170,7 @@ def _store_notification_snapshot(request_id: str, text: str, message_id: int) ->
             },
         )
     except Exception:  # noqa: BLE001
-        pass
+        logger.debug("Failed to emit notification metric", exc_info=True)
 
 
 def send_approval_request(request_id: str, command: str, reason: str, timeout: int = COMMAND_APPROVAL_TIMEOUT,
@@ -207,7 +207,7 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
             account_display = (parsed_account_id, role_name)
             account_mode = 'named'
         except (ValueError, IndexError) as e:
-            logger.error("Failed to parse assume_role ARN: %s", e, extra={"src_module": "notifications", "operation": "send_approval_request", "error": str(e)})
+            logger.exception("Failed to parse assume_role ARN: %s", e, extra={"src_module": "notifications", "operation": "send_approval_request", "error": str(e)})
             account_display = (assume_role, None)
             account_mode = 'role'
     else:
@@ -331,7 +331,7 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
         try:
             _store_notification_snapshot(request_id, text, message_id)
         except Exception:  # noqa: BLE001
-            pass
+            logger.debug("Failed to store notification snapshot", exc_info=True)
     return NotificationResult(ok=ok, message_id=message_id)
 
 def send_account_approval_request(request_id: str, action: str, account_id: str, name: str, role_arn: str, source: str, context: str = None):
@@ -372,7 +372,7 @@ def send_account_approval_request(request_id: str, action: str, account_id: str,
         result = _telegram.send_message_with_entities(text, entities, reply_markup=keyboard)
         return bool(result and result.get('ok'))
     except Exception as e:  # noqa: BLE001
-        logger.error("send_account_approval_request failed: %s", e, extra={
+        logger.exception("send_account_approval_request failed: %s", e, extra={
             "src_module": "notifications",
             "operation": "send_account_approval_request",
             "request_id": request_id,
@@ -579,10 +579,10 @@ def send_grant_request_notification(
                     expires_at=expires_at,
                 )
             except ClientError as pns_exc:
-                logger.error("post_notification_setup failed for %s: %s", grant_id, pns_exc, extra={"src_module": "notifications", "operation": "send_grant_request_notification", "grant_id": grant_id, "error": str(pns_exc)})
+                logger.exception("post_notification_setup failed for %s: %s", grant_id, pns_exc, extra={"src_module": "notifications", "operation": "send_grant_request_notification", "grant_id": grant_id, "error": str(pns_exc)})
 
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
-        logger.error("send_grant_request_notification error: %s", e, extra={"src_module": "notifications", "operation": "send_grant_request_notification", "error": str(e)})
+        logger.exception("send_grant_request_notification error: %s", e, extra={"src_module": "notifications", "operation": "send_grant_request_notification", "error": str(e)})
 
 def send_grant_execute_notification(
     command: str,
@@ -679,7 +679,7 @@ def send_grant_execute_notification(
         _telegram.send_message_with_entities(text, entities, reply_markup=keyboard, silent=True)
 
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
-        logger.error(f"[GRANT] send_grant_execute_notification error: {e}", extra={"src_module": "grant", "operation": "send_grant_execute_notification", "error": str(e)})
+        logger.exception(f"[GRANT] send_grant_execute_notification error: {e}", extra={"src_module": "grant", "operation": "send_grant_execute_notification", "error": str(e)})
 
 def send_grant_complete_notification(grant_id: str, reason: str) -> None:
     """發送 Grant Session 完成/過期通知（entities 模式，無 parse_mode）"""
@@ -695,7 +695,7 @@ def send_grant_complete_notification(grant_id: str, reason: str) -> None:
         _telegram.send_message_with_entities(text, entities, silent=True)
 
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
-        logger.error(f"[GRANT] send_grant_complete_notification error: {e}", extra={"src_module": "grant", "operation": "send_grant_complete_notification", "error": str(e)})
+        logger.exception(f"[GRANT] send_grant_complete_notification error: {e}", extra={"src_module": "grant", "operation": "send_grant_complete_notification", "error": str(e)})
 
 def send_blocked_notification(
     command: str,
@@ -716,7 +716,7 @@ def send_blocked_notification(
         _telegram.send_message_with_entities(text, entities, silent=True)
 
     except Exception as e:  # noqa: BLE001 — fire-and-forget
-        logger.error("send_blocked_notification error: %s", e, extra={"src_module": "notifications", "operation": "send_blocked_notification", "error": str(e)})
+        logger.exception("send_blocked_notification error: %s", e, extra={"src_module": "notifications", "operation": "send_blocked_notification", "error": str(e)})
 
 # ============================================================================
 # Trust Upload Notifications
@@ -756,7 +756,7 @@ def send_trust_upload_notification(
         _telegram.send_message_with_entities(text, entities, reply_markup=keyboard, silent=True)
 
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
-        logger.error("send_trust_upload_notification error: %s", e, extra={"src_module": "notifications", "operation": "send_trust_upload_notification", "error": str(e)})
+        logger.exception("send_trust_upload_notification error: %s", e, extra={"src_module": "notifications", "operation": "send_trust_upload_notification", "error": str(e)})
 
 
 def send_batch_upload_notification(
@@ -827,7 +827,7 @@ def send_batch_upload_notification(
         return NotificationResult(ok=ok, message_id=message_id)
 
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
-        logger.error("send_batch_upload_notification error: %s", e, extra={"src_module": "notifications", "operation": "send_batch_upload_notification", "error": str(e)})
+        logger.exception("send_batch_upload_notification error: %s", e, extra={"src_module": "notifications", "operation": "send_batch_upload_notification", "error": str(e)})
         return NotificationResult(ok=False, message_id=None)
 
 
@@ -857,7 +857,7 @@ def send_presigned_notification(
         _telegram.send_message_with_entities(text, entities, silent=True)
 
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
-        logger.error("send_presigned_notification error: %s", e, extra={"src_module": "notifications", "operation": "send_presigned_notification", "error": str(e)})
+        logger.exception("send_presigned_notification error: %s", e, extra={"src_module": "notifications", "operation": "send_presigned_notification", "error": str(e)})
 
 
 def send_presigned_batch_notification(
@@ -882,7 +882,7 @@ def send_presigned_batch_notification(
         _telegram.send_message_with_entities(text, entities, silent=True)
 
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
-        logger.error("send_presigned_batch_notification error: %s", e, extra={"src_module": "notifications", "operation": "send_presigned_batch_notification", "error": str(e)})
+        logger.exception("send_presigned_batch_notification error: %s", e, extra={"src_module": "notifications", "operation": "send_presigned_batch_notification", "error": str(e)})
 
 
 # ============================================================================
@@ -959,7 +959,7 @@ def send_trust_session_summary(trust_item: dict, end_reason: str = 'revoke') -> 
         _telegram.send_message_with_entities(text, entities, silent=True)
 
     except Exception as exc:  # noqa: BLE001 — fire-and-forget
-        logger.error('send_trust_session_summary error: %s', exc, extra={"src_module": "notifications", "operation": "send_trust_session_summary", "error": str(exc)})
+        logger.exception('send_trust_session_summary error: %s', exc, extra={"src_module": "notifications", "operation": "send_trust_session_summary", "error": str(exc)})
 # Deploy Frontend Notification (sprint9-003)
 # ============================================================================
 
@@ -1036,7 +1036,7 @@ def send_deploy_frontend_notification(
         return NotificationResult(ok=ok, message_id=message_id)
 
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as exc:
-        logger.error("send_deploy_frontend_notification error: %s", exc, extra={"src_module": "notifications", "operation": "send_deploy_frontend_notification", "error": str(exc)})
+        logger.exception("send_deploy_frontend_notification error: %s", exc, extra={"src_module": "notifications", "operation": "send_deploy_frontend_notification", "error": str(exc)})
         return NotificationResult(ok=False, message_id=None)
 
 
@@ -1104,4 +1104,4 @@ def send_expiry_warning_notification(request_id: str, command_preview: str, sour
         text, entities = mb.build()
         _telegram.send_message_with_entities(text, entities)
     except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
-        logger.error("send_expiry_warning_notification error: %s", e, extra={"src_module": "notifications", "operation": "send_expiry_warning_notification", "error": str(e)})
+        logger.exception("send_expiry_warning_notification error: %s", e, extra={"src_module": "notifications", "operation": "send_expiry_warning_notification", "error": str(e)})

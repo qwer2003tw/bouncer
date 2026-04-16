@@ -3,6 +3,7 @@ Bouncer Deploy Pre-flight Checks
 Pre-deploy validation logic extracted from deployer.py
 """
 import os
+from constants import DEFAULT_REGION
 import re
 import subprocess
 import boto3
@@ -21,7 +22,7 @@ def _get_secretsmanager_client():
     """
     import deployer as _deployer
     if _deployer.secretsmanager_client is None:
-        region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+        region = DEFAULT_REGION
         _deployer.secretsmanager_client = boto3.client('secretsmanager', region_name=region)
     return _deployer.secretsmanager_client
 
@@ -73,7 +74,7 @@ def _get_changed_files(repo_path: str = '.') -> list[str]:
         if result.returncode == 0:
             return [f for f in result.stdout.strip().split('\n') if f]
     except Exception:
-        pass
+        logger.warning("Failed to detect secrets via git command", exc_info=True)
     return []
 
 
@@ -104,7 +105,7 @@ def preflight_check_secrets(project: dict, branch: str) -> list:
         github_pat_response = sm_client.get_secret_value(SecretId='sam-deployer/github-pat')
         github_pat = github_pat_response['SecretString']
     except ClientError as e:
-        logger.error("Failed to get GitHub PAT: %s", e, extra={"src_module": "deployer", "operation": "get_preflight_secrets", "error": str(e)})
+        logger.exception("Failed to get GitHub PAT: %s", e, extra={"src_module": "deployer", "operation": "get_preflight_secrets", "error": str(e)})
         return []  # graceful degradation
 
     # Clone repo to temp dir
@@ -122,7 +123,7 @@ def preflight_check_secrets(project: dict, branch: str) -> list:
         clone_cmd = ['git', 'clone', '--depth', '1', '--branch', branch, clone_url, tmpdir]
         result = subprocess.run(clone_cmd, capture_output=True, text=True, timeout=30)
         if result.returncode != 0:
-            logger.error("Git clone failed: %s", result.stderr, extra={"src_module": "deployer", "operation": "git_clone", "error": result.stderr[:200]})
+            logger.exception("Git clone failed: %s", result.stderr, extra={"src_module": "deployer", "operation": "git_clone", "error": result.stderr[:200]})
             return []  # graceful degradation
 
         # Find template.yaml
@@ -164,13 +165,13 @@ def preflight_check_secrets(project: dict, branch: str) -> list:
             except sm_client.exceptions.ResourceNotFoundException:
                 missing_secrets.append(secret_name)
             except ClientError as e:
-                logger.error("Error checking secret %s: %s", secret_name, e, extra={"src_module": "deployer", "operation": "check_secret", "secret_name": secret_name, "error": str(e)})
+                logger.exception("Error checking secret %s: %s", secret_name, e, extra={"src_module": "deployer", "operation": "check_secret", "secret_name": secret_name, "error": str(e)})
                 missing_secrets.append(secret_name)
 
         return missing_secrets
 
     except Exception as e:  # noqa: BLE001 — preflight fail-closed: subprocess, file I/O, git operations
-        logger.error("Preflight check error: %s", e, extra={"src_module": "deployer", "operation": "preflight_check", "error": str(e)})
+        logger.exception("Preflight check error: %s", e, extra={"src_module": "deployer", "operation": "preflight_check", "error": str(e)})
         return []  # graceful degradation
     finally:
         if tmpdir and os.path.exists(tmpdir):

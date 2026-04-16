@@ -329,7 +329,7 @@ def log_decision(table, request_id, command, reason, source, account_id,
     try:
         table.put_item(Item=item)
     except ClientError as e:
-        logger.error("Failed to log decision: %s", e, extra={"src_module": "utils", "operation": "log_decision", "error": str(e)})
+        logger.exception("Failed to log decision: %s", e, extra={"src_module": "utils", "operation": "log_decision", "error": str(e)})
     return item
 
 
@@ -388,4 +388,4 @@ def record_execution_error(table, request_id: str, exit_code: int,
             },
         )
     except Exception as e:  # noqa: BLE001
-        logger.error("Failed to record execution error for %s: %s", request_id, e, extra={"src_module": "utils", "operation": "record_execution_error", "request_id": request_id, "error": str(e)})
+        logger.exception("Failed to record execution error for %s: %s", request_id, e, extra={"src_module": "utils", "operation": "record_execution_error", "request_id": request_id, "error": str(e)})

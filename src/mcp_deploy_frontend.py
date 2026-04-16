@@ -24,7 +24,7 @@ from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
 from aws_clients import get_s3_client
 
-from constants import DEFAULT_ACCOUNT_ID, APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER, UPLOAD_TIMEOUT
+from constants import DEFAULT_ACCOUNT_ID, APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER, UPLOAD_TIMEOUT, DEFAULT_REGION, TTL_30_DAYS
 from db import table, deployer_projects_table, deployer_history_table
 from notifications import send_deploy_frontend_notification
 from utils import generate_request_id, mcp_result, mcp_error
@@ -42,7 +42,7 @@ logger = Logger(service="bouncer")
 
 # Environment variable for projects table (same as deployer.py)
 _PROJECTS_TABLE = os.environ.get('PROJECTS_TABLE', 'bouncer-projects')
-_REGION = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+_REGION = DEFAULT_REGION
 
 # ---------------------------------------------------------------------------
 # Security: Blocked Extensions
@@ -91,7 +91,7 @@ def _get_frontend_config(project_id: str) -> Optional[dict]:
         # Map DDB item fields -> canonical config keys
         frontend_bucket = item.get('frontend_bucket')
         distribution_id = item.get('frontend_distribution_id')
-        region = item.get('frontend_region', 'us-east-1')
+        region = item.get('frontend_region', DEFAULT_REGION)
         deploy_role_arn = item.get('frontend_deploy_role_arn')
 
         if not frontend_bucket or not distribution_id:
@@ -381,7 +381,7 @@ def _submit_deploy_frontend_approval(
         "project": project,
         "frontend_bucket": project_config["frontend_bucket"],
         "distribution_id": project_config["distribution_id"],
-        "region": project_config.get("region", "us-east-1"),
+        "region": project_config.get("region", DEFAULT_REGION),
         "deploy_role_arn": project_config.get("deploy_role_arn"),
         "staging_bucket": staging_bucket,
         "files": json.dumps(files_manifest),
@@ -400,7 +400,7 @@ def _submit_deploy_frontend_approval(
     target_info = {
         "frontend_bucket": project_config["frontend_bucket"],
         "distribution_id": project_config["distribution_id"],
-        "region": project_config.get("region", "us-east-1"),
+        "region": project_config.get("region", DEFAULT_REGION),
     }
 
     notif_result = send_deploy_frontend_notification(
@@ -417,7 +417,7 @@ def _submit_deploy_frontend_approval(
         try:
             table.delete_item(Key={"request_id": request_id})
         except ClientError as del_err:
-            logger.error("DDB cleanup failed for %s: %s", request_id, del_err, extra={"src_module": "deploy_frontend", "operation": "submit_deploy_frontend", "request_id": request_id, "error": str(del_err)})
+            logger.exception("DDB cleanup failed for %s: %s", request_id, del_err, extra={"src_module": "deploy_frontend", "operation": "submit_deploy_frontend", "request_id": request_id, "error": str(del_err)})
         for rk in staged_keys:
             try:
                 s3.delete_object(Bucket=staging_bucket, Key=rk)
@@ -537,7 +537,7 @@ def _execute_deploy_frontend_approved(
         else:
             s3_target = get_s3_client()
     except ClientError as exc:
-        logger.error("[DEPLOY-FRONTEND] Trust deploy AssumeRole failed for %s: %s", deploy_role_arn, exc, extra={"src_module": "deploy_frontend", "operation": "trust_deploy_assume_role", "role_arn": deploy_role_arn, "error": str(exc)})
+        logger.exception("[DEPLOY-FRONTEND] Trust deploy AssumeRole failed for %s: %s", deploy_role_arn, exc, extra={"src_module": "deploy_frontend", "operation": "trust_deploy_assume_role", "role_arn": deploy_role_arn, "error": str(exc)})
         return mcp_result(req_id, {
             "content": [{"type": "text", "text": json.dumps({
                 "status": "error",
@@ -570,7 +570,7 @@ def _execute_deploy_frontend_approved(
             deployed.append(filename)
             logger.info("Trust deploy file %s -> %s", filename, frontend_bucket, extra={"src_module": "deploy_frontend", "operation": "trust_deploy_file", "file_name": filename, "bucket": frontend_bucket})
         except ClientError as exc:
-            logger.error("Trust deploy failed for %s: %s", filename, exc, extra={"src_module": "deploy_frontend", "operation": "trust_deploy_file", "file_name": filename, "error": str(exc)})
+            logger.exception("Trust deploy failed for %s: %s", filename, exc, extra={"src_module": "deploy_frontend", "operation": "trust_deploy_file", "file_name": filename, "error": str(exc)})
             failed.append({"filename": filename, "reason": str(exc)})
 
     # 5. CloudFront invalidation
@@ -588,7 +588,7 @@ def _execute_deploy_frontend_approved(
             )
             logger.info("[DEPLOY-FRONTEND] Trust deploy CloudFront invalidation created for %s", distribution_id, extra={"src_module": "deploy_frontend", "operation": "cloudfront_invalidation", "distribution_id": distribution_id})
         except ClientError as exc:
-            logger.error("[DEPLOY-FRONTEND] Trust deploy CloudFront invalidation failed: %s", exc, extra={"src_module": "deploy_frontend", "operation": "cloudfront_invalidation", "distribution_id": distribution_id})
+            logger.exception("[DEPLOY-FRONTEND] Trust deploy CloudFront invalidation failed: %s", exc, extra={"src_module": "deploy_frontend", "operation": "cloudfront_invalidation", "distribution_id": distribution_id})
             cf_invalidation_failed = True
 
     # 6. Increment trust command count (s59-002: catch rate exceeded)
@@ -639,11 +639,11 @@ def _execute_deploy_frontend_approved(
             "request_id": request_id,
             "trust_bypass": True,
             "trust_scope": trust_scope,
-            "ttl": now + 30 * 24 * 3600,  # 30 days
+            "ttl": now + TTL_30_DAYS,  # 30 days
         }
         deployer_history_table.put_item(Item=history_item)
     except ClientError as exc:
-        logger.error("[DEPLOY-FRONTEND] Trust deploy history write failed for %s: %s", request_id, exc, extra={"src_module": "deploy_frontend", "operation": "trust_deploy_history_write", "request_id": request_id, "error": str(exc)})
+        logger.exception("[DEPLOY-FRONTEND] Trust deploy history write failed for %s: %s", request_id, exc, extra={"src_module": "deploy_frontend", "operation": "trust_deploy_history_write", "request_id": request_id, "error": str(exc)})
     # 9. Send silent trust notification
     remaining = int(trust_session.get("expires_at", 0)) - now
     remaining_str = f"{remaining // 60}:{remaining % 60:02d}" if remaining > 0 else "0:00"
@@ -912,7 +912,7 @@ def mcp_tool_confirm_frontend_deploy(req_id: str, arguments: dict) -> dict:
         "files": json.dumps(files_manifest),
         "frontend_bucket": frontend_config["frontend_bucket"],
         "distribution_id": frontend_config["distribution_id"],
-        "region": frontend_config.get("region", "us-east-1"),
+        "region": frontend_config.get("region", DEFAULT_REGION),
         "deploy_role_arn": frontend_config.get("deploy_role_arn") or project_config.get("deploy_role_arn"),
         "staging_bucket": staging_bucket,
         "file_count": len(files_manifest),
@@ -933,7 +933,7 @@ def mcp_tool_confirm_frontend_deploy(req_id: str, arguments: dict) -> dict:
             target_info={
                 "frontend_bucket": frontend_config["frontend_bucket"],
                 "distribution_id": frontend_config["distribution_id"],
-                "region": frontend_config.get("region", "us-east-1"),
+                "region": frontend_config.get("region", DEFAULT_REGION),
             },
             project=project,
             reason=reason,

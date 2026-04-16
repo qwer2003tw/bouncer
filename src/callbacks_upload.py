@@ -15,15 +15,14 @@ from telegram import escape_markdown, update_message, answer_callback
 from constants import TRUST_SESSION_MAX_UPLOADS, TRUST_SESSION_MAX_COMMANDS
 from metrics import emit_metric
 from mcp_upload import execute_upload, _verify_upload
+import db as _db
 
 logger = Logger()
 
 
-# Import helper functions from callbacks.py (these remain in callbacks.py)
 def _get_table():
-    """Import from callbacks.py to avoid circular dependency"""
-    from callbacks import _get_table as _gt
-    return _gt()
+    return _db.table
+
 
 
 def _update_request_status(table, request_id: str, status: str, approver: str, extra_attrs: dict = None) -> None:
@@ -143,7 +142,7 @@ def _parse_callback_files_manifest(item: dict, callback_id: str) -> 'list | dict
         files_manifest = _json.loads(item.get('files', '[]'))
         return files_manifest
     except _json.JSONDecodeError as e:
-        logger.error("Failed to parse files manifest: %s", e, extra={"src_module": "callbacks", "operation": "parse_files_manifest", "error": str(e)}, exc_info=True)
+        logger.exception("Failed to parse files manifest: %s", e, extra={"src_module": "callbacks", "operation": "parse_files_manifest", "error": str(e)}, exc_info=True)
         answer_callback(callback_id, '❌ 檔案清單解析失敗')
         return response(500, {'error': 'Failed to parse files manifest'})
 

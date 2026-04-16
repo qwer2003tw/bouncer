@@ -2,13 +2,13 @@
 Bouncer Deploy Database Operations
 DB/lock/project CRUD operations extracted from deployer.py
 """
-import os
 import subprocess
 import time
 import boto3
 from botocore.exceptions import ClientError
 import db as _db
 from aws_lambda_powertools import Logger
+from constants import DEFAULT_REGION, TTL_30_DAYS
 
 logger = Logger(service="bouncer")
 
@@ -17,8 +17,7 @@ def _get_dynamodb():
     """Get DynamoDB resource (uses deployer module global for test compatibility)"""
     import deployer
     if deployer._dynamodb is None:
-        region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
-        deployer._dynamodb = boto3.resource('dynamodb', region_name=region)
+        deployer._dynamodb = boto3.resource('dynamodb', region_name=DEFAULT_REGION)
     return deployer._dynamodb
 
 
@@ -267,7 +266,7 @@ def create_deploy_record(deploy_id: str, project_id: str, config: dict) -> dict:
         'commit_sha': git_info['commit_sha'],
         'commit_short': git_info['commit_short'],
         'commit_message': git_info['commit_message'],
-        'ttl': int(time.time()) + 30 * 24 * 3600  # 30 天
+        'ttl': int(time.time()) + TTL_30_DAYS  # 30 天
     }
     # DynamoDB 不允許存 None，過濾掉 null 欄位
     item = {k: v for k, v in item.items() if v is not None}
@@ -289,7 +288,7 @@ def update_deploy_record(deploy_id: str, updates: dict):
             ExpressionAttributeValues=expr_values
         )
     except ClientError as e:
-        logger.error(f"Error updating deploy record: {e}", extra={"src_module": "deploy_db", "operation": "update_deploy_record", "deploy_id": deploy_id})
+        logger.exception(f"Error updating deploy record: {e}", extra={"src_module": "deploy_db", "operation": "update_deploy_record", "deploy_id": deploy_id})
 
 
 def get_deploy_record(deploy_id: str) -> dict:
@@ -313,5 +312,5 @@ def get_deploy_history(project_id: str, limit: int = 10) -> list:
         )
         return result.get('Items', [])
     except ClientError as e:
-        logger.error("Error getting deploy history: %s", e, extra={"src_module": "deploy_db", "operation": "get_deploy_history", "error": str(e)})
+        logger.exception("Error getting deploy history: %s", e, extra={"src_module": "deploy_db", "operation": "get_deploy_history", "error": str(e)})
         return []

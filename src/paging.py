@@ -41,6 +41,7 @@ _table = None
 
 
 def _get_table():
+    """Get table, with test override support. Unified fallback via db.table."""
     if _table is not None:
         return _table
     return _db.table
@@ -178,7 +179,7 @@ def get_paged_output(page_request_id: str) -> dict:
             'next_page': next_page,
         }
     except ClientError as e:
-        logger.error("get_paged_output error: %s", e, extra={"src_module": "paging", "operation": "get_paged_output", "error": str(e)})
+        logger.exception("get_paged_output error: %s", e, extra={"src_module": "paging", "operation": "get_paged_output", "error": str(e)})
         return {'error': f'取得分頁失敗: {str(e)}'}
 
 
@@ -204,7 +205,7 @@ def send_remaining_pages(request_id: str, total_pages: int) -> None:
             else:
                 logger.warning("send_remaining_pages: page %s not found in DynamoDB", page_id, extra={"src_module": "paging", "operation": "send_remaining_pages", "page_id": page_id})
         except (ClientError, OSError, TimeoutError, ConnectionError) as e:
-            logger.error("send_remaining_pages error on page %d: %s", page_num, e, extra={"src_module": "paging", "operation": "send_remaining_pages", "page_num": page_num, "error": str(e)})
+            logger.exception("send_remaining_pages error on page %d: %s", page_num, e, extra={"src_module": "paging", "operation": "send_remaining_pages", "page_num": page_num, "error": str(e)})
             # Continue sending remaining pages even if one fails
 
 

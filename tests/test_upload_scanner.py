@@ -271,8 +271,8 @@ class TestErrorHandling:
             scan_upload('sensitive.yaml', b'hello world', 'text/yaml')
 
             # Verify structured logging
-            mock_logger.error.assert_called_once()
-            call_kwargs = mock_logger.error.call_args[1]
+            mock_logger.exception.assert_called_once()
+            call_kwargs = mock_logger.exception.call_args[1]
             extra = call_kwargs['extra']
             assert extra['src_module'] == 'upload_scanner'
             assert extra['operation'] == 'scan_upload'
