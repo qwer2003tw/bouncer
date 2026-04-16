@@ -145,6 +145,15 @@ def handle_failure(event):
     if len(error_message) > 500:
         error_message = error_message[:500] + '...'
 
+    # Rollback guidance
+    rollback_hint = (
+        "\n\n🔄 *Rollback 指引：*\n"
+        f"• CFN stack 狀態可能是 `UPDATE_ROLLBACK_COMPLETE`（已自動 rollback）\n"
+        f"• 確認：`bouncer_deploy_status deploy_id={deploy_id}`\n"
+        f"• 查歷史：`bouncer_deploy_history project={project_id} limit=3`\n"
+        f"• 手動 rollback：重新 deploy 上一個成功版本"
+    )
+
     text = (
         f"❌ *部署失敗*\n\n"
         f"📦 *專案：* {project_id}\n"
@@ -153,6 +162,7 @@ def handle_failure(event):
         f"❗ *失敗階段：* {phase}\n"
         f"📄 *錯誤：*\n```\n{error_message}\n```\n\n"
         f"⏱️ *執行時間：* {format_duration(duration)}"
+        f"{rollback_hint}"
     )
 
     if message_id:
