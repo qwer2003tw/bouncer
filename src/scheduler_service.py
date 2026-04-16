@@ -18,6 +18,7 @@ from typing import Optional
 
 from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
+from aws_clients import get_client
 from constants import DEFAULT_REGION, SCHEDULE_GROUP_NAME, SCHEDULER_ROLE_ARN, LAMBDA_FUNCTION_ARN, SCHEDULER_ENABLED
 
 logger = Logger(service="bouncer")
@@ -491,10 +492,7 @@ class SchedulerService:
     def _get_client(self):
         """Return the boto3 scheduler client, lazy-initialising if needed."""
         if self._client is None:
-            import boto3
-
-            region = DEFAULT_REGION
-            self._client = boto3.client("scheduler", region_name=region)
+            self._client = get_client("scheduler", DEFAULT_REGION)
         return self._client
 
 

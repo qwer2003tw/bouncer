@@ -10,6 +10,7 @@ from constants import DEFAULT_REGION
 import urllib.error
 from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
+from aws_clients import get_client
 
 from telegram import answer_callback, update_message, escape_markdown
 from utils import response
@@ -93,7 +94,6 @@ def handle_show_page(request_id: str, callback: dict) -> dict:
 def handle_infra_approval(action: str, request_id: str, callback: dict, user_id: str) -> dict:
     """Handle infra_approve/infra_deny callbacks for WaitForInfraApproval SFN state."""
     from deployer import get_deploy_record, update_deploy_record
-    import boto3 as _boto3
     import json as _json
     import time as _time
 
@@ -114,7 +114,7 @@ def handle_infra_approval(action: str, request_id: str, callback: dict, user_id:
         update_message(msg_id, '❌ *審批已過期*\n\n`' + deploy_id + '`\n\n請重新呼叫 bouncer_deploy。', remove_buttons=True)
         return response(200, {'ok': True})
 
-    sfn = _boto3.client('stepfunctions', region_name=DEFAULT_REGION)
+    sfn = get_client('stepfunctions', DEFAULT_REGION)
     if action == 'infra_approve':
         sfn.send_task_success(
             taskToken=task_token,

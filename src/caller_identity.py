@@ -9,7 +9,7 @@ import json
 import logging
 import time
 
-import boto3
+from aws_clients import get_client
 from constants import DEFAULT_REGION, REQUEST_SECRET, PUBLIC_BOT_ROLE_ARN
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ def _load_registry():
         return _registry_cache
 
     bots = {}
-    sm = boto3.client('secretsmanager', region_name=_SM_REGION)
+    sm = get_client('secretsmanager', _SM_REGION)
 
     for bot_id, config in _BOT_SECRETS.items():
         try:

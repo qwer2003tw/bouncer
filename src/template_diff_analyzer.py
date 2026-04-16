@@ -9,7 +9,7 @@ import urllib.request
 import urllib.error
 from dataclasses import dataclass, field
 from constants import DEFAULT_REGION
-import boto3
+from aws_clients import get_client
 
 HIGH_RISK_PATTERNS: list[tuple[str, str]] = [
     (r'Principal\s*:\s*["\']?\*["\']?', "Principal:* — 允許任何人呼叫"),
@@ -58,7 +58,7 @@ class TemplateDiffResult:
 
 
 def _get_github_pat(secret_id: str) -> str:
-    sm = boto3.client('secretsmanager', region_name=DEFAULT_REGION)
+    sm = get_client('secretsmanager', DEFAULT_REGION)
     return sm.get_secret_value(SecretId=secret_id)['SecretString']
 
 

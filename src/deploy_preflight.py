@@ -6,9 +6,9 @@ import os
 from constants import DEFAULT_REGION
 import re
 import subprocess
-import boto3
 from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
+from aws_clients import get_client
 
 logger = Logger(service="bouncer")
 
@@ -21,7 +21,7 @@ def _get_secretsmanager_client():
     """Get Secrets Manager client (lazy init for test compatibility)"""
     global secretsmanager_client
     if secretsmanager_client is None:
-        secretsmanager_client = boto3.client('secretsmanager', region_name=DEFAULT_REGION)
+        secretsmanager_client = get_client('secretsmanager', DEFAULT_REGION)
     return secretsmanager_client
 
 

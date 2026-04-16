@@ -6,7 +6,6 @@ import json
 import re
 import time
 import uuid
-import boto3
 from botocore.exceptions import ClientError
 from metrics import emit_metric
 from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native, generate_display_summary
@@ -14,6 +13,7 @@ import db as _db
 import notifications
 from aws_lambda_powertools import Logger
 from telegram import unpin_message
+from aws_clients import get_client
 from constants import (
     APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER,
     DEPLOY_MODE_MANUAL, DEPLOY_MODE_AUTO_CODE, VALID_DEPLOY_MODES,
@@ -55,14 +55,14 @@ cfn_client = None
 def _get_sfn_client():
     global sfn_client
     if sfn_client is None:
-        sfn_client = boto3.client('stepfunctions', region_name=DEFAULT_REGION)
+        sfn_client = get_client('stepfunctions', DEFAULT_REGION)
     return sfn_client
 
 
 def _get_cfn_client():
     global cfn_client
     if cfn_client is None:
-        cfn_client = boto3.client('cloudformation', region_name=DEFAULT_REGION)
+        cfn_client = get_client('cloudformation', DEFAULT_REGION)
     return cfn_client
 
 
