@@ -583,7 +583,6 @@ class TestMCPToolHandlersAdditional:
     @patch('telegram.send_telegram_message')
     def test_mcp_tool_remove_account_default(self, mock_telegram, app_module):
         """不能移除預設帳號"""
-        import mcp_tools
         import mcp_admin
         original = mcp_admin.DEFAULT_ACCOUNT_ID
         try:
@@ -731,7 +730,6 @@ class TestMCPRemoveAccount:
     @patch('telegram.send_telegram_message')
     def test_remove_default_account_blocked(self, mock_telegram, app_module):
         """不能移除預設帳號"""
-        import mcp_tools
         import mcp_admin
         original = mcp_admin.DEFAULT_ACCOUNT_ID
         try:

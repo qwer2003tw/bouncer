@@ -109,7 +109,6 @@ class TestCrossAccountUpload:
     @pytest.fixture(autouse=True)
     def setup_default_account(self, monkeypatch, app_module):
         """設定預設帳號 ID for upload tests"""
-        import mcp_tools
         import mcp_upload
         monkeypatch.setattr(mcp_upload, 'DEFAULT_ACCOUNT_ID', '111111111111')
 

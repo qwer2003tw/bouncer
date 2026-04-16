@@ -20,7 +20,7 @@ Usage:
 BOUNCER_MODS = [
     'app', 'db', 'trust', 'notifications', 'callbacks',
     'callbacks_command', 'callbacks_upload', 'callbacks_grant',
-    'mcp_execute', 'mcp_tools', 'telegram', 'commands',
+    'mcp_execute', 'telegram', 'commands',
     'mcp_upload', 'mcp_admin', 'mcp_grant', 'mcp_history', 'mcp_confirm',
     'mcp_presigned', 'accounts', 'rate_limit', 'utils',
     'paging', 'smart_approval', 'risk_scorer', 'template_scanner',

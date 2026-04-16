@@ -44,7 +44,7 @@ if SRC_DIR not in sys.path:
 
 _SRC_MODS = [
     "mcp_confirm", "mcp_presigned", "db", "constants", "utils", "accounts",
-    "mcp_tools", "mcp_upload", "mcp_admin", "mcp_execute", "app",
+    "mcp_upload", "mcp_admin", "mcp_execute", "app",
     "trust", "telegram", "notifications", "callbacks", "rate_limit",
     "commands", "paging", "tool_schema", "grant", "smart_approval",
     "risk_scorer", "sequence_analyzer", "compliance_checker",

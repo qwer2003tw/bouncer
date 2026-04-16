@@ -31,7 +31,7 @@ import boto3
 BOUNCER_MODS = [
     'app', 'db', 'trust', 'notifications', 'callbacks',
     'callbacks_command', 'callbacks_upload', 'callbacks_grant',
-    'mcp_execute', 'mcp_tools', 'telegram', 'commands',
+    'mcp_execute', 'telegram', 'commands',
     'mcp_upload', 'mcp_admin', 'mcp_grant', 'mcp_history', 'mcp_confirm',
     'mcp_presigned', 'accounts', 'rate_limit', 'utils',
     'paging', 'smart_approval', 'risk_scorer', 'template_scanner',
@@ -202,7 +202,7 @@ def app_module(mock_dynamodb):
     # 重新載入模組（包括新模組 — Sprint 58 s58-001 補充）
     for mod in ['app', 'telegram', 'paging', 'trust', 'commands', 'notifications', 'db',
                 'callbacks', 'callbacks_command', 'callbacks_upload', 'callbacks_grant',
-                'mcp_tools', 'mcp_execute', 'mcp_upload', 'mcp_admin',
+                'mcp_execute', 'mcp_upload', 'mcp_admin',
                 'accounts', 'rate_limit', 'smart_approval',
                 'constants', 'utils', 'risk_scorer', 'template_scanner',
                 'scheduler_service', 'otp', 'mcp_grant', 'webhook_router',

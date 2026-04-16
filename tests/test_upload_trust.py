@@ -76,7 +76,7 @@ def app_module(mock_dynamodb):
     os.environ['MCP_MAX_WAIT'] = '5'
 
     for mod in ['app', 'telegram', 'paging', 'trust', 'commands', 'notifications', 'db',
-                'callbacks', 'callbacks_upload', 'mcp_tools', 'mcp_execute', 'mcp_upload', 'mcp_admin', 'accounts', 'rate_limit', 'smart_approval',
+                'callbacks', 'callbacks_upload', 'mcp_execute', 'mcp_upload', 'mcp_admin', 'accounts', 'rate_limit', 'smart_approval',
                 'tool_schema', 'constants', 'grant', 'risk_scorer',
                 'src.app', 'src.telegram', 'src.trust']:
         if mod in sys.modules:
@@ -335,7 +335,7 @@ class TestIncrementTrustUploadCount:
 class TestCheckUploadTrust:
 
     def _make_ctx(self, trust_scope='', legacy_bucket=None, legacy_key=None):
-        from mcp_tools import UploadContext
+        from mcp_upload import UploadContext
         return UploadContext(
             req_id='test', filename='test.txt', content_b64=base64.b64encode(b'x').decode(),
             content_type='text/plain', content_size=1, reason='test', source='test',
@@ -345,12 +345,12 @@ class TestCheckUploadTrust:
         )
 
     def test_no_trust_scope(self, app_module):
-        from mcp_tools import _check_upload_trust
+        from mcp_upload import _check_upload_trust
         ctx = self._make_ctx(trust_scope='')
         assert _check_upload_trust(ctx) is None
 
     def test_custom_s3_uri(self, app_module):
-        from mcp_tools import _check_upload_trust
+        from mcp_upload import _check_upload_trust
         ctx = self._make_ctx(trust_scope='test', legacy_bucket='custom-bucket',
                              legacy_key='custom-key')
         assert _check_upload_trust(ctx) is None
@@ -363,7 +363,7 @@ class TestCheckUploadTrust:
 class TestBatchUploadValidation:
 
     def _call(self, arguments, app_module):
-        from mcp_tools import mcp_tool_upload_batch
+        from mcp_upload import mcp_tool_upload_batch
         result = mcp_tool_upload_batch('test-req', arguments)
         # Handle Lambda-style response
         if isinstance(result, dict) and 'body' in result:
@@ -557,16 +557,16 @@ class TestUploadToolSchema:
 class TestFormatSizeHuman:
 
     def test_bytes(self, app_module):
-        from mcp_tools import _format_size_human
+        from mcp_upload import _format_size_human
         assert _format_size_human(500) == '500 bytes'
 
     def test_kb(self, app_module):
-        from mcp_tools import _format_size_human
+        from mcp_upload import _format_size_human
         result = _format_size_human(2048)
         assert 'KB' in result
 
     def test_mb(self, app_module):
-        from mcp_tools import _format_size_human
+        from mcp_upload import _format_size_human
         result = _format_size_human(3 * 1024 * 1024)
         assert 'MB' in result
 

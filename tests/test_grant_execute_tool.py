@@ -85,7 +85,7 @@ def mcp_module(mock_dynamodb):
         'grant', 'db', 'constants', 'trust', 'commands', 'compliance_checker',
         'risk_scorer', 'mcp_execute', 'mcp_grant', 'chain_analyzer', 'mcp_upload', 'mcp_admin', 'notifications', 'telegram', 'app',
         'utils', 'accounts', 'rate_limit', 'paging', 'callbacks',
-        'smart_approval', 'tool_schema', 'metrics', 'mcp_tools',
+        'smart_approval', 'tool_schema', 'metrics',
     ]
     for mod in modules_to_clear:
         if mod in sys.modules:
