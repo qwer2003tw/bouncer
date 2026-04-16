@@ -490,6 +490,8 @@ class TestApproveCallbackS3Copy:
              patch('constants.DEFAULT_ACCOUNT_ID', '111111111111'):
             import callbacks
             callbacks._db.table = table
+            import callbacks_upload
+            callbacks_upload._db.table = table
 
             result = callbacks.handle_upload_batch_callback(
                 action='approve',
