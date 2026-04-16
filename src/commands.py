@@ -663,6 +663,13 @@ def execute_boto3_native(
     else:
         client = boto3.client(service, region_name=region)
 
+    # Auto-convert PascalCase to snake_case (e.g. DescribeInstances → describe_instances)
+    import re as _re
+    if not hasattr(client, operation) and operation[0].isupper():
+        snake = _re.sub(r'(?<!^)(?=[A-Z])', '_', operation).lower()
+        if hasattr(client, snake):
+            operation = snake
+
     # Validate service and operation exist
     if not hasattr(client, operation):
         return f'❌ 不支援的操作: {service}.{operation}'
