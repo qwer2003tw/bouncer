@@ -177,3 +177,26 @@ scripts/      # run-tests.sh, close-sprint.sh
 
 ## Repo
 https://github.com/qwer2003tw/bouncer
+
+## Pagination（Sprint 83+）
+
+- MCP response 回傳完整結果（不分頁）
+- Telegram 通知用 `store_paged_output()` 分頁（3800 chars/page）
+- `_write_all_pages()` 寫入所有頁面（含 page 1）到 DDB
+- `bouncer_get_page` MCP tool 已移除（Sprint 83）
+
+## Telegram 4096 Safety（強制）
+
+所有送出 Telegram 訊息的路徑都必須確保 ≤ 4096 字元：
+- `send_telegram_message_silent` / `send_message_with_entities` 有底層 safety net
+- 上層函數（notification、callback）自己負責截斷
+- **Notifier Lambda 也要遵守**（`handle_infra_approval_request` 曾因超長 changeset 導致 400 → deploy 永久卡住 #301）
+
+## Deploy Mode（設計中 #249）
+
+`deploy_mode` enum 取代舊的 `auto_approve_deploy` + `auto_approve_code_only`：
+- `manual`：每次人工審批（預設）
+- `auto_code`：code-only 自動，infra 要審批
+- `auto_all`：全自動（僅 bootstrapper）
+
+⚠️ `auto_approve_deploy` 從未生效過（Lambda 無 git binary #288）
