@@ -989,3 +989,11 @@ All notable changes to this project will be documented in this file.
 
 ### Security
 - **#270**: TELEGRAM_BOT_TOKEN + WEBHOOK_SECRET read from Secrets Manager (env var fallback)
+
+## v3.86.0 (Sprint 86)
+
+### UX
+- **#264**: Deploy failure notification includes rollback guidance (CFN status, query commands, manual rollback steps)
+
+### Closed
+- **#322**: Trust/Grant TOCTOU — confirmed already correct (mark-before-execute)
