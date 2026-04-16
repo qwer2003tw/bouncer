@@ -41,10 +41,10 @@ _table = None
 
 
 def _get_table():
-    """Get table, with test override support. Unified fallback via db.get_table()."""
+    """Get table, with test override support. Unified fallback via db.table."""
     if _table is not None:
         return _table
-    return _db.get_table()
+    return _db.table
 
 
 # ---------------------------------------------------------------------------

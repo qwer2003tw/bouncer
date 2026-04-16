@@ -27,7 +27,16 @@ import db as _db
 logger = Logger(service="bouncer")
 
 
-# Use _db.table directly - no wrapper needed (unified in db.py)
+# DynamoDB - via db.py (lazy init)
+# Tests may inject directly: callbacks_command._table = mock_table
+_table = None
+
+
+def _get_table():
+    """Get table, with test override support. Unified fallback via db.table."""
+    if _table is not None:
+        return _table
+    return _db.table
 
 def _is_execute_failed(output: str) -> bool:
     """判斷 execute_command 輸出是否代表失敗。
