@@ -132,6 +132,23 @@ def is_code_only_change(result: AnalysisResult) -> bool:
         if resource_type in _SAFE_INFRA_MODIFY_TYPES and action == "Modify":
             continue
 
+        # IAM::Role Modify with Policies-only target is SAM lifecycle
+        # (SAM-generated roles for schedulers/events contain Lambda ARN references
+        #  that update when Lambda code changes. No actual IAM permission change.)
+        if resource_type == "AWS::IAM::Role" and action == "Modify":
+            details = rc.get("Details", [])
+            targets = [d.get("Target", {}).get("Name", "") for d in details]
+            if all(t == "Policies" for t in targets) and targets:
+                continue  # safe: only Policies field changed
+
+        # Custom resource Modify with ServiceToken-only target is SAM lifecycle
+        # (ServiceToken = Lambda ARN; updates when Lambda code changes)
+        if resource_type.startswith("Custom::") and action == "Modify":
+            details = rc.get("Details", [])
+            targets = [d.get("Target", {}).get("Name", "") for d in details]
+            if targets == ["ServiceToken"]:
+                continue
+
         # Lambda Function must be Modify-only
         if resource_type != "AWS::Lambda::Function":
             return False
