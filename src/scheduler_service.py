@@ -12,25 +12,15 @@ Design goals (Aggressive approach):
 """
 
 import json
-import os
 import time
 from datetime import datetime, timezone
 from typing import Optional
 
 from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
-from constants import DEFAULT_REGION
+from constants import DEFAULT_REGION, SCHEDULE_GROUP_NAME, SCHEDULER_ROLE_ARN, LAMBDA_FUNCTION_ARN, SCHEDULER_ENABLED
 
 logger = Logger(service="bouncer")
-
-# ─── env vars ────────────────────────────────────────────────────────────────
-
-SCHEDULE_GROUP_NAME: str = os.environ.get(
-    "SCHEDULER_GROUP_NAME", "bouncer-expiry-schedules"
-)
-SCHEDULER_ROLE_ARN: str = os.environ.get("SCHEDULER_ROLE_ARN", "")
-LAMBDA_FUNCTION_ARN: str = os.environ.get("AWS_LAMBDA_FUNCTION_ARN", "")
-SCHEDULER_ENABLED: bool = os.environ.get("SCHEDULER_ENABLED", "true").lower() == "true"
 
 # ─── naming helpers ──────────────────────────────────────────────────────────
 

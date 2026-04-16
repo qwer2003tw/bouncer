@@ -3,7 +3,6 @@ Bouncer Deployer Tools
 MCP tools for SAM deployment
 """
 import json
-import os
 import re
 import time
 import uuid
@@ -19,6 +18,7 @@ from constants import (
     APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER,
     DEPLOY_MODE_MANUAL, DEPLOY_MODE_AUTO_CODE, VALID_DEPLOY_MODES,
     DEFAULT_REGION, TTL_7_DAYS, DEFAULT_DEPLOY_AVG_SECS,
+    STATE_MACHINE_ARN,
 )
 
 # Import and re-export DB operations from deploy_db for backward compatibility
@@ -43,12 +43,6 @@ from deploy_db import (  # noqa: F401 - re-exports for backward compatibility
 )
 
 logger = Logger(service="bouncer")
-
-# 環境變數
-PROJECTS_TABLE = os.environ.get('PROJECTS_TABLE', 'bouncer-projects')
-HISTORY_TABLE = os.environ.get('HISTORY_TABLE', 'bouncer-deploy-history')
-LOCKS_TABLE = os.environ.get('LOCKS_TABLE', 'bouncer-deploy-locks')
-STATE_MACHINE_ARN = os.environ.get('DEPLOY_STATE_MACHINE_ARN', '')
 
 # DynamoDB — lazy init (no boto3 call at import time)
 # Tests may set these directly: deployer.history_table = moto_table

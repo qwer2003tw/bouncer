@@ -83,6 +83,17 @@ APPROVED_CHAT_ID = os.environ.get('APPROVED_CHAT_ID', '').split(',')[0]
 TABLE_NAME = os.environ.get('TABLE_NAME', 'clawdbot-approval-requests')
 ACCOUNTS_TABLE_NAME = os.environ.get('ACCOUNTS_TABLE_NAME', 'bouncer-accounts')
 
+# Deployer tables
+PROJECTS_TABLE = os.environ.get('PROJECTS_TABLE', 'bouncer-projects')
+HISTORY_TABLE = os.environ.get('HISTORY_TABLE', 'bouncer-deploy-history')
+LOCKS_TABLE = os.environ.get('LOCKS_TABLE', 'bouncer-deploy-locks')
+
+# Shadow approval table (for approval_shadow_create)
+SHADOW_TABLE_NAME = os.environ.get('SHADOW_TABLE', 'bouncer-shadow-approvals')
+
+# Command history table (sequence analyzer)
+COMMAND_HISTORY_TABLE_NAME = os.environ.get('COMMAND_HISTORY_TABLE', 'bouncer-command-history')
+
 # ============================================================================
 # 環境變數 - AWS
 # ============================================================================
@@ -95,6 +106,21 @@ STAGING_BUCKET = os.environ.get(
     'STAGING_BUCKET',
     f"bouncer-uploads-{DEFAULT_ACCOUNT_ID}" if DEFAULT_ACCOUNT_ID else "bouncer-uploads",
 )
+
+# Trusted account IDs (compliance, template scanning)
+TRUSTED_ACCOUNT_IDS = [x for x in os.environ.get('TRUSTED_ACCOUNT_IDS', '').split(',') if x]
+
+# Step Functions state machine for deployments
+STATE_MACHINE_ARN = os.environ.get('DEPLOY_STATE_MACHINE_ARN', '')
+
+# EventBridge Scheduler configuration
+SCHEDULE_GROUP_NAME = os.environ.get('SCHEDULER_GROUP_NAME', 'bouncer-expiry-schedules')
+SCHEDULER_ROLE_ARN = os.environ.get('SCHEDULER_ROLE_ARN', '')
+LAMBDA_FUNCTION_ARN = os.environ.get('AWS_LAMBDA_FUNCTION_ARN', '')
+SCHEDULER_ENABLED = os.environ.get('SCHEDULER_ENABLED', 'true').lower() == 'true'
+
+# Multi-bot support (caller_identity)
+PUBLIC_BOT_ROLE_ARN = os.environ.get('PUBLIC_BOT_ROLE_ARN', 'arn:aws:iam::190825685292:role/bouncer-public-bot-role')
 
 # ============================================================================
 # 環境變數 - 安全

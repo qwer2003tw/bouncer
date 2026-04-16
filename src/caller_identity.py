@@ -7,11 +7,10 @@ REQUEST_SECRET env var is kept as fallback for backward compatibility.
 import hmac
 import json
 import logging
-import os
 import time
 
 import boto3
-from constants import DEFAULT_REGION
+from constants import DEFAULT_REGION, REQUEST_SECRET, PUBLIC_BOT_ROLE_ARN
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +28,7 @@ _BOT_SECRETS = {
     'public-bot': {
         'sm_name': 'bouncer/public-bot-secret',
         'default_source': 'Public Bot',
-        'default_role_arn': os.environ.get(
-            'PUBLIC_BOT_ROLE_ARN',
-            'arn:aws:iam::190825685292:role/bouncer-public-bot-role',
-        ),
+        'default_role_arn': PUBLIC_BOT_ROLE_ARN,
     },
 }
 
@@ -62,10 +58,9 @@ def _load_registry():
 
     # Fallback: if private-bot not loaded from SM, use REQUEST_SECRET env var
     if 'private-bot' not in bots:
-        request_secret = os.environ.get('REQUEST_SECRET', '')
-        if request_secret:
+        if REQUEST_SECRET:
             bots['private-bot'] = {
-                'secret': request_secret,
+                'secret': REQUEST_SECRET,
                 'source': 'Private Bot',
                 'role_arn': None,
             }

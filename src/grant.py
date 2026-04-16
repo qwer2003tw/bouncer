@@ -46,6 +46,7 @@ from constants import (
     GRANT_MAX_COMMANDS,
     GRANT_MAX_TOTAL_EXECUTIONS,
     GRANT_APPROVAL_TIMEOUT,
+    PROJECTS_TABLE,
 )
 
 logger = Logger(service="bouncer")
@@ -277,10 +278,8 @@ def create_grant_request(
         if project:
             try:
                 import boto3 as _boto3_ddb
-                import os
-                projects_table_name = os.environ.get('PROJECTS_TABLE', 'bouncer-projects')
                 ddb = _boto3_ddb.resource('dynamodb', region_name=DEFAULT_REGION)
-                projects_table = ddb.Table(projects_table_name)
+                projects_table = ddb.Table(PROJECTS_TABLE)
                 resp = projects_table.get_item(Key={'project_id': project})
                 item = resp.get('Item', {})
                 assume_role_arn = item.get('deploy_role_arn') or item.get('frontend_deploy_role_arn')

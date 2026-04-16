@@ -15,7 +15,6 @@ Author: Bouncer Team
 Version: 1.0.0
 """
 
-import os
 import re
 import time
 import hashlib
@@ -28,6 +27,7 @@ from aws_lambda_powertools import Logger
 import db as _db
 from boto3.dynamodb.conditions import Key
 from metrics import emit_metric
+from constants import COMMAND_HISTORY_TABLE_NAME
 
 logger = Logger(service="bouncer")
 
@@ -50,7 +50,7 @@ __all__ = [
 # ============================================================================
 
 # DynamoDB 表名 - 使用獨立的歷史記錄表
-HISTORY_TABLE_NAME = os.environ.get('COMMAND_HISTORY_TABLE', 'bouncer-command-history')
+HISTORY_TABLE_NAME = COMMAND_HISTORY_TABLE_NAME
 
 # 設定
 DEFAULT_HISTORY_MINUTES = 30  # 預設查詢最近 30 分鐘

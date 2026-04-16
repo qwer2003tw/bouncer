@@ -21,13 +21,13 @@ Check IDs:
 """
 
 import json
-import os
 import re
 from typing import Any, Optional
 
 from aws_lambda_powertools import Logger
 from metrics import emit_metric
 from utils import RiskFactor
+from constants import TRUSTED_ACCOUNT_IDS
 
 logger = Logger(service="bouncer")
 
@@ -52,10 +52,8 @@ TARGET_PARAMETERS = [
     '--environment',
 ]
 
-# 已知 AWS 帳號 (TP-004 排除清單) — 從環境變數載入
-# TRUSTED_ACCOUNT_IDS: 逗號分隔的帳號清單，由 SAM template 注入
-_trusted_ids_raw = os.environ.get('TRUSTED_ACCOUNT_IDS', '')
-KNOWN_ACCOUNT_IDS = {aid.strip() for aid in _trusted_ids_raw.split(',') if aid.strip()}
+# 已知 AWS 帳號 (TP-004 排除清單) — 從 constants 載入
+KNOWN_ACCOUNT_IDS = {aid.strip() for aid in TRUSTED_ACCOUNT_IDS if aid.strip()}
 
 # 高危端口 (TP-006)
 HIGH_RISK_PORTS = {22, 3389, 3306, 1433, 5432, 27017}
