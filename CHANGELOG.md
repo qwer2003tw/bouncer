@@ -1,4 +1,79 @@
 # Changelog
+## v3.86.0 (Sprint 86)
+
+### UX
+- **#264**: Deploy failure notification includes rollback guidance (CFN status, query commands, manual rollback steps)
+
+### Closed
+- **#322**: Trust/Grant TOCTOU — confirmed already correct (mark-before-execute)
+
+## v3.85.0 (Sprint 85) — Bug Fix + Security
+
+### Fixed
+- **#301**: Infra approval notification truncated to 4096 chars + fallback on failure (was silently failing)
+
+### Security
+- **#270**: TELEGRAM_BOT_TOKEN + WEBHOOK_SECRET read from Secrets Manager (env var fallback)
+
+## v3.84.0 (Sprint 84) — Audit Completeness + Security Hardening
+
+### Security
+- **#321**: All secret/OTP comparisons use hmac.compare_digest (timing-safe)
+- **#320**: EKS token generation audit log
+
+### Audit
+- **#323**: Deploy lock acquire/release audit
+- **#324**: infra_approve/infra_deny unified audit
+- **#325**: add/remove account MCP audit
+- **#326**: Unified audit schema — all logs have src_module, operation, bot_id/source/user_id
+
+## v3.83.0 (Sprint 83) — Unified Pagination
+
+### Changed
+- **#328**: MCP response returns full result (no pagination)
+- Telegram notification uses dedicated pagination (3800 chars/page, zero gap)
+- `OUTPUT_HARD_CAP_BYTES` raised from 100K to 300K
+- Removed `bouncer_get_page` MCP tool
+- Button correctly points to page 2
+
+## v3.82.0 (Sprint 82) — Comprehensive Audit Logging
+
+### Security
+- **#307**: MCP tool dispatch caller audit log (bot_id + tool_name)
+- **#308**: Grant callback approve/deny audit log
+- **#309**: Logs allowlist modification audit log
+- **#310**: Fix str(e) stack trace leakage (~10 occurrences)
+- **#311**: Presigned URL generation audit log
+- **#312**: Webhook unauthorized callback attempt log
+- **#313**: Callback approve/deny unified structured audit
+- **#314**: Rate limit rejection audit log
+
+### Tests
+- Fix presigned test xdist isolation (Powertools LogRecord conflict)
+- Fix notifier_app test xdist module collision (importlib + xfail)
+
+## v3.81.0 (Sprint 81) — Per-bot Auth + ABAC
+
+### Added
+- **Per-bot authentication**: `caller_identity.py` identifies callers by secret, auto-fills source
+- **PublicBotExecutionRole**: tag-based ABAC role for ztp-files resources only
+- **API Gateway API Keys**: private-bot + public-bot keys (not yet enforced)
+- **Secrets Manager**: all bot secrets stored in SM (private-bot + public-bot)
+- **Audit logging**: every request logs bot_id + source; auth failures logged as warnings
+- **Expanded code-only whitelist**: DDB/CloudFront/S3/WAF/CW Modify auto-approve
+
+### Security
+- Caller identity server-side enforced (source can't be spoofed)
+- Per-bot execution role isolation (ABAC tag-based)
+- REQUEST_SECRET env var kept as fallback only
+
+## v3.80.0 (Sprint 80) — Deploy UX
+
+### Fixed
+- **#277**: 移除中間進度通知（handle_start/handle_progress 不再發 Telegram），只收到審批或完成通知
+- **#283**: 通知順序異常 — #277 移除進度通知後自動解決
+- **#263**: MCP 錯誤訊息加 error_code + suggestion 欄位（MISSING_PARAM, COMPLIANCE_BLOCKED, RATE_LIMITED 等）
+- e2e test xdist patch isolation fix（patch.object on deployer module）
 
 ## v3.79.0 (2026-04-13)
 ### Fixes
@@ -922,78 +997,3 @@ All notable changes to this project will be documented in this file.
 ### Tests
 - Backend: 886 passed (+18 regression tests) / coverage 81.52%
 
-## v3.80.0 (Sprint 80) — Deploy UX
-
-### Fixed
-- **#277**: 移除中間進度通知（handle_start/handle_progress 不再發 Telegram），只收到審批或完成通知
-- **#283**: 通知順序異常 — #277 移除進度通知後自動解決
-- **#263**: MCP 錯誤訊息加 error_code + suggestion 欄位（MISSING_PARAM, COMPLIANCE_BLOCKED, RATE_LIMITED 等）
-- e2e test xdist patch isolation fix（patch.object on deployer module）
-
-## v3.81.0 (Sprint 81) — Per-bot Auth + ABAC
-
-### Added
-- **Per-bot authentication**: `caller_identity.py` identifies callers by secret, auto-fills source
-- **PublicBotExecutionRole**: tag-based ABAC role for ztp-files resources only
-- **API Gateway API Keys**: private-bot + public-bot keys (not yet enforced)
-- **Secrets Manager**: all bot secrets stored in SM (private-bot + public-bot)
-- **Audit logging**: every request logs bot_id + source; auth failures logged as warnings
-- **Expanded code-only whitelist**: DDB/CloudFront/S3/WAF/CW Modify auto-approve
-
-### Security
-- Caller identity server-side enforced (source can't be spoofed)
-- Per-bot execution role isolation (ABAC tag-based)
-- REQUEST_SECRET env var kept as fallback only
-
-## v3.82.0 (Sprint 82) — Comprehensive Audit Logging
-
-### Security
-- **#307**: MCP tool dispatch caller audit log (bot_id + tool_name)
-- **#308**: Grant callback approve/deny audit log
-- **#309**: Logs allowlist modification audit log
-- **#310**: Fix str(e) stack trace leakage (~10 occurrences)
-- **#311**: Presigned URL generation audit log
-- **#312**: Webhook unauthorized callback attempt log
-- **#313**: Callback approve/deny unified structured audit
-- **#314**: Rate limit rejection audit log
-
-### Tests
-- Fix presigned test xdist isolation (Powertools LogRecord conflict)
-- Fix notifier_app test xdist module collision (importlib + xfail)
-
-## v3.83.0 (Sprint 83) — Unified Pagination
-
-### Changed
-- **#328**: MCP response returns full result (no pagination)
-- Telegram notification uses dedicated pagination (3800 chars/page, zero gap)
-- `OUTPUT_HARD_CAP_BYTES` raised from 100K to 300K
-- Removed `bouncer_get_page` MCP tool
-- Button correctly points to page 2
-
-## v3.84.0 (Sprint 84) — Audit Completeness + Security Hardening
-
-### Security
-- **#321**: All secret/OTP comparisons use hmac.compare_digest (timing-safe)
-- **#320**: EKS token generation audit log
-
-### Audit
-- **#323**: Deploy lock acquire/release audit
-- **#324**: infra_approve/infra_deny unified audit
-- **#325**: add/remove account MCP audit
-- **#326**: Unified audit schema — all logs have src_module, operation, bot_id/source/user_id
-
-## v3.85.0 (Sprint 85) — Bug Fix + Security
-
-### Fixed
-- **#301**: Infra approval notification truncated to 4096 chars + fallback on failure (was silently failing)
-
-### Security
-- **#270**: TELEGRAM_BOT_TOKEN + WEBHOOK_SECRET read from Secrets Manager (env var fallback)
-
-## v3.86.0 (Sprint 86)
-
-### UX
-- **#264**: Deploy failure notification includes rollback guidance (CFN status, query commands, manual rollback steps)
-
-### Closed
-- **#322**: Trust/Grant TOCTOU — confirmed already correct (mark-before-execute)
