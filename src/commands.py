@@ -663,6 +663,9 @@ def execute_boto3_native(
     else:
         client = boto3.client(service, region_name=region)
 
+    # Auto-normalize service name to lowercase (e.g. EC2 → ec2, DynamoDB → dynamodb)
+    service = service.lower()
+
     # Auto-convert PascalCase to snake_case (e.g. DescribeInstances → describe_instances)
     import re as _re
     if not hasattr(client, operation) and operation[0].isupper():
