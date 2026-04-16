@@ -32,8 +32,8 @@ from notifications import (
     send_batch_upload_notification,
 )
 from constants import (
-
     DEFAULT_ACCOUNT_ID,
+    DEFAULT_REGION,
     TRUST_SESSION_MAX_UPLOADS,
     TRUST_UPLOAD_MAX_BYTES_PER_FILE, TRUST_UPLOAD_MAX_BYTES_TOTAL,
     UPLOAD_BATCH_PAYLOAD_SAFE_LIMIT, UPLOAD_BATCH_PER_FILE_B64_LIMIT,
@@ -1068,8 +1068,8 @@ def execute_upload(request_id: str, approver: str) -> dict:
             )
 
         # 產生 S3 URL
-        region = s3.meta.region_name or 'us-east-1'
-        if region == 'us-east-1':
+        region = s3.meta.region_name or DEFAULT_REGION
+        if region == DEFAULT_REGION:
             s3_url = f"https://{bucket}.s3.amazonaws.com/{key}"
         else:
             s3_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"

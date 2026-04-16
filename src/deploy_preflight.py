@@ -3,6 +3,7 @@ Bouncer Deploy Pre-flight Checks
 Pre-deploy validation logic extracted from deployer.py
 """
 import os
+from constants import DEFAULT_REGION
 import re
 import subprocess
 import boto3
@@ -21,7 +22,7 @@ def _get_secretsmanager_client():
     """
     import deployer as _deployer
     if _deployer.secretsmanager_client is None:
-        region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+        region = DEFAULT_REGION
         _deployer.secretsmanager_client = boto3.client('secretsmanager', region_name=region)
     return _deployer.secretsmanager_client
 

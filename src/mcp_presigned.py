@@ -14,7 +14,7 @@ from aws_lambda_powertools import Logger
 from aws_clients import get_s3_client
 from botocore.exceptions import ClientError
 
-from constants import DEFAULT_ACCOUNT_ID
+from constants import DEFAULT_ACCOUNT_ID, TTL_1_HOUR
 from db import table
 from notifications import send_presigned_notification, send_presigned_batch_notification
 from rate_limit import PendingLimitExceeded, RateLimitExceeded, check_rate_limit
@@ -29,7 +29,7 @@ logger = Logger(service="bouncer")
 
 _MIN_EXPIRES_IN = 60
 _DEFAULT_EXPIRES_IN = 900
-_MAX_EXPIRES_IN = 3600
+_MAX_EXPIRES_IN = TTL_1_HOUR
 
 
 @dataclass

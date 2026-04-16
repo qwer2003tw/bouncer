@@ -40,7 +40,7 @@ from botocore.exceptions import ClientError
 from db import table
 
 from constants import (
-
+    DEFAULT_REGION,
     GRANT_MAX_TTL_MINUTES,
     GRANT_DEFAULT_TTL_MINUTES,
     GRANT_MAX_COMMANDS,
@@ -279,7 +279,7 @@ def create_grant_request(
                 import boto3 as _boto3_ddb
                 import os
                 projects_table_name = os.environ.get('PROJECTS_TABLE', 'bouncer-projects')
-                ddb = _boto3_ddb.resource('dynamodb', region_name=os.environ.get('AWS_DEFAULT_REGION', 'us-east-1'))
+                ddb = _boto3_ddb.resource('dynamodb', region_name=DEFAULT_REGION)
                 projects_table = ddb.Table(projects_table_name)
                 resp = projects_table.get_item(Key={'project_id': project})
                 item = resp.get('Item', {})

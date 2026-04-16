@@ -18,6 +18,7 @@ from telegram import unpin_message
 from constants import (
     APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER,
     DEPLOY_MODE_MANUAL, DEPLOY_MODE_AUTO_CODE, VALID_DEPLOY_MODES,
+    DEFAULT_REGION, TTL_7_DAYS, DEFAULT_DEPLOY_AVG_SECS,
 )
 
 # Import and re-export DB operations from deploy_db for backward compatibility
@@ -70,16 +71,14 @@ secretsmanager_client = None
 def _get_sfn_client():
     global sfn_client
     if sfn_client is None:
-        region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
-        sfn_client = boto3.client('stepfunctions', region_name=region)
+        sfn_client = boto3.client('stepfunctions', region_name=DEFAULT_REGION)
     return sfn_client
 
 
 def _get_cfn_client():
     global cfn_client
     if cfn_client is None:
-        region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
-        cfn_client = boto3.client('cloudformation', region_name=region)
+        cfn_client = boto3.client('cloudformation', region_name=DEFAULT_REGION)
     return cfn_client
 
 
@@ -139,7 +138,7 @@ def start_deploy(project_id: str, branch: str, triggered_by: str, reason: str) -
             import datetime
             started_at_iso = datetime.datetime.utcfromtimestamp(int(locked_at_ts)).strftime('%Y-%m-%dT%H:%M:%SZ')
             elapsed = int(time.time()) - int(locked_at_ts)
-            avg_deploy_secs = 300  # 5 分鐘
+            avg_deploy_secs = DEFAULT_DEPLOY_AVG_SECS  # 5 分鐘
             estimated_remaining = max(0, avg_deploy_secs - elapsed)
         return {
             'status': 'conflict',
@@ -675,7 +674,7 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
             import datetime
             started_at_iso = datetime.datetime.utcfromtimestamp(int(locked_at_ts)).strftime('%Y-%m-%dT%H:%M:%SZ')
             elapsed = int(time.time()) - int(locked_at_ts)
-            avg_deploy_secs = 300  # 5 分鐘
+            avg_deploy_secs = DEFAULT_DEPLOY_AVG_SECS  # 5 分鐘
             estimated_remaining = max(0, avg_deploy_secs - elapsed)
         return mcp_result(req_id, {
             'content': [{'type': 'text', 'text': json.dumps({
@@ -793,7 +792,7 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
     # 建立審批請求
     request_id = generate_request_id(f"deploy:{project_id}")
     now = int(time.time())
-    ttl = now + 7 * 24 * 3600  # 7 days for DDB record retention (history lookup)
+    ttl = now + TTL_7_DAYS  # 7 days for DDB record retention (history lookup)
     approval_expiry = now + APPROVAL_TIMEOUT_DEFAULT + APPROVAL_TTL_BUFFER  # 審批到期時間
 
     item = {

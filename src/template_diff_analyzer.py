@@ -8,6 +8,7 @@ import json
 import urllib.request
 import urllib.error
 from dataclasses import dataclass, field
+from constants import DEFAULT_REGION
 import boto3
 
 HIGH_RISK_PATTERNS: list[tuple[str, str]] = [
@@ -57,7 +58,7 @@ class TemplateDiffResult:
 
 
 def _get_github_pat(secret_id: str) -> str:
-    sm = boto3.client('secretsmanager', region_name='us-east-1')
+    sm = boto3.client('secretsmanager', region_name=DEFAULT_REGION)
     return sm.get_secret_value(SecretId=secret_id)['SecretString']
 
 

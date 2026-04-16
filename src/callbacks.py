@@ -17,7 +17,7 @@ from aws_lambda_powertools import Logger
 from utils import response, format_size_human, build_info_lines
 from paging import get_paged_output
 from telegram import escape_markdown, update_message, answer_callback, send_telegram_message_silent, pin_message
-from constants import RESULT_TTL
+from constants import RESULT_TTL, TTL_30_DAYS
 from metrics import emit_metric
 # Grant callbacks extracted to separate module (Sprint 53 Phase 1)
 from callbacks_grant import (  # noqa: F401
@@ -541,7 +541,7 @@ def _write_frontend_deploy_history(
             'distribution_id': distribution_id,
             'cf_invalidation_failed': cf_invalidation_failed,
             'request_id': request_id,
-            'ttl': now + 30 * 24 * 3600,  # 30 days
+            'ttl': now + TTL_30_DAYS,  # 30 days
         }
         # DynamoDB does not allow None values
         history_item = {k: v for k, v in history_item.items() if v is not None}

@@ -18,7 +18,7 @@ from paging import store_paged_output
 from trust import create_trust_session, track_command_executed, increment_trust_command_count, TrustRateExceeded
 from telegram import escape_markdown, update_message, answer_callback, send_telegram_message_silent, send_chat_action, send_telegram_message_to
 from notifications import send_trust_auto_approve_notification
-from constants import DEFAULT_ACCOUNT_ID, RESULT_TTL, TRUST_SESSION_MAX_UPLOADS, TRUST_SESSION_MAX_COMMANDS, OTP_RISK_THRESHOLD
+from constants import DEFAULT_ACCOUNT_ID, DEFAULT_REGION, RESULT_TTL, TRUST_SESSION_MAX_UPLOADS, TRUST_SESSION_MAX_COMMANDS, OTP_RISK_THRESHOLD
 from metrics import emit_metric
 
 # DynamoDB tables from db.py (no circular dependency)
@@ -166,7 +166,7 @@ def _execute_and_store_result(
         native_service = item.get('native_service', '')
         native_operation = item.get('native_operation', '')
         native_params_str = item.get('native_params', '{}')
-        native_region = item.get('native_region', 'us-east-1') or 'us-east-1'
+        native_region = item.get('native_region', DEFAULT_REGION) or DEFAULT_REGION
         try:
             native_params = _json.loads(native_params_str) if isinstance(native_params_str, str) else native_params_str
         except Exception:

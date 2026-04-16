@@ -11,7 +11,7 @@ from typing import Callable, Optional
 import boto3
 from botocore.exceptions import ClientError
 
-from constants import BLOCKED_PATTERNS, DANGEROUS_PATTERNS, AUTO_APPROVE_PREFIXES
+from constants import BLOCKED_PATTERNS, DANGEROUS_PATTERNS, AUTO_APPROVE_PREFIXES, DEFAULT_REGION
 
 # Lock: Lambda warm start 下 os.environ credential swap 必須 atomic
 _execute_lock = threading.Lock()
@@ -556,7 +556,7 @@ def execute_command(command: str, assume_role_arn: str = None,
 
 
 
-def generate_eks_token(cluster_name: str, region: str = 'us-east-1', assume_role_arn: str = None) -> str:
+def generate_eks_token(cluster_name: str, region: str = None, assume_role_arn: str = None) -> str:
     """Generate EKS kubectl token (k8s-aws-v1.* format) via STS presigned URL.
 
     Uses SigV4QueryAuth to include x-k8s-aws-id header in the signed URL.
@@ -639,7 +639,7 @@ def execute_boto3_native(
     """
     import json
 
-    region = region or os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+    region = region or DEFAULT_REGION
 
     # Build boto3 client with optional assume role
     if assume_role_arn:

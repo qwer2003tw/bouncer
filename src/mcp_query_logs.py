@@ -7,7 +7,6 @@ bouncer_logs_allowlist:  管理允許查詢的 log group 名單（add/remove/lis
 from __future__ import annotations
 
 import json
-import os
 import re
 import time
 
@@ -20,7 +19,7 @@ from accounts import get_account
 from db import table
 from telegram import send_telegram_message, escape_markdown
 from notifications import post_notification_setup
-from constants import DEFAULT_ACCOUNT_ID
+from constants import DEFAULT_ACCOUNT_ID, DEFAULT_REGION, TTL_30_DAYS
 
 logger = Logger(service="bouncer")
 
@@ -29,7 +28,7 @@ logger = Logger(service="bouncer")
 # ============================================================================
 
 # Maximum time range: 30 days
-MAX_TIME_RANGE_SECONDS = 30 * 24 * 60 * 60
+MAX_TIME_RANGE_SECONDS = TTL_30_DAYS
 
 # Result limits
 MAX_RESULTS_LIMIT = 1000
@@ -129,7 +128,7 @@ def _resolve_account(account: str) -> tuple[str, str | None, str | None]:
 
 def _get_logs_client(region: str = None, assume_role_arn: str = None):
     """Get CloudWatch Logs boto3 client, optionally with assumed role."""
-    region = region or os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+    region = region or DEFAULT_REGION
 
     if assume_role_arn:
         sts = boto3.client('sts')

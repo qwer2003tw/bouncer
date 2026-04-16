@@ -43,8 +43,7 @@ from notifications import (
 from telegram import send_telegram_message_silent, escape_markdown
 from metrics import emit_metric
 from constants import (
-
-    DEFAULT_ACCOUNT_ID, MCP_MAX_WAIT, RATE_LIMIT_WINDOW,
+    DEFAULT_ACCOUNT_ID, DEFAULT_REGION, MCP_MAX_WAIT, RATE_LIMIT_WINDOW,
     TRUST_SESSION_MAX_COMMANDS,
     APPROVAL_TTL_BUFFER,
     AUDIT_TTL_SHORT,
@@ -1150,7 +1149,7 @@ def mcp_tool_eks_get_token(req_id: str, arguments: dict) -> dict:
     from commands import generate_eks_token
 
     cluster_name = arguments.get('cluster_name', '').strip()
-    region = arguments.get('region', 'us-east-1').strip()
+    region = arguments.get('region', DEFAULT_REGION).strip()
     account = arguments.get('account', '').strip()
 
     if not cluster_name:
@@ -1202,7 +1201,7 @@ def mcp_tool_execute_native(req_id: str, arguments: dict) -> dict:
       "aws": {
         "service": "eks",
         "operation": "create_cluster",
-        "region": "us-east-1",
+        "region": DEFAULT_REGION,
         "account": "123456789012",
         "params": {...}
       },

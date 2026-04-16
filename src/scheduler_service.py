@@ -19,6 +19,7 @@ from typing import Optional
 
 from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
+from constants import DEFAULT_REGION
 
 logger = Logger(service="bouncer")
 
@@ -502,7 +503,7 @@ class SchedulerService:
         if self._client is None:
             import boto3
 
-            region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+            region = DEFAULT_REGION
             self._client = boto3.client("scheduler", region_name=region)
         return self._client
 

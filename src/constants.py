@@ -4,6 +4,22 @@ Bouncer Constants
 """
 import os
 
+# ============================================================================
+# Time Constants (TTL, timeouts)
+# ============================================================================
+
+TTL_30_DAYS = 30 * 24 * 3600   # 30 days in seconds
+TTL_90_DAYS = 90 * 24 * 3600   # 90 days in seconds
+TTL_7_DAYS = 7 * 24 * 3600     # 7 days in seconds
+TTL_1_HOUR = 3600              # 1 hour in seconds
+DEFAULT_DEPLOY_AVG_SECS = 300  # Default deployment average time (5 minutes)
+
+# ============================================================================
+# AWS Region Configuration
+# ============================================================================
+
+DEFAULT_REGION = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+
 
 def _load_secrets_batch():
     """Load multiple secrets from Secrets Manager, fallback to env vars.
@@ -22,6 +38,7 @@ def _load_secrets_batch():
 
     try:
         import boto3
+        # Keep hardcoded region here to avoid circular dependency during module load
         sm = boto3.client('secretsmanager', region_name='us-east-1')
 
         for sm_name, env_name in secret_mapping:
@@ -110,8 +127,8 @@ UPLOAD_TIMEOUT = 300  # 上傳審批超時
 # Audit Log TTL
 # ============================================================================
 
-AUDIT_TTL_SHORT = 30 * 24 * 60 * 60  # 30 天（blocked/compliance）
-AUDIT_TTL_LONG = 90 * 24 * 60 * 60  # 90 天（其他）
+AUDIT_TTL_SHORT = TTL_30_DAYS  # 30 天（blocked/compliance）
+AUDIT_TTL_LONG = TTL_90_DAYS   # 90 天（其他）
 
 # ============================================================================
 # Telegram
@@ -259,7 +276,7 @@ OTP_RISK_THRESHOLD = 66  # Commands with risk_score >= this require OTP
 
 OUTPUT_PAGE_SIZE = 4000         # 每頁字元數（提高至 4K）— only used for Telegram pages
 OUTPUT_MAX_INLINE = 300_000     # MCP never paged, always return full result (300K chars)
-OUTPUT_PAGE_TTL = 3600          # 分頁資料保留 1 小時
+OUTPUT_PAGE_TTL = TTL_1_HOUR    # 分頁資料保留 1 小時
 
 # Hard cap: outputs larger than this will be truncated with a notice.
 # DynamoDB item limit = 400 KB; keeping total stored data well below that.
