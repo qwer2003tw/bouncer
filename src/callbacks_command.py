@@ -27,9 +27,7 @@ import db as _db
 logger = Logger(service="bouncer")
 
 
-def _get_table():
-    return _db.table
-
+# Use _db.table directly - no wrapper needed (unified in db.py)
 
 def _is_execute_failed(output: str) -> bool:
     """判斷 execute_command 輸出是否代表失敗。
@@ -157,7 +155,7 @@ def _execute_and_store_result(
     Returns:
         dict: 包含 result, paged, decision_latency_ms
     """
-    table = _get_table()
+    table = _db.table
 
     # 執行命令（native boto3 or awscli based on stored action_type）
     if item.get('action_type') == 'native':
@@ -561,7 +559,7 @@ def _handle_deny_callback(
         message_id: Telegram message ID
         info: _format_command_info 返回的 dict
     """
-    table = _get_table()
+    table = _db.table
 
     now = int(time.time())
     created_at = int(item.get('created_at', 0))

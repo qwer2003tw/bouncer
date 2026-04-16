@@ -15,15 +15,12 @@ from telegram import escape_markdown, update_message, answer_callback
 from constants import TRUST_SESSION_MAX_UPLOADS, TRUST_SESSION_MAX_COMMANDS
 from metrics import emit_metric
 from mcp_upload import execute_upload, _verify_upload
+import db as _db
 
 logger = Logger()
 
 
-# Import helper functions from callbacks.py (these remain in callbacks.py)
-def _get_table():
-    """Import from callbacks.py to avoid circular dependency"""
-    from callbacks import _get_table as _gt
-    return _gt()
+# Use _db.table directly - no wrapper needed (unified in db.py)
 
 
 def _update_request_status(table, request_id: str, status: str, approver: str, extra_attrs: dict = None) -> None:
@@ -38,7 +35,7 @@ def _update_request_status(table, request_id: str, status: str, approver: str, e
 
 def handle_upload_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str) -> dict:
     """處理上傳的審批 callback"""
-    table = _get_table()
+    table = _db.table
 
     bucket = item.get('bucket', '')
     key = item.get('key', '')
@@ -341,7 +338,7 @@ def _create_callback_trust_session(
 
 def handle_upload_batch_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str) -> dict:
     """處理批量上傳的審批 callback"""
-    table = _get_table()
+    table = _db.table
 
     bucket = item.get('bucket', '')
     file_count = int(item.get('file_count', 0))

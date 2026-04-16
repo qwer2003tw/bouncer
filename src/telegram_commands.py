@@ -19,10 +19,7 @@ import db as _db
 logger = Logger(service="bouncer")
 
 
-def _get_table():
-    """取得 DynamoDB table"""
-    return _db.table
-
+# Use _db.table directly - no wrapper needed (unified in db.py)
 
 def handle_telegram_command(message: dict) -> dict:
     """處理 Telegram 文字指令"""
@@ -112,7 +109,7 @@ def handle_accounts_command(chat_id: str) -> dict:
 
 def handle_trust_command(chat_id: str) -> dict:
     """處理 /trust 指令"""
-    table = _get_table()
+    table = _db.table
     now = int(time.time())
 
     try:
@@ -145,7 +142,7 @@ def handle_trust_command(chat_id: str) -> dict:
 
 def handle_pending_command(chat_id: str) -> dict:
     """處理 /pending 指令"""
-    table = _get_table()
+    table = _db.table
 
     try:
         from boto3.dynamodb.conditions import Key
@@ -194,7 +191,7 @@ def handle_stats_command(chat_id: str, hours: int = 24) -> dict:
         chat_id: Telegram chat ID
         hours: 查詢過去 N 小時（預設 24）
     """
-    table = _get_table()
+    table = _db.table
     now = int(time.time())
     since_ts = now - hours * 3600
 
@@ -340,7 +337,7 @@ def handle_otp_command(chat_id: str, user_id: str, provided_code: str) -> dict:
     send_telegram_message_to(chat_id, f"✅ {msg}，正在執行命令...")
 
     # Get the original pending item from DDB
-    table = _get_table()
+    table = _db.table
     try:
         item = table.get_item(Key={'request_id': original_request_id}).get('Item')
     except Exception as e:

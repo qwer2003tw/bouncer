@@ -8,6 +8,7 @@ from typing import Optional
 
 from aws_lambda_powertools import Logger
 from botocore.exceptions import ClientError
+import db as _db
 
 logger = Logger(service="bouncer")
 
@@ -15,10 +16,7 @@ OTP_TTL = 300  # 5 minutes
 OTP_MAX_ATTEMPTS = 3
 OTP_LENGTH = 6
 
-
-def _get_table():
-    import db as _db
-    return _db.table
+# Use _db.table directly - no wrapper needed (unified in db.py)
 
 
 def generate_otp() -> str:
@@ -35,7 +33,7 @@ def create_otp_record(request_id: str, user_id: str, otp_code: str, message_id: 
         otp_code: Generated OTP code
         message_id: Telegram message ID of the approval request (for updating after verification)
     """
-    table = _get_table()
+    table = _db.table
     now = int(time.time())
     table.put_item(Item={
         'request_id': f'otp#{request_id}',
@@ -57,7 +55,7 @@ def get_pending_otp(user_id: str) -> Optional[dict]:
     Queries user-id-created-index GSI for otp# records belonging to user_id that haven't expired.
     Returns None if no pending OTP found.
     """
-    table = _get_table()
+    table = _db.table
     now = int(time.time())
     all_items = []
     query_kwargs = {
@@ -102,7 +100,7 @@ def validate_otp(request_id: str, provided_code: str) -> tuple[bool, str]:
     On success: marks record as used.
     On failure: increments attempts. If max attempts reached, marks as failed.
     """
-    table = _get_table()
+    table = _db.table
     otp_key = f'otp#{request_id}'
     now = int(time.time())
 
