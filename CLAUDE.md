@@ -91,7 +91,8 @@ Missing ANY of these = the tool will work locally (mcporter list) but fail on La
 
 **NEVER do any of the following:**
 - Version bump (`src/constants.py VERSION` or `pyproject.toml`)
-- Update `CHANGELOG.md`
+- Update `README.md` version in title
+- Update `CHANGELOG.md` (prepend to top, newest first)
 - `git push` to remote
 - Create git tags (`git tag`)
 - Close sprint state
