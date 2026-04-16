@@ -20,7 +20,9 @@ import db as _db
 logger = Logger()
 
 
-# Use _db.table directly - no wrapper needed (unified in db.py)
+def _get_table():
+    return _db.table
+
 
 
 def _update_request_status(table, request_id: str, status: str, approver: str, extra_attrs: dict = None) -> None:
@@ -35,7 +37,7 @@ def _update_request_status(table, request_id: str, status: str, approver: str, e
 
 def handle_upload_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str) -> dict:
     """處理上傳的審批 callback"""
-    table = _db.table
+    table = _get_table()
 
     bucket = item.get('bucket', '')
     key = item.get('key', '')
@@ -338,7 +340,7 @@ def _create_callback_trust_session(
 
 def handle_upload_batch_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str) -> dict:
     """處理批量上傳的審批 callback"""
-    table = _db.table
+    table = _get_table()
 
     bucket = item.get('bucket', '')
     file_count = int(item.get('file_count', 0))
