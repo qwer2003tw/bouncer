@@ -56,7 +56,7 @@ def test_telegram_error_emits_metric():
     with open(telegram_path, 'r') as f:
         content = f.read()
         # Verify logger.error is used (not logger.debug)
-        assert 'logger.error("Telegram %s error' in content
+        assert 'logger.exception("Telegram %s error' in content
         # Verify emit_metric is called
         assert "from metrics import emit_metric" in content
         assert "emit_metric('Bouncer', 'NotificationFailure', 1" in content
@@ -77,7 +77,7 @@ def test_deploy_approval_ttl_7_days():
     with open(deployer_path, 'r') as f:
         content = f.read()
         # Verify TTL calculation is 7 days for DDB retention
-        assert 'ttl = now + 7 * 24 * 3600' in content
+        assert 'ttl = now + TTL_7_DAYS' in content
         # Verify approval_expiry is separate from ttl (#228)
         assert 'approval_expiry = now + APPROVAL_TIMEOUT_DEFAULT + APPROVAL_TTL_BUFFER' in content
 

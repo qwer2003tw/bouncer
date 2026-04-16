@@ -16,7 +16,9 @@ OTP_TTL = 300  # 5 minutes
 OTP_MAX_ATTEMPTS = 3
 OTP_LENGTH = 6
 
-# Use _db.table directly - no wrapper needed (unified in db.py)
+def _get_table():
+    return _db.table
+
 
 
 def generate_otp() -> str:

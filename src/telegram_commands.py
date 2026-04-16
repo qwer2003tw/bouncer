@@ -19,7 +19,9 @@ import db as _db
 logger = Logger(service="bouncer")
 
 
-# Use _db.table directly - no wrapper needed (unified in db.py)
+def _get_table():
+    return _db.table
+
 
 def handle_telegram_command(message: dict) -> dict:
     """處理 Telegram 文字指令"""
