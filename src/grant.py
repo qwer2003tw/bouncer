@@ -32,7 +32,7 @@ import json
 import re
 import secrets
 import time
-from typing import Optional, Dict, List, Any
+from typing import Any, Optional
 
 from aws_lambda_powertools import Logger
 from botocore.exceptions import ClientError
@@ -68,7 +68,7 @@ __all__ = [
 # Named placeholder regex map
 # Each value is a raw regex fragment (no anchors, no groups needed by user).
 # ---------------------------------------------------------------------------
-_PLACEHOLDER_PATTERNS: Dict[str, str] = {
+_PLACEHOLDER_PATTERNS: dict[str, str] = {
     # UUID: hex chars + optional hyphens, 12-36 chars total
     'uuid':   r'[0-9a-f][0-9a-f\-]{10,34}[0-9a-f]',
     # ISO date: YYYY-MM-DD
@@ -127,7 +127,7 @@ def compile_pattern(pattern: str) -> re.Pattern:
     # 格式：{name}  → 只允許合法識別符（字母 + 底線）
     placeholder_re = re.compile(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}')
 
-    parts: List[str] = []
+    parts: list[str] = []
     last_end = 0
 
     for m in placeholder_re.finditer(pattern):
@@ -220,7 +220,7 @@ def normalize_command(command: str) -> str:
 
 
 def create_grant_request(
-    commands: List[str],
+    commands: list[str],
     reason: str,
     source: str,
     account_id: str,
@@ -228,7 +228,7 @@ def create_grant_request(
     allow_repeat: bool = False,
     approval_timeout: int = None,
     project: str = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """建立 Grant 請求
 
     對每個命令做完整預檢，分類為 grantable / requires_individual / blocked。
@@ -367,7 +367,7 @@ def _precheck_command(
     reason: str,
     source: str,
     account_id: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """預檢單一命令，分類為 grantable / requires_individual / blocked
 
     Args:
@@ -436,7 +436,7 @@ def _precheck_command(
     return detail
 
 
-def get_grant_session(grant_id: str) -> Optional[Dict]:
+def get_grant_session(grant_id: str) -> Optional[dict]:
     """查詢 Grant Session
 
     Args:
@@ -458,7 +458,7 @@ def get_grant_session(grant_id: str) -> Optional[Dict]:
         return None
 
 
-def approve_grant(grant_id: str, approved_by: str, mode: str = 'all') -> Optional[Dict]:
+def approve_grant(grant_id: str, approved_by: str, mode: str = 'all') -> Optional[dict]:
     """批准 Grant Session
 
     TTL 從批准時算起。
@@ -595,7 +595,7 @@ def revoke_grant(grant_id: str) -> bool:
         return False
 
 
-def is_command_in_grant(normalized_cmd: str, grant: Dict) -> bool:
+def is_command_in_grant(normalized_cmd: str, grant: dict) -> bool:
     """檢查正規化命令是否在 Grant 授權清單中
 
     比對策略（Approach B — 積極）：
@@ -745,7 +745,7 @@ def try_use_grant_command(
         return False
 
 
-def get_grant_status(grant_id: str, source: str) -> Optional[Dict]:
+def get_grant_status(grant_id: str, source: str) -> Optional[dict]:
     """查詢 Grant 狀態（含 source 驗證）
 
     Args:

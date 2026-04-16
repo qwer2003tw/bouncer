@@ -28,7 +28,7 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Optional
 
 from aws_lambda_powertools import Logger
 from utils import RiskFactor  # canonical definition in utils.py
@@ -87,7 +87,7 @@ class RiskResult:
     """
     score: int
     category: str
-    factors: List[RiskFactor]
+    factors: list[RiskFactor]
     recommendation: str
     command: str = ""
     parsed_command: Optional['ParsedCommand'] = None
@@ -98,7 +98,7 @@ class RiskResult:
         """確保分數在有效範圍內"""
         self.score = max(0, min(100, self.score))
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """轉換為字典格式（方便 JSON 序列化）"""
         return {
             'score': self.score,
@@ -143,9 +143,9 @@ class ParsedCommand:
     action: str = ""
     verb: str = ""
     resource_type: str = ""
-    parameters: Dict[str, str] = field(default_factory=dict)
-    flags: List[str] = field(default_factory=list)
-    targets: List[str] = field(default_factory=list)
+    parameters: dict[str, str] = field(default_factory=dict)
+    flags: list[str] = field(default_factory=list)
+    targets: list[str] = field(default_factory=list)
     is_valid: bool = True
     parse_error: Optional[str] = None
 
@@ -176,22 +176,22 @@ class RiskRules:
         weights: 各維度權重 {verb, parameter, context, account}
     """
     version: str = "1.0.0"
-    verb_scores: Dict[str, int] = field(default_factory=dict)
-    service_scores: Dict[str, int] = field(default_factory=dict)
-    parameter_patterns: List[Dict] = field(default_factory=list)
-    dangerous_flags: Dict[str, int] = field(default_factory=dict)
-    blocked_patterns: List[str] = field(default_factory=list)
-    account_sensitivity: Dict[str, int] = field(default_factory=dict)
-    context_rules: List[Dict] = field(default_factory=list)
-    template_rules: List[Dict] = field(default_factory=list)
-    weights: Dict[str, float] = field(default_factory=lambda: {
+    verb_scores: dict[str, int] = field(default_factory=dict)
+    service_scores: dict[str, int] = field(default_factory=dict)
+    parameter_patterns: list[dict] = field(default_factory=list)
+    dangerous_flags: dict[str, int] = field(default_factory=dict)
+    blocked_patterns: list[str] = field(default_factory=list)
+    account_sensitivity: dict[str, int] = field(default_factory=dict)
+    context_rules: list[dict] = field(default_factory=list)
+    template_rules: list[dict] = field(default_factory=list)
+    weights: dict[str, float] = field(default_factory=lambda: {
         'verb': 0.40,
         'parameter': 0.30,
         'context': 0.20,
         'account': 0.10,
     })
 
-    def validate(self) -> Tuple[bool, List[str]]:
+    def validate(self) -> tuple[bool, list[str]]:
         """
         驗證規則配置是否有效
 
@@ -353,7 +353,7 @@ def _load_rules_from_file(path: Optional[str] = None) -> RiskRules:
     raise FileNotFoundError(f"No risk rules file found in: {paths_to_try}")
 
 
-def _dict_to_rules(data: Dict) -> RiskRules:
+def _dict_to_rules(data: dict) -> RiskRules:
     """將字典轉換為 RiskRules 物件"""
     return RiskRules(
         version=data.get('version', '1.0.0'),
@@ -519,7 +519,7 @@ def _is_target_parameter(param_name: str, param_value: str) -> bool:
 def score_verb(
     parsed: ParsedCommand,
     rules: RiskRules,
-) -> Tuple[int, List[RiskFactor]]:
+) -> tuple[int, list[RiskFactor]]:
     """
     計算動詞基礎分數
 
@@ -579,7 +579,7 @@ def score_verb(
 def score_parameters(
     parsed: ParsedCommand,
     rules: RiskRules,
-) -> Tuple[int, List[RiskFactor]]:
+) -> tuple[int, list[RiskFactor]]:
     """
     計算參數風險分數
 
@@ -668,7 +668,7 @@ def score_context(
     reason: str,
     source: str,
     rules: RiskRules,
-) -> Tuple[int, List[RiskFactor]]:
+) -> tuple[int, list[RiskFactor]]:
     """
     計算上下文風險分數
 
@@ -747,7 +747,7 @@ def score_context(
 def score_account(
     account_id: str,
     rules: RiskRules,
-) -> Tuple[int, List[RiskFactor]]:
+) -> tuple[int, list[RiskFactor]]:
     """
     計算帳號敏感度分數
 
@@ -819,7 +819,7 @@ def _generate_recommendation(
     score: int,
     category: str,
     parsed: ParsedCommand,
-    factors: List[RiskFactor],
+    factors: list[RiskFactor],
 ) -> str:
     """
     生成人類可讀的建議
@@ -926,7 +926,7 @@ def calculate_risk(
             )
 
         # 收集所有因素
-        all_factors: List[RiskFactor] = []
+        all_factors: list[RiskFactor] = []
 
         # 1. 動詞基礎分數 (40%)
         verb_score, verb_factors = score_verb(parsed, rules)

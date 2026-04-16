@@ -10,7 +10,7 @@ Bouncer - Trust Session 模組
 import time
 import hashlib
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
+from typing import Any, Optional
 
 from botocore.exceptions import ClientError
 
@@ -91,14 +91,14 @@ class TrustSession:
     bound_source: str = ''          # security-critical: bound at creation time
     creator_ip: str = ''            # IP of the approver at trust session creation time
     ttl: int = 0
-    _raw: Dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+    _raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     # ------------------------------------------------------------------
     # Factory
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_item(cls, item: Dict[str, Any]) -> 'TrustSession':
+    def from_item(cls, item: dict[str, Any]) -> 'TrustSession':
         """Construct a TrustSession from a raw DynamoDB item dict."""
         return cls(
             request_id=str(item.get('request_id', '')),
@@ -130,7 +130,7 @@ class TrustSession:
     def is_expired(self) -> bool:
         return self.remaining_seconds <= 0
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         """Return the underlying raw item dict (for backward-compatible callers)."""
         return self._raw
 
@@ -172,7 +172,7 @@ def get_trust_session(
     trust_scope: str,
     account_id: str,
     source: str = '',
-) -> Optional[Dict]:
+) -> Optional[dict]:
     """Query for an active trust session, validating source binding.
 
     Args:

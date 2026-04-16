@@ -8,10 +8,9 @@ import json
 import urllib.request
 import urllib.error
 from dataclasses import dataclass, field
-from typing import List, Tuple
 import boto3
 
-HIGH_RISK_PATTERNS: List[Tuple[str, str]] = [
+HIGH_RISK_PATTERNS: list[tuple[str, str]] = [
     (r'Principal\s*:\s*["\']?\*["\']?', "Principal:* — 允許任何人呼叫"),
     (r'AuthType\s*:\s*NONE', "Lambda URL AuthType:NONE — 無驗證"),
     (r'BlockPublicAcls\s*:\s*false', "S3 BlockPublicAcls disabled"),
@@ -40,7 +39,7 @@ HIGH_RISK_PATTERNS: List[Tuple[str, str]] = [
 ]
 
 # Sprint 75 #241: patterns for removed lines (- lines) — dangerous deletions
-REMOVAL_RISK_PATTERNS: List[Tuple[str, str]] = [
+REMOVAL_RISK_PATTERNS: list[tuple[str, str]] = [
     (r'BucketName\s*:', "BucketName 被刪除 — CloudFormation 可能重建 bucket 導致資料遺失"),
     (r'DeletionPolicy\s*:\s*Retain', "DeletionPolicy: Retain 被刪除 — 失去刪除保護"),
     (r'AWS::DynamoDB::Table', "DynamoDB Table 資源被刪除"),
@@ -52,7 +51,7 @@ REMOVAL_RISK_PATTERNS: List[Tuple[str, str]] = [
 class TemplateDiffResult:
     is_safe: bool                    # True = auto-approve ok
     has_template_changes: bool       # template.yaml 有無變動
-    high_risk_findings: List[str] = field(default_factory=list)  # 高風險描述
+    high_risk_findings: list[str] = field(default_factory=list)  # 高風險描述
     diff_summary: str = ''           # 人讀摘要
     error: str = ''                  # 分析失敗原因（有值時 fail-safe）
 
@@ -72,7 +71,7 @@ def _github_api(url: str, pat: str) -> dict:
         return json.loads(resp.read())
 
 
-def _get_latest_commits(owner: str, repo: str, branch: str, pat: str) -> Tuple[str, str]:
+def _get_latest_commits(owner: str, repo: str, branch: str, pat: str) -> tuple[str, str]:
     """Return (head_sha, base_sha) — head and its parent."""
     data = _github_api(
         f'https://api.github.com/repos/{owner}/{repo}/commits/{branch}',
@@ -97,7 +96,7 @@ def _get_template_diff(owner: str, repo: str, base_sha: str, head_sha: str, pat:
     return ''
 
 
-def _scan_added_lines(patch: str) -> List[str]:
+def _scan_added_lines(patch: str) -> list[str]:
     """Scan added (+) and removed (-) lines for high-risk patterns.
 
     Added lines are checked against HIGH_RISK_PATTERNS (dangerous additions).

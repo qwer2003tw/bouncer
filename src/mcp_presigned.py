@@ -9,7 +9,6 @@ import json
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import List
 
 from aws_lambda_powertools import Logger
 from aws_clients import get_s3_client
@@ -358,7 +357,7 @@ class PresignedBatchContext:
     """Pipeline context for mcp_tool_request_presigned_batch."""
 
     req_id: str
-    files: List[dict]          # validated [{filename, content_type}]
+    files: list[dict]          # validated [{filename, content_type}]
     reason: str
     source: str
     account_id: str
@@ -427,7 +426,7 @@ def _parse_presigned_batch_request(
             f"files exceeds maximum of {_BATCH_MAX_FILES} items"
         )
 
-    validated_files: List[dict] = []
+    validated_files: list[dict] = []
     for i, entry in enumerate(files_raw):
         if not isinstance(entry, dict):
             return _error(f"files[{i}] must be an object")

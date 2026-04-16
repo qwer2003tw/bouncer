@@ -5,7 +5,7 @@ Bouncer - 帳號管理模組
 import time
 import json
 import urllib.request
-from typing import Optional, Dict
+from typing import Optional
 
 from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
@@ -85,7 +85,7 @@ def init_default_account():
         logger.error("Error initializing default account: %s", e, extra={"src_module": "accounts", "operation": "init_default_account", "error": str(e)})
 
 
-def get_account(account_id: str) -> Optional[Dict]:
+def get_account(account_id: str) -> Optional[dict]:
     """取得帳號配置"""
     try:
         result = _get_accounts_table().get_item(Key={'account_id': account_id})

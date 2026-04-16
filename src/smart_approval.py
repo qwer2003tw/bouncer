@@ -5,7 +5,6 @@ Bouncer - Smart Approval Module
 這個模組提供統一的 API 給 mcp_tools.py 使用，替換原有的 is_blocked/is_auto_approve 邏輯。
 """
 
-from typing import Dict
 from aws_lambda_powertools import Logger
 
 from risk_scorer import calculate_risk, RiskCategory, RiskResult
@@ -45,7 +44,7 @@ class ApprovalDecision:
         self.final_score = final_score
         self.reason = reason
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """轉換為 dict 供 JSON 序列化"""
         return {
             'decision': self.decision,

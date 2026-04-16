@@ -6,7 +6,7 @@ import os
 import re
 import threading
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
 import boto3
 from botocore.exceptions import ClientError
@@ -60,7 +60,7 @@ class CommandChainResult:
         results:   per-sub-command results in execution order
         stopped_at: index of the first failed sub-command (None = all succeeded)
     """
-    results: List[SubCommandResult] = field(default_factory=list)
+    results: list[SubCommandResult] = field(default_factory=list)
     stopped_at: Optional[int] = None
 
     @property
@@ -76,7 +76,7 @@ class CommandChainResult:
         return '\n'.join(p for p in parts if p)
 
     @property
-    def sub_commands(self) -> List[str]:
+    def sub_commands(self) -> list[str]:
         return [r.command for r in self.results]
 
 
@@ -85,7 +85,7 @@ def _normalize_whitespace(command: str) -> str:
     return re.sub(r'\s+', ' ', command).strip()
 
 
-def _split_chain(command: str) -> List[str]:
+def _split_chain(command: str) -> list[str]:
     """Split a command string on unquoted ``&&`` operators.
 
     Understands shell-style quoting (single/double quotes, backticks) and
@@ -118,14 +118,14 @@ def _split_chain(command: str) -> List[str]:
     if not command:
         return []
 
-    parts: List[str] = []
-    current: List[str] = []
+    parts: list[str] = []
+    current: list[str] = []
     i = 0
     n = len(command)
 
     OPEN_BRACKETS = {'(', '[', '{'}
     CLOSE_MAP = {'(': ')', '[': ']', '{': '}'}
-    bracket_stack: List[str] = []
+    bracket_stack: list[str] = []
 
     while i < n:
         c = command[i]
@@ -726,7 +726,7 @@ def _chain_failure_output(chain_result: CommandChainResult) -> str:
     return '\n'.join(p for p in lines if p)
 
 
-def _execute_chain(sub_cmds: List[str], assume_role_arn: Optional[str],
+def _execute_chain(sub_cmds: list[str], assume_role_arn: Optional[str],
                    _executor: Optional[Callable] = None,
                    cli_input_json: dict = None) -> CommandChainResult:
     """Execute a list of sub-commands sequentially with && semantics."""

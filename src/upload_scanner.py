@@ -2,7 +2,6 @@
 import re
 import os
 from dataclasses import dataclass, field
-from typing import List, Tuple
 from aws_lambda_powertools import Logger
 from metrics import emit_metric
 
@@ -19,7 +18,7 @@ SCANNABLE_CONTENT_TYPES = {
     'application/xml', 'application/javascript', 'application/typescript',
 }
 
-SECRET_PATTERNS: List[Tuple[str, str]] = [
+SECRET_PATTERNS: list[tuple[str, str]] = [
     (r'(?i)aws_secret_access_key\s*[=:]\s*[A-Za-z0-9+/]{40}', "AWS Secret Access Key"),
     (r'AKIA[A-Z0-9]{16}', "AWS Access Key ID"),
     (r'ghp_[A-Za-z0-9]{36}', "GitHub PAT"),
@@ -34,7 +33,7 @@ MAX_SCAN_SIZE = 1_000_000  # 1MB — don't scan files larger than this
 class UploadScanResult:
     is_blocked: bool = False         # True = reject immediately
     risk_level: str = 'safe'         # 'blocked' / 'high' / 'medium' / 'safe' / 'error'
-    findings: List[str] = field(default_factory=list)
+    findings: list[str] = field(default_factory=list)
     summary: str = ''
 
 
