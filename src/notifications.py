@@ -990,11 +990,11 @@ def send_deploy_frontend_notification(
         file_count = len(files_summary)
 
         mb = MessageBuilder()
-        mb.text("🚀 ").bold("Frontend Deploy Request").newline(2)
-        mb.text("📦 ").bold("Project:").text(f" {project or 'unknown'}").newline()
-        mb.text("🗂 ").bold("Target Bucket:").text(" ").code(target_info.get("frontend_bucket", "")).newline()
-        mb.text("☁️ ").bold("CloudFront:").text(" ").code(target_info.get("distribution_id", "")).newline()
-        mb.text("📁 ").bold(f"Files ({file_count}, {total_size_str}):").newline()
+        mb.text("🚀 ").bold("前端部署請求").newline(2)
+        mb.text("📦 ").bold("專案：").text(f" {project or 'unknown'}").newline()
+        mb.text("🗂 ").bold("目標 Bucket：").text(" ").code(target_info.get("frontend_bucket", "")).newline()
+        mb.text("☁️ ").bold("CloudFront：").text(" ").code(target_info.get("distribution_id", "")).newline()
+        mb.text("📁 ").bold(f"檔案（{file_count} 個，{total_size_str}）：").newline()
 
         for f in files_summary[:10]:
             fname = f.get("filename", "?")
@@ -1009,21 +1009,21 @@ def send_deploy_frontend_notification(
             mb.text("  • ").code(fname).text(f" ({fsize}) → {cc_short}").newline()
 
         if file_count > 10:
-            mb.text(f"  ...and {file_count - 10} more files").newline()
+            mb.text(f"  ...還有 {file_count - 10} 個檔案").newline()
 
         mb.newline()
-        mb.text("🤖 ").bold("Source:").text(f" {source or 'Unknown'}").newline()
-        mb.text("💬 ").bold("Reason:").text(f" {reason or 'No reason provided'}").newline(2)
-        mb.text("🆔 ").bold("ID:").text(" ").code(request_id).newline()
-        mb.text("⏰ ").bold(f"Expires in {UPLOAD_TIMEOUT // 60} min")
+        mb.text("🤖 ").bold("來源：").text(f" {source or 'Unknown'}").newline()
+        mb.text("💬 ").bold("原因：").text(f" {reason or '未提供原因'}").newline(2)
+        mb.text("🆔 ").bold("ID：").text(" ").code(request_id).newline()
+        mb.text("⏰ ").bold(f"{UPLOAD_TIMEOUT // 60} 分鐘後過期")
 
         text, entities = mb.build()
 
         keyboard = {
             "inline_keyboard": [
                 [
-                    {"text": "✅ Approve Deploy", "callback_data": f"approve:{request_id}", "style": "success"},
-                    {"text": "❌ Reject", "callback_data": f"deny:{request_id}", "style": "danger"},
+                    {"text": "✅ 批准部署", "callback_data": f"approve:{request_id}", "style": "success"},
+                    {"text": "❌ 拒絕", "callback_data": f"deny:{request_id}", "style": "danger"},
                 ],
             ]
         }
