@@ -62,7 +62,7 @@ def handle_telegram_command(message: dict) -> dict:
             try:
                 hours = int(parts[1])
             except ValueError:
-                pass
+                logger.debug("Invalid hours parameter for /stats command", exc_info=True)
         return handle_stats_command(chat_id, hours=hours)
 
     # /otp {code} - OTP 驗證

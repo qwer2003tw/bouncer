@@ -154,7 +154,7 @@ def _extract_param_json(command: str, param: str) -> list[dict]:
                 if isinstance(parsed, (dict, list)):
                     results.append(parsed)
             except (json.JSONDecodeError, ValueError):
-                pass
+                logger.debug("Failed to parse JSON payload from command", exc_info=True)
 
         idx = command.find(param, idx + len(param))
 

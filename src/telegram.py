@@ -108,7 +108,7 @@ def _telegram_request(method: str, data: dict, timeout: int = 5, json_body: bool
             from metrics import emit_metric
             emit_metric('Bouncer', 'NotificationFailure', 1, dimensions={'Method': method})
         except Exception:  # noqa: BLE001
-            pass
+            logger.debug("Failed to emit NotificationFailure metric", exc_info=True)
 
         # Fallback: if sendMessage fails with Markdown, retry without parse_mode
         if method == 'sendMessage' and 'parse_mode' in data and '400' in str(e):

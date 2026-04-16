@@ -102,7 +102,7 @@ def check_chain_risks(ctx) -> Optional[dict]:
                     'isError': True
                 })
         except ImportError:
-            pass
+            logger.debug("compliance_checker module not available", exc_info=True)
 
         # Layer 1: blocked check per sub-command
         block_reason = get_block_reason(sub_cmd)

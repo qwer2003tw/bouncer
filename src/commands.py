@@ -10,8 +10,11 @@ from typing import Callable, Optional
 
 import boto3
 from botocore.exceptions import ClientError
+from aws_lambda_powertools import Logger
 
 from constants import BLOCKED_PATTERNS, DANGEROUS_PATTERNS, AUTO_APPROVE_PREFIXES, DEFAULT_REGION
+
+logger = Logger(service="bouncer")
 
 # Lock: Lambda warm start 下 os.environ credential swap 必須 atomic
 _execute_lock = threading.Lock()
@@ -902,4 +905,4 @@ def _execute_locked(command: str, assume_role_arn: str = None,
                 import os as _os
                 _os.unlink(_cli_input_tmp)
             except Exception:  # noqa: BLE001
-                pass
+                logger.debug("Failed to delete temporary CLI input file", exc_info=True)

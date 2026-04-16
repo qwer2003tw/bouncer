@@ -948,7 +948,7 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
             try:
                 target_account = target_role_arn.split(':iam::')[1].split(':')[0]
             except (IndexError, AttributeError):
-                pass
+                logger.debug("Failed to parse target account from role ARN", exc_info=True)
 
     branch = branch or project.get('default_branch', 'master')
     # build_info_lines escapes internally; pass raw values

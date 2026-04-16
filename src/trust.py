@@ -525,7 +525,7 @@ def should_trust_approve(
                 from metrics import emit_metric
                 emit_metric('Bouncer', 'TrustIPBlocked', 1, dimensions={'Event': 'blocked', 'Mode': 'strict'})
             except Exception:  # noqa: BLE001 — best-effort metrics
-                pass
+                logger.debug("Failed to emit TrustIPBlocked metric", exc_info=True)
             return False, session, f"IP mismatch blocked (strict mode): creator={creator_ip} caller={caller_ip}"
         else:
             # Default 'warn' mode: log warning + metric but allow the request
@@ -539,7 +539,7 @@ def should_trust_approve(
                 from metrics import emit_metric
                 emit_metric('Bouncer', 'TrustIPMismatch', 1, dimensions={'Event': 'mismatch', 'Mode': 'warn'})
             except Exception:  # noqa: BLE001 — best-effort metrics
-                pass
+                logger.debug("Failed to emit TrustIPMismatch metric", exc_info=True)
 
     return True, session, f"Trust session active ({remaining}s remaining)"
 

@@ -74,7 +74,7 @@ def _get_changed_files(repo_path: str = '.') -> list[str]:
         if result.returncode == 0:
             return [f for f in result.stdout.strip().split('\n') if f]
     except Exception:
-        pass
+        logger.warning("Failed to detect secrets via git command", exc_info=True)
     return []
 
 

@@ -170,7 +170,7 @@ def _store_notification_snapshot(request_id: str, text: str, message_id: int) ->
             },
         )
     except Exception:  # noqa: BLE001
-        pass
+        logger.debug("Failed to emit notification metric", exc_info=True)
 
 
 def send_approval_request(request_id: str, command: str, reason: str, timeout: int = COMMAND_APPROVAL_TIMEOUT,
@@ -331,7 +331,7 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
         try:
             _store_notification_snapshot(request_id, text, message_id)
         except Exception:  # noqa: BLE001
-            pass
+            logger.debug("Failed to store notification snapshot", exc_info=True)
     return NotificationResult(ok=ok, message_id=message_id)
 
 def send_account_approval_request(request_id: str, action: str, account_id: str, name: str, role_arn: str, source: str, context: str = None):

@@ -398,7 +398,7 @@ def _precheck_command(
                 detail['block_reason'] = f"合規違規: {violation.rule_name}" if violation else "合規違規"
                 return detail
         except ImportError:
-            pass
+            logger.debug("compliance_checker module not available", exc_info=True)
 
         # 2. Blocked check
         from commands import is_blocked
