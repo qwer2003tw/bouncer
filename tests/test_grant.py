@@ -120,8 +120,8 @@ def mcp_module(mock_dynamodb):
     db.table = mock_dynamodb.Table('clawdbot-approval-requests')
     db.dynamodb = mock_dynamodb
 
-    import mcp_grant
-    yield mcp_grant
+    import mcp_execute
+    yield mcp_execute
 
     sys.path.pop(0)
 
