@@ -415,7 +415,7 @@ def handle_infra_approval_request(event):
             # send_telegram_message returned 0 (failure) — try fallback
             raise Exception("send_telegram_message returned 0")
     except Exception as e:
-        print(f"[infra_approval] Failed to send notification: {e}")
+        print(f"[infra_approval] Failed to send notification (text_len={len(text)}): {e}")
         # Fallback: send shorter message without changes_detail
         fallback_text = (
             f"⚠️ *Infrastructure Changes*\n\n"
@@ -450,6 +450,12 @@ def send_telegram_message(text: str, reply_markup: dict = None) -> int:
     if reply_markup:
         data['reply_markup'] = json.dumps(reply_markup)
 
+    # Safety net: Telegram 4096 char limit (#301)
+    if len(text) > 4096:
+        print(f"[telegram] WARNING: text {len(text)} chars > 4096, truncating")
+        text = text[:4036] + "\n\n⚠️ [訊息過長已截斷]"
+        data['text'] = text
+
     try:
         req = urllib.request.Request(
             url,
@@ -472,6 +478,11 @@ def update_telegram_message(message_id: int, text: str):
         return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageText"
+    # Safety net: Telegram 4096 char limit (#301)
+    if len(text) > 4096:
+        print(f"[telegram] WARNING: editMessage text {len(text)} chars > 4096, truncating")
+        text = text[:4036] + "\n\n⚠️ [訊息過長已截斷]"
+
     data = {
         'chat_id': TELEGRAM_CHAT_ID,
         'message_id': message_id,
