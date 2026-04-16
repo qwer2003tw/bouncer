@@ -107,7 +107,7 @@ def get_command_help(command: str) -> dict:
     if len(parts) < 2:
         return {'error': f'無效命令格式，需要: aws <service> <action>，收到: {command}'}
 
-    service_name = parts[0]
+    service_name = parts[0].lower()
     action_raw = parts[1]
 
     # 轉換 CLI action 格式為 API 格式
@@ -169,6 +169,7 @@ def get_command_help(command: str) -> dict:
 
 
 def get_service_operations(service_name: str) -> dict:
+    service_name = service_name.lower().strip()
     """
     列出服務的所有操作
     """
