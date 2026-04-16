@@ -1,4 +1,13 @@
 # Changelog
+
+## v3.87.0 (2026-04-16)
+### Refactor
+- Modernize typing syntax — remove deprecated typing imports (#343)
+- Extract magic numbers + region to constants (#349)
+- Unify _get_table() — single source in db.py (#348)
+- Replace silent except-pass with logging (#371)
+- Use logger.exception in except blocks for traceback (#364)
+
 ## v3.86.0 (Sprint 86)
 
 ### UX
