@@ -57,7 +57,7 @@ jobs:
       - name: Run pip-audit
         run: |
           pip install pip-audit
-          pip-audit -r src/requirements.txt || true  # informational only
+          pip-audit -r src/requirements.txt  # fail CI on known vulnerabilities
 
   typos:
     name: Typos Check

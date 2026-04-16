@@ -848,3 +848,16 @@ MCP_TOOLS['bouncer_confirm_frontend_deploy'] = {
         'required': ['request_id', 'files', 'project'],
     },
 }
+
+MCP_TOOLS['bouncer_eks_get_token'] = {
+    'description': 'Generate a kubectl-compatible EKS authentication token via STS presigned URL. Returns a token that can be used with kubectl --token or kubeconfig exec.',
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'cluster_name': {'type': 'string', 'description': 'EKS cluster name'},
+            'region': {'type': 'string', 'description': 'AWS region (default: us-east-1)'},
+            'account': {'type': 'string', 'description': 'AWS account ID or alias for cross-account access'},
+        },
+        'required': ['cluster_name'],
+    },
+}
