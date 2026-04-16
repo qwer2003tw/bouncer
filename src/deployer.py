@@ -44,22 +44,12 @@ from deploy_db import (  # noqa: F401 - re-exports for backward compatibility
 
 logger = Logger(service="bouncer")
 
-# DynamoDB — lazy init (no boto3 call at import time)
-# Tests may set these directly: deployer.history_table = moto_table
-_dynamodb = None
-projects_table = None
-history_table = None
-locks_table = None
-
 # Step Functions — lazy init
 # Tests may patch this: patch.object(deployer, 'sfn_client')
 sfn_client = None
 
 # CloudFormation — lazy init
 cfn_client = None
-
-# Secrets Manager — lazy init
-secretsmanager_client = None
 
 
 def _get_sfn_client():

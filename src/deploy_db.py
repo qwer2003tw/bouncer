@@ -12,37 +12,44 @@ from constants import DEFAULT_REGION, TTL_30_DAYS
 
 logger = Logger(service="bouncer")
 
+# DynamoDB — lazy init (no boto3 call at import time)
+# Tests may set these directly: deploy_db._dynamodb = moto_resource
+_dynamodb = None
+projects_table = None
+history_table = None
+locks_table = None
+
 
 def _get_dynamodb():
-    """Get DynamoDB resource (uses deployer module global for test compatibility)"""
-    import deployer
-    if deployer._dynamodb is None:
-        deployer._dynamodb = boto3.resource('dynamodb', region_name=DEFAULT_REGION)
-    return deployer._dynamodb
+    """Get DynamoDB resource (lazy init for test compatibility)"""
+    global _dynamodb
+    if _dynamodb is None:
+        _dynamodb = boto3.resource('dynamodb', region_name=DEFAULT_REGION)
+    return _dynamodb
 
 
 def _get_projects_table():
-    """Get projects table (uses deployer module global for test compatibility)"""
-    import deployer
-    if deployer.projects_table is None:
-        deployer.projects_table = _db.deployer_projects_table._get()
-    return deployer.projects_table
+    """Get projects table (lazy init for test compatibility)"""
+    global projects_table
+    if projects_table is None:
+        projects_table = _db.deployer_projects_table._get()
+    return projects_table
 
 
 def _get_history_table():
-    """Get history table (uses deployer module global for test compatibility)"""
-    import deployer
-    if deployer.history_table is None:
-        deployer.history_table = _db.deployer_history_table._get()
-    return deployer.history_table
+    """Get history table (lazy init for test compatibility)"""
+    global history_table
+    if history_table is None:
+        history_table = _db.deployer_history_table._get()
+    return history_table
 
 
 def _get_locks_table():
-    """Get locks table (uses deployer module global for test compatibility)"""
-    import deployer
-    if deployer.locks_table is None:
-        deployer.locks_table = _db.deployer_locks_table._get()
-    return deployer.locks_table
+    """Get locks table (lazy init for test compatibility)"""
+    global locks_table
+    if locks_table is None:
+        locks_table = _db.deployer_locks_table._get()
+    return locks_table
 
 
 def get_git_commit_info(cwd: str = None) -> dict:
