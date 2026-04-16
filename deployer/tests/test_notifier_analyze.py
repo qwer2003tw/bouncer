@@ -372,3 +372,79 @@ class TestHandleInfraApprovalRequest:
             # Verify Telegram message uses default branch
             telegram_text = mock_telegram.call_args[0][0]
             assert 'master' in telegram_text
+
+
+# ============================================================================
+# Whitelist extensions: IAM::Role Policies + Custom::* ServiceToken (#278 part 2)
+# ============================================================================
+
+def test_is_code_only_iam_role_policies_only_is_safe():
+    """SAM-generated IAM::Role Modify (Policies only) should be code-only (Lambda ARN update)."""
+    from changeset_analyzer import is_code_only_change, AnalysisResult
+
+    result = AnalysisResult(
+        is_code_only=False,
+        resource_changes=[{
+            "ResourceChange": {
+                "ResourceType": "AWS::IAM::Role",
+                "Action": "Modify",
+                "LogicalResourceId": "DdbBackupScheduleRole",
+                "Details": [{"Target": {"Name": "Policies", "Attribute": "Properties"}}],
+            }
+        }],
+    )
+    assert is_code_only_change(result) is True
+
+
+def test_is_code_only_iam_role_non_policies_is_unsafe():
+    """IAM::Role Modify with non-Policies target should NOT be code-only."""
+    from changeset_analyzer import is_code_only_change, AnalysisResult
+
+    result = AnalysisResult(
+        is_code_only=False,
+        resource_changes=[{
+            "ResourceChange": {
+                "ResourceType": "AWS::IAM::Role",
+                "Action": "Modify",
+                "LogicalResourceId": "ApiFunctionRole",
+                "Details": [{"Target": {"Name": "AssumeRolePolicyDocument", "Attribute": "Properties"}}],
+            }
+        }],
+    )
+    assert is_code_only_change(result) is False
+
+
+def test_is_code_only_custom_service_token_only_is_safe():
+    """Custom::* Modify (ServiceToken only) should be code-only (Lambda ARN update)."""
+    from changeset_analyzer import is_code_only_change, AnalysisResult
+
+    result = AnalysisResult(
+        is_code_only=False,
+        resource_changes=[{
+            "ResourceChange": {
+                "ResourceType": "Custom::KeyPairValidator",
+                "Action": "Modify",
+                "LogicalResourceId": "KeyPairValidator",
+                "Details": [{"Target": {"Name": "ServiceToken", "Attribute": "Properties"}}],
+            }
+        }],
+    )
+    assert is_code_only_change(result) is True
+
+
+def test_is_code_only_custom_non_service_token_is_unsafe():
+    """Custom::* Modify with non-ServiceToken target should NOT be code-only."""
+    from changeset_analyzer import is_code_only_change, AnalysisResult
+
+    result = AnalysisResult(
+        is_code_only=False,
+        resource_changes=[{
+            "ResourceChange": {
+                "ResourceType": "Custom::KeyPairValidator",
+                "Action": "Modify",
+                "LogicalResourceId": "KeyPairValidator",
+                "Details": [{"Target": {"Name": "KeyPair", "Attribute": "Properties"}}],
+            }
+        }],
+    )
+    assert is_code_only_change(result) is False
