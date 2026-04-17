@@ -23,6 +23,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+pythonpath = ["src", "deployer/notifier"]
 
 [tool.bandit]
 # Security scan skip rules (documented for Sprint 27-004)
