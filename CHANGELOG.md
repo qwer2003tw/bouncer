@@ -1,5 +1,12 @@
 # Changelog
 
+## v3.89.0 (2026-04-17)
+### Refactor
+- Add pytest pythonpath config for src/ and deployer/notifier/ (#358 partial)
+- Rename deployer/notifier/app.py → handler.py — eliminates module collision with src/app.py (#357)
+- Remove 7 xfail markers (module collision resolved)
+
+
 ## v3.88.0 (2026-04-17)
 ### Refactor — Batch 2 Structure Cleanup
 - CI: add pip cache to setup-python steps (#351)
