@@ -5,12 +5,10 @@ When get_execution_status() encounters a ClientError while fetching SFN executio
 status, the deploy lock must be released to prevent permanent lockout.
 """
 
-import sys
 import os
 from unittest.mock import patch, MagicMock
 from botocore.exceptions import ClientError
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 
 class TestDeployLockReleaseOnClientError:

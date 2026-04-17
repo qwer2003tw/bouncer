@@ -24,7 +24,6 @@ import sys
 from pathlib import Path
 
 # 確保可以 import src
-sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from template_scanner import (
     extract_json_payloads,

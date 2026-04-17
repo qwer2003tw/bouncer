@@ -1,8 +1,6 @@
 """Regression tests for MCP tool usage tracking (bouncer-s42-001)"""
 import os
-import sys
 import json
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 os.environ.setdefault('TABLE_NAME', 'clawdbot-approval-requests')
 os.environ.setdefault('DEFAULT_ACCOUNT_ID', '190825685292')
 os.environ.setdefault('TELEGRAM_BOT_TOKEN', 'test-token')

@@ -29,9 +29,6 @@ os.environ.setdefault('TELEGRAM_BOT_TOKEN', 'test-token')
 os.environ.setdefault('APPROVED_CHAT_ID', '999999999')
 os.environ.setdefault('TRUSTED_ACCOUNT_IDS', '111111111111,222222222222')
 
-SRC_DIR = os.path.join(os.path.dirname(__file__), '..', 'src')
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
 
 
 # ============================================================================

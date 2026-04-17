@@ -167,7 +167,6 @@ class TestDisplaySummaryInItems:
     def test_execute_item_has_display_summary(self, mock_blocked, mock_approval, app_module):
         """Execute approval item has display_summary field"""
         import sys as _sys, os as _os
-        _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), '..', 'src'))
         from notifications import NotificationResult
         from mcp_execute import mcp_tool_execute
         mock_approval.return_value = NotificationResult(ok=True, message_id=None)
@@ -226,7 +225,6 @@ class TestDisplaySummaryInItems:
     def test_upload_batch_item_has_display_summary(self, mock_notification, app_module):
         """Upload batch approval item has display_summary field"""
         import sys, os as _os
-        sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), '..', 'src'))
         from notifications import NotificationResult
         mock_notification.return_value = NotificationResult(ok=True, message_id=None)
         import base64
@@ -334,9 +332,6 @@ class TestDisplaySummaryInItems:
 # ============================================================================
 
 # Ensure src is on path for direct notifications import
-_SRC_DIR = os.path.join(os.path.dirname(__file__), '..', 'src')
-if _SRC_DIR not in sys.path:
-    sys.path.insert(0, _SRC_DIR)
 
 
 def _make_notifications_module():

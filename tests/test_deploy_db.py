@@ -3,14 +3,12 @@ Tests for src/deploy_db.py - DynamoDB operations and git helpers.
 
 Tests git commit info extraction, project list, and DDB table accessors.
 """
-import sys
 import os
 import pytest
 from unittest.mock import MagicMock, patch
 from botocore.exceptions import ClientError
 
 # Ensure src is on sys.path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 import deploy_db
 

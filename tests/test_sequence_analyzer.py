@@ -2,12 +2,10 @@
 Tests for sequence_analyzer module
 """
 import os
-import sys
 import pytest
 from unittest.mock import patch, MagicMock
 
 # Ensure src is on path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 
 class TestExtractResourceIds:

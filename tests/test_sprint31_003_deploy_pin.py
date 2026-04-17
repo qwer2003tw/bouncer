@@ -9,14 +9,12 @@ Tests:
   5. Notifier handle_success → updates existing message + unpins
 """
 import json
-import sys
 import os
 import time
 from unittest.mock import patch, MagicMock, call
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 
 # ---------------------------------------------------------------------------

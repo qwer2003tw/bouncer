@@ -16,7 +16,6 @@ import importlib
 import sys
 from unittest.mock import patch, MagicMock
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 # Sprint 58 s58-001: Use centralized module list from _module_list (not conftest — xdist compat)
 from _module_list import BOUNCER_MODS

@@ -1,7 +1,6 @@
 """Tests for OTP two-factor verification (Sprint 55 s55-007)."""
 
 import os
-import sys
 import time
 
 import pytest
@@ -9,7 +8,6 @@ import boto3
 from moto import mock_aws
 from unittest.mock import patch, MagicMock
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from paging import PaginatedOutput
 
 os.environ.setdefault('TABLE_NAME', 'clawdbot-approval-requests')

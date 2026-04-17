@@ -10,13 +10,11 @@ Verifies:
 - log_decision accepts new exit_code / error_output optional params
 """
 import json
-import sys
 import os
 import pytest
 from unittest.mock import MagicMock, patch, call
 
 # Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from paging import PaginatedOutput
 

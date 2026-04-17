@@ -1,7 +1,6 @@
 """Regression tests for Sprint 63 bug fixes."""
 
 import os
-import sys
 import time
 from unittest.mock import MagicMock, patch
 
@@ -9,7 +8,6 @@ import pytest
 import boto3
 from moto import mock_aws
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 os.environ.setdefault('TABLE_NAME', 'clawdbot-approval-requests')
 os.environ.setdefault('DEFAULT_ACCOUNT_ID', '190825685292')

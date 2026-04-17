@@ -13,7 +13,6 @@ import os
 import pytest
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 os.environ.setdefault('TELEGRAM_BOT_TOKEN', 'test-token')
 os.environ.setdefault('TELEGRAM_CHAT_ID', '-1234567890')

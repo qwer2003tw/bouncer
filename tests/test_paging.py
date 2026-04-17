@@ -53,7 +53,6 @@ def paging_module(mock_dynamodb):
         if mod in ('paging', 'constants', 'telegram'):
             del sys.modules[mod]
 
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
     import paging
     import importlib

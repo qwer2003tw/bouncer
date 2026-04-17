@@ -3,14 +3,12 @@ Tests for src/scheduler_service.py - EventBridge Scheduler operations.
 
 Tests schedule name generation, schedule creation/deletion, and error handling.
 """
-import sys
 import os
 import pytest
 from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone
 
 # Ensure src is on sys.path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 import scheduler_service
 

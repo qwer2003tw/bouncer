@@ -16,7 +16,6 @@ import pytest
 import boto3
 from moto import mock_aws
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 DEFAULT_ACCOUNT = '190825685292'
 DEV_ACCOUNT = '992382394211'

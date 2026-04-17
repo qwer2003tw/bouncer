@@ -2,11 +2,9 @@
 Tests for Sprint 60 Monitoring - Smart Approval metrics emission
 """
 import os
-import sys
 from unittest.mock import patch, MagicMock
 
 # Ensure src is on path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 
 class TestSmartApprovalMetrics:

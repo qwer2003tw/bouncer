@@ -2,9 +2,7 @@
 Tests for Trust Session IP binding (Sprint 26 - security/trust-session-ip-binding-s26).
 """
 
-import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 import pytest
 from unittest.mock import MagicMock, patch, call

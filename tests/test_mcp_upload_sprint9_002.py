@@ -13,11 +13,9 @@ Scenarios:
 import base64
 import json
 import os
-import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 os.environ.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
 os.environ.setdefault('DEFAULT_ACCOUNT_ID', '111111111111')

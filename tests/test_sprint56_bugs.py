@@ -10,7 +10,6 @@ import pytest
 import boto3
 from moto import mock_aws
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 os.environ.setdefault('TABLE_NAME', 'clawdbot-approval-requests')
 os.environ.setdefault('DEFAULT_ACCOUNT_ID', '190825685292')
@@ -207,10 +206,8 @@ class TestS56_004_ExpiryWarningStatusCheck:
                 # Ensure src/app.py is imported (xdist isolation fix)
                 import sys
                 import os
-                src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
                 if src_path in sys.path:
                     sys.path.remove(src_path)
-                sys.path.insert(0, src_path)
                 if 'app' in sys.modules:
                     app_file = getattr(sys.modules['app'], '__file__', '')
                     if 'deployer' in app_file:
@@ -255,10 +252,8 @@ class TestS56_004_ExpiryWarningStatusCheck:
                 # Ensure src/app.py is imported (xdist isolation fix)
                 import sys
                 import os
-                src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
                 if src_path in sys.path:
                     sys.path.remove(src_path)
-                sys.path.insert(0, src_path)
                 if 'app' in sys.modules:
                     app_file = getattr(sys.modules['app'], '__file__', '')
                     if 'deployer' in app_file:
@@ -299,10 +294,8 @@ class TestS56_004_ExpiryWarningStatusCheck:
                 # Ensure src/app.py is imported (xdist isolation fix)
                 import sys
                 import os
-                src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
                 if src_path in sys.path:
                     sys.path.remove(src_path)
-                sys.path.insert(0, src_path)
                 if 'app' in sys.modules:
                     app_file = getattr(sys.modules['app'], '__file__', '')
                     if 'deployer' in app_file:

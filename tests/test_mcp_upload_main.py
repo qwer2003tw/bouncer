@@ -2,7 +2,6 @@
 Auto-generated test file split from test_bouncer.py
 """
 import json
-import sys
 import os
 import time
 import pytest
@@ -478,7 +477,6 @@ class TestUploadVerificationResult:
     def test_verify_upload_success(self):
         """Scenario 1 & 2: head_object succeeds → verified=True, s3_size populated."""
         import sys, os
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         from mcp_upload import _verify_upload, UploadVerificationResult
 
         mock_s3 = MagicMock()
@@ -498,7 +496,6 @@ class TestUploadVerificationResult:
     def test_verify_upload_failure_non_blocking(self):
         """Scenario 3 & 4: head_object raises → verified=False, no exception propagated, error captured."""
         import sys, os
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         from mcp_upload import _verify_upload, UploadVerificationResult
 
         mock_s3 = MagicMock()
@@ -515,7 +512,6 @@ class TestUploadVerificationResult:
     def test_verify_upload_warning_logged(self, caplog):
         """Scenario 4: verification failure logs a warning."""
         import sys, os, logging
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         from mcp_upload import _verify_upload
 
         mock_s3 = MagicMock()
@@ -531,7 +527,6 @@ class TestUploadVerificationResult:
     def test_verify_upload_result_fields(self):
         """UploadVerificationResult has all required fields."""
         import sys, os
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         from mcp_upload import UploadVerificationResult
 
         r = UploadVerificationResult(filename='f.txt', s3_uri='s3://b/k', verified=True, s3_size=100)

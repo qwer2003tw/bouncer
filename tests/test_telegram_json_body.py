@@ -18,7 +18,6 @@ from unittest.mock import patch
 # Set up env + path before importing telegram
 os.environ.setdefault('TELEGRAM_BOT_TOKEN', 'test-token')
 os.environ.setdefault('APPROVED_CHAT_ID', '999999999')
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 import telegram as _telegram_module  # noqa: E402
 

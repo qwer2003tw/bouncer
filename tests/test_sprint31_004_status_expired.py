@@ -9,7 +9,6 @@ Tests for mcp_tool_status TTL expiry check in mcp_admin.py:
   5. pending_approval + TTL=0 → status: 'pending_approval' (TTL=0 treated as no TTL)
 """
 import json
-import sys
 import os
 import time
 from decimal import Decimal
@@ -17,7 +16,6 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 
 def call_mcp_status(request_id: str, db_item: dict | None):

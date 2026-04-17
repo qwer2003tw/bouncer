@@ -7,12 +7,10 @@ Covers:
   - handle_deploy_callback: update_message failure is non-fatal (continues to start_deploy)
   - handle_deploy_frontend_callback: already removes buttons before deployment
 """
-import sys
 import os
 import pytest
 from unittest.mock import MagicMock, patch, call
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 os.environ.setdefault('TABLE_NAME', 'clawdbot-approval-requests')
 os.environ.setdefault('DEFAULT_ACCOUNT_ID', '190825685292')

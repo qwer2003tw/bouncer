@@ -7,13 +7,11 @@ Verifies that:
   3. Exceptions in non-critical paths do NOT propagate
   4. No ruff lint errors remain in priority files
 """
-import sys
 import os
 import logging
 import pytest
 from unittest.mock import patch, MagicMock
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 os.environ.setdefault('TABLE_NAME', 'clawdbot-approval-requests')
 os.environ.setdefault('DEFAULT_ACCOUNT_ID', '190825685292')

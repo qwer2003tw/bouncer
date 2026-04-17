@@ -9,11 +9,9 @@ Covers:
   - UTF-16 length calculation correctness
   - MessageBuilder.expandable_blockquote() method
 """
-import sys
 import os
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 os.environ.setdefault('TELEGRAM_BOT_TOKEN', 'test-token')
 os.environ.setdefault('TELEGRAM_CHAT_ID', '-1234567890')

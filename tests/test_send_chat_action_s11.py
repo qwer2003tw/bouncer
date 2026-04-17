@@ -5,12 +5,10 @@ Covers:
   - send_chat_action silently suppresses exceptions (fire-and-forget)
   - handle_mcp_tool_call triggers send_chat_action at the start of processing
 """
-import sys
 import os
 import pytest
 from unittest.mock import patch, MagicMock, call
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 os.environ.setdefault('TABLE_NAME', 'clawdbot-approval-requests')
 os.environ.setdefault('DEFAULT_ACCOUNT_ID', '190825685292')

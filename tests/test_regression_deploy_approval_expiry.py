@@ -11,9 +11,7 @@ callbacks_command.py 只檢查 ttl（= timeout + buffer，較寬鬆）。
 import time
 from unittest.mock import patch
 
-import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 
 class TestRegressionDeployApprovalExpiry:

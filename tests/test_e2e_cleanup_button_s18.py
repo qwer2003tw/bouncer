@@ -24,7 +24,6 @@ import pytest
 pytestmark = pytest.mark.xdist_group("e2e_cleanup")
 
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 os.environ.setdefault('TABLE_NAME', 'clawdbot-approval-requests')
 os.environ.setdefault('DEFAULT_ACCOUNT_ID', '190825685292')
@@ -176,10 +175,8 @@ class TestE2ECleanupNormalPath:
         # Ensure src/app.py is imported (xdist isolation fix)
         import sys
         import os
-        src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
         if src_path in sys.path:
             sys.path.remove(src_path)
-        sys.path.insert(0, src_path)
         if 'app' in sys.modules:
             app_file = getattr(sys.modules['app'], '__file__', '')
             if 'deployer' in app_file:
@@ -257,10 +254,8 @@ class TestE2ECleanupNormalPath:
         # Ensure src/app.py is imported (xdist isolation fix)
         import sys
         import os
-        src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
         if src_path in sys.path:
             sys.path.remove(src_path)
-        sys.path.insert(0, src_path)
         if 'app' in sys.modules:
             app_file = getattr(sys.modules['app'], '__file__', '')
             if 'deployer' in app_file:

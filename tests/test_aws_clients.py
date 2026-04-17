@@ -13,7 +13,6 @@ import pytest
 from unittest.mock import MagicMock, patch, call
 
 # Ensure src is on sys.path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 import aws_clients
 

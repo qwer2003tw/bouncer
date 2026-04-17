@@ -15,12 +15,10 @@ Regression tests:
 - exit_code in response is the actual value (not hardcoded -1)
 """
 import json
-import sys
 import os
 import pytest
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from paging import PaginatedOutput
 

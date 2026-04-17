@@ -8,12 +8,10 @@ Covers:
   - _execute_and_store_result: command_status='success' stored in DDB when exit code == 0
   - trust_callback DDB update includes command_status
 """
-import sys
 import os
 import pytest
 from unittest.mock import MagicMock, patch, call
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from paging import PaginatedOutput
 

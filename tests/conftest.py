@@ -10,7 +10,6 @@ import time
 import pytest
 
 # Ensure src/ is in path for all workers (required for pytest-xdist)
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../src'))
 # Ensure tests/ is in path so test files can import _module_list (Sprint 58 s58-001)
 _tests_dir = os.path.join(os.path.dirname(__file__))
 if _tests_dir not in sys.path:
@@ -209,7 +208,6 @@ def app_module(mock_dynamodb):
                 'src.app', 'src.telegram', 'src.paging', 'src.trust', 'src.commands', 'src.webhook_router']:
         if mod in sys.modules:
             del sys.modules[mod]
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
     import app
     

@@ -80,7 +80,6 @@ def grant_module(mock_dynamodb):
         if mod in sys.modules:
             del sys.modules[mod]
 
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
     import db
     db.table = mock_dynamodb.Table('clawdbot-approval-requests')
@@ -114,7 +113,6 @@ def mcp_module(mock_dynamodb):
         if mod in sys.modules:
             del sys.modules[mod]
 
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
     import db
     db.table = mock_dynamodb.Table('clawdbot-approval-requests')
@@ -994,9 +992,7 @@ def _get_compile_pattern():
     _os.environ.setdefault('TELEGRAM_BOT_TOKEN', 'test-token')
     _os.environ.setdefault('APPROVED_CHAT_ID', '999999999')
 
-    src_path = _os.path.join(_os.path.dirname(__file__), '..', 'src')
     if src_path not in _sys.path:
-        _sys.path.insert(0, src_path)
 
     # reload to avoid stale state
     import importlib
@@ -1084,9 +1080,7 @@ class TestCompilePatternReDoS:
         """覆蓋 re.error 路徑：即使繞過驗證也能捕獲 re.error → ValueError"""
         import re
         import os
-        src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
         if src_path not in _sys.path:
-            _sys.path.insert(0, src_path)
         import importlib
         if 'grant' in _sys.modules:
             grant_mod = importlib.reload(_sys.modules['grant'])

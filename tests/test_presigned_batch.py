@@ -57,9 +57,6 @@ os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
 os.environ.setdefault("AWS_SECURITY_TOKEN", "testing")
 os.environ.setdefault("AWS_SESSION_TOKEN", "testing")
 
-SRC_DIR = os.path.join(os.path.dirname(__file__), "..", "src")
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
 
 _SRC_MODS = [
     "mcp_presigned", "db", "constants", "utils", "accounts",

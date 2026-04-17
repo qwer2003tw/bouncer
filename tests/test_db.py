@@ -9,7 +9,6 @@ from moto import mock_aws
 import boto3
 
 # Ensure src is on path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 
 # ---------------------------------------------------------------------------

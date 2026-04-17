@@ -3,13 +3,11 @@ Tests for src/help_command.py - AWS CLI command help using botocore.
 
 Tests built-in Bouncer command help, AWS command help parsing, and formatting.
 """
-import sys
 import os
 import pytest
 from unittest.mock import MagicMock, patch
 
 # Ensure src is on sys.path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 import help_command
 

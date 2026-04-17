@@ -16,11 +16,9 @@ Author: Bouncer Team
 """
 
 import pytest
-import sys
 from pathlib import Path
 
 # 確保可以 import src
-sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from risk_scorer import (
     # Core types

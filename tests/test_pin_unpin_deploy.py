@@ -7,11 +7,9 @@ with the deploy approval and completion flow.
 
 import time
 import urllib.error
-import sys
 import os
 from unittest.mock import patch, MagicMock
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import deploy_db
 
 

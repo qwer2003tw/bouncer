@@ -4,11 +4,9 @@ Sprint 14 #60: Regression test — style field preserved in button whitelist.
 Verifies that _strip_unsupported_button_fields() preserves 'style' (supported
 since Telegram Bot API 9.4) while still removing unknown fields.
 """
-import sys
 import os
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 
 @pytest.fixture

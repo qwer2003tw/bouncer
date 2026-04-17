@@ -11,14 +11,12 @@ Covers:
   - app.py routing: deploy_frontend dispatches to handle_deploy_frontend_callback
 """
 import json
-import sys
 import os
 import pytest
 from io import BytesIO
 from unittest.mock import patch, MagicMock, call
 from botocore.exceptions import ClientError
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 os.environ.setdefault('TABLE_NAME', 'clawdbot-approval-requests')
 os.environ.setdefault('DEFAULT_ACCOUNT_ID', '190825685292')

@@ -11,13 +11,11 @@ TC08 - send_auto_approve_deploy_notification sends silent Telegram with deploy_i
 from __future__ import annotations
 
 import json
-import sys
 import os
 
 import pytest
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import deploy_db
 
 # ---------------------------------------------------------------------------

@@ -10,7 +10,6 @@ from unittest.mock import Mock, patch, MagicMock
 import pytest
 
 # Add src/ to path for module imports
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'src'))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'deployer'))
 
 
@@ -49,7 +48,6 @@ def test_telegram_error_emits_metric():
     """s44-005: Telegram API failure should log error and emit NotificationFailure metric"""
     # Verify code change: telegram.py line 103 now calls emit_metric on error
     import sys
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'src'))
 
     # Read the source code and verify the fix is present
     telegram_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'src', 'telegram.py')

@@ -11,7 +11,6 @@ import pytest
 import boto3
 from moto import mock_aws
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 
 def _trust_id(scope, account='111111111111'):
@@ -82,7 +81,6 @@ def app_module(mock_dynamodb):
         if mod in sys.modules:
             del sys.modules[mod]
 
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
     import app
     import db
     import trust

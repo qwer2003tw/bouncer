@@ -15,7 +15,6 @@ import boto3
 from moto import mock_aws
 from botocore.exceptions import ClientError
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 
 # ---------------------------------------------------------------------------

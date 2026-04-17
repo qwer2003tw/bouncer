@@ -6,12 +6,10 @@ Covers:
   - Path 2: send_trust_auto_approve_notification handles outputs > 4096 chars (Telegram limit)
   - Path 3: send_grant_execute_notification handles outputs > 4096 chars (Telegram limit)
 """
-import sys
 import os
 import pytest
 from unittest.mock import patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 os.environ.setdefault('TABLE_NAME', 'clawdbot-approval-requests')
 os.environ.setdefault('DEFAULT_ACCOUNT_ID', '190825685292')

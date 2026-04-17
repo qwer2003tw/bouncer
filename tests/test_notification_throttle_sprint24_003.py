@@ -8,13 +8,11 @@ Implements sprint24-003: deduplicate consecutive auto_approved notifications (#7
 import time
 import pytest
 from unittest.mock import patch, MagicMock
-import sys
 import os
 import pytest
 pytestmark = pytest.mark.xdist_group("throttle")
 
 # Add src directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 # Set up minimal environment variables
 os.environ.setdefault('TELEGRAM_BOT_TOKEN', 'test-token')

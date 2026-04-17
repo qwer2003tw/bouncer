@@ -2,14 +2,12 @@
 import json
 from unittest.mock import patch, MagicMock
 import pytest
-import sys
 import os
 
 # xdist isolation: keep all template_diff_analyzer tests in the same worker
 pytestmark = pytest.mark.xdist_group("template_diff_analyzer")
 
 # Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from template_diff_analyzer import analyze_template_diff, TemplateDiffResult, _scan_added_lines
 

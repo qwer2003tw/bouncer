@@ -13,13 +13,11 @@ Covers:
   - Regression: _write_frontend_deploy_history is importable/callable from callbacks
 """
 import json
-import sys
 import os
 import pytest
 from io import BytesIO
 from unittest.mock import patch, MagicMock, call, ANY
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 os.environ.setdefault('TABLE_NAME', 'clawdbot-approval-requests')
 os.environ.setdefault('DEFAULT_ACCOUNT_ID', '190825685292')

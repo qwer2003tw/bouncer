@@ -15,7 +15,6 @@ from unittest.mock import MagicMock, patch
 from moto import mock_aws
 
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 
 # ============================================================================

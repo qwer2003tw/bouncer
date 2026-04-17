@@ -16,12 +16,10 @@ TC11 - mcp_tool_deploy: auto_all + start_deploy error → returns error
 from __future__ import annotations
 
 import json
-import sys
 import os
 from unittest.mock import MagicMock, patch
 from dataclasses import dataclass
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import deployer
 from deployer import _resolve_deploy_mode
 

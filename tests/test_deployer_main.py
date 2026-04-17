@@ -140,7 +140,6 @@ class TestDeployerModule:
         if 'src.deployer' in sys.modules:
             del sys.modules['src.deployer']
         
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         import deployer
         
         # 注入 mock tables
@@ -161,7 +160,6 @@ class TestDeployerModule:
         if 'src.deployer' in sys.modules:
             del sys.modules['src.deployer']
         
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         import deployer
         
         deployer.projects_table = deployer_tables.Table('bouncer-projects')
@@ -197,7 +195,6 @@ class TestDeployerModule:
         if 'src.deployer' in sys.modules:
             del sys.modules['src.deployer']
         
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         import deployer
         
         deployer.projects_table = deployer_tables.Table('bouncer-projects')
@@ -223,7 +220,6 @@ class TestDeployerModule:
         if 'src.deployer' in sys.modules:
             del sys.modules['src.deployer']
         
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         import deployer
         
         deployer.locks_table = deployer_tables.Table('bouncer-deploy-locks')
@@ -253,7 +249,6 @@ class TestDeployerModule:
         if 'src.deployer' in sys.modules:
             del sys.modules['src.deployer']
         
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         import deployer
         
         deployer.locks_table = deployer_tables.Table('bouncer-deploy-locks')
@@ -280,7 +275,6 @@ class TestDeployerModule:
         if 'src.deployer' in sys.modules:
             del sys.modules['src.deployer']
         
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         import deployer
         
         deployer.history_table = deployer_tables.Table('bouncer-deploy-history')
@@ -315,7 +309,6 @@ class TestDeployerModule:
         if 'src.deployer' in sys.modules:
             del sys.modules['src.deployer']
         
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         import deployer
         
         deployer.projects_table = deployer_tables.Table('bouncer-projects')
@@ -336,7 +329,6 @@ class TestDeployerModule:
         if 'src.deployer' in sys.modules:
             del sys.modules['src.deployer']
         
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         import deployer
         
         deployer.projects_table = deployer_tables.Table('bouncer-projects')
@@ -363,7 +355,6 @@ class TestDeployerModule:
         if 'src.deployer' in sys.modules:
             del sys.modules['src.deployer']
         
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         import deployer
         
         deployer.projects_table = deployer_tables.Table('bouncer-projects')
@@ -400,7 +391,6 @@ class TestDeployerModule:
         if 'src.deployer' in sys.modules:
             del sys.modules['src.deployer']
         
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         import deployer
         
         deployer.history_table = deployer_tables.Table('bouncer-deploy-history')
@@ -419,7 +409,6 @@ class TestDeployerModule:
         if 'src.deployer' in sys.modules:
             del sys.modules['src.deployer']
         
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         import deployer
         
         deployer.history_table = deployer_tables.Table('bouncer-deploy-history')
@@ -445,7 +434,6 @@ class TestDeployerModule:
         if 'src.deployer' in sys.modules:
             del sys.modules['src.deployer']
         
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         import deployer
         
         deployer.history_table = deployer_tables.Table('bouncer-deploy-history')
@@ -465,7 +453,6 @@ class TestDeployerModule:
         if 'src.deployer' in sys.modules:
             del sys.modules['src.deployer']
         
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         import deployer
         
         deployer.history_table = deployer_tables.Table('bouncer-deploy-history')
@@ -613,7 +600,6 @@ class TestDeployerMCPTools:
         """部署缺少專案"""
         # 透過 deployer 模組直接呼叫
         import sys
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         from deployer import mcp_tool_deploy
         
         with patch('deployer.get_project', return_value=None), \
@@ -630,7 +616,6 @@ class TestDeployerMCPTools:
     def test_mcp_tool_deploy_missing_reason(self, app_module):
         """部署缺少原因"""
         import sys
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         from deployer import mcp_tool_deploy
         
         result = mcp_tool_deploy('test-1', {
@@ -697,7 +682,6 @@ class TestDeployerAdditional:
         if 'src.deployer' in sys.modules:
             del sys.modules['src.deployer']
         
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         import deployer
         
         deployer.projects_table = deployer_setup.Table('bouncer-projects')
@@ -715,7 +699,6 @@ class TestDeployerAdditional:
         if 'src.deployer' in sys.modules:
             del sys.modules['src.deployer']
         
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         import deployer
         
         deployer.history_table = deployer_setup.Table('bouncer-deploy-history')
@@ -790,7 +773,6 @@ class TestDeployerFull:
         if 'src.deployer' in sys.modules:
             del sys.modules['src.deployer']
         
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         import deployer
         
         deployer.history_table = deployer_full_setup.Table('bouncer-deploy-history')
@@ -818,7 +800,6 @@ class TestDeployerFull:
         if 'src.deployer' in sys.modules:
             del sys.modules['src.deployer']
         
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         import deployer
         
         deployer.history_table = deployer_full_setup.Table('bouncer-deploy-history')
@@ -864,7 +845,6 @@ class TestDeployerMore:
         if 'src.deployer' in sys.modules:
             del sys.modules['src.deployer']
         
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         import deployer
         
         deployer.projects_table = deployer_more_setup.Table('bouncer-projects')
@@ -1276,7 +1256,6 @@ class TestDeployNotificationFallback:
 
 import sys as _sys
 import os as _os
-_sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), '..', 'src'))
 from deployer import DeployErrorExtractor  # noqa: E402
 
 import pytest
@@ -1421,7 +1400,6 @@ class TestGetDeployStatusFailedPath:
         for mod_name in list(sys.modules.keys()):
             if 'deployer' in mod_name:
                 del sys.modules[mod_name]
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
         import deployer as dep
         dep.history_table = mock_dynamodb.Table('bouncer-deploy-history')
         dep.locks_table = mock_dynamodb.Table('bouncer-deploy-locks')

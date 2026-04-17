@@ -5,12 +5,10 @@ Validates that _check_auto_approve(), _check_trust_session(), and
 _check_grant_session() all include 'request_id' in their response content.
 """
 import json
-import sys
 import os
 import pytest
 from unittest.mock import patch, MagicMock, call
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from paging import PaginatedOutput
 

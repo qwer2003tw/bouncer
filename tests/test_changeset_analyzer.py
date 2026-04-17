@@ -4,14 +4,12 @@ TC01-TC10 covering is_code_only_change, analyze_changeset, and cleanup_changeset
 """
 from __future__ import annotations
 
-import sys
 import os
 
 import pytest
 from botocore.exceptions import ClientError
 from unittest.mock import MagicMock, call
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from changeset_analyzer import (  # noqa: E402
     AnalysisResult,

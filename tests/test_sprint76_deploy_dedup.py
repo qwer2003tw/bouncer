@@ -10,12 +10,10 @@ TC08 - _find_pending_deploy: DDB error → fail-open (returns None)
 from __future__ import annotations
 
 import json
-import sys
 import os
 import time
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 
 # ---------------------------------------------------------------------------

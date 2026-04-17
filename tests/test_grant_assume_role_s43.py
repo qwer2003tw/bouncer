@@ -12,9 +12,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from moto import mock_aws
 import boto3
-import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from paging import PaginatedOutput
 
 

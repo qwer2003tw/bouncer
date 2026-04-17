@@ -3,14 +3,12 @@ Tests for src/deploy_preflight.py - Pre-deploy validation logic.
 
 Tests template URL validation, changed files detection, and secrets preflight checks.
 """
-import sys
 import os
 import pytest
 from unittest.mock import MagicMock, patch, mock_open
 from botocore.exceptions import ClientError
 
 # Ensure src is on sys.path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 import deploy_preflight
 

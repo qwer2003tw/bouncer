@@ -11,8 +11,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import sys
-sys.path.insert(0, 'src')
 import commands as commands_mod
 
 

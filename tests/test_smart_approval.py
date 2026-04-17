@@ -1,12 +1,10 @@
 """Tests for smart_approval module."""
 import os
-import sys
 import time
 import json
 import pytest
 
 # Setup path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 os.environ.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
 os.environ.setdefault('REQUESTS_TABLE_NAME', 'bouncer-test-requests')
 os.environ.setdefault('DEFAULT_ACCOUNT_ID', '111111111111')

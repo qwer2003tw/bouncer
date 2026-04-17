@@ -13,7 +13,6 @@ from unittest.mock import patch
 import importlib.util as _ilu
 
 _notifier_dir = os.path.join(os.path.dirname(__file__), '..', 'deployer', 'notifier')
-sys.path.insert(0, _notifier_dir)
 
 with patch.dict(os.environ, {
     'TELEGRAM_BOT_TOKEN': 'fake-token',
@@ -41,7 +40,6 @@ def mock_boto3_resources():
     notifier_path = os.path.join(os.path.dirname(__file__), '..', 'deployer', 'notifier')
     if notifier_path in sys.path:
         sys.path.remove(notifier_path)
-    sys.path.insert(0, notifier_path)
     if 'app' in sys.modules:
         app_file = getattr(sys.modules['app'], '__file__', '')
         if 'notifier' not in app_file and 'src' in app_file:

@@ -7,7 +7,6 @@ import importlib
 import pytest
 from unittest.mock import patch, MagicMock
 import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 VALID_STYLES = {'success', 'primary', 'danger'}
 CHINESE = re.compile(r'[\u4e00-\u9fff]')

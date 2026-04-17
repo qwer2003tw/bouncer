@@ -15,9 +15,6 @@ import boto3
 import pytest
 from moto import mock_aws
 
-SRC_DIR = os.path.join(os.path.dirname(__file__), '..', 'src')
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
 
 os.environ.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
 os.environ.setdefault('DEFAULT_ACCOUNT_ID', '190825685292')

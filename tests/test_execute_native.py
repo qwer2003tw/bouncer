@@ -7,9 +7,7 @@ from unittest.mock import patch, MagicMock, Mock
 from moto import mock_aws
 import boto3
 from botocore.exceptions import ClientError
-import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from paging import PaginatedOutput
 

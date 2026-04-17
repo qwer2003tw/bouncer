@@ -18,9 +18,6 @@ import pytest
 from unittest.mock import patch, MagicMock, call
 
 # Ensure src is on path
-_SRC_DIR = os.path.join(os.path.dirname(__file__), '..', 'src')
-if _SRC_DIR not in sys.path:
-    sys.path.insert(0, _SRC_DIR)
 
 os.environ.setdefault('TELEGRAM_BOT_TOKEN', 'test-token')
 os.environ.setdefault('APPROVED_CHAT_ID', '99999')

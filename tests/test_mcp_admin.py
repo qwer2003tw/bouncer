@@ -89,7 +89,6 @@ def mcp_admin_module(mock_dynamodb):
         if mod in sys.modules:
             del sys.modules[mod]
 
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
     import db
     db.table = mock_dynamodb.Table('clawdbot-approval-requests')
