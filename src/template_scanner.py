@@ -20,6 +20,7 @@ Check IDs:
     TP-009: public_access         - S3/Policy Principal:* + Allow
 """
 
+import os
 import json
 import re
 from typing import Any, Optional
@@ -27,7 +28,10 @@ from typing import Any, Optional
 from aws_lambda_powertools import Logger
 from metrics import emit_metric
 from utils import RiskFactor
-from constants import TRUSTED_ACCOUNT_IDS
+
+# Read env directly (not via constants) to avoid test-isolation issues.
+# See #358 for the underlying sys.modules mess.
+TRUSTED_ACCOUNT_IDS = [x for x in os.environ.get('TRUSTED_ACCOUNT_IDS', '').split(',') if x]
 
 logger = Logger(service="bouncer")
 
@@ -326,7 +330,11 @@ def check_external_account_trust(
         (score, description) if external account found, None otherwise
     """
     if known_accounts is None:
-        known_accounts = KNOWN_ACCOUNT_IDS
+        # Dynamically read from env (not module-load snapshot) to allow
+        # tests to override TRUSTED_ACCOUNT_IDS via monkeypatch.setenv.
+        import os as _os
+        _current = [x for x in _os.environ.get('TRUSTED_ACCOUNT_IDS', '').split(',') if x]
+        known_accounts = {aid.strip() for aid in _current if aid.strip()}
 
     account_pattern = re.compile(r'arn:aws:iam::(\d{12}):')
 

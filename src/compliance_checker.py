@@ -9,9 +9,14 @@ Compliance Checker - 三份安規合規檢查
 """
 import json
 import re
+import os
 from dataclasses import dataclass
 from typing import Optional
-from constants import TRUSTED_ACCOUNT_IDS
+
+# Read env var directly (not via constants) to avoid test-isolation issues
+# where tests set the env var AFTER constants is imported.
+# See #358 for the underlying sys.modules mess.
+TRUSTED_ACCOUNT_IDS = [x for x in os.environ.get('TRUSTED_ACCOUNT_IDS', '').split(',') if x]
 
 
 @dataclass
