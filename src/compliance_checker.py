@@ -8,12 +8,14 @@ Compliance Checker - 三份安規合規檢查
 - CS: Code Scanning 規則
 """
 import json
-import os
 import re
+import os
 from dataclasses import dataclass
 from typing import Optional
 
-# 受信任的組織內 AWS 帳號 ID（用於合規檢查）
+# Read env var directly (not via constants) to avoid test-isolation issues
+# where tests set the env var AFTER constants is imported.
+# See #358 for the underlying sys.modules mess.
 TRUSTED_ACCOUNT_IDS = [x for x in os.environ.get('TRUSTED_ACCOUNT_IDS', '').split(',') if x]
 
 

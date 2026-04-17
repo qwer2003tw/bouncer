@@ -259,7 +259,6 @@ class TestTrustAutoApprove:
     def test_trust_auto_approve_flow(self, mock_silent, app_module):
         """信任時段內的自動批准流程"""
         import mcp_execute
-        import mcp_tools
         source = 'trust-auto-test'
         account_id = '111111111111'
         

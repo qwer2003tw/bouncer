@@ -6,25 +6,23 @@ import os
 from constants import DEFAULT_REGION
 import re
 import subprocess
-import boto3
 from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
+from aws_clients import get_client
 
 logger = Logger(service="bouncer")
 
+# Secrets Manager — lazy init (no boto3 call at import time)
+# Tests may patch this: patch.object(deploy_preflight, 'secretsmanager_client')
+secretsmanager_client = None
+
 
 def _get_secretsmanager_client():
-    """Get Secrets Manager client.
-
-    Uses deployer module global for caching and test mock compatibility.
-    Tests should patch 'deploy_preflight._get_secretsmanager_client' or
-    'deployer._get_secretsmanager_client' (re-exported from this module).
-    """
-    import deployer as _deployer
-    if _deployer.secretsmanager_client is None:
-        region = DEFAULT_REGION
-        _deployer.secretsmanager_client = boto3.client('secretsmanager', region_name=region)
-    return _deployer.secretsmanager_client
+    """Get Secrets Manager client (lazy init for test compatibility)"""
+    global secretsmanager_client
+    if secretsmanager_client is None:
+        secretsmanager_client = get_client('secretsmanager', DEFAULT_REGION)
+    return secretsmanager_client
 
 
 def validate_template_s3_url(url: str) -> tuple:

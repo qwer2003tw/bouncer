@@ -3,11 +3,9 @@ Bouncer Deployer Tools
 MCP tools for SAM deployment
 """
 import json
-import os
 import re
 import time
 import uuid
-import boto3
 from botocore.exceptions import ClientError
 from metrics import emit_metric
 from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native, generate_display_summary
@@ -15,10 +13,12 @@ import db as _db
 import notifications
 from aws_lambda_powertools import Logger
 from telegram import unpin_message
+from aws_clients import get_client
 from constants import (
     APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER,
     DEPLOY_MODE_MANUAL, DEPLOY_MODE_AUTO_CODE, VALID_DEPLOY_MODES,
     DEFAULT_REGION, TTL_7_DAYS, DEFAULT_DEPLOY_AVG_SECS,
+    STATE_MACHINE_ARN,
 )
 
 # Import and re-export DB operations from deploy_db for backward compatibility
@@ -44,19 +44,6 @@ from deploy_db import (  # noqa: F401 - re-exports for backward compatibility
 
 logger = Logger(service="bouncer")
 
-# 環境變數
-PROJECTS_TABLE = os.environ.get('PROJECTS_TABLE', 'bouncer-projects')
-HISTORY_TABLE = os.environ.get('HISTORY_TABLE', 'bouncer-deploy-history')
-LOCKS_TABLE = os.environ.get('LOCKS_TABLE', 'bouncer-deploy-locks')
-STATE_MACHINE_ARN = os.environ.get('DEPLOY_STATE_MACHINE_ARN', '')
-
-# DynamoDB — lazy init (no boto3 call at import time)
-# Tests may set these directly: deployer.history_table = moto_table
-_dynamodb = None
-projects_table = None
-history_table = None
-locks_table = None
-
 # Step Functions — lazy init
 # Tests may patch this: patch.object(deployer, 'sfn_client')
 sfn_client = None
@@ -64,21 +51,18 @@ sfn_client = None
 # CloudFormation — lazy init
 cfn_client = None
 
-# Secrets Manager — lazy init
-secretsmanager_client = None
-
 
 def _get_sfn_client():
     global sfn_client
     if sfn_client is None:
-        sfn_client = boto3.client('stepfunctions', region_name=DEFAULT_REGION)
+        sfn_client = get_client('stepfunctions', DEFAULT_REGION)
     return sfn_client
 
 
 def _get_cfn_client():
     global cfn_client
     if cfn_client is None:
-        cfn_client = boto3.client('cloudformation', region_name=DEFAULT_REGION)
+        cfn_client = get_client('cloudformation', DEFAULT_REGION)
     return cfn_client
 
 

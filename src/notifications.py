@@ -14,7 +14,6 @@ sprint24-003:
 """
 
 import datetime
-import os
 import time
 import urllib.error
 from typing import NamedTuple, Optional
@@ -24,7 +23,7 @@ from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
 import telegram as _telegram
 from commands import is_dangerous, check_lambda_env_update
-from constants import COMMAND_APPROVAL_TIMEOUT, TRUST_SESSION_MAX_COMMANDS, UPLOAD_TIMEOUT, GRANT_APPROVAL_TIMEOUT
+from constants import COMMAND_APPROVAL_TIMEOUT, TRUST_SESSION_MAX_COMMANDS, UPLOAD_TIMEOUT, GRANT_APPROVAL_TIMEOUT, DEFAULT_ACCOUNT_ID
 from trust import is_trust_excluded
 from telegram_entities import MessageBuilder, format_command_output
 from utils import format_size_human, extract_exit_code
@@ -211,8 +210,7 @@ def send_approval_request(request_id: str, command: str, reason: str, timeout: i
             account_display = (assume_role, None)
             account_mode = 'role'
     else:
-        default_account = os.environ.get('AWS_ACCOUNT_ID', '')
-        account_display = (default_account, '預設')
+        account_display = (DEFAULT_ACCOUNT_ID, '預設')
         account_mode = 'named'
 
     # ---- Build message with MessageBuilder ----

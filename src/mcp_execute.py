@@ -7,7 +7,6 @@ Chain risk analysis moved to chain_analyzer.py (sprint60-002).
 """
 
 import json
-import os
 import re
 import secrets
 import time
@@ -49,6 +48,7 @@ from constants import (
     AUDIT_TTL_SHORT,
     GRANT_SESSION_ENABLED,
     TELEGRAM_PAGE_SIZE,
+    SHADOW_TABLE_NAME,
 )
 from aws_lambda_powertools import Logger
 
@@ -56,10 +56,6 @@ logger = Logger(service="bouncer")
 
 # Backward-compat alias for tests that reference mcp_execute._check_chain_risks (s60-002)
 _check_chain_risks = check_chain_risks
-
-
-# Shadow mode 表名（用於收集智慧審批數據）
-SHADOW_TABLE_NAME = os.environ.get('SHADOW_TABLE', 'bouncer-shadow-approvals')
 
 
 # =============================================================================

@@ -12,7 +12,10 @@ if not os.environ.get('TRUSTED_ACCOUNT_IDS'):
     os.environ['TRUSTED_ACCOUNT_IDS'] = '111111111111,222222222222,333333333333'
 
 import src.compliance_checker as _cc_mod
-# Reload to pick up the env var if it was imported before we set it
+# Reload constants first (TRUSTED_ACCOUNT_IDS loaded from env at import time),
+# then reload compliance_checker to pick up the new TRUSTED_ACCOUNT_IDS
+import src.constants as _const_mod
+importlib.reload(_const_mod)
 importlib.reload(_cc_mod)
 
 from src.compliance_checker import (

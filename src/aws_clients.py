@@ -79,3 +79,35 @@ def get_cloudfront_client(role_arn=None, session_name='bouncer-cf', region=None)
         return boto3.client('cloudfront', **kwargs)
 
     return boto3.client('cloudfront', **(dict(region_name=region) if region else {}))
+
+
+# ============================================================================
+# Generic Client Factory (Sprint 88 #370)
+# ============================================================================
+# Unified boto3 client creation with caching for all services except S3/CloudFront
+# (which require role assumption support via get_s3_client/get_cloudfront_client)
+
+_clients = {}
+
+
+def get_client(service: str, region: str = None):
+    """Get or create a cached boto3 client.
+
+    Args:
+        service: AWS service name (e.g., 'sts', 'dynamodb', 'secretsmanager')
+        region: AWS region (defaults to DEFAULT_REGION from constants)
+
+    Returns:
+        boto3 client for the specified service
+    """
+    from constants import DEFAULT_REGION
+    region = region or DEFAULT_REGION
+    key = f"{service}:{region}"
+    if key not in _clients:
+        _clients[key] = boto3.client(service, region_name=region)
+    return _clients[key]
+
+
+def reset_clients():
+    """Reset all cached clients. Use in test teardown."""
+    _clients.clear()

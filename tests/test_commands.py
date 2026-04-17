@@ -832,7 +832,7 @@ class TestHelpCommand:
 
     def test_mcp_tool_help(self, mock_dynamodb):
         """測試 MCP tool 呼叫"""
-        from src.mcp_tools import mcp_tool_help
+        from src.mcp_admin import mcp_tool_help
         import json
 
         result = mcp_tool_help('test-req', {'command': 'ec2 describe-instances'})

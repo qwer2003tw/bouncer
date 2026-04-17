@@ -14,7 +14,6 @@ Phase B (callback / actual S3 deploy / CloudFront invalidation) is NOT included 
 import base64
 import binascii
 import json
-import os
 import time
 from typing import Optional
 
@@ -24,7 +23,7 @@ from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
 from aws_clients import get_s3_client
 
-from constants import DEFAULT_ACCOUNT_ID, APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER, UPLOAD_TIMEOUT, DEFAULT_REGION, TTL_30_DAYS
+from constants import DEFAULT_ACCOUNT_ID, APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER, UPLOAD_TIMEOUT, DEFAULT_REGION, TTL_30_DAYS, PROJECTS_TABLE
 from db import table, deployer_projects_table, deployer_history_table
 from notifications import send_deploy_frontend_notification
 from utils import generate_request_id, mcp_result, mcp_error
@@ -40,8 +39,6 @@ logger = Logger(service="bouncer")
 # See SKILL.md > "Adding a New Frontend Project" for full instructions.
 # ---------------------------------------------------------------------------
 
-# Environment variable for projects table (same as deployer.py)
-_PROJECTS_TABLE = os.environ.get('PROJECTS_TABLE', 'bouncer-projects')
 _REGION = DEFAULT_REGION
 
 # ---------------------------------------------------------------------------
@@ -81,7 +78,7 @@ def _get_frontend_config(project_id: str) -> Optional[dict]:
     """
     try:
         dynamodb = boto3.resource('dynamodb', region_name=_REGION)
-        projects_table = dynamodb.Table(_PROJECTS_TABLE)
+        projects_table = dynamodb.Table(PROJECTS_TABLE)
         resp = projects_table.get_item(Key={'project_id': project_id})
         item = resp.get('Item')
 
@@ -130,7 +127,7 @@ def _list_known_projects() -> list:
     known = set()
     try:
         dynamodb = boto3.resource('dynamodb', region_name=_REGION)
-        projects_table = dynamodb.Table(_PROJECTS_TABLE)
+        projects_table = dynamodb.Table(PROJECTS_TABLE)
         result = projects_table.scan(
             ProjectionExpression='project_id, frontend_bucket',
         )
