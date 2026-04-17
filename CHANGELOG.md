@@ -1,5 +1,14 @@
 # Changelog
 
+## v3.88.0 (2026-04-17)
+### Refactor — Batch 2 Structure Cleanup
+- CI: add pip cache to setup-python steps (#351)
+- Centralize os.environ reads to constants.py (#347)
+- Break circular imports: deployer/deploy_db/deploy_preflight (#355)
+- Unify boto3 client factory in aws_clients.py (#370)
+- Remove mcp_tools.py re-export hub, direct imports (#369)
+
+
 ## v3.87.0 (2026-04-16)
 ### Refactor
 - Modernize typing syntax — remove deprecated typing imports (#343)
