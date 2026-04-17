@@ -19,23 +19,12 @@ Bouncer - Template Scanner Tests (Phase 4)
 """
 
 import json
-import os
 import pytest
 import sys
-import importlib
 from pathlib import Path
 
 # 確保可以 import src
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
-
-# Ensure TRUSTED_ACCOUNT_IDS is empty for this test file (template_scanner
-# expects empty known set by default so tests can use '111111111111' as known).
-# Other test files may have set it, so we force reload constants+template_scanner here.
-os.environ.pop('TRUSTED_ACCOUNT_IDS', None)
-import constants as _const
-importlib.reload(_const)
-import template_scanner as _ts
-importlib.reload(_ts)
 
 from template_scanner import (
     extract_json_payloads,
