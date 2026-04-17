@@ -636,7 +636,7 @@ Resources:
       Description: Send deployment notifications to Telegram
       Role: !GetAtt NotifierLambdaRole.Arn
       CodeUri: notifier/
-      Handler: app.lambda_handler
+      Handler: handler.lambda_handler
       Environment:
         Variables:
           TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
