@@ -1,5 +1,5 @@
 """
-Tests for deployer/notifier/app.py
+Tests for deployer/notifier/handler.py
 
 Regression test for Sprint 27-003: Notifier Lambda missing unpin on deploy complete
 """
@@ -16,7 +16,7 @@ sys.path.insert(0, str(NOTIFIER_DIR))
 
 # Mock boto3 before importing app (app.py initializes dynamodb at module level)
 with patch('boto3.resource'):
-    import app
+    import handler as app
 
 
 @pytest.fixture
@@ -31,8 +31,8 @@ def mock_env(monkeypatch):
 @pytest.fixture
 def mock_dynamodb():
     """Mock DynamoDB tables"""
-    with patch('app.history_table') as mock_history, \
-         patch('app.locks_table') as mock_locks:
+    with patch('handler.history_table') as mock_history, \
+         patch('handler.locks_table') as mock_locks:
         yield mock_history, mock_locks
 
 
@@ -171,8 +171,8 @@ class TestHandleSuccessUnpin:
             }
         }
 
-        with patch('app.update_telegram_message') as mock_update, \
-             patch('app.unpin_telegram_message') as mock_unpin:
+        with patch('handler.update_telegram_message') as mock_update, \
+             patch('handler.unpin_telegram_message') as mock_unpin:
 
             event = {
                 'deploy_id': 'test-deploy-123',
@@ -200,8 +200,8 @@ class TestHandleSuccessUnpin:
         # Mock history without message_id
         mock_history.get_item.return_value = {'Item': {}}
 
-        with patch('app.send_telegram_message') as mock_send, \
-             patch('app.unpin_telegram_message') as mock_unpin:
+        with patch('handler.send_telegram_message') as mock_send, \
+             patch('handler.unpin_telegram_message') as mock_unpin:
 
             event = {
                 'deploy_id': 'test-deploy-123',
@@ -238,8 +238,8 @@ class TestHandleFailureUnpin:
             }
         }
 
-        with patch('app.update_telegram_message') as mock_update, \
-             patch('app.unpin_telegram_message') as mock_unpin:
+        with patch('handler.update_telegram_message') as mock_update, \
+             patch('handler.unpin_telegram_message') as mock_unpin:
 
             event = {
                 'deploy_id': 'test-deploy-123',
@@ -267,8 +267,8 @@ class TestHandleFailureUnpin:
         # Mock history without message_id
         mock_history.get_item.return_value = {'Item': {}}
 
-        with patch('app.send_telegram_message') as mock_send, \
-             patch('app.unpin_telegram_message') as mock_unpin:
+        with patch('handler.send_telegram_message') as mock_send, \
+             patch('handler.unpin_telegram_message') as mock_unpin:
 
             event = {
                 'deploy_id': 'test-deploy-123',
@@ -297,8 +297,8 @@ class TestHandleStartPin:
         # No existing message_id → falls through to send_telegram_message
         mock_history.get_item.return_value = {}
 
-        with patch('app.send_telegram_message') as mock_send, \
-             patch('app.pin_telegram_message') as mock_pin:
+        with patch('handler.send_telegram_message') as mock_send, \
+             patch('handler.pin_telegram_message') as mock_pin:
 
             # Mock message send
             mock_send.return_value = 789
@@ -326,8 +326,8 @@ class TestHandleStartPin:
         # No existing message_id → falls through to send_telegram_message
         mock_history.get_item.return_value = {}
 
-        with patch('app.send_telegram_message') as mock_send, \
-             patch('app.pin_telegram_message') as mock_pin:
+        with patch('handler.send_telegram_message') as mock_send, \
+             patch('handler.pin_telegram_message') as mock_pin:
 
             # Mock message send returns None
             mock_send.return_value = None
@@ -365,8 +365,8 @@ class TestSprint39UX:
             }
         }
 
-        with patch('app.update_telegram_message') as mock_update, \
-             patch('app.format_duration') as mock_format_duration, \
+        with patch('handler.update_telegram_message') as mock_update, \
+             patch('handler.format_duration') as mock_format_duration, \
              patch('time.time', return_value=1000010):  # 10 seconds elapsed
 
             mock_format_duration.return_value = '10s'
@@ -408,9 +408,9 @@ class TestSprint39UX:
             }
         }
 
-        with patch('app.update_history') as mock_update_history, \
-             patch('app.handle_progress') as mock_handle_progress, \
-             patch('app._get_stack_name', return_value='test-stack'), \
+        with patch('handler.update_history') as mock_update_history, \
+             patch('handler.handle_progress') as mock_handle_progress, \
+             patch('handler._get_stack_name', return_value='test-stack'), \
              patch('boto3.client') as mock_boto3_client:
 
             # Mock CFN client

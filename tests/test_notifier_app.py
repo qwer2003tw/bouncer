@@ -1,21 +1,14 @@
 """
-Tests for deployer/notifier/app.py - Deploy notification Lambda.
+Tests for deployer/notifier/handler.py - Deploy notification Lambda.
 
 Tests lambda_handler routing, Telegram messaging, and DynamoDB operations.
 """
-import sys
-import os
 import pytest
 from unittest.mock import patch
 
-# Load deployer/notifier/app.py explicitly via importlib
-# to avoid collision with src/app.py (conftest adds src/ to sys.path)
-import importlib.util as _ilu
-
-_notifier_dir = os.path.join(os.path.dirname(__file__), '..', 'deployer', 'notifier')
-sys.path.insert(0, _notifier_dir)
-
-with patch.dict(os.environ, {
+# After rename (deployer/notifier/app.py → handler.py), no more collision with src/app.py.
+# Simple import via pythonpath (set in pyproject.toml / pytest.ini).
+with patch.dict('os.environ', {
     'TELEGRAM_BOT_TOKEN': 'fake-token',
     'TELEGRAM_CHAT_ID': '123456',
     'MESSAGE_THREAD_ID': '',
@@ -24,10 +17,7 @@ with patch.dict(os.environ, {
     'ARTIFACTS_BUCKET': 'test-bucket',
     'DEPLOYS_TABLE': 'test-deploys'
 }):
-    _spec = _ilu.spec_from_file_location('app', os.path.join(_notifier_dir, 'app.py'))
-    app = _ilu.module_from_spec(_spec)
-    sys.modules['app'] = app  # register so patch('app.xxx') works
-    _spec.loader.exec_module(app)
+    import handler as app  # alias to keep existing `app.xxx` references working
 
 pytestmark = pytest.mark.xdist_group("notifier_app")
 
@@ -41,16 +31,15 @@ def mock_boto3_resources():
     notifier_path = os.path.join(os.path.dirname(__file__), '..', 'deployer', 'notifier')
     if notifier_path in sys.path:
         sys.path.remove(notifier_path)
-    sys.path.insert(0, notifier_path)
     if 'app' in sys.modules:
         app_file = getattr(sys.modules['app'], '__file__', '')
         if 'notifier' not in app_file and 'src' in app_file:
             del sys.modules['app']
             import app  # Re-import from deployer/notifier/
 
-    with patch('app.dynamodb'):
-        with patch('app.history_table') as mock_history:
-            with patch('app.locks_table') as mock_locks:
+    with patch('handler.dynamodb'):
+        with patch('handler.history_table') as mock_history:
+            with patch('handler.locks_table') as mock_locks:
                 mock_history.get_item.return_value = {}
                 mock_history.update_item.return_value = {}
                 mock_locks.delete_item.return_value = {}
@@ -64,17 +53,16 @@ class TestLambdaHandler:
         """lambda_handler() routes 'start' action to handle_start."""
         event = {'action': 'start', 'deploy_id': 'dep-123', 'project_id': 'proj1', 'branch': 'main'}
 
-        with patch('app.handle_start', return_value={'message_id': 123}):
+        with patch('handler.handle_start', return_value={'message_id': 123}):
             result = app.lambda_handler(event, None)
 
         assert 'message_id' in result
 
-    @pytest.mark.xfail(reason="xdist conftest imports src/app.py, collides with deployer/notifier/app.py")
     def test_lambda_handler_progress_action(self):
         """lambda_handler() routes 'progress' action to handle_progress."""
         event = {'action': 'progress', 'deploy_id': 'dep-123', 'phase': 'BUILDING'}
 
-        with patch('app.handle_progress', return_value={'status': 'updated'}):
+        with patch('handler.handle_progress', return_value={'status': 'updated'}):
             result = app.lambda_handler(event, None)
 
         assert result['status'] == 'updated'
@@ -83,17 +71,16 @@ class TestLambdaHandler:
         """lambda_handler() routes 'success' action to handle_success."""
         event = {'action': 'success', 'deploy_id': 'dep-123', 'project_id': 'proj1'}
 
-        with patch('app.handle_success', return_value={'status': 'success'}):
+        with patch('handler.handle_success', return_value={'status': 'success'}):
             result = app.lambda_handler(event, None)
 
         assert result['status'] == 'success'
 
-    @pytest.mark.xfail(reason="xdist conftest imports src/app.py, collides with deployer/notifier/app.py")
     def test_lambda_handler_failure_action(self):
         """lambda_handler() routes 'failure' action to handle_failure."""
         event = {'action': 'failure', 'deploy_id': 'dep-123', 'error': {'message': 'Build failed'}}
 
-        with patch('app.handle_failure', return_value={'status': 'notified'}):
+        with patch('handler.handle_failure', return_value={'status': 'notified'}):
             result = app.lambda_handler(event, None)
 
         assert result['status'] == 'notified'
@@ -176,8 +163,7 @@ class TestExtractErrorMessage:
 class TestGetHistory:
     """Test get_history() DynamoDB wrapper."""
 
-    @patch('app.history_table')
-    @pytest.mark.xfail(reason="xdist conftest imports src/app.py, collides with deployer/notifier/app.py")
+    @patch('handler.history_table')
     def test_get_history_found(self, mock_table):
         """get_history() returns Item from DynamoDB."""
         mock_table.get_item.return_value = {
@@ -196,7 +182,7 @@ class TestGetHistory:
         call_args = mock_table.get_item.call_args
         assert call_args[1]['Key'] == {'deploy_id': 'dep-123'}
 
-    @patch('app.history_table')
+    @patch('handler.history_table')
     def test_get_history_not_found(self, mock_table):
         """get_history() returns empty dict when Item not found."""
         mock_table.get_item.return_value = {}
@@ -205,7 +191,7 @@ class TestGetHistory:
 
         assert result == {}
 
-    @patch('app.history_table')
+    @patch('handler.history_table')
     def test_get_history_exception(self, mock_table):
         """get_history() returns empty dict on exception."""
         mock_table.get_item.side_effect = Exception("DynamoDB error")
@@ -218,8 +204,7 @@ class TestGetHistory:
 class TestUpdateHistory:
     """Test update_history() DynamoDB update wrapper."""
 
-    @patch('app.history_table')
-    @pytest.mark.xfail(reason="xdist conftest imports src/app.py, collides with deployer/notifier/app.py")
+    @patch('handler.history_table')
     def test_update_history_success(self, mock_table):
         """update_history() calls update_item with correct params."""
         updates = {'status': 'SUCCESS', 'finished_at': 1704067200}
@@ -230,7 +215,7 @@ class TestUpdateHistory:
         call_kwargs = mock_table.update_item.call_args[1]
         assert call_kwargs['Key'] == {'deploy_id': 'dep-123'}
 
-    @patch('app.history_table')
+    @patch('handler.history_table')
     def test_update_history_exception(self, mock_table):
         """update_history() logs exception but doesn't raise."""
         mock_table.update_item.side_effect = Exception("DynamoDB error")
@@ -242,15 +227,14 @@ class TestUpdateHistory:
 class TestReleaseLock:
     """Test release_lock() lock cleanup."""
 
-    @patch('app.locks_table')
-    @pytest.mark.xfail(reason="xdist conftest imports src/app.py, collides with deployer/notifier/app.py")
+    @patch('handler.locks_table')
     def test_release_lock_success(self, mock_table):
         """release_lock() deletes lock from DynamoDB."""
         app.release_lock('proj1')
 
         mock_table.delete_item.assert_called_once_with(Key={'project_id': 'proj1'})
 
-    @patch('app.locks_table')
+    @patch('handler.locks_table')
     def test_release_lock_exception(self, mock_table):
         """release_lock() logs exception but doesn't raise."""
         mock_table.delete_item.side_effect = Exception("DynamoDB error")

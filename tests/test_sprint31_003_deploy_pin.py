@@ -119,7 +119,7 @@ class TestNotifierHandleStart:
         import importlib, types
 
         # Patch notifier app at module level
-        notifier_path = os.path.join(os.path.dirname(__file__), '..', 'deployer', 'notifier', 'app.py')
+        notifier_path = os.path.join(os.path.dirname(__file__), '..', 'deployer', 'notifier', 'handler.py')
         spec = importlib.util.spec_from_file_location('notifier_app', notifier_path)
         notifier = importlib.util.module_from_spec(spec)
 
@@ -169,7 +169,7 @@ class TestNotifierHandleStart:
         """When DDB has no telegram_message_id, handle_start does NOT send Telegram (changed by #277)."""
         import importlib
 
-        notifier_path = os.path.join(os.path.dirname(__file__), '..', 'deployer', 'notifier', 'app.py')
+        notifier_path = os.path.join(os.path.dirname(__file__), '..', 'deployer', 'notifier', 'handler.py')
         spec = importlib.util.spec_from_file_location('notifier_app_2', notifier_path)
         notifier = importlib.util.module_from_spec(spec)
 
@@ -219,7 +219,7 @@ class TestNotifierHandleSuccess:
         """handle_success must call unpin_telegram_message with existing message_id."""
         import importlib
 
-        notifier_path = os.path.join(os.path.dirname(__file__), '..', 'deployer', 'notifier', 'app.py')
+        notifier_path = os.path.join(os.path.dirname(__file__), '..', 'deployer', 'notifier', 'handler.py')
         spec = importlib.util.spec_from_file_location('notifier_app_3', notifier_path)
         notifier = importlib.util.module_from_spec(spec)
 

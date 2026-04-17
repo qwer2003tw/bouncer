@@ -1,5 +1,5 @@
 """
-Tests for deployer/notifier/app.py handle_analyze and handle_infra_approval_request
+Tests for deployer/notifier/handler.py handle_analyze and handle_infra_approval_request
 
 Sprint 73: Refactored to test DDB-based changeset flow (no more dry-run changeset creation).
 Phase 1 (CodeBuild) creates the changeset via sam deploy --no-execute-changeset and stores
@@ -19,7 +19,7 @@ sys.path.insert(0, str(NOTIFIER_DIR))
 
 # Mock boto3 before importing app (app.py initializes dynamodb at module level)
 with patch('boto3.resource'):
-    import app
+    import handler as app
 
 
 @pytest.fixture
@@ -61,10 +61,10 @@ class TestHandleAnalyze:
         ]
         mock_analysis.error = None
 
-        with patch('app.get_history', return_value=history_data), \
-             patch('app.update_history'), \
-             patch('app.handle_progress'), \
-             patch('app._get_stack_name', return_value='test-stack'), \
+        with patch('handler.get_history', return_value=history_data), \
+             patch('handler.update_history'), \
+             patch('handler.handle_progress'), \
+             patch('handler._get_stack_name', return_value='test-stack'), \
              patch('boto3.client', return_value=mock_cfn), \
              patch('changeset_analyzer.analyze_changeset', return_value=mock_analysis) as mock_analyze, \
              patch('changeset_analyzer.is_code_only_change', return_value=True):
@@ -90,9 +90,9 @@ class TestHandleAnalyze:
             'telegram_message_id': 123,
         }
 
-        with patch('app.get_history', return_value=history_data), \
-             patch('app.update_history'), \
-             patch('app.handle_progress'):
+        with patch('handler.get_history', return_value=history_data), \
+             patch('handler.update_history'), \
+             patch('handler.handle_progress'):
 
             result = app.handle_analyze(sample_event)
 
@@ -117,10 +117,10 @@ class TestHandleAnalyze:
         ]
         mock_analysis.error = None
 
-        with patch('app.get_history', return_value=history_data), \
-             patch('app.update_history'), \
-             patch('app.handle_progress'), \
-             patch('app._get_stack_name', return_value='test-stack'), \
+        with patch('handler.get_history', return_value=history_data), \
+             patch('handler.update_history'), \
+             patch('handler.handle_progress'), \
+             patch('handler._get_stack_name', return_value='test-stack'), \
              patch('boto3.client', return_value=mock_cfn), \
              patch('changeset_analyzer.analyze_changeset', return_value=mock_analysis), \
              patch('changeset_analyzer.is_code_only_change', return_value=False):
@@ -139,10 +139,10 @@ class TestHandleAnalyze:
             'telegram_message_id': 123,
         }
 
-        with patch('app.get_history', return_value=history_data), \
-             patch('app.update_history'), \
-             patch('app.handle_progress'), \
-             patch('app._get_stack_name', return_value='test-stack'):
+        with patch('handler.get_history', return_value=history_data), \
+             patch('handler.update_history'), \
+             patch('handler.handle_progress'), \
+             patch('handler._get_stack_name', return_value='test-stack'):
 
             result = app.handle_analyze(sample_event)
 
@@ -158,10 +158,10 @@ class TestHandleAnalyze:
             'telegram_message_id': 123,
         }
 
-        with patch('app.get_history', return_value=history_data), \
-             patch('app.update_history'), \
-             patch('app.handle_progress'), \
-             patch('app._get_stack_name', return_value=''):
+        with patch('handler.get_history', return_value=history_data), \
+             patch('handler.update_history'), \
+             patch('handler.handle_progress'), \
+             patch('handler._get_stack_name', return_value=''):
 
             result = app.handle_analyze(sample_event)
 
@@ -177,10 +177,10 @@ class TestHandleAnalyze:
             'telegram_message_id': 123,
         }
 
-        with patch('app.get_history', return_value=history_data), \
-             patch('app.update_history'), \
-             patch('app.handle_progress'), \
-             patch('app._get_stack_name', return_value='test-stack'), \
+        with patch('handler.get_history', return_value=history_data), \
+             patch('handler.update_history'), \
+             patch('handler.handle_progress'), \
+             patch('handler._get_stack_name', return_value='test-stack'), \
              patch('boto3.client', return_value=MagicMock()), \
              patch('changeset_analyzer.analyze_changeset', side_effect=Exception('CloudFormation API error')):
 
@@ -201,9 +201,9 @@ class TestHandleAnalyze:
             'telegram_message_id': 123,
         }
 
-        with patch('app.get_history', return_value=history_data), \
-             patch('app.update_history'), \
-             patch('app.handle_progress'):
+        with patch('handler.get_history', return_value=history_data), \
+             patch('handler.update_history'), \
+             patch('handler.handle_progress'):
 
             result = app.handle_analyze(event)
 
@@ -224,10 +224,10 @@ class TestHandleAnalyze:
         mock_analysis.resource_changes = []
         mock_analysis.error = None
 
-        with patch('app.get_history', return_value=history_data), \
-             patch('app.update_history'), \
-             patch('app.handle_progress'), \
-             patch('app._get_stack_name', return_value='test-stack'), \
+        with patch('handler.get_history', return_value=history_data), \
+             patch('handler.update_history'), \
+             patch('handler.handle_progress'), \
+             patch('handler._get_stack_name', return_value='test-stack'), \
              patch('boto3.client', return_value=mock_cfn), \
              patch('changeset_analyzer.analyze_changeset', return_value=mock_analysis), \
              patch('changeset_analyzer.is_code_only_change', return_value=False):
@@ -251,10 +251,10 @@ class TestHandleAnalyze:
         mock_analysis.resource_changes = []
         mock_analysis.error = "No updates are to be performed."
 
-        with patch('app.get_history', return_value=history_data), \
-             patch('app.update_history'), \
-             patch('app.handle_progress'), \
-             patch('app._get_stack_name', return_value='test-stack'), \
+        with patch('handler.get_history', return_value=history_data), \
+             patch('handler.update_history'), \
+             patch('handler.handle_progress'), \
+             patch('handler._get_stack_name', return_value='test-stack'), \
              patch('boto3.client', return_value=mock_cfn), \
              patch('changeset_analyzer.analyze_changeset', return_value=mock_analysis):
 
@@ -318,8 +318,8 @@ class TestHandleInfraApprovalRequest:
             'Item': {'deploy_id': 'test-deploy-002', 'branch': 'feature-x'}
         }
 
-        with patch('app.history_table', mock_history_table), \
-             patch('app.send_telegram_message', return_value=789) as mock_telegram, \
+        with patch('handler.history_table', mock_history_table), \
+             patch('handler.send_telegram_message', return_value=789) as mock_telegram, \
              patch('time.time', return_value=1000000):
 
             result = app.handle_infra_approval_request(event)
@@ -360,8 +360,8 @@ class TestHandleInfraApprovalRequest:
         mock_history_table = MagicMock()
         mock_history_table.get_item.return_value = {}
 
-        with patch('app.history_table', mock_history_table), \
-             patch('app.send_telegram_message', return_value=999) as mock_telegram, \
+        with patch('handler.history_table', mock_history_table), \
+             patch('handler.send_telegram_message', return_value=999) as mock_telegram, \
              patch('time.time', return_value=2000000):
 
             result = app.handle_infra_approval_request(event)
