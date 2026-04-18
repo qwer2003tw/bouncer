@@ -861,3 +861,12 @@ MCP_TOOLS['bouncer_eks_get_token'] = {
         'required': ['cluster_name'],
     },
 }
+
+MCP_TOOLS['bouncer_whoami'] = {
+    'description': 'Return Bouncer version, default account, region, and feature flags. For debugging and agent self-check.',
+    'parameters': {
+        'type': 'object',
+        'properties': {},
+        'required': [],
+    },
+}
