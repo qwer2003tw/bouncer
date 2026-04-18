@@ -1,5 +1,20 @@
 # Changelog
 
+## v3.90.0 (2026-04-18)
+### Bug Fix
+- bouncer_query_logs: poll for results after Complete status (eventual consistency) (#385)
+
+### Features
+- Add bouncer_whoami tool for agent self-check (version/account/region/features) (#362)
+
+### Infrastructure
+- Deployer DDB tables: DeletionPolicy Retain (#346)
+- Deployer log groups: RetentionInDays=30 (#372)
+
+### Documentation
+- Update README version and tool list (#340)
+
+
 ## v3.89.0 (2026-04-17)
 ### Refactor
 - Add pytest pythonpath config for src/ and deployer/notifier/ (#358 partial)
