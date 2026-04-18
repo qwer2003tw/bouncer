@@ -1,7 +1,7 @@
 # Bouncer
 
-> 🔐 AWS 命令審批執行系統 v3.86.0
-> 
+> 🔐 AWS 命令審批執行系統 v3.89.0
+>
 > 讓 AI Agent 安全執行 AWS 命令。危險命令透過 Telegram 審批後才執行。
 
 ## 架構
@@ -157,6 +157,7 @@ mcporter call bouncer bouncer_execute_native --args '{
 |------|------|------|
 | `bouncer_execute_native` | 執行 AWS API call（**boto3 native 格式**）| 視命令而定 |
 | `bouncer_status` | 查詢審批請求狀態 | 自動 |
+| `bouncer_eks_get_token` | 取得 EKS cluster kubeconfig token（支援跨帳號 assume role）| 自動 |
 
 ### 帳號管理
 | Tool | 說明 | 審批 |
@@ -183,7 +184,7 @@ mcporter call bouncer bouncer_execute_native --args '{
 | `bouncer_request_presigned_batch` | 批量生成 N 個 presigned PUT URL，前端部署推薦用法 | **不需審批**（staging bucket）|
 | `bouncer_deploy_frontend` | 前端一鍵部署：staging → 一次審批 → S3 copy + CloudFront invalidation | 需審批 |
 
-> **前端部署推薦流程：** `bouncer_deploy_frontend` 一鍵完成（推薦）；或 `bouncer_request_presigned_batch` 取得 URL → PUT → `bouncer_execute s3 cp`（手動）
+> **前端部署推薦流程：** `bouncer_deploy_frontend` 一鍵完成（推薦）；或 `bouncer_request_presigned_batch` 取得 URL → PUT → `bouncer_execute_native` (service=s3, operation=copy_object)（手動）
 
 ### CloudWatch Logs 查詢
 
@@ -304,11 +305,18 @@ mcporter call bouncer.bouncer_add_account \
 此操作需要 Telegram 審批。審批通過後，就可以用 `account` 參數指定帳號執行命令：
 
 ```bash
-mcporter call bouncer.bouncer_execute \
-  command="aws s3 ls" \
-  account="目標帳號ID" \
-  reason="檢查目標帳號 S3" \
-  source="你的Bot名稱"
+mcporter call bouncer.bouncer_execute_native --args '{
+  "aws": {
+    "service": "s3",
+    "operation": "list_buckets",
+    "account": "目標帳號ID"
+  },
+  "bouncer": {
+    "reason": "檢查目標帳號 S3",
+    "source": "你的Bot名稱",
+    "trust_scope": "cross-account-check"
+  }
+}'
 ```
 
 ### Step 4: 設定本地 MCP Client
