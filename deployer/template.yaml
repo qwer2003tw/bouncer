@@ -136,6 +136,8 @@ Resources:
   # ============================================================
   ProjectsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: bouncer-projects
       BillingMode: PAY_PER_REQUEST
@@ -158,6 +160,8 @@ Resources:
   # ============================================================
   DeployHistoryTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: bouncer-deploy-history
       BillingMode: PAY_PER_REQUEST
@@ -196,6 +200,8 @@ Resources:
   # ============================================================
   DeployLocksTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: bouncer-deploy-locks
       BillingMode: PAY_PER_REQUEST
