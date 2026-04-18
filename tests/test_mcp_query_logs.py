@@ -281,3 +281,106 @@ def test_logs_allowlist_unknown_action(mcp_query_logs_module):
     body = json.loads(result['body'])
     assert body['error']['code'] == -32602
     assert 'Unknown action' in body['error']['message']
+
+
+# ============================================================================
+# Tests for execute_log_insights — regression test for #385
+# ============================================================================
+
+def test_execute_log_insights_eventual_consistency(mcp_query_logs_module):
+    """測試 execute_log_insights 處理 AWS eventual consistency
+
+    Regression test for #385: AWS may return status=Complete before results
+    are populated. The function should poll again if results are empty but
+    statistics show recordsMatched > 0.
+    """
+    from unittest.mock import MagicMock
+
+    # Mock logs client
+    mock_logs_client = MagicMock()
+
+    # start_query returns query_id
+    mock_logs_client.start_query.return_value = {'queryId': 'test-query-123'}
+
+    # get_query_results returns Complete with empty results first,
+    # then with results populated on second call
+    mock_logs_client.get_query_results.side_effect = [
+        # First call: status=Complete but results empty, recordsMatched=3
+        {
+            'status': 'Complete',
+            'results': [],
+            'statistics': {'recordsMatched': 3, 'recordsScanned': 100, 'bytesScanned': 1024}
+        },
+        # Second call: results now populated
+        {
+            'status': 'Complete',
+            'results': [
+                [{'field': '@timestamp', 'value': '2026-04-18 12:00:00'},
+                 {'field': '@message', 'value': 'test log 1'}],
+                [{'field': '@timestamp', 'value': '2026-04-18 12:01:00'},
+                 {'field': '@message', 'value': 'test log 2'}],
+                [{'field': '@timestamp', 'value': '2026-04-18 12:02:00'},
+                 {'field': '@message', 'value': 'test log 3'}],
+            ],
+            'statistics': {'recordsMatched': 3, 'recordsScanned': 100, 'bytesScanned': 1024}
+        },
+    ]
+
+    # Patch _get_logs_client to return our mock
+    with patch('mcp_query_logs._get_logs_client', return_value=mock_logs_client):
+        result = mcp_query_logs_module.execute_log_insights(
+            log_group='/aws/lambda/test',
+            query_with_limit='fields @timestamp, @message | limit 100',
+            start_time=int(time.time()) - 3600,
+            end_time=int(time.time()),
+            region='us-east-1',
+            account_id='111111111111'
+        )
+
+    # Should have polled twice (once in main loop, once in eventual consistency handler)
+    assert mock_logs_client.get_query_results.call_count == 2
+
+    # Should return complete status with results
+    assert result['status'] == 'complete'
+    assert result['records_matched'] == 3
+    assert len(result['results']) == 3
+    assert result['results'][0]['@message'] == 'test log 1'
+    assert result['statistics']['records_matched'] == 3
+
+
+def test_execute_log_insights_eventual_consistency_timeout(mcp_query_logs_module):
+    """測試 execute_log_insights 當 results 永遠不來時的超時處理
+
+    If status=Complete and recordsMatched > 0 but results never populate
+    within MAX_RESULTS_WAIT, should return empty results with statistics.
+    """
+    from unittest.mock import MagicMock
+
+    mock_logs_client = MagicMock()
+    mock_logs_client.start_query.return_value = {'queryId': 'test-query-456'}
+
+    # Always return Complete with empty results but recordsMatched > 0
+    mock_logs_client.get_query_results.return_value = {
+        'status': 'Complete',
+        'results': [],
+        'statistics': {'recordsMatched': 5, 'recordsScanned': 200, 'bytesScanned': 2048}
+    }
+
+    with patch('mcp_query_logs._get_logs_client', return_value=mock_logs_client):
+        result = mcp_query_logs_module.execute_log_insights(
+            log_group='/aws/lambda/test',
+            query_with_limit='fields @timestamp, @message | limit 100',
+            start_time=int(time.time()) - 3600,
+            end_time=int(time.time()),
+            region='us-east-1',
+            account_id='111111111111'
+        )
+
+    # Should have polled multiple times (trying to get results)
+    assert mock_logs_client.get_query_results.call_count >= 2
+
+    # Should return complete status but with empty results
+    # Statistics should still show recordsMatched=5
+    assert result['status'] == 'complete'
+    assert result['records_matched'] == 0  # no results returned
+    assert result['statistics']['records_matched'] == 5  # but stats say 5 matched

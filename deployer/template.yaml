@@ -136,6 +136,8 @@ Resources:
   # ============================================================
   ProjectsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: bouncer-projects
       BillingMode: PAY_PER_REQUEST
@@ -158,6 +160,8 @@ Resources:
   # ============================================================
   DeployHistoryTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: bouncer-deploy-history
       BillingMode: PAY_PER_REQUEST
@@ -196,6 +200,8 @@ Resources:
   # ============================================================
   DeployLocksTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: bouncer-deploy-locks
       BillingMode: PAY_PER_REQUEST
@@ -532,10 +538,30 @@ Resources:
           Value: bouncer-deployer
 
   # ============================================================
+  # CloudWatch Log Groups with retention
+  # ============================================================
+  CodeBuildLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: /aws/codebuild/sam-deployer
+      RetentionInDays: 30
+
+  NotifierLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: /aws/lambda/bouncer-deployer-notifier
+      RetentionInDays: 30
+
+  # ============================================================
   # CodeBuild Project
   # ============================================================
   SAMDeployerProject:
     Type: AWS::CodeBuild::Project
+    DependsOn: CodeBuildLogGroup
     Properties:
       Name: sam-deployer
       Description: Bouncer SAM Deployer
@@ -631,6 +657,7 @@ Resources:
   # ============================================================
   NotifierLambda:
     Type: AWS::Serverless::Function
+    DependsOn: NotifierLogGroup
     Properties:
       FunctionName: bouncer-deployer-notifier
       Description: Send deployment notifications to Telegram

@@ -60,6 +60,7 @@ from mcp_deploy_frontend import (
     mcp_tool_confirm_frontend_deploy,
 )
 from mcp_query_logs import mcp_tool_query_logs, mcp_tool_logs_allowlist
+from mcp_whoami import mcp_tool_whoami
 from callbacks import (
     _is_execute_failed,
 )
@@ -662,6 +663,7 @@ TOOL_HANDLERS = {
     'bouncer_confirm_frontend_deploy': mcp_tool_confirm_frontend_deploy,
     'bouncer_query_logs': mcp_tool_query_logs,
     'bouncer_logs_allowlist': mcp_tool_logs_allowlist,
+    'bouncer_whoami': mcp_tool_whoami,
 }
 
 # Deployer handlers are lazy-imported to avoid cold-start cost
