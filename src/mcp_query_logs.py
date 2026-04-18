@@ -375,6 +375,20 @@ def execute_log_insights(log_group: str, query_with_limit: str, start_time: int,
             results = get_resp.get('results', [])
             stats = get_resp.get('statistics', {})
 
+        # Handle eventual consistency: AWS may return status=Complete before results are fully populated
+        # If status is Complete but results are empty AND statistics show matches, poll a few more times
+        MAX_RESULTS_WAIT = 5  # extra seconds to wait for results after Complete
+        results_wait_start = time.time()
+        while (status == 'Complete'
+               and not results
+               and stats.get('recordsMatched', 0) > 0
+               and (time.time() - results_wait_start) < MAX_RESULTS_WAIT):
+            time.sleep(0.5)
+            get_resp = logs_client.get_query_results(queryId=query_id)
+            results = get_resp.get('results', [])
+            stats = get_resp.get('statistics', {})
+            status = get_resp.get('status', '')
+
         if status in ('Scheduled', 'Running'):
             logger.info("Log query still running after poll timeout: query_id=%s", query_id,
                          extra={"src_module": "mcp_query_logs", "operation": "query_timeout",
