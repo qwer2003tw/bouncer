@@ -395,3 +395,14 @@ from notifications import send_blocked_notification  # noqa: F401, E402
 from metrics import emit_metric  # noqa: F401, E402
 from constants import GRANT_SESSION_ENABLED  # noqa: F401, E402
 from db import table  # noqa: F401, E402
+
+# More backward-compat re-exports (tests patch these on mcp_execute module)
+from utils import log_decision, record_execution_error, generate_request_id  # noqa: F401, E402
+from notifications import (  # noqa: F401, E402
+    send_approval_request, send_grant_execute_notification,
+    send_trust_auto_approve_notification,
+)
+from telegram import send_telegram_message_silent  # noqa: F401, E402
+from paging import store_paged_output  # noqa: F401, E402
+from trust import track_command_executed  # noqa: F401, E402
+from commands import execute_boto3_native  # noqa: F401, E402
