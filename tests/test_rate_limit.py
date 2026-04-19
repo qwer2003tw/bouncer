@@ -64,10 +64,10 @@ class TestRateLimitErrors:
         """Rate limit 超過應返回錯誤"""
         from mcp_execute import mcp_tool_execute
         import mcp_execute
+        import rate_limit
 
         # Mock check_rate_limit 拋出 RateLimitExceeded
         with patch('execute_pipeline.check_rate_limit',
-        import rate_limit
                           side_effect=rate_limit.RateLimitExceeded('Rate limit exceeded')):
             result = mcp_tool_execute('test-1', {
                 'command': 'aws ec2 start-instances --instance-ids i-123',

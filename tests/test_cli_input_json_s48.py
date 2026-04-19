@@ -9,7 +9,7 @@ and appends --cli-input-json file:// to the command, bypassing shell quoting iss
 from unittest.mock import Mock, patch, mock_open, MagicMock
 
 from src.commands import execute_command, _execute_locked
-from src.mcp_execute import ExecuteContext, _parse_execute_request
+from execute_context import ExecuteContext, _parse_execute_request
 
 
 class TestCliInputJsonParameter:

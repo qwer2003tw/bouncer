@@ -99,7 +99,7 @@ class TestSEC003UnicodeNormalization:
                 for mod in list(sys.modules.keys()):
                     if 'mcp_execute' in mod:
                         del sys.modules[mod]
-                import src.mcp_execute as mcp_exec_mod
+                import execute_context as mcp_exec_mod
                 cls.normalize = staticmethod(mcp_exec_mod._normalize_command)
 
     def test_normal_command_unchanged(self):
