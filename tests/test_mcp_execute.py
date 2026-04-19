@@ -602,7 +602,7 @@ class TestMCPToolHandlersAdditional:
     @patch('telegram.send_telegram_message')
     def test_mcp_tool_remove_account_not_exists(self, mock_telegram, app_module):
         """移除不存在的帳號"""
-        with patch('accounts.get_account', return_value=None):
+        with patch('execute_context.get_account', return_value=None):
             result = app_module.mcp_tool_remove_account('test-1', {
                 'account_id': '999999999999'
             })
@@ -1775,8 +1775,8 @@ class TestMCPTemplateScanEscalate:
 class TestMCPDisabledAccount:
     """Cover disabled account error path (L232)."""
 
-    @patch('mcp_execute.get_account')
-    @patch('mcp_execute.validate_account_id')
+    @patch('execute_context.get_account')
+    @patch('execute_context.validate_account_id')
     def test_execute_disabled_account(self, mock_validate, mock_get, app_module):
         """Execute with disabled account returns error."""
         from mcp_execute import mcp_tool_execute

@@ -659,7 +659,7 @@ class TestCoverage80Sprint:
         from mcp_execute import mcp_tool_execute
         import mcp_execute
         import execute_pipeline
-        with patch.object(mcp_execute, 'get_account', return_value={
+        with patch('execute_context.get_account', return_value={
             'account_id': '555555555555',
             'name': 'Configured Account',
             'enabled': True,
