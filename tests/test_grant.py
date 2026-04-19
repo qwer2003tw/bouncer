@@ -72,7 +72,7 @@ def grant_module(mock_dynamodb):
     # 清除可能殘留的模組
     modules_to_clear = [
         'grant', 'db', 'constants', 'trust', 'commands', 'compliance_checker',
-        'risk_scorer', 'mcp_execute', 'mcp_grant', 'chain_analyzer', 'mcp_upload', 'mcp_admin', 'notifications', 'telegram', 'app',
+        'risk_scorer', 'mcp_execute', 'execute_context', 'execute_pipeline', 'execute_helpers', 'mcp_grant', 'chain_analyzer', 'mcp_upload', 'mcp_admin', 'notifications', 'telegram', 'app',
         'utils', 'accounts', 'rate_limit', 'paging', 'callbacks',
         'smart_approval', 'tool_schema', 'metrics',
     ]
@@ -106,7 +106,7 @@ def mcp_module(mock_dynamodb):
 
     modules_to_clear = [
         'grant', 'db', 'constants', 'trust', 'commands', 'compliance_checker',
-        'risk_scorer', 'mcp_execute', 'mcp_grant', 'chain_analyzer', 'mcp_upload', 'mcp_admin', 'notifications', 'telegram', 'app',
+        'risk_scorer', 'mcp_execute', 'execute_context', 'execute_pipeline', 'execute_helpers', 'mcp_grant', 'chain_analyzer', 'mcp_upload', 'mcp_admin', 'notifications', 'telegram', 'app',
         'utils', 'accounts', 'rate_limit', 'paging', 'callbacks',
         'smart_approval', 'tool_schema', 'metrics',
     ]

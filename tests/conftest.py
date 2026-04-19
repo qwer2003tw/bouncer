@@ -203,7 +203,8 @@ def app_module(mock_dynamodb):
     # 重新載入模組（包括新模組 — Sprint 58 s58-001 補充）
     for mod in ['app', 'telegram', 'paging', 'trust', 'commands', 'notifications', 'db',
                 'callbacks', 'callbacks_command', 'callbacks_upload', 'callbacks_grant',
-                'mcp_execute', 'mcp_upload', 'mcp_admin',
+                'mcp_execute', 'execute_context', 'execute_pipeline', 'execute_helpers',
+                'mcp_upload', 'mcp_admin',
                 'accounts', 'rate_limit', 'smart_approval',
                 'constants', 'utils', 'risk_scorer', 'template_scanner',
                 'scheduler_service', 'otp', 'mcp_grant', 'webhook_router',

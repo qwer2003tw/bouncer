@@ -805,7 +805,8 @@ class TestAutoApproveSilentNotification:
         """Silent notification should be called when safelist auto-approves."""
         import mcp_execute
         # Build a minimal ExecuteContext
-        from mcp_execute import ExecuteContext, _check_auto_approve
+        from execute_context import ExecuteContext
+        from execute_pipeline import _check_auto_approve
         ctx = ExecuteContext(
             req_id='test-req-silent',
             command='aws ec2 describe-instances',
@@ -831,7 +832,8 @@ class TestAutoApproveSilentNotification:
     @patch('execute_pipeline.execute_command', return_value='ok output')
     def test_notification_failure_does_not_break_execution(self, mock_exec, mock_silent, app_module):
         """Notification failure must not break the execution result."""
-        from mcp_execute import ExecuteContext, _check_auto_approve
+        from execute_context import ExecuteContext
+        from execute_pipeline import _check_auto_approve
         ctx = ExecuteContext(
             req_id='test-req-notif-fail',
             command='aws s3 ls',
@@ -862,7 +864,8 @@ class TestAutoApproveSilentNotification:
     @patch('execute_pipeline.execute_command', return_value='output')
     def test_non_safelist_no_notification(self, mock_exec, mock_silent, app_module):
         """Non-safelist commands should NOT trigger the silent notification."""
-        from mcp_execute import ExecuteContext, _check_auto_approve
+        from execute_context import ExecuteContext
+        from execute_pipeline import _check_auto_approve
         ctx = ExecuteContext(
             req_id='test-req-no-notif',
             command='aws iam create-user --user-name hacker',
@@ -887,7 +890,8 @@ class TestAutoApproveSilentNotification:
     @patch('execute_pipeline.extract_exit_code', return_value=0)
     def test_success_notification_shows_checkmark(self, mock_exit, mock_exec, mock_silent, app_module):
         """s54-003: Successful command shows ✅ in notification."""
-        from mcp_execute import ExecuteContext, _check_auto_approve
+        from execute_context import ExecuteContext
+        from execute_pipeline import _check_auto_approve
         ctx = ExecuteContext(
             req_id='test-req-success',
             command='aws ec2 describe-instances',
@@ -915,7 +919,8 @@ class TestAutoApproveSilentNotification:
     @patch('execute_pipeline.extract_exit_code', return_value=1)
     def test_failed_notification_shows_x_mark(self, mock_exit, mock_exec, mock_silent, app_module):
         """s54-003: Failed command shows ❌ in notification."""
-        from mcp_execute import ExecuteContext, _check_auto_approve
+        from execute_context import ExecuteContext
+        from execute_pipeline import _check_auto_approve
         ctx = ExecuteContext(
             req_id='test-req-failure',
             command='aws ec2 describe-instances',

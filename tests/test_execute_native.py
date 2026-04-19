@@ -227,9 +227,9 @@ class TestMcpToolExecuteNative:
         from mcp_execute import mcp_tool_execute_native
 
         # Mock compliance checker to block the command
-        with patch('execute_pipeline._score_risk'), \
-             patch('execute_pipeline._scan_template'), \
-             patch('execute_pipeline._check_compliance') as mock_compliance:
+        with patch('mcp_execute._score_risk'), \
+             patch('mcp_execute._scan_template'), \
+             patch('mcp_execute._check_compliance') as mock_compliance:
             mock_compliance.return_value = {
                 'id': 'req-123',
                 'jsonrpc': '2.0',
@@ -265,8 +265,8 @@ class TestMcpToolExecuteNative:
         from mcp_execute import mcp_tool_execute_native
 
         # Mock auto_approve to return True for describe operations
-        with patch('execute_pipeline._score_risk'), \
-             patch('execute_pipeline._scan_template'), \
+        with patch('mcp_execute._score_risk'), \
+             patch('mcp_execute._scan_template'), \
              patch('execute_pipeline.is_auto_approve') as mock_auto_approve, \
              patch('execute_pipeline.execute_boto3_native') as mock_execute, \
              patch('execute_pipeline.store_paged_output') as mock_paging:
@@ -311,10 +311,10 @@ class TestMcpToolExecuteNative:
             # Return None to continue pipeline
             return None
 
-        with patch('execute_pipeline._score_risk'), \
-             patch('execute_pipeline._scan_template'), \
-             patch('execute_pipeline._check_compliance', side_effect=capture_compliance), \
-             patch('execute_pipeline._check_blocked') as mock_blocked:
+        with patch('mcp_execute._score_risk'), \
+             patch('mcp_execute._scan_template'), \
+             patch('mcp_execute._check_compliance', side_effect=capture_compliance), \
+             patch('mcp_execute._check_blocked') as mock_blocked:
             # Make blocked return a result to stop pipeline
             mock_blocked.return_value = {
                 'id': 'req-123',

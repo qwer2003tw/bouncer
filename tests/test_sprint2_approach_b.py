@@ -381,7 +381,7 @@ class TestTemplateScanEscalation:
         """A plain safe command should not escalate."""
         # Clear cached modules
         for mod in list(sys.modules.keys()):
-            if 'mcp_execute' in mod:
+            if 'mcp_execute' in mod or 'execute_context' in mod or 'execute_pipeline' in mod or 'execute_helpers' in mod:
                 del sys.modules[mod]
 
         import mcp_execute as me
@@ -415,7 +415,7 @@ class TestTemplateScanEscalation:
     def test_scan_template_escalates_on_critical_hit(self):
         """HIGH/CRITICAL hits must set escalate=True."""
         for mod in list(sys.modules.keys()):
-            if 'mcp_execute' in mod:
+            if 'mcp_execute' in mod or 'execute_context' in mod or 'execute_pipeline' in mod or 'execute_helpers' in mod:
                 del sys.modules[mod]
 
         import mcp_execute as me
@@ -454,7 +454,7 @@ class TestTemplateScanEscalation:
     def test_scan_template_escalates_on_high_hit(self):
         """Score >= 75 should set severity=high and escalate=True."""
         for mod in list(sys.modules.keys()):
-            if 'mcp_execute' in mod:
+            if 'mcp_execute' in mod or 'execute_context' in mod or 'execute_pipeline' in mod or 'execute_helpers' in mod:
                 del sys.modules[mod]
 
         import mcp_execute as me
@@ -491,7 +491,7 @@ class TestTemplateScanEscalation:
     def test_scan_template_low_score_no_escalation(self):
         """Score < 75 should NOT escalate."""
         for mod in list(sys.modules.keys()):
-            if 'mcp_execute' in mod:
+            if 'mcp_execute' in mod or 'execute_context' in mod or 'execute_pipeline' in mod or 'execute_helpers' in mod:
                 del sys.modules[mod]
 
         import mcp_execute as me
@@ -527,7 +527,7 @@ class TestTemplateScanEscalation:
     def test_scan_template_fails_open_on_import_error(self):
         """If template_scanner is unavailable, escalate must default to False."""
         for mod in list(sys.modules.keys()):
-            if 'mcp_execute' in mod:
+            if 'mcp_execute' in mod or 'execute_context' in mod or 'execute_pipeline' in mod or 'execute_helpers' in mod:
                 del sys.modules[mod]
 
         import mcp_execute as me
@@ -563,7 +563,7 @@ class TestTemplateScanEscalation:
     def test_mcp_execute_escalated_skips_auto_approve(self):
         """When template scan escalates, safelist auto-approve must be bypassed."""
         for mod in list(sys.modules.keys()):
-            if 'mcp_execute' in mod:
+            if 'mcp_execute' in mod or 'execute_context' in mod or 'execute_pipeline' in mod or 'execute_helpers' in mod:
                 del sys.modules[mod]
 
         import mcp_execute as me

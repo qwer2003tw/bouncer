@@ -1615,7 +1615,7 @@ class TestMCPRateLimitPaths:
 class TestMCPCompliancePaths:
     """Cover _check_compliance violation path."""
 
-    @patch('execute_pipeline._check_compliance')
+    @patch('mcp_execute._check_compliance')
     @patch('telegram.send_telegram_message')
     def test_compliance_violation_returned(self, mock_tg, mock_compliance, app_module):
         """When compliance check returns violation, pipeline returns compliance_violation."""
@@ -1692,7 +1692,7 @@ class TestMCPCompliancePaths:
 class TestMCPBlockedPath:
     """Cover _check_blocked path."""
 
-    @patch('execute_pipeline._check_blocked')
+    @patch('mcp_execute._check_blocked')
     @patch('telegram.send_telegram_message')
     def test_blocked_command_returns_blocked_status(self, mock_tg, mock_blocked, app_module):
         """When _check_blocked returns a result, pipeline short-circuits."""
@@ -1735,8 +1735,8 @@ class TestMCPBlockedPath:
 class TestMCPTemplateScanEscalate:
     """Cover template escalate pipeline branch."""
 
-    @patch('execute_pipeline._scan_template')
-    @patch('execute_pipeline._score_risk')
+    @patch('mcp_execute._scan_template')
+    @patch('mcp_execute._score_risk')
     @patch('telegram.send_telegram_message')
     def test_escalate_skips_auto_approve(self, mock_tg, mock_score, mock_scan, app_module):
         """When template scan escalates, auto_approve / trust are skipped."""
