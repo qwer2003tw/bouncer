@@ -385,3 +385,12 @@ from execute_helpers import (  # noqa: F401, E402
     _safe_risk_factors,
     _map_status_to_decision,
 )
+
+# Additional backward-compat re-exports (tests patch these on mcp_execute module)
+from commands import is_auto_approve, execute_command, extract_exit_code  # noqa: F401, E402
+from trust import should_trust_approve, increment_trust_command_count  # noqa: F401, E402
+from rate_limit import check_rate_limit  # noqa: F401, E402
+from notifications import send_blocked_notification  # noqa: F401, E402
+from metrics import emit_metric  # noqa: F401, E402
+from constants import GRANT_SESSION_ENABLED  # noqa: F401, E402
+from db import table  # noqa: F401, E402
