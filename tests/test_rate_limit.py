@@ -66,8 +66,9 @@ class TestRateLimitErrors:
         import mcp_execute
 
         # Mock check_rate_limit 拋出 RateLimitExceeded
-        with patch.object(mcp_execute, 'check_rate_limit',
-                          side_effect=mcp_execute.RateLimitExceeded('Rate limit exceeded')):
+        with patch('execute_pipeline.check_rate_limit',
+        import rate_limit
+                          side_effect=rate_limit.RateLimitExceeded('Rate limit exceeded')):
             result = mcp_tool_execute('test-1', {
                 'command': 'aws ec2 start-instances --instance-ids i-123',
                 'trust_scope': 'test-session',

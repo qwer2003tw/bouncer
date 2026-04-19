@@ -314,6 +314,11 @@ def _cleanup_tables(request):
             _mcp_execute.table = mock_dynamodb.Table('clawdbot-approval-requests')
     except Exception:
         pass
+    try:
+        import execute_pipeline as _execute_pipeline
+        _execute_pipeline.table = mock_dynamodb.Table('clawdbot-approval-requests')
+    except Exception:
+        pass
     yield
     for table_name, key_attrs in _ALL_TABLE_KEYS.items():
         try:

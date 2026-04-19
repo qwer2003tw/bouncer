@@ -1361,7 +1361,8 @@ class TestMCPExecuteHelpers:
     def test_safe_risk_category_none_input(self, app_module):
         """_safe_risk_category returns None for None input."""
         import mcp_execute
-        result = mcp_execute._safe_risk_category(None)
+        import execute_helpers
+        result = execute_helpers._safe_risk_category(None)
         assert result is None
 
     def test_safe_risk_category_with_value_attr(self, app_module):
@@ -1371,7 +1372,8 @@ class TestMCPExecuteHelpers:
         cat_mock.value = 'high'
         risk_mock = MagicMock()
         risk_mock.risk_result.category = cat_mock
-        result = mcp_execute._safe_risk_category(risk_mock)
+        import execute_helpers
+        result = execute_helpers._safe_risk_category(risk_mock)
         assert result == 'high'
 
     def test_safe_risk_category_exception(self, app_module):
@@ -1379,13 +1381,15 @@ class TestMCPExecuteHelpers:
         import mcp_execute
         bad_mock = MagicMock()
         bad_mock.risk_result = None  # will raise AttributeError
-        result = mcp_execute._safe_risk_category(bad_mock)
+        import execute_helpers
+        result = execute_helpers._safe_risk_category(bad_mock)
         assert result is None
 
     def test_safe_risk_factors_none_input(self, app_module):
         """_safe_risk_factors returns None for None input."""
         import mcp_execute
-        result = mcp_execute._safe_risk_factors(None)
+        import execute_helpers
+        result = execute_helpers._safe_risk_factors(None)
         assert result is None
 
     def test_safe_risk_factors_with_floats(self, app_module):
@@ -1396,7 +1400,8 @@ class TestMCPExecuteHelpers:
         factor_mock.__dict__ = {'name': 'test', 'score': 0.75, 'raw_score': 75}
         risk_mock = MagicMock()
         risk_mock.risk_result.factors = [factor_mock]
-        result = mcp_execute._safe_risk_factors(risk_mock)
+        import execute_helpers
+        result = execute_helpers._safe_risk_factors(risk_mock)
         assert result is not None
         assert isinstance(result[0]['score'], Decimal)
 
@@ -1405,7 +1410,8 @@ class TestMCPExecuteHelpers:
         import mcp_execute
         bad_mock = MagicMock()
         bad_mock.risk_result = None
-        result = mcp_execute._safe_risk_factors(bad_mock)
+        import execute_helpers
+        result = execute_helpers._safe_risk_factors(bad_mock)
         assert result is None
 
     def test_normalize_command_strips_invisible_chars(self, app_module):
@@ -1413,14 +1419,16 @@ class TestMCPExecuteHelpers:
         import mcp_execute
         # Zero-width space (U+200B) in command
         cmd = 'aws\u200b s3 ls'
-        result = mcp_execute._normalize_command(cmd)
+        import execute_context
+        result = execute_context._normalize_command(cmd)
         assert '\u200b' not in result
         assert 'aws' in result
 
     def test_normalize_command_collapses_spaces(self, app_module):
         """_normalize_command collapses multiple spaces."""
         import mcp_execute
-        result = mcp_execute._normalize_command('aws   s3   ls')
+        import execute_context
+        result = execute_context._normalize_command('aws   s3   ls')
         assert result == 'aws s3 ls'
 
     def test_normalize_command_unicode_spaces(self, app_module):
@@ -1428,14 +1436,16 @@ class TestMCPExecuteHelpers:
         import mcp_execute
         # Non-breaking space (U+00A0)
         cmd = 'aws\u00a0s3\u00a0ls'
-        result = mcp_execute._normalize_command(cmd)
+        import execute_context
+        result = execute_context._normalize_command(cmd)
         assert '\u00a0' not in result
         assert 'aws s3 ls' == result
 
     def test_normalize_command_empty_string(self, app_module):
         """_normalize_command handles empty string."""
         import mcp_execute
-        assert mcp_execute._normalize_command('') == ''
+        import execute_context
+        assert execute_context._normalize_command('') == ''
 
 
 # ============================================================================
@@ -1448,31 +1458,38 @@ class TestMCPExecuteDecisionHelpers:
 
     def test_map_status_auto_approved(self, app_module):
         import mcp_execute
-        assert mcp_execute._map_status_to_decision('auto_approved') == 'auto_approve'
+        import execute_helpers
+        assert execute_helpers._map_status_to_decision('auto_approved') == 'auto_approve'
 
     def test_map_status_blocked(self, app_module):
         import mcp_execute
-        assert mcp_execute._map_status_to_decision('blocked') == 'blocked'
+        import execute_helpers
+        assert execute_helpers._map_status_to_decision('blocked') == 'blocked'
 
     def test_map_status_compliance_violation(self, app_module):
         import mcp_execute
-        assert mcp_execute._map_status_to_decision('compliance_violation') == 'blocked'
+        import execute_helpers
+        assert execute_helpers._map_status_to_decision('compliance_violation') == 'blocked'
 
     def test_map_status_pending_approval(self, app_module):
         import mcp_execute
-        assert mcp_execute._map_status_to_decision('pending_approval') == 'needs_approval'
+        import execute_helpers
+        assert execute_helpers._map_status_to_decision('pending_approval') == 'needs_approval'
 
     def test_map_status_trust_auto_approved(self, app_module):
         import mcp_execute
-        assert mcp_execute._map_status_to_decision('trust_auto_approved') == 'auto_approve'
+        import execute_helpers
+        assert execute_helpers._map_status_to_decision('trust_auto_approved') == 'auto_approve'
 
     def test_map_status_grant_auto_approved(self, app_module):
         import mcp_execute
-        assert mcp_execute._map_status_to_decision('grant_auto_approved') == 'auto_approve'
+        import execute_helpers
+        assert execute_helpers._map_status_to_decision('grant_auto_approved') == 'auto_approve'
 
     def test_map_status_unknown(self, app_module):
         import mcp_execute
-        assert mcp_execute._map_status_to_decision('something_else') == 'something_else'
+        import execute_helpers
+        assert execute_helpers._map_status_to_decision('something_else') == 'something_else'
 
     def test_extract_actual_decision_auto_approved(self, app_module):
         import mcp_execute
@@ -1484,7 +1501,8 @@ class TestMCPExecuteDecisionHelpers:
                 }
             })
         }
-        assert mcp_execute._extract_actual_decision(fake_result) == 'auto_approve'
+        import execute_helpers
+        assert execute_helpers._extract_actual_decision(fake_result) == 'auto_approve'
 
     def test_extract_actual_decision_error_path(self, app_module):
         import mcp_execute
@@ -1494,13 +1512,15 @@ class TestMCPExecuteDecisionHelpers:
                 'error': {'code': -32603, 'message': 'Internal error'}
             })
         }
-        assert mcp_execute._extract_actual_decision(fake_result) == 'error'
+        import execute_helpers
+        assert execute_helpers._extract_actual_decision(fake_result) == 'error'
 
     def test_extract_actual_decision_bad_json(self, app_module):
         import mcp_execute
         fake_result = {'body': 'not-json'}
         # Should not raise, returns 'unknown'
-        result = mcp_execute._extract_actual_decision(fake_result)
+        import execute_helpers
+        result = execute_helpers._extract_actual_decision(fake_result)
         assert isinstance(result, str)
 
     def test_extract_actual_decision_empty_content(self, app_module):
@@ -1511,7 +1531,8 @@ class TestMCPExecuteDecisionHelpers:
                 'result': {'content': []}
             })
         }
-        result = mcp_execute._extract_actual_decision(fake_result)
+        import execute_helpers
+        result = execute_helpers._extract_actual_decision(fake_result)
         assert result == 'unknown'
 
 
