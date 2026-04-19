@@ -295,6 +295,7 @@ class TestTrustSessionPassesCallerIP:
     def test_check_trust_session_passes_caller_ip(self):
         """_check_trust_session should pass ctx.caller_ip to should_trust_approve."""
         import mcp_execute
+        import execute_pipeline
         from mcp_execute import ExecuteContext, _check_trust_session
 
         # Create ExecuteContext with caller_ip
@@ -316,7 +317,7 @@ class TestTrustSessionPassesCallerIP:
         # Mock should_trust_approve to capture its arguments
         mock_should_trust_approve = MagicMock(return_value=(False, None, 'not trusted'))
 
-        with patch.object(mcp_execute, 'should_trust_approve', mock_should_trust_approve):
+        with patch.object(execute_pipeline, 'should_trust_approve', mock_should_trust_approve):
             _check_trust_session(ctx)
 
         # Verify should_trust_approve was called with caller_ip

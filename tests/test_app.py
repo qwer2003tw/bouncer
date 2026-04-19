@@ -103,7 +103,8 @@ class TestIntegration:
         """測試完整 MCP 流程（SAFELIST）"""
         from mcp_execute import mcp_tool_execute
         import mcp_execute
-        with patch.object(mcp_execute, 'execute_command', return_value='{"UserId": "123", "Account": "456", "Arn": "arn:aws:iam::456:user/test"}'):
+        import execute_pipeline
+        with patch.object(execute_pipeline, 'execute_command', return_value='{"UserId": "123", "Account": "456", "Arn": "arn:aws:iam::456:user/test"}'):
             # Initialize
             init_event = {
                 'rawPath': '/mcp',
@@ -498,9 +499,10 @@ class TestAppModuleMore:
         """執行命令並測試分頁"""
         from mcp_execute import mcp_tool_execute
         import mcp_execute
+        import execute_pipeline
         # Mock 返回長輸出
         long_output = 'x' * 5000
-        with patch.object(mcp_execute, 'execute_command', return_value=long_output):
+        with patch.object(execute_pipeline, 'execute_command', return_value=long_output):
             result = mcp_tool_execute('test-paging', {
                 'command': 'aws logs get-log-events --log-group-name test --log-stream-name test-stream',
                 'trust_scope': 'test-session',
@@ -656,12 +658,13 @@ class TestCoverage80Sprint:
         """執行命令使用配置的帳號"""
         from mcp_execute import mcp_tool_execute
         import mcp_execute
+        import execute_pipeline
         with patch.object(mcp_execute, 'get_account', return_value={
             'account_id': '555555555555',
             'name': 'Configured Account',
             'enabled': True,
             'role_arn': 'arn:aws:iam::555555555555:role/TestRole'
-        }), patch.object(mcp_execute, 'execute_command', return_value='{"result": "ok"}'):
+        }), patch.object(execute_pipeline, 'execute_command', return_value='{"result": "ok"}'):
             result = mcp_tool_execute('test-acct', {
                 'command': 'aws s3 ls',
                 'trust_scope': 'test-session',

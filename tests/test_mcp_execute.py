@@ -108,8 +108,9 @@ class TestMCPExecuteSafelist:
         """測試自動批准的命令"""
         from mcp_execute import mcp_tool_execute
         import mcp_execute
+        import execute_pipeline
         # 需要 mock mcp_execute.execute_command
-        with patch.object(mcp_execute, 'execute_command', return_value='{"Reservations": []}'):
+        with patch.object(execute_pipeline, 'execute_command', return_value='{"Reservations": []}'):
             result = mcp_tool_execute('req-3', {
                 'command': 'aws ec2 describe-instances',
                 'trust_scope': 'test-session',
@@ -1361,6 +1362,7 @@ class TestMCPExecuteHelpers:
     def test_safe_risk_category_none_input(self, app_module):
         """_safe_risk_category returns None for None input."""
         import mcp_execute
+        import execute_pipeline
         import execute_helpers
         result = execute_helpers._safe_risk_category(None)
         assert result is None
@@ -1368,6 +1370,7 @@ class TestMCPExecuteHelpers:
     def test_safe_risk_category_with_value_attr(self, app_module):
         """_safe_risk_category returns .value for enum-like category."""
         import mcp_execute
+        import execute_pipeline
         cat_mock = MagicMock()
         cat_mock.value = 'high'
         risk_mock = MagicMock()
@@ -1379,6 +1382,7 @@ class TestMCPExecuteHelpers:
     def test_safe_risk_category_exception(self, app_module):
         """_safe_risk_category returns None on exception."""
         import mcp_execute
+        import execute_pipeline
         bad_mock = MagicMock()
         bad_mock.risk_result = None  # will raise AttributeError
         import execute_helpers
@@ -1388,6 +1392,7 @@ class TestMCPExecuteHelpers:
     def test_safe_risk_factors_none_input(self, app_module):
         """_safe_risk_factors returns None for None input."""
         import mcp_execute
+        import execute_pipeline
         import execute_helpers
         result = execute_helpers._safe_risk_factors(None)
         assert result is None
@@ -1395,6 +1400,7 @@ class TestMCPExecuteHelpers:
     def test_safe_risk_factors_with_floats(self, app_module):
         """_safe_risk_factors converts float values to Decimal."""
         import mcp_execute
+        import execute_pipeline
         from decimal import Decimal
         factor_mock = MagicMock()
         factor_mock.__dict__ = {'name': 'test', 'score': 0.75, 'raw_score': 75}
@@ -1408,6 +1414,7 @@ class TestMCPExecuteHelpers:
     def test_safe_risk_factors_exception(self, app_module):
         """_safe_risk_factors returns None on exception."""
         import mcp_execute
+        import execute_pipeline
         bad_mock = MagicMock()
         bad_mock.risk_result = None
         import execute_helpers
@@ -1417,6 +1424,7 @@ class TestMCPExecuteHelpers:
     def test_normalize_command_strips_invisible_chars(self, app_module):
         """_normalize_command removes Unicode zero-width characters."""
         import mcp_execute
+        import execute_pipeline
         # Zero-width space (U+200B) in command
         cmd = 'aws\u200b s3 ls'
         import execute_context
@@ -1427,6 +1435,7 @@ class TestMCPExecuteHelpers:
     def test_normalize_command_collapses_spaces(self, app_module):
         """_normalize_command collapses multiple spaces."""
         import mcp_execute
+        import execute_pipeline
         import execute_context
         result = execute_context._normalize_command('aws   s3   ls')
         assert result == 'aws s3 ls'
@@ -1434,6 +1443,7 @@ class TestMCPExecuteHelpers:
     def test_normalize_command_unicode_spaces(self, app_module):
         """_normalize_command replaces Unicode spaces with ASCII space."""
         import mcp_execute
+        import execute_pipeline
         # Non-breaking space (U+00A0)
         cmd = 'aws\u00a0s3\u00a0ls'
         import execute_context
@@ -1444,6 +1454,7 @@ class TestMCPExecuteHelpers:
     def test_normalize_command_empty_string(self, app_module):
         """_normalize_command handles empty string."""
         import mcp_execute
+        import execute_pipeline
         import execute_context
         assert execute_context._normalize_command('') == ''
 
@@ -1458,41 +1469,49 @@ class TestMCPExecuteDecisionHelpers:
 
     def test_map_status_auto_approved(self, app_module):
         import mcp_execute
+        import execute_pipeline
         import execute_helpers
         assert execute_helpers._map_status_to_decision('auto_approved') == 'auto_approve'
 
     def test_map_status_blocked(self, app_module):
         import mcp_execute
+        import execute_pipeline
         import execute_helpers
         assert execute_helpers._map_status_to_decision('blocked') == 'blocked'
 
     def test_map_status_compliance_violation(self, app_module):
         import mcp_execute
+        import execute_pipeline
         import execute_helpers
         assert execute_helpers._map_status_to_decision('compliance_violation') == 'blocked'
 
     def test_map_status_pending_approval(self, app_module):
         import mcp_execute
+        import execute_pipeline
         import execute_helpers
         assert execute_helpers._map_status_to_decision('pending_approval') == 'needs_approval'
 
     def test_map_status_trust_auto_approved(self, app_module):
         import mcp_execute
+        import execute_pipeline
         import execute_helpers
         assert execute_helpers._map_status_to_decision('trust_auto_approved') == 'auto_approve'
 
     def test_map_status_grant_auto_approved(self, app_module):
         import mcp_execute
+        import execute_pipeline
         import execute_helpers
         assert execute_helpers._map_status_to_decision('grant_auto_approved') == 'auto_approve'
 
     def test_map_status_unknown(self, app_module):
         import mcp_execute
+        import execute_pipeline
         import execute_helpers
         assert execute_helpers._map_status_to_decision('something_else') == 'something_else'
 
     def test_extract_actual_decision_auto_approved(self, app_module):
         import mcp_execute
+        import execute_pipeline
         fake_result = {
             'body': json.dumps({
                 'jsonrpc': '2.0',
@@ -1506,6 +1525,7 @@ class TestMCPExecuteDecisionHelpers:
 
     def test_extract_actual_decision_error_path(self, app_module):
         import mcp_execute
+        import execute_pipeline
         fake_result = {
             'body': json.dumps({
                 'jsonrpc': '2.0',
@@ -1517,6 +1537,7 @@ class TestMCPExecuteDecisionHelpers:
 
     def test_extract_actual_decision_bad_json(self, app_module):
         import mcp_execute
+        import execute_pipeline
         fake_result = {'body': 'not-json'}
         # Should not raise, returns 'unknown'
         import execute_helpers
@@ -1525,6 +1546,7 @@ class TestMCPExecuteDecisionHelpers:
 
     def test_extract_actual_decision_empty_content(self, app_module):
         import mcp_execute
+        import execute_pipeline
         fake_result = {
             'body': json.dumps({
                 'jsonrpc': '2.0',
@@ -1868,6 +1890,7 @@ class TestMCPShadowLogging:
     def test_shadow_log_handles_exception_gracefully(self, app_module):
         """_log_smart_approval_shadow failure is non-fatal."""
         import mcp_execute
+        import execute_pipeline
 
         # Create a fake smart_decision that will cause DDB error
         smart_mock = MagicMock()
@@ -1958,7 +1981,8 @@ class TestChainRiskChecks:
     def test_chain_all_safe_proceeds(self, app_module):
         """Chain of two safe commands proceeds to auto_approve or pending_approval."""
         import mcp_execute
-        with patch.object(mcp_execute, 'execute_command', return_value='output1\noutput2'):
+        import execute_pipeline
+        with patch.object(execute_pipeline, 'execute_command', return_value='output1\noutput2'):
             result = _call_execute_direct('aws s3 ls && aws sts get-caller-identity')
         body = json.loads(result['body'])
         # Handle both result and error responses
@@ -1985,7 +2009,8 @@ class TestChainRiskChecks:
     def test_single_command_chain_check_passthrough(self, app_module):
         """Single command (no &&) bypasses chain check, processed normally."""
         import mcp_execute
-        with patch.object(mcp_execute, 'execute_command', return_value='{}'):
+        import execute_pipeline
+        with patch.object(execute_pipeline, 'execute_command', return_value='{}'):
             result = _call_execute_direct('aws sts get-caller-identity')
         body = json.loads(result['body'])
         # Handle both result and error responses
@@ -1999,7 +2024,8 @@ class TestChainRiskChecks:
     def test_quoted_ampersand_not_split_for_risk_check(self, app_module):
         """Quoted && is treated as single command — no chain splitting."""
         import mcp_execute
-        with patch.object(mcp_execute, 'execute_command', return_value='log events'):
+        import execute_pipeline
+        with patch.object(execute_pipeline, 'execute_command', return_value='log events'):
             result = _call_execute_direct(
                 'aws logs filter-log-events --log-group-name /app '
                 '--filter-pattern "foo && bar"'
@@ -2047,12 +2073,13 @@ class TestChainRiskChecks:
     def test_chain_risk_blocked_direct_ctx(self, app_module, mock_dynamodb):
         """直接測試 _check_chain_risks: blocked sub-command → 回傳 blocked"""
         import mcp_execute
+        import execute_pipeline
 
         chained = 'aws s3 ls && aws iam delete-user --user-name test'
 
-        with patch.object(mcp_execute, 'send_blocked_notification'), \
-             patch.object(mcp_execute, 'emit_metric'), \
-             patch.object(mcp_execute, 'log_decision'):
+        with patch.object(execute_pipeline, 'send_blocked_notification'), \
+             patch.object(execute_pipeline, 'emit_metric'), \
+             patch.object(execute_pipeline, 'log_decision'):
 
             ctx = mcp_execute.ExecuteContext(
                 req_id='test-chain-001',
@@ -2082,6 +2109,7 @@ class TestChainRiskChecks:
     def test_chain_risk_all_safe_returns_none(self, app_module, mock_dynamodb):
         """直接測試 _check_chain_risks: 全部安全 → 回傳 None"""
         import mcp_execute
+        import execute_pipeline
 
         chained = 'aws s3 ls && aws sts get-caller-identity'
 
@@ -2105,6 +2133,7 @@ class TestChainRiskChecks:
     def test_chain_risk_single_cmd_passthrough_direct(self, app_module):
         """單一命令 → _check_chain_risks 回傳 None"""
         import mcp_execute
+        import execute_pipeline
 
         ctx = mcp_execute.ExecuteContext(
             req_id='test-chain-003',
@@ -2126,12 +2155,13 @@ class TestChainRiskChecks:
     def test_chain_risk_first_cmd_blocked_direct(self, app_module, mock_dynamodb):
         """串接命令中第一個命令就被封鎖"""
         import mcp_execute
+        import execute_pipeline
 
         chained = 'aws iam create-user --user-name hacker && aws s3 ls'
 
-        with patch.object(mcp_execute, 'send_blocked_notification'), \
-             patch.object(mcp_execute, 'emit_metric'), \
-             patch.object(mcp_execute, 'log_decision'):
+        with patch.object(execute_pipeline, 'send_blocked_notification'), \
+             patch.object(execute_pipeline, 'emit_metric'), \
+             patch.object(execute_pipeline, 'log_decision'):
 
             ctx = mcp_execute.ExecuteContext(
                 req_id='test-chain-004',
@@ -2161,11 +2191,12 @@ class TestChainRiskChecks:
     def test_chain_non_aws_command_rejected(self, app_module, mock_dynamodb):
         """Regression test for #96: chain with non-AWS command rejected before execution."""
         import mcp_execute
+        import execute_pipeline
 
         # Real case from issue #96: aws command && echo
         chained = 'aws secretsmanager delete-secret --secret-id test --force-delete-without-recovery && echo DELETED'
 
-        with patch.object(mcp_execute, 'emit_metric'):
+        with patch.object(execute_pipeline, 'emit_metric'):
             ctx = mcp_execute.ExecuteContext(
                 req_id='test-chain-non-aws',
                 command=chained,
