@@ -162,10 +162,10 @@ class TestLoggingPresentAfterRefactor:
 
     def test_mcp_execute_notification_failure_uses_logger(self):
         """logger.warning present in mcp_execute.py after notification failure."""
-        with open(_src('mcp_execute.py')) as f:
+        with open(_src('execute_pipeline.py')) as f:
             content = f.read()
         assert 'EXECUTE] Result notification failed' in content, \
-            "Expected logger.warning for notification failure in mcp_execute.py"
+            "Expected logger.warning for notification failure in execute_pipeline.py"
 
     def test_mcp_history_latency_failure_uses_logger(self):
         """logger.debug present in mcp_history.py after latency calc failure."""

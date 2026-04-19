@@ -387,7 +387,8 @@ from execute_helpers import (  # noqa: F401, E402
 )
 
 # Additional backward-compat re-exports (tests patch these on mcp_execute module)
-from commands import is_auto_approve, execute_command, extract_exit_code  # noqa: F401, E402
+from commands import is_auto_approve, execute_command  # noqa: F401, E402
+from utils import extract_exit_code  # noqa: F401, E402
 from trust import should_trust_approve, increment_trust_command_count  # noqa: F401, E402
 from rate_limit import check_rate_limit  # noqa: F401, E402
 from notifications import send_blocked_notification  # noqa: F401, E402
