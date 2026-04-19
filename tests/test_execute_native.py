@@ -17,16 +17,16 @@ from paging import PaginatedOutput
 @pytest.fixture
 def mock_table():
     """Mock DynamoDB table"""
-    with patch('mcp_execute.table') as mock:
+    with patch('execute_pipeline.table') as mock:
         yield mock
 
 
 @pytest.fixture
 def mock_notifications():
     """Mock notification functions"""
-    with patch('mcp_execute.send_approval_request') as mock_approval, \
-         patch('mcp_execute.send_trust_auto_approve_notification') as mock_trust, \
-         patch('mcp_execute.send_blocked_notification') as mock_blocked:
+    with patch('execute_pipeline.send_approval_request') as mock_approval, \
+         patch('execute_pipeline.send_trust_auto_approve_notification') as mock_trust, \
+         patch('execute_pipeline.send_blocked_notification') as mock_blocked:
         mock_approval.return_value = MagicMock(ok=True, message_id='msg-123')
         yield {
             'approval': mock_approval,
@@ -227,9 +227,9 @@ class TestMcpToolExecuteNative:
         from mcp_execute import mcp_tool_execute_native
 
         # Mock compliance checker to block the command
-        with patch('mcp_execute._score_risk'), \
-             patch('mcp_execute._scan_template'), \
-             patch('mcp_execute._check_compliance') as mock_compliance:
+        with patch('execute_pipeline._score_risk'), \
+             patch('execute_pipeline._scan_template'), \
+             patch('execute_pipeline._check_compliance') as mock_compliance:
             mock_compliance.return_value = {
                 'id': 'req-123',
                 'jsonrpc': '2.0',
@@ -265,11 +265,11 @@ class TestMcpToolExecuteNative:
         from mcp_execute import mcp_tool_execute_native
 
         # Mock auto_approve to return True for describe operations
-        with patch('mcp_execute._score_risk'), \
-             patch('mcp_execute._scan_template'), \
-             patch('mcp_execute.is_auto_approve') as mock_auto_approve, \
-             patch('mcp_execute.execute_boto3_native') as mock_execute, \
-             patch('mcp_execute.store_paged_output') as mock_paging:
+        with patch('execute_pipeline._score_risk'), \
+             patch('execute_pipeline._scan_template'), \
+             patch('execute_pipeline.is_auto_approve') as mock_auto_approve, \
+             patch('execute_pipeline.execute_boto3_native') as mock_execute, \
+             patch('execute_pipeline.store_paged_output') as mock_paging:
             mock_auto_approve.return_value = True
             mock_execute.return_value = '{"Buckets": [{"Name": "test-bucket-auto"}]}'
             mock_paging.return_value = PaginatedOutput(
@@ -311,10 +311,10 @@ class TestMcpToolExecuteNative:
             # Return None to continue pipeline
             return None
 
-        with patch('mcp_execute._score_risk'), \
-             patch('mcp_execute._scan_template'), \
-             patch('mcp_execute._check_compliance', side_effect=capture_compliance), \
-             patch('mcp_execute._check_blocked') as mock_blocked:
+        with patch('execute_pipeline._score_risk'), \
+             patch('execute_pipeline._scan_template'), \
+             patch('execute_pipeline._check_compliance', side_effect=capture_compliance), \
+             patch('execute_pipeline._check_blocked') as mock_blocked:
             # Make blocked return a result to stop pipeline
             mock_blocked.return_value = {
                 'id': 'req-123',

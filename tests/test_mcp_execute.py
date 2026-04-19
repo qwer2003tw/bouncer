@@ -847,7 +847,7 @@ class TestMCPAddAccount:
 class TestSyncModeExecute:
     """測試同步/異步模式"""
 
-    @patch('mcp_execute.execute_command')
+    @patch('execute_pipeline.execute_command')
     def test_sync_safe_command_auto_approved(self, mock_execute, app_module):
         """sync=True + safe command → 直接返回結果"""
         from mcp_execute import mcp_tool_execute
@@ -900,7 +900,7 @@ class TestCrossAccountExecuteFlow:
         import accounts
         accounts._accounts_table = None  # 重置快取
 
-    @patch('mcp_execute.execute_command')
+    @patch('execute_pipeline.execute_command')
     @patch('telegram.send_telegram_message')
     def test_cross_account_with_assume_role(self, mock_telegram, mock_execute, app_module):
         """mock execute_command 驗證帶 assume_role 的調用"""
@@ -957,7 +957,7 @@ class TestCrossAccountExecuteFlow:
         assert content['status'] == 'error'
         assert '999999999999' in content['error']
 
-    @patch('mcp_execute.execute_command')
+    @patch('execute_pipeline.execute_command')
     def test_assume_role_failure(self, mock_execute, app_module):
         """assume_role 失敗 → 返回錯誤"""
         mock_execute.return_value = '❌ Assume role 失敗: Access Denied'
@@ -1523,7 +1523,7 @@ class TestMCPExecuteDecisionHelpers:
 class TestMCPRateLimitPaths:
     """Cover _check_rate_limit PendingLimitExceeded branch (L656-660)."""
 
-    @patch('mcp_execute.check_rate_limit')
+    @patch('execute_pipeline.check_rate_limit')
     @patch('telegram.send_telegram_message')
     def test_pending_limit_exceeded(self, mock_tg, mock_rate, app_module):
         """When PendingLimitExceeded is raised, return pending_limit_exceeded status."""
@@ -1542,7 +1542,7 @@ class TestMCPRateLimitPaths:
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'pending_limit_exceeded'
 
-    @patch('mcp_execute.check_rate_limit')
+    @patch('execute_pipeline.check_rate_limit')
     @patch('telegram.send_telegram_message')
     def test_rate_limit_exceeded(self, mock_tg, mock_rate, app_module):
         """When RateLimitExceeded is raised, return rate_limited status."""
@@ -1572,7 +1572,7 @@ class TestMCPRateLimitPaths:
 class TestMCPCompliancePaths:
     """Cover _check_compliance violation path."""
 
-    @patch('mcp_execute._check_compliance')
+    @patch('execute_pipeline._check_compliance')
     @patch('telegram.send_telegram_message')
     def test_compliance_violation_returned(self, mock_tg, mock_compliance, app_module):
         """When compliance check returns violation, pipeline returns compliance_violation."""
@@ -1649,7 +1649,7 @@ class TestMCPCompliancePaths:
 class TestMCPBlockedPath:
     """Cover _check_blocked path."""
 
-    @patch('mcp_execute._check_blocked')
+    @patch('execute_pipeline._check_blocked')
     @patch('telegram.send_telegram_message')
     def test_blocked_command_returns_blocked_status(self, mock_tg, mock_blocked, app_module):
         """When _check_blocked returns a result, pipeline short-circuits."""
@@ -1692,8 +1692,8 @@ class TestMCPBlockedPath:
 class TestMCPTemplateScanEscalate:
     """Cover template escalate pipeline branch."""
 
-    @patch('mcp_execute._scan_template')
-    @patch('mcp_execute._score_risk')
+    @patch('execute_pipeline._scan_template')
+    @patch('execute_pipeline._score_risk')
     @patch('telegram.send_telegram_message')
     def test_escalate_skips_auto_approve(self, mock_tg, mock_score, mock_scan, app_module):
         """When template scan escalates, auto_approve / trust are skipped."""

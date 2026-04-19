@@ -40,15 +40,15 @@ class TestAutoApprovedRequestId:
         ctx.smart_decision = None
         ctx.is_native = False
 
-        with patch('mcp_execute.is_auto_approve', return_value=True), \
-             patch('mcp_execute.execute_command', return_value='output'), \
-             patch('mcp_execute.emit_metric'), \
-             patch('mcp_execute.store_paged_output',
+        with patch('execute_pipeline.is_auto_approve', return_value=True), \
+             patch('execute_pipeline.execute_command', return_value='output'), \
+             patch('execute_pipeline.emit_metric'), \
+             patch('execute_pipeline.store_paged_output',
                    return_value=PaginatedOutput(paged=False, result='output')), \
-             patch('mcp_execute.send_telegram_message_silent'), \
-             patch('mcp_execute.log_decision'), \
-             patch('mcp_execute.record_execution_error'), \
-             patch('mcp_execute.table', MagicMock()):
+             patch('execute_pipeline.send_telegram_message_silent'), \
+             patch('execute_pipeline.log_decision'), \
+             patch('execute_pipeline.record_execution_error'), \
+             patch('execute_pipeline.table', MagicMock()):
             result = mcp_execute._check_auto_approve(ctx)
 
         assert result is not None, "_check_auto_approve should return a result"
@@ -81,18 +81,18 @@ class TestAutoApprovedRequestId:
             'command_count': 0,
         }
 
-        with patch('mcp_execute.should_trust_approve',
+        with patch('execute_pipeline.should_trust_approve',
                    return_value=(True, trust_session, 'active_session')), \
-             patch('mcp_execute.increment_trust_command_count', return_value=1), \
-             patch('mcp_execute.execute_command', return_value='copied'), \
-             patch('mcp_execute.emit_metric'), \
-             patch('mcp_execute.store_paged_output',
+             patch('execute_pipeline.increment_trust_command_count', return_value=1), \
+             patch('execute_pipeline.execute_command', return_value='copied'), \
+             patch('execute_pipeline.emit_metric'), \
+             patch('execute_pipeline.store_paged_output',
                    return_value=PaginatedOutput(paged=False, result='copied')), \
-             patch('mcp_execute.send_trust_auto_approve_notification'), \
-             patch('mcp_execute.log_decision'), \
-             patch('mcp_execute.track_command_executed'), \
-             patch('mcp_execute.record_execution_error'), \
-             patch('mcp_execute.table', MagicMock()):
+             patch('execute_pipeline.send_trust_auto_approve_notification'), \
+             patch('execute_pipeline.log_decision'), \
+             patch('execute_pipeline.track_command_executed'), \
+             patch('execute_pipeline.record_execution_error'), \
+             patch('execute_pipeline.table', MagicMock()):
             result = mcp_execute._check_trust_session(ctx)
 
         assert result is not None, "_check_trust_session should return a result"
@@ -131,19 +131,19 @@ class TestAutoApprovedRequestId:
             'max_total_executions': 50,
         }
 
-        with patch('mcp_execute.GRANT_SESSION_ENABLED', True), \
+        with patch('execute_pipeline.GRANT_SESSION_ENABLED', True), \
              patch('grant.get_grant_session', return_value=grant_session), \
              patch('grant.normalize_command', side_effect=lambda cmd: cmd.strip()), \
              patch('grant.is_command_in_grant', return_value=True), \
              patch('grant.try_use_grant_command', return_value=True), \
-             patch('mcp_execute.execute_command', return_value='bucket-contents'), \
-             patch('mcp_execute.emit_metric'), \
-             patch('mcp_execute.store_paged_output',
+             patch('execute_pipeline.execute_command', return_value='bucket-contents'), \
+             patch('execute_pipeline.emit_metric'), \
+             patch('execute_pipeline.store_paged_output',
                    return_value=PaginatedOutput(paged=False, result='bucket-contents')), \
-             patch('mcp_execute.send_grant_execute_notification'), \
-             patch('mcp_execute.log_decision'), \
-             patch('mcp_execute.record_execution_error'), \
-             patch('mcp_execute.table', MagicMock()):
+             patch('execute_pipeline.send_grant_execute_notification'), \
+             patch('execute_pipeline.log_decision'), \
+             patch('execute_pipeline.record_execution_error'), \
+             patch('execute_pipeline.table', MagicMock()):
             result = mcp_execute._check_grant_session(ctx)
 
         assert result is not None, "_check_grant_session should return a result"

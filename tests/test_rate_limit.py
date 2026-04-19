@@ -84,7 +84,7 @@ class TestRateLimitErrors:
         from mcp_execute import mcp_tool_execute
 
         # Mock check_rate_limit 拋出 PendingLimitExceeded
-        with patch('mcp_execute.check_rate_limit',
+        with patch('execute_pipeline.check_rate_limit',
                           side_effect=app_module.PendingLimitExceeded('Too many pending')):
             result = mcp_tool_execute('test-1', {
                 'command': 'aws ec2 start-instances --instance-ids i-123',

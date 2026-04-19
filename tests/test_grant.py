@@ -723,8 +723,8 @@ class TestCheckGrantSession:
         result = mcp_module._check_grant_session(ctx)
         assert result is None
 
-    @patch('mcp_execute.send_grant_execute_notification')
-    @patch('mcp_execute.execute_command', return_value='bucket1\nbucket2')
+    @patch('execute_pipeline.send_grant_execute_notification')
+    @patch('execute_pipeline.execute_command', return_value='bucket1\nbucket2')
     @patch('risk_scorer.calculate_risk')
     @patch('trust.is_trust_excluded', return_value=False)
     @patch('commands.is_blocked', return_value=False)

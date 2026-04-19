@@ -161,16 +161,16 @@ class TestCheckAutoApproveErrorPath:
         ctx_mock.smart_decision = None
         ctx_mock.is_native = False  # ensure non-native path
 
-        with patch('mcp_execute.is_auto_approve', return_value=True), \
-             patch('mcp_execute.execute_command', return_value=cmd_result), \
-             patch('mcp_execute.emit_metric'), \
-             patch('mcp_execute.store_paged_output', return_value=PaginatedOutput(
+        with patch('execute_pipeline.is_auto_approve', return_value=True), \
+             patch('execute_pipeline.execute_command', return_value=cmd_result), \
+             patch('execute_pipeline.emit_metric'), \
+             patch('execute_pipeline.store_paged_output', return_value=PaginatedOutput(
                  paged=False, result=cmd_result
              )), \
-             patch('mcp_execute.send_telegram_message_silent'), \
-             patch('mcp_execute.log_decision'), \
-             patch('mcp_execute.record_execution_error') as mock_record, \
-             patch('mcp_execute.table', mock_table):
+             patch('execute_pipeline.send_telegram_message_silent'), \
+             patch('execute_pipeline.log_decision'), \
+             patch('execute_pipeline.record_execution_error') as mock_record, \
+             patch('execute_pipeline.table', mock_table):
             from mcp_execute import _check_auto_approve
             result = _check_auto_approve(ctx_mock)
             return result, mock_record
@@ -223,17 +223,17 @@ class TestCheckTrustSessionErrorPath:
 
         trust_session = {'request_id': 'trust-001', 'expires_at': 9999999999}
 
-        with patch('mcp_execute.should_trust_approve', return_value=(True, trust_session, 'ok')), \
-             patch('mcp_execute.increment_trust_command_count', return_value=1), \
-             patch('mcp_execute.execute_command', return_value=cmd_result), \
-             patch('mcp_execute.emit_metric'), \
-             patch('mcp_execute.store_paged_output', return_value=PaginatedOutput(
+        with patch('execute_pipeline.should_trust_approve', return_value=(True, trust_session, 'ok')), \
+             patch('execute_pipeline.increment_trust_command_count', return_value=1), \
+             patch('execute_pipeline.execute_command', return_value=cmd_result), \
+             patch('execute_pipeline.emit_metric'), \
+             patch('execute_pipeline.store_paged_output', return_value=PaginatedOutput(
                  paged=False, result=cmd_result
              )), \
-             patch('mcp_execute.send_trust_auto_approve_notification'), \
-             patch('mcp_execute.log_decision'), \
-             patch('mcp_execute.record_execution_error') as mock_record, \
-             patch('mcp_execute.table', mock_table):
+             patch('execute_pipeline.send_trust_auto_approve_notification'), \
+             patch('execute_pipeline.log_decision'), \
+             patch('execute_pipeline.record_execution_error') as mock_record, \
+             patch('execute_pipeline.table', mock_table):
             from mcp_execute import _check_trust_session
             result = _check_trust_session(ctx_mock)
             return result, mock_record
