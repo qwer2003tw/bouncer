@@ -801,7 +801,8 @@ class TestAutoApproveSilentNotification:
 
     @patch('execute_pipeline.send_telegram_message_silent')
     @patch('execute_pipeline.execute_command', return_value='{"ok": true}')
-    def test_silent_notification_called(self, mock_exec, mock_silent, app_module):
+    @patch('execute_pipeline._should_throttle_notification', return_value=False)
+    def test_silent_notification_called(self, mock_throttle, mock_exec, mock_silent, app_module):
         """Silent notification should be called when safelist auto-approves."""
         import mcp_execute
         # Build a minimal ExecuteContext
@@ -918,7 +919,7 @@ class TestAutoApproveSilentNotification:
     @patch('execute_pipeline.execute_command', return_value='Error: command failed')
     @patch('execute_pipeline.extract_exit_code', return_value=1)
     @patch('execute_pipeline._should_throttle_notification', return_value=False)
-    def test_failed_notification_shows_x_mark(self, mock_exit, mock_exec, mock_silent, app_module):
+    def test_failed_notification_shows_x_mark(self, mock_throttle, mock_exit, mock_exec, mock_silent, app_module):
         """s54-003: Failed command shows ❌ in notification."""
         from execute_context import ExecuteContext
         from execute_pipeline import _check_auto_approve
