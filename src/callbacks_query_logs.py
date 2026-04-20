@@ -104,6 +104,49 @@ def _handle_deny(request_id: str, item: dict, message_id: int, callback_id: str,
     return response(200, {'ok': True})
 
 
+def _handle_query_error(request_id: str, error_msg: str, log_group: str,
+                        message_id: int, user_id: str) -> dict:
+    """Handle query execution error and update status."""
+    _update_request_status(table, request_id, 'approved', user_id, extra_attrs={
+        'result': json.dumps({'status': 'error', 'error': error_msg}, ensure_ascii=False),
+        'decision_type': 'manual_approved',
+    })
+    if message_id:
+        update_message(
+            message_id,
+            f"✅ *已批准但查詢失敗*\n\n"
+            f"📁 *Log Group：* `{escape_markdown(log_group)}`\n"
+            f"❌ *錯誤：* {escape_markdown(error_msg[:200])}\n"
+            f"🆔 `{request_id}`",
+        )
+    logger.info("Query logs approved but query failed: request_id=%s", request_id,
+                 extra={"src_module": "callbacks_query_logs", "operation": "approve_error",
+                        "request_id": request_id, "error": error_msg[:200]})
+    return response(200, {'ok': True})
+
+
+def _handle_query_running(request_id: str, query_id: str, log_group: str,
+                         message_id: int, user_id: str) -> dict:
+    """Handle query still running status."""
+    _update_request_status(table, request_id, 'approved', user_id, extra_attrs={
+        'result': json.dumps({'status': 'running', 'query_id': query_id}, ensure_ascii=False),
+        'decision_type': 'manual_approved',
+    })
+    if message_id:
+        update_message(
+            message_id,
+            f"✅ *已批准*\n\n"
+            f"📁 *Log Group：* `{escape_markdown(log_group)}`\n"
+            f"⏳ 查詢仍在執行中（query\\_id: `{query_id}`）\n"
+            f"🆔 `{request_id}`",
+        )
+    logger.info("Query logs approved, query still running: request_id=%s, query_id=%s",
+                 request_id, query_id,
+                 extra={"src_module": "callbacks_query_logs", "operation": "approve_running",
+                        "request_id": request_id, "query_id": query_id})
+    return response(200, {'ok': True})
+
+
 def _handle_approve(action: str, request_id: str, item: dict, message_id: int,
                     callback_id: str, user_id: str) -> dict:
     """Handle approve_query_logs or approve_add_allowlist callback."""
@@ -144,44 +187,13 @@ def _handle_approve(action: str, request_id: str, item: dict, message_id: int,
 
     # Handle error
     if result_data.get('status') == 'error':
-        error_msg = result_data.get('error', 'Unknown error')
-        _update_request_status(table, request_id, 'approved', user_id, extra_attrs={
-            'result': json.dumps({'status': 'error', 'error': error_msg}, ensure_ascii=False),
-            'decision_type': 'manual_approved',
-        })
-        if message_id:
-            update_message(
-                message_id,
-                f"✅ *已批准但查詢失敗*\n\n"
-                f"📁 *Log Group：* `{escape_markdown(log_group)}`\n"
-                f"❌ *錯誤：* {escape_markdown(error_msg[:200])}\n"
-                f"🆔 `{request_id}`",
-            )
-        logger.info("Query logs approved but query failed: request_id=%s", request_id,
-                     extra={"src_module": "callbacks_query_logs", "operation": "approve_error",
-                            "request_id": request_id, "error": error_msg[:200]})
-        return response(200, {'ok': True})
+        return _handle_query_error(request_id, result_data.get('error', 'Unknown error'),
+                                   log_group, message_id, user_id)
 
     # Handle still running
     if result_data.get('status') == 'running':
-        query_id = result_data.get('query_id', '')
-        _update_request_status(table, request_id, 'approved', user_id, extra_attrs={
-            'result': json.dumps({'status': 'running', 'query_id': query_id}, ensure_ascii=False),
-            'decision_type': 'manual_approved',
-        })
-        if message_id:
-            update_message(
-                message_id,
-                f"✅ *已批准*\n\n"
-                f"📁 *Log Group：* `{escape_markdown(log_group)}`\n"
-                f"⏳ 查詢仍在執行中（query\\_id: `{query_id}`）\n"
-                f"🆔 `{request_id}`",
-            )
-        logger.info("Query logs approved, query still running: request_id=%s, query_id=%s",
-                     request_id, query_id,
-                     extra={"src_module": "callbacks_query_logs", "operation": "approve_running",
-                            "request_id": request_id, "query_id": query_id})
-        return response(200, {'ok': True})
+        return _handle_query_running(request_id, result_data.get('query_id', ''),
+                                     log_group, message_id, user_id)
 
     # Handle complete
     stats = result_data.get('statistics', {})

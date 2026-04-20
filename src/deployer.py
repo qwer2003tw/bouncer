@@ -353,6 +353,52 @@ def _get_progress_hint(elapsed: int) -> str:
         return "正在部署 CloudFormation stack"
 
 
+def _extract_cfn_failure_info(stack_name: str) -> dict:
+    """Extract CloudFormation failed resources and events.
+
+    Returns a dict with 'failed_resources', 'cfn_failure_events', and 'error_summary' keys.
+    """
+    result = {}
+    try:
+        events = _get_cfn_client().describe_stack_events(
+            StackName=stack_name
+        )['StackEvents']
+        failed_events = [
+            e for e in events
+            if 'FAILED' in e.get('ResourceStatus', '')
+        ][:5]
+        result['failed_resources'] = [
+            {
+                'resource': e['LogicalResourceId'],
+                'status': e['ResourceStatus'],
+                'reason': e.get('ResourceStatusReason', '')[:200],
+            }
+            for e in failed_events
+        ]
+        result['cfn_failure_events'] = [
+            {
+                'logical_resource_id': e['LogicalResourceId'],
+                'resource_status': e['ResourceStatus'],
+                'reason': e.get('ResourceStatusReason', '')[:300],
+                'timestamp': (
+                    e['Timestamp'].strftime('%Y-%m-%dT%H:%M:%SZ')
+                    if hasattr(e.get('Timestamp'), 'strftime')
+                    else str(e.get('Timestamp', ''))
+                ),
+            }
+            for e in failed_events
+        ]
+        result['error_summary'] = (
+            failed_events[0].get('ResourceStatusReason', '')[:300]
+            if failed_events else ''
+        )
+    except ClientError as exc:
+        logger.warning('describe_stack_events failed: %s', exc,
+                      extra={"src_module": "deployer", "operation": "describe_stack_events",
+                             "stack_name": stack_name, "error": str(exc)})
+    return result
+
+
 def get_deploy_status(deploy_id: str) -> dict:
     """取得部署狀態"""
     record = get_deploy_record(deploy_id)
@@ -402,42 +448,8 @@ def get_deploy_status(deploy_id: str) -> dict:
                 # --- Sprint17-#55: CloudFormation failed resources ---
                 stack_name = record.get('stack_name', '')
                 if sfn_status in ('FAILED', 'TIMED_OUT', 'ABORTED') and stack_name:
-                    try:
-                        events = _get_cfn_client().describe_stack_events(
-                            StackName=stack_name
-                        )['StackEvents']
-                        failed_events = [
-                            e for e in events
-                            if 'FAILED' in e.get('ResourceStatus', '')
-                        ][:5]
-                        ddb_update['failed_resources'] = [
-                            {
-                                'resource': e['LogicalResourceId'],
-                                'status': e['ResourceStatus'],
-                                'reason': e.get('ResourceStatusReason', '')[:200],
-                            }
-                            for e in failed_events
-                        ]
-                        # #87: cfn_failure_events with richer format (logical_resource_id, timestamp)
-                        ddb_update['cfn_failure_events'] = [
-                            {
-                                'logical_resource_id': e['LogicalResourceId'],
-                                'resource_status': e['ResourceStatus'],
-                                'reason': e.get('ResourceStatusReason', '')[:300],
-                                'timestamp': (
-                                    e['Timestamp'].strftime('%Y-%m-%dT%H:%M:%SZ')
-                                    if hasattr(e.get('Timestamp'), 'strftime')
-                                    else str(e.get('Timestamp', ''))
-                                ),
-                            }
-                            for e in failed_events
-                        ]
-                        ddb_update['error_summary'] = (
-                            failed_events[0].get('ResourceStatusReason', '')[:300]
-                            if failed_events else ''
-                        )
-                    except ClientError as exc:
-                        logger.warning('describe_stack_events failed: %s', exc, extra={"src_module": "deployer", "operation": "describe_stack_events", "stack_name": stack_name, "error": str(exc)})
+                    cfn_info = _extract_cfn_failure_info(stack_name)
+                    ddb_update.update(cfn_info)
 
                 update_deploy_record(deploy_id, ddb_update)
                 record['status'] = new_status

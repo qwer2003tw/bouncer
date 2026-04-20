@@ -783,6 +783,36 @@ def _preprocess_upload_files(req_id: str, files: list) -> tuple:
     return processed_files, total_size, None
 
 
+def _execute_trust_batch_uploads(session: dict, processed_files: list, bucket: str,
+                                 date_str: str, assume_role: Optional[str]) -> list:
+    """Execute batch uploads under trust quota.
+
+    Returns list of uploaded file results. Stops early if quota race detected.
+    """
+    from trust import increment_trust_upload_count
+    uploaded = []
+    s3 = get_s3_client(role_arn=assume_role, session_name='bouncer-batch-trust-upload')
+
+    for pf in processed_files:
+        inc_ok = increment_trust_upload_count(session['request_id'], pf['size'])
+        if not inc_ok:
+            break  # quota race, stop
+
+        fkey = f"{date_str}/{generate_request_id('batch-upload')}/{pf['filename']}"
+        s3.put_object(
+            Bucket=bucket, Key=fkey,
+            Body=pf['content_bytes'], ContentType=pf['content_type'],
+        )
+        vr = _verify_upload(s3, bucket, fkey, pf['filename'])
+        uploaded.append({
+            'filename': pf['filename'], 's3_uri': vr.s3_uri,
+            'size': pf['size'], 'sha256': pf['sha256'],
+            'verified': vr.verified, 's3_size': vr.s3_size,
+        })
+
+    return uploaded
+
+
 def _try_trust_auto_approve_batch(
     req_id: str, trust_scope: str, target_account_id: str,
     processed_files: list, total_size: int, bucket: str,
@@ -792,7 +822,7 @@ def _try_trust_auto_approve_batch(
     if not trust_scope:
         return None
 
-    from trust import should_trust_approve_upload, increment_trust_upload_count, get_trust_session
+    from trust import should_trust_approve_upload, get_trust_session
 
     session = get_trust_session(trust_scope, target_account_id or DEFAULT_ACCOUNT_ID)
     if not session:
@@ -822,25 +852,7 @@ def _try_trust_auto_approve_batch(
     # Execute all uploads under trust
     uploaded = []
     try:
-        # Sprint 58 s58-003: use top-level import
-        s3 = get_s3_client(role_arn=assume_role, session_name='bouncer-batch-trust-upload')
-
-        for pf in processed_files:
-            inc_ok = increment_trust_upload_count(session['request_id'], pf['size'])
-            if not inc_ok:
-                break  # quota race, stop
-
-            fkey = f"{date_str}/{generate_request_id('batch-upload')}/{pf['filename']}"
-            s3.put_object(
-                Bucket=bucket, Key=fkey,
-                Body=pf['content_bytes'], ContentType=pf['content_type'],
-            )
-            vr = _verify_upload(s3, bucket, fkey, pf['filename'])
-            uploaded.append({
-                'filename': pf['filename'], 's3_uri': vr.s3_uri,
-                'size': pf['size'], 'sha256': pf['sha256'],
-                'verified': vr.verified, 's3_size': vr.s3_size,
-            })
+        uploaded = _execute_trust_batch_uploads(session, processed_files, bucket, date_str, assume_role)
 
         if uploaded:
             verification_failed = [u['filename'] for u in uploaded if not u['verified']]
