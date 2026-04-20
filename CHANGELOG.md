@@ -1,5 +1,10 @@
 # Changelog
 
+## v3.92.0 (2026-04-20)
+### Refactor
+- Split notifications.py (1105 lines) into 4 modules: notifications_core, notifications_execute, notifications_grant (#272)
+
+
 ## v3.91.0 (2026-04-20)
 ### Refactor
 - Split mcp_execute.py (1413 lines) into 4 focused modules (#268):
