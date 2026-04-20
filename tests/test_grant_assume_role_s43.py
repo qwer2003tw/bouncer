@@ -169,10 +169,10 @@ def test_check_grant_session_uses_grant_assume_role(mock_dynamodb):
         grant_id=grant_id,
     )
 
-    with patch('mcp_execute.execute_command') as mock_execute, \
-         patch('mcp_execute.store_paged_output') as mock_store, \
-         patch('mcp_execute.send_grant_execute_notification') as mock_notify, \
-         patch('mcp_execute.log_decision') as mock_log:
+    with patch('execute_pipeline.execute_command') as mock_execute, \
+         patch('execute_pipeline.store_paged_output') as mock_store, \
+         patch('execute_pipeline.send_grant_execute_notification') as mock_notify, \
+         patch('execute_pipeline.log_decision') as mock_log:
 
         mock_execute.return_value = 'output'
         mock_store.return_value = PaginatedOutput(paged=False, result='output', telegram_pages=1)
@@ -227,10 +227,10 @@ def test_check_grant_session_fallback_to_ctx_assume_role(mock_dynamodb):
         grant_id=grant_id,
     )
 
-    with patch('mcp_execute.execute_command') as mock_execute, \
-         patch('mcp_execute.store_paged_output') as mock_store, \
-         patch('mcp_execute.send_grant_execute_notification') as mock_notify, \
-         patch('mcp_execute.log_decision') as mock_log:
+    with patch('execute_pipeline.execute_command') as mock_execute, \
+         patch('execute_pipeline.store_paged_output') as mock_store, \
+         patch('execute_pipeline.send_grant_execute_notification') as mock_notify, \
+         patch('execute_pipeline.log_decision') as mock_log:
 
         mock_execute.return_value = 'output'
         mock_store.return_value = PaginatedOutput(paged=False, result='output', telegram_pages=1)

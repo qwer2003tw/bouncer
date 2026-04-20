@@ -799,13 +799,15 @@ class TestBatchUploadVerification:
 class TestAutoApproveSilentNotification:
     """Tests that _check_auto_approve sends a silent Telegram notification."""
 
-    @patch('mcp_execute.send_telegram_message_silent')
-    @patch('mcp_execute.execute_command', return_value='{"ok": true}')
-    def test_silent_notification_called(self, mock_exec, mock_silent, app_module):
+    @patch('execute_pipeline.send_telegram_message_silent')
+    @patch('execute_pipeline.execute_command', return_value='{"ok": true}')
+    @patch('execute_pipeline._should_throttle_notification', return_value=False)
+    def test_silent_notification_called(self, mock_throttle, mock_exec, mock_silent, app_module):
         """Silent notification should be called when safelist auto-approves."""
         import mcp_execute
         # Build a minimal ExecuteContext
-        from mcp_execute import ExecuteContext, _check_auto_approve
+        from execute_context import ExecuteContext
+        from execute_pipeline import _check_auto_approve
         ctx = ExecuteContext(
             req_id='test-req-silent',
             command='aws ec2 describe-instances',
@@ -827,11 +829,12 @@ class TestAutoApproveSilentNotification:
         assert '自動執行' in call_text
         assert 'test-bot' in call_text
 
-    @patch('mcp_execute.send_telegram_message_silent', side_effect=Exception('Telegram down'))
-    @patch('mcp_execute.execute_command', return_value='ok output')
+    @patch('execute_pipeline.send_telegram_message_silent', side_effect=Exception('Telegram down'))
+    @patch('execute_pipeline.execute_command', return_value='ok output')
     def test_notification_failure_does_not_break_execution(self, mock_exec, mock_silent, app_module):
         """Notification failure must not break the execution result."""
-        from mcp_execute import ExecuteContext, _check_auto_approve
+        from execute_context import ExecuteContext
+        from execute_pipeline import _check_auto_approve
         ctx = ExecuteContext(
             req_id='test-req-notif-fail',
             command='aws s3 ls',
@@ -858,11 +861,12 @@ class TestAutoApproveSilentNotification:
             content = _j.loads(result['result']['content'][0]['text'])
         assert content['status'] == 'auto_approved'
 
-    @patch('mcp_execute.send_telegram_message_silent')
-    @patch('mcp_execute.execute_command', return_value='output')
+    @patch('execute_pipeline.send_telegram_message_silent')
+    @patch('execute_pipeline.execute_command', return_value='output')
     def test_non_safelist_no_notification(self, mock_exec, mock_silent, app_module):
         """Non-safelist commands should NOT trigger the silent notification."""
-        from mcp_execute import ExecuteContext, _check_auto_approve
+        from execute_context import ExecuteContext
+        from execute_pipeline import _check_auto_approve
         ctx = ExecuteContext(
             req_id='test-req-no-notif',
             command='aws iam create-user --user-name hacker',
@@ -882,12 +886,13 @@ class TestAutoApproveSilentNotification:
         assert result is None
         mock_silent.assert_not_called()
 
-    @patch('mcp_execute.send_telegram_message_silent')
-    @patch('mcp_execute.execute_command', return_value='Command output')
-    @patch('mcp_execute.extract_exit_code', return_value=0)
+    @patch('execute_pipeline.send_telegram_message_silent')
+    @patch('execute_pipeline.execute_command', return_value='Command output')
+    @patch('execute_pipeline.extract_exit_code', return_value=0)
     def test_success_notification_shows_checkmark(self, mock_exit, mock_exec, mock_silent, app_module):
         """s54-003: Successful command shows ✅ in notification."""
-        from mcp_execute import ExecuteContext, _check_auto_approve
+        from execute_context import ExecuteContext
+        from execute_pipeline import _check_auto_approve
         ctx = ExecuteContext(
             req_id='test-req-success',
             command='aws ec2 describe-instances',
@@ -910,12 +915,14 @@ class TestAutoApproveSilentNotification:
         assert '✅' in call_text
         assert '❌' not in call_text
 
-    @patch('mcp_execute.send_telegram_message_silent')
-    @patch('mcp_execute.execute_command', return_value='Error: command failed')
-    @patch('mcp_execute.extract_exit_code', return_value=1)
-    def test_failed_notification_shows_x_mark(self, mock_exit, mock_exec, mock_silent, app_module):
+    @patch('execute_pipeline.send_telegram_message_silent')
+    @patch('execute_pipeline.execute_command', return_value='Error: command failed')
+    @patch('execute_pipeline.extract_exit_code', return_value=1)
+    @patch('execute_pipeline._should_throttle_notification', return_value=False)
+    def test_failed_notification_shows_x_mark(self, mock_throttle, mock_exit, mock_exec, mock_silent, app_module):
         """s54-003: Failed command shows ❌ in notification."""
-        from mcp_execute import ExecuteContext, _check_auto_approve
+        from execute_context import ExecuteContext
+        from execute_pipeline import _check_auto_approve
         ctx = ExecuteContext(
             req_id='test-req-failure',
             command='aws ec2 describe-instances',

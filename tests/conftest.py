@@ -31,7 +31,8 @@ import boto3
 BOUNCER_MODS = [
     'app', 'db', 'trust', 'notifications', 'callbacks',
     'callbacks_command', 'callbacks_upload', 'callbacks_grant',
-    'mcp_execute', 'telegram', 'commands',
+    'mcp_execute', 'execute_context', 'execute_helpers', 'execute_pipeline',
+    'telegram', 'commands',
     'mcp_upload', 'mcp_admin', 'mcp_grant', 'mcp_history', 'mcp_confirm',
     'mcp_presigned', 'accounts', 'rate_limit', 'utils',
     'paging', 'smart_approval', 'risk_scorer', 'template_scanner',
@@ -202,7 +203,8 @@ def app_module(mock_dynamodb):
     # 重新載入模組（包括新模組 — Sprint 58 s58-001 補充）
     for mod in ['app', 'telegram', 'paging', 'trust', 'commands', 'notifications', 'db',
                 'callbacks', 'callbacks_command', 'callbacks_upload', 'callbacks_grant',
-                'mcp_execute', 'mcp_upload', 'mcp_admin',
+                'mcp_execute', 'execute_context', 'execute_pipeline', 'execute_helpers',
+                'mcp_upload', 'mcp_admin',
                 'accounts', 'rate_limit', 'smart_approval',
                 'constants', 'utils', 'risk_scorer', 'template_scanner',
                 'scheduler_service', 'otp', 'mcp_grant', 'webhook_router',
@@ -311,6 +313,11 @@ def _cleanup_tables(request):
         import mcp_execute as _mcp_execute
         if hasattr(_mcp_execute, 'table'):
             _mcp_execute.table = mock_dynamodb.Table('clawdbot-approval-requests')
+    except Exception:
+        pass
+    try:
+        import execute_pipeline as _execute_pipeline
+        _execute_pipeline.table = mock_dynamodb.Table('clawdbot-approval-requests')
     except Exception:
         pass
     yield

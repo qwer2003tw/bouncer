@@ -162,13 +162,13 @@ class TestNotificationThrottling:
         from unittest.mock import MagicMock, patch
 
         # Mock dependencies
-        with patch('mcp_execute.is_auto_approve', return_value=True), \
-             patch('mcp_execute.execute_command', return_value='command output'), \
-             patch('mcp_execute.store_paged_output', return_value=PaginatedOutput(paged=False, result='output', telegram_pages=1)), \
-             patch('mcp_execute.send_telegram_message_silent') as mock_send_tg, \
-             patch('mcp_execute.log_decision'), \
-             patch('mcp_execute.emit_metric'), \
-             patch('mcp_execute.generate_request_id', return_value='req-123'):
+        with patch('execute_pipeline.is_auto_approve', return_value=True), \
+             patch('execute_pipeline.execute_command', return_value='command output'), \
+             patch('execute_pipeline.store_paged_output', return_value=PaginatedOutput(paged=False, result='output', telegram_pages=1)), \
+             patch('execute_pipeline.send_telegram_message_silent') as mock_send_tg, \
+             patch('execute_pipeline.log_decision'), \
+             patch('execute_pipeline.emit_metric'), \
+             patch('execute_pipeline.generate_request_id', return_value='req-123'):
 
             # Create context
             ctx = ExecuteContext(

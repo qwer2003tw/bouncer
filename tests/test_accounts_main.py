@@ -165,7 +165,7 @@ class TestAccountValidationErrorPaths:
         from mcp_execute import mcp_tool_execute
 
         # Mock get_account 返回 None
-        with patch('accounts.get_account', return_value=None), \
+        with patch('execute_context.get_account', return_value=None), \
              patch.object(app_module, 'list_accounts', return_value=[{'account_id': '123456789012'}]):
             result = mcp_tool_execute('test-1', {
                 'command': 'aws s3 ls',
@@ -187,7 +187,7 @@ class TestAccountValidationErrorPaths:
         import mcp_execute
 
         # Mock get_account 返回停用的帳號
-        with patch.object(mcp_execute, 'get_account', return_value={
+        with patch('execute_context.get_account', return_value={
             'account_id': '123456789012',
             'name': 'Test',
             'enabled': False

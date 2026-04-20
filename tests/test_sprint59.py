@@ -366,9 +366,9 @@ class TestS59_002_TrustRateDetection:
             # Mock increment to raise TrustRateExceeded
             from trust import TrustRateExceeded
 
-            with patch('mcp_execute.increment_trust_command_count', side_effect=TrustRateExceeded('Rate exceeded')):
-                with patch('mcp_execute.should_trust_approve', return_value=(True, {'request_id': 'trust-123'}, 'ok')):
-                    with patch('mcp_execute.emit_metric') as mock_metric:
+            with patch('execute_pipeline.increment_trust_command_count', side_effect=TrustRateExceeded('Rate exceeded')):
+                with patch('execute_pipeline.should_trust_approve', return_value=(True, {'request_id': 'trust-123'}, 'ok')):
+                    with patch('execute_pipeline.emit_metric') as mock_metric:
                         from mcp_execute import _check_trust_session
 
                         ctx = MagicMock()

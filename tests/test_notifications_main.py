@@ -162,8 +162,8 @@ class TestGenerateDisplaySummary:
 class TestDisplaySummaryInItems:
     """Tests that display_summary is written to DynamoDB items"""
 
-    @patch('mcp_execute.send_approval_request')
-    @patch('mcp_execute.send_blocked_notification')
+    @patch('execute_pipeline.send_approval_request')
+    @patch('execute_pipeline.send_blocked_notification')
     def test_execute_item_has_display_summary(self, mock_blocked, mock_approval, app_module):
         """Execute approval item has display_summary field"""
         import sys as _sys, os as _os
