@@ -29,7 +29,8 @@ import boto3
 # ============================================================================
 
 BOUNCER_MODS = [
-    'app', 'db', 'trust', 'notifications', 'callbacks',
+    'app', 'db', 'trust', 'notifications', 'notifications_core', 'notifications_execute', 'notifications_grant',
+    'callbacks',
     'callbacks_command', 'callbacks_upload', 'callbacks_grant',
     'mcp_execute', 'execute_context', 'execute_helpers', 'execute_pipeline',
     'telegram', 'commands',
@@ -201,7 +202,8 @@ def app_module(mock_dynamodb):
     copy.deepcopy = _safe_deepcopy
 
     # 重新載入模組（包括新模組 — Sprint 58 s58-001 補充）
-    for mod in ['app', 'telegram', 'paging', 'trust', 'commands', 'notifications', 'db',
+    for mod in ['app', 'telegram', 'paging', 'trust', 'commands', 'notifications', 'notifications_core',
+                'notifications_execute', 'notifications_grant', 'db',
                 'callbacks', 'callbacks_command', 'callbacks_upload', 'callbacks_grant',
                 'mcp_execute', 'execute_context', 'execute_pipeline', 'execute_helpers',
                 'mcp_upload', 'mcp_admin',
@@ -393,7 +395,7 @@ def reset_telegram_commands_module():
 
         # Reload telegram_commands, notifications, and related modules to ensure clean state
         # test_sprint39_ux.py reloads notifications, which can affect telegram_commands
-        modules_to_reload = ['telegram_commands', 'notifications', 'telegram', 'constants']
+        modules_to_reload = ['telegram_commands', 'notifications', 'notifications_core', 'notifications_execute', 'notifications_grant', 'telegram', 'constants']
         for mod_name in modules_to_reload:
             if mod_name in sys.modules:
                 try:
