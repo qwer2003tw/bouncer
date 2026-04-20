@@ -135,7 +135,7 @@ def test_approval_request_stores_notification_snapshot():
         # Verify it's called in send_approval_request
         assert '_store_notification_snapshot(request_id, text, message_id)' in exec_content
         # Verify DDB update with notification fields
-        assert 'notification_text = :t, notification_length = :l, notification_message_id = :m' in content
+        assert 'notification_text = :t, notification_length = :l, notification_message_id = :m' in exec_content
 
 
 # Test 7: NotifySuccess works when build_id is missing (s44-002)

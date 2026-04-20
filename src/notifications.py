@@ -24,6 +24,7 @@ Sprint 92 (#272):
 # All existing `from notifications import X` and `patch('notifications.X')` continue to work
 from notifications_core import (  # noqa: F401
     _last_notification_time,
+    NOTIFICATION_THROTTLE_SECONDS,
     NotificationResult,
     _should_throttle_notification,
     _escape_markdown,
@@ -34,6 +35,8 @@ from notifications_core import (  # noqa: F401
 )
 from notifications_execute import (  # noqa: F401
     send_approval_request,
+    is_dangerous,
+    check_lambda_env_update,
     send_trust_auto_approve_notification,
     send_blocked_notification,
     send_expiry_warning_notification,
