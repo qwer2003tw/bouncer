@@ -10,10 +10,9 @@ Bouncer - Query Logs Callback 處理模組
 import json
 import time
 
-from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
 
-from db import table
+from db import table, safe_get_item
 from telegram import answer_callback, update_message, escape_markdown
 from utils import response, format_size_human
 from callbacks import _update_request_status
@@ -38,13 +37,7 @@ def handle_query_logs_callback(action: str, request_id: str, callback: dict, use
                        "request_id": request_id, "action": action, "user_id": user_id})
 
     # Fetch from DDB
-    try:
-        item = table.get_item(Key={'request_id': request_id}).get('Item')
-    except ClientError as e:
-        logger.exception("DynamoDB get_item error: %s", e,
-                     extra={"src_module": "callbacks_query_logs", "operation": "get_item",
-                            "request_id": request_id, "error": str(e)})
-        item = None
+    item = safe_get_item(table, {'request_id': request_id})
 
     if not item:
         answer_callback(callback['id'], '❌ 請求已過期或不存在')

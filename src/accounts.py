@@ -70,29 +70,21 @@ def init_bot_commands():
 
 def init_default_account():
     """初始化預設帳號（如果不存在）"""
-    try:
-        result = _get_accounts_table().get_item(Key={'account_id': DEFAULT_ACCOUNT_ID})
-        if 'Item' not in result:
-            _get_accounts_table().put_item(Item={
-                'account_id': DEFAULT_ACCOUNT_ID,
-                'name': 'Default',
-                'role_arn': None,
-                'is_default': True,
-                'enabled': True,
-                'created_at': int(time.time())
-            })
-    except ClientError as e:
-        logger.exception("Error initializing default account: %s", e, extra={"src_module": "accounts", "operation": "init_default_account", "error": str(e)})
+    item = _db.safe_get_item(_get_accounts_table(), {'account_id': DEFAULT_ACCOUNT_ID})
+    if not item:
+        _db.safe_put_item(_get_accounts_table(), {
+            'account_id': DEFAULT_ACCOUNT_ID,
+            'name': 'Default',
+            'role_arn': None,
+            'is_default': True,
+            'enabled': True,
+            'created_at': int(time.time())
+        })
 
 
 def get_account(account_id: str) -> Optional[dict]:
     """取得帳號配置"""
-    try:
-        result = _get_accounts_table().get_item(Key={'account_id': account_id})
-        return result.get('Item')
-    except ClientError as e:
-        logger.exception("get_account error: %s", e, extra={"src_module": "accounts", "operation": "get_account", "account_id": account_id, "error": str(e)})
-        return None
+    return _db.safe_get_item(_get_accounts_table(), {'account_id': account_id})
 
 
 def list_accounts() -> list:

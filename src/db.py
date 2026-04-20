@@ -6,8 +6,12 @@ moto mock isolation issues in tests and reduce cold-start OOM risk.
 """
 
 import os
+import logging
 import boto3
+from botocore.exceptions import ClientError
 from constants import TABLE_NAME, ACCOUNTS_TABLE_NAME, DEFAULT_REGION
+
+logger = logging.getLogger(__name__)
 
 
 class _LazyTable:
@@ -72,3 +76,79 @@ def reset_tables():
     deployer_history_table._reset()
     deployer_locks_table._reset()
     sequence_history_table._reset()
+
+
+# DDB operation helpers — reduce boilerplate for common patterns
+
+def safe_put_item(table_ref, item: dict, **kwargs) -> bool:
+    """Put item with standardized error handling.
+
+    Args:
+        table_ref: DynamoDB table object or _LazyTable reference
+        item: Item dict to put
+        **kwargs: Additional kwargs for put_item (e.g., ConditionExpression)
+
+    Returns:
+        True on success, False on error
+    """
+    try:
+        table_ref.put_item(Item=item, **kwargs)
+        return True
+    except ClientError as e:
+        logger.exception("DDB put_item failed: %s", e)
+        return False
+
+
+def safe_get_item(table_ref, key: dict) -> dict | None:
+    """Get item with standardized error handling.
+
+    Args:
+        table_ref: DynamoDB table object or _LazyTable reference
+        key: Key dict for get_item
+
+    Returns:
+        Item dict if found, None if not found or on error
+    """
+    try:
+        response = table_ref.get_item(Key=key)
+        return response.get('Item')
+    except ClientError as e:
+        logger.exception("DDB get_item failed: %s", e)
+        return None
+
+
+def safe_update_item(
+    table_ref,
+    key: dict,
+    update_expr: str,
+    expr_values: dict,
+    expr_names: dict | None = None,
+    **kwargs
+) -> bool:
+    """Update item with standardized error handling.
+
+    Args:
+        table_ref: DynamoDB table object or _LazyTable reference
+        key: Key dict for update_item
+        update_expr: UpdateExpression string
+        expr_values: ExpressionAttributeValues dict
+        expr_names: ExpressionAttributeNames dict (optional)
+        **kwargs: Additional kwargs (e.g., ConditionExpression)
+
+    Returns:
+        True on success, False on error
+    """
+    try:
+        params = {
+            'Key': key,
+            'UpdateExpression': update_expr,
+            'ExpressionAttributeValues': expr_values,
+        }
+        if expr_names:
+            params['ExpressionAttributeNames'] = expr_names
+        params.update(kwargs)
+        table_ref.update_item(**params)
+        return True
+    except ClientError as e:
+        logger.exception("DDB update_item failed: %s", e)
+        return False
