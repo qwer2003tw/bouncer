@@ -7,6 +7,7 @@ that existed in mcp_upload.py (x4) and callbacks.py (x2).
 """
 
 import boto3
+import constants
 
 
 def get_s3_client(role_arn=None, session_name='bouncer-s3', region=None):
@@ -100,8 +101,7 @@ def get_client(service: str, region: str = None):
     Returns:
         boto3 client for the specified service
     """
-    from constants import DEFAULT_REGION
-    region = region or DEFAULT_REGION
+    region = region or constants.DEFAULT_REGION
     key = f"{service}:{region}"
     if key not in _clients:
         _clients[key] = boto3.client(service, region_name=region)

@@ -12,7 +12,7 @@ import time
 from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
 
-
+import help_command
 from utils import mcp_result, mcp_error, generate_request_id, decimal_to_native, generate_display_summary
 from accounts import (
     init_default_account, get_account, list_accounts,
@@ -80,8 +80,8 @@ def mcp_tool_status(req_id: str, arguments: dict) -> dict:
 def mcp_tool_help(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_help - 查詢 AWS CLI 命令說明"""
     try:
-        from help_command import get_command_help, get_service_operations, format_help_text
-    except ImportError:
+        help_command  # Check module is available
+    except NameError:
         return mcp_error(req_id, -32603, 'help_command module not found')
 
     command = arguments.get('command', '').strip()
@@ -89,16 +89,16 @@ def mcp_tool_help(req_id: str, arguments: dict) -> dict:
 
     if service:
         # 列出服務的所有操作
-        result = get_service_operations(service)
+        result = help_command.get_service_operations(service)
     elif command:
         # 查詢特定命令的參數
-        result = get_command_help(command)
+        result = help_command.get_command_help(command)
     else:
         return mcp_error(req_id, -32602, 'Missing parameter: command or service')
 
     # 加入格式化文字版本
     if 'error' not in result or 'similar_operations' in result:
-        result['formatted'] = format_help_text(result)
+        result['formatted'] = help_command.format_help_text(result)
 
     return mcp_result(req_id, {
         'content': [{

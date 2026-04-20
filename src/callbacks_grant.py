@@ -8,6 +8,7 @@ import urllib.error
 from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
 
+import grant
 from utils import response
 from telegram import answer_callback, update_message
 
@@ -23,8 +24,6 @@ def handle_grant_approve(query: dict, grant_id: str, mode: str = 'all') -> dict:
         grant_id: Grant session ID
         mode: 'all' 全部批准 | 'safe_only' 只批准安全命令
     """
-    from grant import approve_grant, get_grant_session
-
     callback_id = query.get('id', '')
     user_id = str(query.get('from', {}).get('id', ''))
     message_id = query.get('message', {}).get('message_id')
@@ -35,20 +34,20 @@ def handle_grant_approve(query: dict, grant_id: str, mode: str = 'all') -> dict:
         # Check if grant contains dangerous commands before approving
         show_alert = False
         if mode == 'all':
-            grant_check = get_grant_session(grant_id)
+            grant_check = grant.get_grant_session(grant_id)
             if grant_check:
                 commands_detail = grant_check.get('commands_detail', [])
                 has_dangerous = any(d.get('category') == 'requires_individual' for d in commands_detail)
                 if has_dangerous:
                     show_alert = True
 
-        grant = approve_grant(grant_id, user_id, mode=mode)
-        if not grant:
+        grant_result = grant.approve_grant(grant_id, user_id, mode=mode)
+        if not grant_result:
             answer_callback(callback_id, '❌ Grant 不存在或已處理')
             return response(200, {'ok': True})
 
-        granted = grant.get('granted_commands', [])
-        ttl_minutes = grant.get('ttl_minutes', 30)
+        granted = grant_result.get('granted_commands', [])
+        ttl_minutes = grant_result.get('ttl_minutes', 30)
 
         logger.info("Grant callback", extra={
             "src_module": "callbacks", "operation": "grant_callback",
@@ -105,14 +104,12 @@ def handle_grant_approve_safe(query: dict, grant_id: str) -> dict:
 
 def handle_grant_deny(query: dict, grant_id: str) -> dict:
     """處理 Grant 拒絕 callback"""
-    from grant import deny_grant
-
     callback_id = query.get('id', '')
     user_id = str(query.get('from', {}).get('id', ''))
     message_id = query.get('message', {}).get('message_id')
 
     try:
-        success = deny_grant(grant_id)
+        success = grant.deny_grant(grant_id)
         if not success:
             answer_callback(callback_id, '❌ 拒絕失敗')
             return response(200, {'ok': True})

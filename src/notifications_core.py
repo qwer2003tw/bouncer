@@ -15,6 +15,7 @@ from botocore.exceptions import ClientError
 
 from aws_lambda_powertools import Logger
 import telegram as _telegram
+import db as db_module
 
 logger = Logger(service="bouncer")
 
@@ -145,9 +146,8 @@ def _store_notification_snapshot(request_id: str, text: str, message_id: int) ->
 
     Non-fatal: failures are silently swallowed.
     """
-    from db import table as _table
     try:
-        _table.update_item(
+        db_module.table.update_item(
             Key={'request_id': request_id},
             UpdateExpression='SET notification_text = :t, notification_length = :l, notification_message_id = :m',
             ExpressionAttributeValues={
