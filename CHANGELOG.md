@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.93.0 (2026-04-20)
+### Refactor
+- Extract common DDB helpers (safe_put_item, safe_get_item, safe_update_item) to db.py (#271)
+- Reduce cyclomatic complexity — extracted helpers from top-10 complex functions (#365)
+
+
 ## v3.92.0 (2026-04-20)
 ### Refactor
 - Split notifications.py (1105 lines) into 4 modules: notifications_core, notifications_execute, notifications_grant (#272)
