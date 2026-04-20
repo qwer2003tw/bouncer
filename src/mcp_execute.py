@@ -239,10 +239,22 @@ def mcp_tool_execute_native(req_id: str, arguments: dict) -> dict:
     # e.g. create_cluster -> create-cluster
     operation_kebab = operation.replace('_', '-')
 
+    # Map boto3 service name to AWS CLI subcommand name
+    # boto3 uses 's3' for all S3 operations, but AWS CLI splits into:
+    #   - 'aws s3' (high-level: ls, cp, sync)
+    #   - 'aws s3api' (low-level API: list-objects-v2, get-object, etc.)
+    # Safelist (AUTO_APPROVE_PREFIXES) uses CLI naming, so we must match.
+    _SERVICE_TO_CLI = {
+        's3': 's3api',           # boto3 s3 operations are s3api CLI commands
+        'logs': 'logs',          # same
+        'sts': 'sts',            # same
+    }
+    cli_service = _SERVICE_TO_CLI.get(service, service)
+
     # Build synthetic command string for compliance/risk scoring
-    # Format: "aws {service} {operation-kebab} {params_json}"
+    # Format: "aws {cli_service} {operation-kebab} {params_json}"
     # This allows existing compliance rules to work with native calls
-    synthetic_command = f"aws {service} {operation_kebab} {json.dumps(params, separators=(',', ':'))}"
+    synthetic_command = f"aws {cli_service} {operation_kebab} {json.dumps(params, separators=(',', ':'))}"
 
     # 初始化預設帳號
     init_default_account()
