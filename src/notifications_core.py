@@ -15,6 +15,8 @@ from botocore.exceptions import ClientError
 
 from aws_lambda_powertools import Logger
 import telegram as _telegram
+from db import table as _table
+from scheduler_service import get_scheduler_service
 
 logger = Logger(service="bouncer")
 
@@ -112,7 +114,6 @@ def post_notification_setup(
     """
     # 1. Store telegram_message_id in DynamoDB
     try:
-        from db import table as _table
 
         _table.update_item(
             Key={"request_id": request_id},
@@ -125,7 +126,6 @@ def post_notification_setup(
 
     # 2. Schedule EventBridge expiry trigger (embed telegram_message_id as fallback)
     try:
-        from scheduler_service import get_scheduler_service
 
         svc = get_scheduler_service()
         svc.create_expiry_schedule(
@@ -145,7 +145,6 @@ def _store_notification_snapshot(request_id: str, text: str, message_id: int) ->
 
     Non-fatal: failures are silently swallowed.
     """
-    from db import table as _table
     try:
         _table.update_item(
             Key={'request_id': request_id},

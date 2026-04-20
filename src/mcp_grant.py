@@ -27,6 +27,8 @@ from notifications import (
     send_grant_execute_notification,
 )
 from constants import DEFAULT_ACCOUNT_ID
+from compliance_checker import check_compliance
+from grant import create_grant_request, get_grant_session, get_grant_status, is_command_in_grant, revoke_grant, try_use_grant_command
 
 logger = Logger(service="bouncer")
 
@@ -34,7 +36,6 @@ logger = Logger(service="bouncer")
 def mcp_tool_request_grant(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_request_grant — 批次申請命令執行權限"""
     try:
-        from grant import create_grant_request
 
         commands = arguments.get('commands', [])
         reason = str(arguments.get('reason', '')).strip()
@@ -127,7 +128,6 @@ def mcp_tool_request_grant(req_id: str, arguments: dict) -> dict:
 def mcp_tool_grant_status(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_grant_status — 查詢 Grant Session 狀態"""
     try:
-        from grant import get_grant_status
 
         grant_id = str(arguments.get('grant_id', '')).strip()
         source = arguments.get('source', None)
@@ -159,7 +159,6 @@ def mcp_tool_grant_status(req_id: str, arguments: dict) -> dict:
 def mcp_tool_revoke_grant(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_revoke_grant — 撤銷 Grant Session"""
     try:
-        from grant import revoke_grant
 
         grant_id = str(arguments.get('grant_id', '')).strip()
         if not grant_id:
@@ -250,7 +249,6 @@ def mcp_tool_grant_execute(req_id: str, arguments: dict) -> dict:
             })
 
         # 4. 取 grant session（不存在 → grant_not_found）
-        from grant import get_grant_session, is_command_in_grant, try_use_grant_command
 
         grant = get_grant_session(grant_id)
         if not grant:
@@ -318,7 +316,6 @@ def mcp_tool_grant_execute(req_id: str, arguments: dict) -> dict:
             })
 
         # 9. compliance_checker（用 synthetic CLI 命令做 pattern 匹配）
-        from compliance_checker import check_compliance
 
         synthetic_cmd = f"aws {service} {operation.replace('_', '-')}"
         is_compliant, violation = check_compliance(synthetic_cmd)

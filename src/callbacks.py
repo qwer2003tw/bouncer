@@ -55,13 +55,17 @@ from callbacks_upload import (  # noqa: F401,F811
 
 # DynamoDB tables from db.py (no circular dependency)
 import db as _db
+from aws_clients import get_cloudfront_client
+from deployer import _get_history_table, start_deploy, update_deploy_record
+from notifications import _send_message_silent
+from scheduler_service import get_scheduler_service
+from utils import extract_exit_code
 
 
 def _is_execute_failed(output: str) -> bool:
     """判斷 execute_command 輸出是否代表失敗。
     支援：❌ prefix（Bouncer 格式）和 (exit code: N) 格式（AWS CLI 直接輸出）。
     """
-    from utils import extract_exit_code
     code = extract_exit_code(output)
     return code is not None and code != 0
 
@@ -132,7 +136,6 @@ def _update_request_status(table, request_id: str, status: str, approver: str, e
     # S59-001: Also delete reminder schedule
     # S60-004: Also delete escalation schedule
     try:
-        from scheduler_service import get_scheduler_service
         svc = get_scheduler_service()
         svc.delete_schedule(request_id)  # cleanup schedule
         svc.delete_warning_schedule(request_id)  # warning schedule
@@ -364,7 +367,6 @@ def _handle_deploy_approve(request_id: str, item: dict, message_id: int,
                            callback_id: str, user_id: str, project_name: str,
                            branch: str, stack_name: str, source_line: str) -> None:
     """Handle approve action for deploy callback."""
-    from deployer import start_deploy, update_deploy_record
     table = _get_table()
 
     project_id = item.get('project_id', '')
@@ -535,7 +537,6 @@ def _write_frontend_deploy_history(
     map the frontend project name to project_id for consistent querying.
     """
     try:
-        from deployer import _get_history_table
         now = int(time.time())
         # Map deploy_status -> uppercase STATUS used by SAM deploys
         status_map = {
@@ -768,7 +769,6 @@ def _invalidate_cloudfront(success_count: int, deploy_role_arn: str, distributio
         return False
 
     try:
-        from aws_clients import get_cloudfront_client
         cf = get_cloudfront_client(role_arn=deploy_role_arn)
         cf.create_invalidation(
             DistributionId=distribution_id,
@@ -863,7 +863,6 @@ def _finalize_deploy_frontend(deployed: list, failed: list, cf_invalidation_fail
 
     # Send Telegram result notification (silent)
     try:
-        from notifications import _send_message_silent
         if deploy_status == 'deployed':
             notif_text = (
                 f"✅ 前端部署成功\n"

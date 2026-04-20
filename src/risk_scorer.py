@@ -32,6 +32,7 @@ from typing import Any, Optional
 
 from aws_lambda_powertools import Logger
 from utils import RiskFactor  # canonical definition in utils.py
+from template_scanner import scan_command_payloads
 
 logger = Logger(service="bouncer")
 
@@ -636,7 +637,6 @@ def score_parameters(
 
     # 4. Template scanning (Phase 4)
     try:
-        from template_scanner import scan_command_payloads
         template_rules = rules.template_rules if hasattr(rules, 'template_rules') else []
         template_score, template_factors = scan_command_payloads(
             parsed.original, template_rules,

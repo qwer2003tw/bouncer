@@ -13,6 +13,7 @@ from typing import Optional
 from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
 from constants import AUDIT_TTL_SHORT, AUDIT_TTL_LONG
+from telegram import escape_markdown as _esc
 
 logger = Logger(service="bouncer")
 
@@ -118,7 +119,6 @@ def build_info_lines(
     Returns:
         多行字串（每行結尾含 ``\\n``），可直接嵌入 f-string
     """
-    from telegram import escape_markdown as _esc
 
     # Escape user-input fields (inline code fields like account_id are not escaped)
     if source:

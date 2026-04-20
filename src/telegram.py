@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from aws_lambda_powertools import Logger
 
 from constants import TELEGRAM_TOKEN, TELEGRAM_API_BASE, APPROVED_CHAT_ID
+from metrics import emit_metric
 
 logger = Logger(service="bouncer")
 
@@ -105,7 +106,6 @@ def _telegram_request(method: str, data: dict, timeout: int = 5, json_body: bool
             "method": method, "elapsed_ms": elapsed, "error": str(e)
         })
         try:
-            from metrics import emit_metric
             emit_metric('Bouncer', 'NotificationFailure', 1, dimensions={'Method': method})
         except Exception:  # noqa: BLE001
             logger.debug("Failed to emit NotificationFailure metric", exc_info=True)

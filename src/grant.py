@@ -48,6 +48,10 @@ from constants import (
     GRANT_APPROVAL_TIMEOUT,
     PROJECTS_TABLE,
 )
+from commands import is_blocked, is_dangerous
+from compliance_checker import check_compliance
+from risk_scorer import calculate_risk
+from trust import is_trust_excluded
 
 logger = Logger(service="bouncer")
 
@@ -390,7 +394,6 @@ def _precheck_command(
     try:
         # 1. Compliance check
         try:
-            from compliance_checker import check_compliance
             is_compliant, violation = check_compliance(command)
             if not is_compliant:
                 detail['category'] = 'blocked'
@@ -400,14 +403,12 @@ def _precheck_command(
             logger.debug("compliance_checker module not available", exc_info=True)
 
         # 2. Blocked check
-        from commands import is_blocked
         if is_blocked(command):
             detail['category'] = 'blocked'
             detail['block_reason'] = '在封鎖清單'
             return detail
 
         # 3. Trust excluded (高危)
-        from trust import is_trust_excluded
         if is_trust_excluded(command):
             detail['category'] = 'requires_individual'
             detail['block_reason'] = '高危命令，需個別審批'
@@ -415,7 +416,6 @@ def _precheck_command(
 
         # 4. Risk score
         try:
-            from risk_scorer import calculate_risk
             risk = calculate_risk(command, reason=reason, source=source, account_id=account_id)
             score = risk.score if hasattr(risk, 'score') else 0
             detail['risk_score'] = score
@@ -678,7 +678,6 @@ def try_use_grant_command(
     try:
         if allow_repeat:
             # SEC-009: 危險命令檢查 — 即使 allow_repeat 也限制最多 3 次
-            from commands import is_dangerous
             if is_dangerous(normalized_cmd):
                 # 讀取目前計數
                 try:

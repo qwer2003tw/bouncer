@@ -26,6 +26,7 @@ from constants import (
     APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER,
     AUTO_APPROVE_PREFIXES, BLOCKED_PATTERNS,
 )
+from help_command import format_help_text, get_command_help, get_service_operations
 
 
 logger = Logger(service="bouncer")
@@ -79,10 +80,6 @@ def mcp_tool_status(req_id: str, arguments: dict) -> dict:
 
 def mcp_tool_help(req_id: str, arguments: dict) -> dict:
     """MCP tool: bouncer_help - 查詢 AWS CLI 命令說明"""
-    try:
-        from help_command import get_command_help, get_service_operations, format_help_text
-    except ImportError:
-        return mcp_error(req_id, -32603, 'help_command module not found')
 
     command = arguments.get('command', '').strip()
     service = arguments.get('service', '').strip()

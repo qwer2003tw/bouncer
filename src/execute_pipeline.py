@@ -39,6 +39,14 @@ from constants import (
     GRANT_SESSION_ENABLED,
     TELEGRAM_PAGE_SIZE,
 )
+from compliance_checker import check_compliance
+from constants import PENDING_REMINDER_MINUTES
+from grant import get_grant_session, is_command_in_grant, normalize_command, try_use_grant_command
+from notifications import post_notification_setup
+from risk_scorer import load_risk_rules
+from scheduler_service import get_scheduler_service
+from smart_approval import evaluate_command as smart_evaluate
+from template_scanner import scan_command_payloads
 
 logger = Logger(service="bouncer")
 
@@ -49,7 +57,6 @@ def _score_risk(ctx: ExecuteContext) -> None:
     Mutates ctx.smart_decision in-place.  Never raises.
     """
     try:
-        from smart_approval import evaluate_command as smart_evaluate
         ctx.smart_decision = smart_evaluate(
             command=ctx.command,
             reason=ctx.reason,
@@ -82,8 +89,6 @@ def _scan_template(ctx: ExecuteContext) -> None:
         'escalate': False,
     }
     try:
-        from template_scanner import scan_command_payloads
-        from risk_scorer import load_risk_rules
 
         rules = load_risk_rules()
         template_rules = rules.template_rules if hasattr(rules, 'template_rules') else []
@@ -133,7 +138,6 @@ def _scan_template(ctx: ExecuteContext) -> None:
 def _check_compliance(ctx: ExecuteContext) -> Optional[dict]:
     """Layer 0: compliance check — blocks on security-rule violations."""
     try:
-        from compliance_checker import check_compliance
         is_compliant, violation = check_compliance(ctx.command)
         if not is_compliant:
             logger.warning("Compliance blocked: %s - %s", violation.rule_id, violation.rule_name, extra={"src_module": "execute", "operation": "check_compliance", "rule_id": violation.rule_id, "rule_name": violation.rule_name})
@@ -234,10 +238,6 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
         if not grant_id:
             return None
 
-        from grant import (
-            normalize_command, get_grant_session, is_command_in_grant,
-            try_use_grant_command,
-        )
 
         grant = get_grant_session(grant_id)
 
@@ -711,7 +711,6 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
 
     # Post-notification: store telegram_message_id + schedule expiry cleanup + warning
     if notified.message_id:
-        from notifications import post_notification_setup
         post_notification_setup(
             request_id=request_id,
             telegram_message_id=notified.message_id,
@@ -720,7 +719,6 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
 
         # S35-003: Schedule expiry warning (60s before TTL) — best-effort, never block approval flow
         try:
-            from scheduler_service import get_scheduler_service
             svc = get_scheduler_service()
             svc.create_expiry_warning_schedule(
                 request_id=request_id,
@@ -733,8 +731,6 @@ def _submit_for_approval(ctx: ExecuteContext) -> dict:
 
         # S59-001: Schedule pending approval reminder — best-effort, never block approval flow
         try:
-            from scheduler_service import get_scheduler_service
-            from constants import PENDING_REMINDER_MINUTES
             svc = get_scheduler_service()
             svc.create_pending_reminder_schedule(
                 request_id=request_id,

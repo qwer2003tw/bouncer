@@ -10,6 +10,7 @@ from aws_lambda_powertools import Logger
 
 from utils import response
 from telegram import answer_callback, update_message
+from grant import approve_grant, deny_grant, get_grant_session
 
 
 logger = Logger(service="bouncer")
@@ -23,7 +24,6 @@ def handle_grant_approve(query: dict, grant_id: str, mode: str = 'all') -> dict:
         grant_id: Grant session ID
         mode: 'all' 全部批准 | 'safe_only' 只批准安全命令
     """
-    from grant import approve_grant, get_grant_session
 
     callback_id = query.get('id', '')
     user_id = str(query.get('from', {}).get('id', ''))
@@ -105,7 +105,6 @@ def handle_grant_approve_safe(query: dict, grant_id: str) -> dict:
 
 def handle_grant_deny(query: dict, grant_id: str) -> dict:
     """處理 Grant 拒絕 callback"""
-    from grant import deny_grant
 
     callback_id = query.get('id', '')
     user_id = str(query.get('from', {}).get('id', ''))

@@ -32,6 +32,8 @@ from callbacks import (
 from callbacks_query_logs import handle_query_logs_callback
 from trust import revoke_trust_session
 from notifications import send_trust_session_summary
+from deployer import get_deploy_record, update_deploy_record
+from grant import revoke_grant
 
 logger = Logger(service="bouncer")
 
@@ -93,7 +95,6 @@ def handle_show_page(request_id: str, callback: dict) -> dict:
 
 def handle_infra_approval(action: str, request_id: str, callback: dict, user_id: str) -> dict:
     """Handle infra_approve/infra_deny callbacks for WaitForInfraApproval SFN state."""
-    from deployer import get_deploy_record, update_deploy_record
     import json as _json
     import time as _time
 
@@ -199,7 +200,6 @@ def handle_grant_callbacks(action: str, request_id: str, callback: dict) -> dict
             return response(200, {'ok': True})
         return handle_grant_deny(callback, request_id)
     elif action == 'grant_revoke':
-        from grant import revoke_grant
         success = revoke_grant(request_id)
         message_id = callback.get('message', {}).get('message_id')
         if success:

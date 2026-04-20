@@ -16,6 +16,8 @@ from commands import get_block_reason, _split_chain
 from db import table
 from notifications import send_blocked_notification
 from metrics import emit_metric
+from commands import aws_cli_split
+from compliance_checker import check_compliance
 
 logger = Logger(service="bouncer")
 
@@ -59,7 +61,6 @@ def check_chain_risks(ctx) -> Optional[dict]:
 
         # Layer -1: validate that all sub-commands are AWS CLI commands
         # This prevents misleading errors when first command succeeds but second fails
-        from commands import aws_cli_split
         args = aws_cli_split(sub_cmd)
         if not args or args[0] != 'aws':
             non_aws_cmd = args[0] if args else '(empty)'
@@ -81,7 +82,6 @@ def check_chain_risks(ctx) -> Optional[dict]:
 
         # Layer 0: compliance check per sub-command
         try:
-            from compliance_checker import check_compliance
             is_compliant, violation = check_compliance(sub_cmd)
             if not is_compliant:
                 logger.warning("Compliance violation in sub-command: %s", sub_cmd[:100], extra={"src_module": "execute", "operation": "check_chain_risks", "sub_cmd": sub_cmd[:100]})

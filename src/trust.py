@@ -28,6 +28,8 @@ from constants import (
     TRUST_RATE_LIMIT_PER_MINUTE, TRUST_RATE_LIMIT_ENABLED,
 )
 from aws_lambda_powertools import Logger
+from metrics import emit_metric
+from scheduler_service import get_trust_expiry_notifier
 
 logger = Logger(service="bouncer")
 
@@ -290,7 +292,6 @@ def create_trust_session(
 
     # Schedule expiry notification (best-effort, non-raising)
     try:
-        from scheduler_service import get_trust_expiry_notifier
         get_trust_expiry_notifier().schedule(trust_id=trust_id, expires_at=expires_at)
     except ClientError as exc:  # pragma: no cover
         logger.exception("Failed to schedule trust expiry notification for %s: %s", trust_id, exc, extra={"src_module": "trust", "operation": "create_trust_session", "trust_id": trust_id, "error": str(exc)})
@@ -317,7 +318,6 @@ def revoke_trust_session(trust_id: str) -> bool:
 
         # Cancel the EventBridge expiry schedule (best-effort, non-raising)
         try:
-            from scheduler_service import get_trust_expiry_notifier
             get_trust_expiry_notifier().cancel(trust_id=trust_id)
         except ClientError as exc:  # pragma: no cover
             logger.exception("Failed to cancel trust expiry schedule for %s: %s", trust_id, exc, extra={"src_module": "trust", "operation": "revoke_trust_session", "trust_id": trust_id, "error": str(exc)})
@@ -522,7 +522,6 @@ def should_trust_approve(
                 extra={"src_module": "trust", "operation": "should_trust_approve", "trust_id": trust_id, "mode": "strict"},
             )
             try:
-                from metrics import emit_metric
                 emit_metric('Bouncer', 'TrustIPBlocked', 1, dimensions={'Event': 'blocked', 'Mode': 'strict'})
             except Exception:  # noqa: BLE001 — best-effort metrics
                 logger.debug("Failed to emit TrustIPBlocked metric", exc_info=True)
@@ -536,7 +535,6 @@ def should_trust_approve(
                 extra={"src_module": "trust", "operation": "should_trust_approve", "trust_id": trust_id, "mode": "warn"},
             )
             try:
-                from metrics import emit_metric
                 emit_metric('Bouncer', 'TrustIPMismatch', 1, dimensions={'Event': 'mismatch', 'Mode': 'warn'})
             except Exception:  # noqa: BLE001 — best-effort metrics
                 logger.debug("Failed to emit TrustIPMismatch metric", exc_info=True)

@@ -23,6 +23,11 @@ from metrics import emit_metric
 
 # DynamoDB tables from db.py (no circular dependency)
 import db as _db
+from commands import execute_boto3_native
+from compliance_checker import check_compliance
+from otp import create_otp_record, generate_otp
+from risk_scorer import calculate_risk
+from utils import extract_exit_code
 
 logger = Logger(service="bouncer")
 
@@ -42,7 +47,6 @@ def _is_execute_failed(output: str) -> bool:
     """判斷 execute_command 輸出是否代表失敗。
     支援：❌ prefix（Bouncer 格式）和 (exit code: N) 格式（AWS CLI 直接輸出）。
     """
-    from utils import extract_exit_code
     code = extract_exit_code(output)
     return code is not None and code != 0
 
@@ -169,7 +173,6 @@ def _execute_and_store_result(
     # 執行命令（native boto3 or awscli based on stored action_type）
     if item.get('action_type') == 'native':
         import json as _json
-        from commands import execute_boto3_native
         native_service = item.get('native_service', '')
         native_operation = item.get('native_operation', '')
         native_params_str = item.get('native_params', '{}')
@@ -314,7 +317,6 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
 
         # SEC-013: 重跑 compliance check，不合規的 pending 命令拒絕執行
         try:
-            from compliance_checker import check_compliance
             is_compliant, violation = check_compliance(cmd)
             if not is_compliant:
                 logger.warning("Pending request failed compliance", extra={"src_module": "trust", "sec_rule": "SEC-013", "request_id": req_id, "violation_rule": violation.rule_id if violation else "unknown"})
@@ -653,11 +655,9 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         if action == 'approve' and not item.get('otp_verified'):
             # s56-001: Recalculate risk_score in callback instead of using DDB value
             # (DDB value may be 0 if smart_decision wasn't calculated during execute)
-            from risk_scorer import calculate_risk
             risk_result = calculate_risk(command)
             risk_score = risk_result.score if risk_result else 0
             if risk_score >= OTP_RISK_THRESHOLD:
-                from otp import generate_otp, create_otp_record
 
                 otp_code = generate_otp()
                 create_otp_record(request_id, user_id, otp_code, message_id)

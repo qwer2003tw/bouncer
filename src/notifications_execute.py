@@ -27,6 +27,7 @@ from notifications_core import (
     _should_throttle_notification,
     _store_notification_snapshot,
 )
+from telegram_entities import _utf16_len
 
 logger = Logger(service="bouncer")
 
@@ -227,7 +228,6 @@ def send_trust_auto_approve_notification(command: str, trust_id: str, remaining:
 
     # Format command result with expandable blockquote for long output
     if result:
-        from telegram_entities import _utf16_len
         _exit_code = extract_exit_code(result)
         result_status = "❌" if (_exit_code is not None and _exit_code != 0) else "✅"
 
@@ -263,7 +263,6 @@ def send_trust_auto_approve_notification(command: str, trust_id: str, remaining:
     TELEGRAM_MAX_TEXT = 4096
     if len(text) > TELEGRAM_MAX_TEXT:
         # Truncate result text to fit within limit
-        from telegram_entities import _utf16_len
         truncation_notice = "\n\n[輸出已截斷，超過 Telegram 4096 字元限制]"
         available = TELEGRAM_MAX_TEXT - len(header_text) - len(result_header) - len(truncation_notice) if result else TELEGRAM_MAX_TEXT - len(header_text) - len(truncation_notice)
         if available > 0 and result:
