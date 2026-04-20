@@ -30,7 +30,8 @@ os.environ.setdefault('TABLE_NAME', 'clawdbot-approval-requests')
 
 def _make_notifications_module():
     """Reload notifications and its dependencies with mocked env."""
-    for mod in ['notifications', 'telegram', 'commands', 'constants', 'utils',
+    for mod in ['notifications', 'notifications_core', 'notifications_execute', 'notifications_grant',
+                'telegram', 'commands', 'constants', 'utils',
                 'risk_scorer', 'template_scanner', 'scheduler_service', 'telegram_entities']:
         sys.modules.pop(mod, None)
         sys.modules.pop(f'src.{mod}', None)

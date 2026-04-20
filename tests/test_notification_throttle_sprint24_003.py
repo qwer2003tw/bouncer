@@ -26,7 +26,7 @@ os.environ.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
 def reset_throttle_state():
     """Reset throttle state before each test."""
     import notifications
-import notifications_core
+    import notifications_core
     notifications_core._last_notification_time = {}
     yield
     notifications_core._last_notification_time = {}
@@ -76,7 +76,7 @@ class TestNotificationThrottling:
 
         # Simulate time passing (mock the time)
         import notifications
-import notifications_core
+        import notifications_core
         notifications_core._last_notification_time['test_type'] = time.time() - (NOTIFICATION_THROTTLE_SECONDS + 1)
 
         # After throttle window, should not be throttled
@@ -135,7 +135,7 @@ import notifications_core
         """Trust auto-approve notification should send after throttle window."""
         from notifications import send_trust_auto_approve_notification, NOTIFICATION_THROTTLE_SECONDS
         import notifications
-import notifications_core
+        import notifications_core
 
         # First call
         send_trust_auto_approve_notification(
