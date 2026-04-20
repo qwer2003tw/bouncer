@@ -187,7 +187,8 @@ class TestSendApprovalRequestEntities:
 
     def test_dangerous_keyboard_has_confirm_reject(self):
         """Dangerous command has Confirm (not Approve) + Reject buttons."""
-        with patch.object(self.notif, 'is_dangerous', return_value=True):
+        import notifications_execute as _ne
+        with patch.object(_ne, 'is_dangerous', return_value=True):
             _, captured = self._call(command='aws s3 rb s3://bucket --force')
         buttons_flat = [
             btn['text']
@@ -201,7 +202,8 @@ class TestSendApprovalRequestEntities:
 
     def test_dangerous_message_shows_warning(self):
         """Dangerous command text contains warning phrase."""
-        with patch.object(self.notif, 'is_dangerous', return_value=True):
+        import notifications_execute as _ne
+        with patch.object(_ne, 'is_dangerous', return_value=True):
             _, captured = self._call(command='aws s3 rb s3://bucket --force')
         text = captured[0]['text']
         assert '高危' in text or '⚠️' in text
@@ -283,8 +285,9 @@ class TestSendApprovalRequestEntities:
 
     def test_lambda_env_dangerous_warning_in_text(self):
         """DANGEROUS lambda env update shows warning text."""
-        with patch.object(self.notif, 'check_lambda_env_update', return_value=('DANGEROUS', 'Risky env update')), \
-             patch.object(self.notif, 'is_dangerous', return_value=False):
+        import notifications_execute as _ne
+        with patch.object(_ne, 'check_lambda_env_update', return_value=('DANGEROUS', 'Risky env update')), \
+             patch.object(_ne, 'is_dangerous', return_value=False):
             _, captured = self._call(command='aws lambda update-function-configuration --environment ...')
         assert 'Risky env update' in captured[0]['text'] or '🔴' in captured[0]['text']
 
