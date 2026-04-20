@@ -360,9 +360,100 @@ def handle_account_remove_callback(action: str, request_id: str, item: dict, mes
 # Deploy Callback
 # ============================================================================
 
+def _handle_deploy_approve(request_id: str, item: dict, message_id: int,
+                           callback_id: str, user_id: str, project_name: str,
+                           branch: str, stack_name: str, source_line: str) -> None:
+    """Handle approve action for deploy callback."""
+    from deployer import start_deploy, update_deploy_record
+    table = _get_table()
+
+    project_id = item.get('project_id', '')
+    reason = item.get('reason', '')
+
+    answer_callback(callback_id, '🚀 啟動部署中...')
+    _update_request_status(table, request_id, 'approved', user_id)
+
+    logger.info("Approval action", extra={
+        "src_module": "callbacks", "operation": "approval_action",
+        "action": "approve",
+        "request_id": request_id,
+        "request_type": "deploy",
+        "user_id": str(user_id),
+    })
+
+    # Immediate feedback: remove buttons before start_deploy (best-effort)
+    try:
+        update_message(
+            message_id,
+            f"⏳ *部署排隊中...*\n\n"
+            f"📋 *請求 ID：* `{request_id}`\n"
+            f"{source_line}"
+            f"📦 *專案：* {project_name}\n"
+            f"🌿 *分支：* {branch}",
+            remove_buttons=True,
+        )
+    except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
+        logger.warning(f"[deploy] Immediate feedback update_message failed (non-critical): {e}")
+
+    # 啟動部署
+    result = start_deploy(project_id, branch, user_id, reason)
+
+    if 'error' in result or result.get('status') == 'conflict':
+        emit_metric('Bouncer', 'Deploy', 1, dimensions={'Status': 'failed', 'Project': project_id})
+        error_msg = result.get('error') or result.get('message', '啟動失敗')
+        update_message(
+            message_id,
+            f"❌ *部署啟動失敗*\n\n"
+            f"📋 *請求 ID：* `{request_id}`\n"
+            f"{source_line}"
+            f"📦 *專案：* {project_name}\n"
+            f"🌿 *分支：* {branch}\n\n"
+            f"❗ *錯誤：* {escape_markdown(error_msg)}"
+        )
+    else:
+        emit_metric('Bouncer', 'Deploy', 1, dimensions={'Status': 'started', 'Project': project_id})
+        deploy_id = result.get('deploy_id', '')
+        reason_line = f"📝 *原因：* {escape_markdown(reason)}\n" if reason else ""
+        commit_short = result.get('commit_short')
+        commit_message = result.get('commit_message', '')
+        commit_line = ""
+        if commit_short:
+            commit_display = f"`{commit_short}`"
+            if commit_message:
+                commit_display += f" {escape_markdown(commit_message)}"
+            commit_line = f"🔖 {commit_display}\n"
+        update_message(
+            message_id,
+            f"🚀 *部署已啟動*\n\n"
+            f"📋 *請求 ID：* `{request_id}`\n"
+            f"{source_line}"
+            f"📦 *專案：* {project_name}\n"
+            f"🌿 *分支：* {branch}\n"
+            f"{reason_line}"
+            f"📋 *Stack：* {stack_name}\n"
+            f"{commit_line}"
+            f"\n🆔 *部署 ID：* `{deploy_id}`\n\n"
+            f"⏳ 部署進行中..."
+        )
+
+        # Pin the approval message so progress is visible (best-effort)
+        try:
+            pin_message(message_id)
+        except Exception as pin_err:
+            logger.warning(f"[deploy] Failed to pin message (ignored): {pin_err}")
+
+        # Store telegram_message_id in deploy record for unpinning later
+        if deploy_id:
+            try:
+                update_deploy_record(deploy_id, {'telegram_message_id': message_id})
+            except ClientError as e:
+                logger.warning("Failed to store telegram_message_id (ignored): %s", e,
+                             extra={"src_module": "callbacks", "operation": "handle_deploy_callback",
+                                    "error": str(e)})
+
+
 def handle_deploy_callback(action: str, request_id: str, item: dict, message_id: int, callback_id: str, user_id: str) -> dict:
     """處理部署的審批 callback"""
-    from deployer import start_deploy
     table = _get_table()
 
     project_id = item.get('project_id', '')
@@ -388,86 +479,8 @@ def handle_deploy_callback(action: str, request_id: str, item: dict, message_id:
         return response(200, {'ok': True})
 
     if action == 'approve':
-        answer_callback(callback_id, '🚀 啟動部署中...')
-        _update_request_status(table, request_id, 'approved', user_id)
-
-        logger.info("Approval action", extra={
-            "src_module": "callbacks", "operation": "approval_action",
-            "action": "approve",
-            "request_id": request_id,
-            "request_type": "deploy",
-            "user_id": str(user_id),
-        })
-
-        # Immediate feedback: remove buttons before start_deploy (best-effort)
-        try:
-            update_message(
-                message_id,
-                f"⏳ *部署排隊中...*\n\n"
-                f"📋 *請求 ID：* `{request_id}`\n"
-                f"{source_line}"
-                f"📦 *專案：* {project_name}\n"
-                f"🌿 *分支：* {branch}",
-                remove_buttons=True,
-            )
-        except (OSError, TimeoutError, ConnectionError, urllib.error.URLError) as e:
-            logger.warning(f"[deploy] Immediate feedback update_message failed (non-critical): {e}")
-
-        # 啟動部署
-        result = start_deploy(project_id, branch, user_id, reason)
-
-        if 'error' in result or result.get('status') == 'conflict':
-            emit_metric('Bouncer', 'Deploy', 1, dimensions={'Status': 'failed', 'Project': project_id})
-            error_msg = result.get('error') or result.get('message', '啟動失敗')
-            update_message(
-                message_id,
-                f"❌ *部署啟動失敗*\n\n"
-                f"📋 *請求 ID：* `{request_id}`\n"
-                f"{source_line}"
-                f"📦 *專案：* {project_name}\n"
-                f"🌿 *分支：* {branch}\n\n"
-                f"❗ *錯誤：* {escape_markdown(error_msg)}"
-            )
-        else:
-            emit_metric('Bouncer', 'Deploy', 1, dimensions={'Status': 'started', 'Project': project_id})
-            deploy_id = result.get('deploy_id', '')
-            reason_line = f"📝 *原因：* {escape_markdown(reason)}\n" if reason else ""
-            # 加入 git commit SHA（若有）
-            commit_short = result.get('commit_short')
-            commit_message = result.get('commit_message', '')
-            commit_line = ""
-            if commit_short:
-                commit_display = f"`{commit_short}`"
-                if commit_message:
-                    commit_display += f" {escape_markdown(commit_message)}"
-                commit_line = f"🔖 {commit_display}\n"
-            update_message(
-                message_id,
-                f"🚀 *部署已啟動*\n\n"
-                f"📋 *請求 ID：* `{request_id}`\n"
-                f"{source_line}"
-                f"📦 *專案：* {project_name}\n"
-                f"🌿 *分支：* {branch}\n"
-                f"{reason_line}"
-                f"📋 *Stack：* {stack_name}\n"
-                f"{commit_line}"
-                f"\n🆔 *部署 ID：* `{deploy_id}`\n\n"
-                f"⏳ 部署進行中..."
-            )
-
-            # Pin the approval message so progress is visible (best-effort)
-            try:
-                pin_message(message_id)
-            except Exception as pin_err:
-                logger.warning(f"[deploy] Failed to pin message (ignored): {pin_err}")
-
-            # Store telegram_message_id in deploy record for unpinning later
-            if deploy_id:
-                try:
-                    from deployer import update_deploy_record
-                    update_deploy_record(deploy_id, {'telegram_message_id': message_id})
-                except ClientError as e:
-                    logger.warning("Failed to store telegram_message_id (ignored): %s", e, extra={"src_module": "callbacks", "operation": "handle_deploy_callback", "error": str(e)})
+        _handle_deploy_approve(request_id, item, message_id, callback_id, user_id,
+                               project_name, branch, stack_name, source_line)
 
     elif action == 'deny':
         answer_callback(callback_id, '❌ 已拒絕')

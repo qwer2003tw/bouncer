@@ -289,6 +289,44 @@ def _check_deploy_trust(trust_scope: str, project: str, account_id: str, source:
 # Helper: Submit for approval
 # ---------------------------------------------------------------------------
 
+def _stage_files_to_s3(processed_files: list, staging_bucket: str, req_id: str):
+    """Stage processed files to S3.
+
+    Returns (staged_keys, error_result). If error_result is not None, staging failed.
+    """
+    s3 = get_s3_client()
+    staged_keys = []
+
+    for pf in processed_files:
+        try:
+            s3.put_object(
+                Bucket=staging_bucket,
+                Key=pf["s3_key"],
+                Body=pf["content_bytes"],
+                ContentType=pf["content_type"],
+            )
+            staged_keys.append(pf["s3_key"])
+        except ClientError as exc:
+            # Rollback: delete already-staged objects
+            for rk in staged_keys:
+                try:
+                    s3.delete_object(Bucket=staging_bucket, Key=rk)
+                except Exception:  # noqa: BLE001 — best-effort cleanup
+                    logger.warning("Rollback cleanup failed (non-critical)",
+                                 extra={"src_module": "deploy_frontend",
+                                        "operation": "rollback_cleanup", "s3_key": rk})
+            error_result = mcp_result(req_id, {
+                "content": [{"type": "text", "text": json.dumps({
+                    "status": "error",
+                    "error": f"Failed to stage {pf['filename']} to S3: {exc}",
+                })}],
+                "isError": True,
+            })
+            return staged_keys, error_result
+
+    return staged_keys, None
+
+
 def _submit_deploy_frontend_approval(
     req_id: str,
     files: list,
@@ -329,32 +367,9 @@ def _submit_deploy_frontend_approval(
         total_size += file_size
 
     # 2. Stage files to S3
-    s3 = get_s3_client()
-    staged_keys = []
-
-    for pf in processed_files:
-        try:
-            s3.put_object(
-                Bucket=staging_bucket,
-                Key=pf["s3_key"],
-                Body=pf["content_bytes"],
-                ContentType=pf["content_type"],
-            )
-            staged_keys.append(pf["s3_key"])
-        except ClientError as exc:
-            # Rollback: delete already-staged objects
-            for rk in staged_keys:
-                try:
-                    s3.delete_object(Bucket=staging_bucket, Key=rk)
-                except Exception:  # noqa: BLE001 — best-effort cleanup
-                    logger.warning("Rollback cleanup failed (non-critical)", extra={"src_module": "deploy_frontend", "operation": "rollback_cleanup", "s3_key": rk})
-            return mcp_result(req_id, {
-                "content": [{"type": "text", "text": json.dumps({
-                    "status": "error",
-                    "error": f"Failed to stage {pf['filename']} to S3: {exc}",
-                })}],
-                "isError": True,
-            })
+    staged_keys, stage_error = _stage_files_to_s3(processed_files, staging_bucket, req_id)
+    if stage_error is not None:
+        return stage_error
 
     # 3. Build files manifest (without raw content_bytes)
     files_manifest = [
@@ -415,6 +430,7 @@ def _submit_deploy_frontend_approval(
             table.delete_item(Key={"request_id": request_id})
         except ClientError as del_err:
             logger.exception("DDB cleanup failed for %s: %s", request_id, del_err, extra={"src_module": "deploy_frontend", "operation": "submit_deploy_frontend", "request_id": request_id, "error": str(del_err)})
+        s3 = get_s3_client()
         for rk in staged_keys:
             try:
                 s3.delete_object(Bucket=staging_bucket, Key=rk)

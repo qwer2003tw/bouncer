@@ -264,17 +264,22 @@ def clean_description(doc: Optional[str]) -> str:
     return doc
 
 
+def _format_error_help(help_data: dict) -> str:
+    """Format error message with similar operations and hints."""
+    lines = [f"❌ {help_data['error']}"]
+    if 'similar_operations' in help_data:
+        lines.append("\n類似的操作:")
+        for op in help_data['similar_operations'][:5]:
+            lines.append(f"  • aws {help_data.get('service', '?')} {op}")
+    if 'hint' in help_data:
+        lines.append(f"\n💡 {help_data['hint']}")
+    return '\n'.join(lines)
+
+
 def format_help_text(help_data: dict) -> str:
     """格式化為可讀文字"""
     if 'error' in help_data:
-        lines = [f"❌ {help_data['error']}"]
-        if 'similar_operations' in help_data:
-            lines.append("\n類似的操作:")
-            for op in help_data['similar_operations'][:5]:
-                lines.append(f"  • aws {help_data.get('service', '?')} {op}")
-        if 'hint' in help_data:
-            lines.append(f"\n💡 {help_data['hint']}")
-        return '\n'.join(lines)
+        return _format_error_help(help_data)
 
     lines = [
         f"📖 aws {help_data['service']} {help_data['operation']}",

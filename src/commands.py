@@ -399,6 +399,83 @@ def is_auto_approve(command: str) -> bool:
     return True
 
 
+def _parse_quoted_string(command: str, i: int, quote: str) -> tuple[str, int]:
+    """Parse a quoted string and return (content, new_index)."""
+    i += 1  # Skip opening quote
+    part = []
+    while i < len(command) and command[i] != quote:
+        if command[i] == '\\' and i + 1 < len(command) and command[i + 1] == quote:
+            part.append(command[i + 1])
+            i += 2
+        else:
+            part.append(command[i])
+            i += 1
+    if i < len(command):
+        i += 1  # Skip closing quote
+    return ''.join(part), i
+
+
+def _parse_backtick(command: str, i: int) -> tuple[str, int]:
+    """Parse a backtick expression and return (content_with_backticks, new_index)."""
+    part = ['`']
+    i += 1  # Skip opening backtick
+    while i < len(command) and command[i] != '`':
+        part.append(command[i])
+        i += 1
+    if i < len(command):
+        part.append(command[i])
+        i += 1  # Skip closing backtick
+    return ''.join(part), i
+
+
+def _parse_brackets(command: str, i: int, open_char: str, close_map: dict) -> tuple[str, int]:
+    """Parse nested brackets/braces/parens and return (content, new_index)."""
+    stack = [open_char]
+    part = [open_char]
+    i += 1  # Skip opening bracket
+
+    while i < len(command) and stack:
+        cc = command[i]
+        part.append(cc)
+
+        if cc in ('"', "'"):
+            # String inside brackets: skip to matching quote
+            q = cc
+            i += 1
+            while i < len(command):
+                sc = command[i]
+                part.append(sc)
+                if sc == '\\' and i + 1 < len(command):
+                    part.append(command[i + 1])
+                    i += 2
+                    continue
+                if sc == q:
+                    i += 1
+                    break
+                i += 1
+            continue
+        elif cc == '`':
+            # Backtick inside brackets
+            i += 1
+            while i < len(command) and command[i] != '`':
+                part.append(command[i])
+                i += 1
+            if i < len(command):
+                part.append(command[i])
+                i += 1
+            continue
+        elif cc in ('(', '[', '{'):
+            stack.append(cc)
+        elif stack and cc == close_map.get(stack[-1]):
+            stack.pop()
+            if not stack:
+                i += 1
+                break
+
+        i += 1
+    return ''.join(part), i
+
+
 def aws_cli_split(command: str) -> list:
     """
     把 AWS CLI 命令字串拆成 argv list。
@@ -434,82 +511,22 @@ def aws_cli_split(command: str) -> list:
             # 引號：收集到配對引號，去引號
             if c in ('"', "'"):
                 has_content = True
-                quote = c
-                i += 1
-                part = []
-                while i < n and command[i] != quote:
-                    if command[i] == '\\' and i + 1 < n and command[i + 1] == quote:
-                        part.append(command[i + 1])
-                        i += 2
-                    else:
-                        part.append(command[i])
-                        i += 1
-                if i < n:
-                    i += 1  # 跳過結尾引號
-                token_parts.append(''.join(part))
+                part, i = _parse_quoted_string(command, i, c)
+                token_parts.append(part)
                 continue
 
             # 反引號：收集到配對反引號（保留反引號本身，JMESPath 語法）
             if c == '`':
                 has_content = True
-                part = [c]
-                i += 1
-                while i < n and command[i] != '`':
-                    part.append(command[i])
-                    i += 1
-                if i < n:
-                    part.append(command[i])
-                    i += 1
-                token_parts.append(''.join(part))
+                part, i = _parse_backtick(command, i)
+                token_parts.append(part)
                 continue
 
             # 開括號 { [ (：用堆疊追蹤配對（支援巢狀混合括號）
             if c in OPEN_BRACKETS:
                 has_content = True
-                stack = [c]
-                part = [c]
-                i += 1
-
-                while i < n and stack:
-                    cc = command[i]
-                    part.append(cc)
-
-                    if cc in ('"', "'"):
-                        # 字串：跳到配對引號
-                        q = cc
-                        i += 1
-                        while i < n:
-                            sc = command[i]
-                            part.append(sc)
-                            if sc == '\\' and i + 1 < n:
-                                part.append(command[i + 1])
-                                i += 2
-                                continue
-                            if sc == q:
-                                i += 1
-                                break
-                            i += 1
-                        continue
-                    elif cc == '`':
-                        # 反引號內容
-                        i += 1
-                        while i < n and command[i] != '`':
-                            part.append(command[i])
-                            i += 1
-                        if i < n:
-                            part.append(command[i])
-                            i += 1
-                        continue
-                    elif cc in OPEN_BRACKETS:
-                        stack.append(cc)
-                    elif stack and cc == CLOSE_MAP.get(stack[-1]):
-                        stack.pop()
-                        if not stack:
-                            i += 1
-                            break
-
-                    i += 1
-                token_parts.append(''.join(part))
+                part, i = _parse_brackets(command, i, c, CLOSE_MAP)
+                token_parts.append(part)
                 continue
 
             # 普通字元

@@ -134,6 +134,32 @@ def _write_confirm_record(
 # ---------------------------------------------------------------------------
 
 
+def _validate_and_extract_keys(files_raw, req_id: str) -> list[str] | dict:
+    """Validate files parameter and extract s3_key list.
+
+    Returns list of s3_keys on success, or error result dict on failure.
+    """
+    if not isinstance(files_raw, list) or len(files_raw) == 0:
+        return _error_result(req_id, "files must be a non-empty array")
+
+    if len(files_raw) > _CONFIRM_MAX_FILES:
+        return _error_result(
+            req_id,
+            f"files exceeds maximum of {_CONFIRM_MAX_FILES} items",
+        )
+
+    requested_keys: list[str] = []
+    for i, entry in enumerate(files_raw):
+        if not isinstance(entry, dict):
+            return _error_result(req_id, f"files[{i}] must be an object")
+        s3_key = str(entry.get("s3_key", "")).strip()
+        if not s3_key:
+            return _error_result(req_id, f"files[{i}].s3_key is required")
+        requested_keys.append(s3_key)
+
+    return requested_keys
+
+
 def handle_confirm_upload(params: dict) -> dict:
     """MCP tool handler for ``bouncer_confirm_upload``.
 
@@ -152,24 +178,9 @@ def handle_confirm_upload(params: dict) -> dict:
 
     # ---- Validate files ----
     files_raw = params.get("files")
-    if not isinstance(files_raw, list) or len(files_raw) == 0:
-        return _error_result(req_id, "files must be a non-empty array")
-
-    if len(files_raw) > _CONFIRM_MAX_FILES:
-        return _error_result(
-            req_id,
-            f"files exceeds maximum of {_CONFIRM_MAX_FILES} items",
-        )
-
-    # Extract s3_key strings
-    requested_keys: list[str] = []
-    for i, entry in enumerate(files_raw):
-        if not isinstance(entry, dict):
-            return _error_result(req_id, f"files[{i}] must be an object")
-        s3_key = str(entry.get("s3_key", "")).strip()
-        if not s3_key:
-            return _error_result(req_id, f"files[{i}].s3_key is required")
-        requested_keys.append(s3_key)
+    requested_keys = _validate_and_extract_keys(files_raw, req_id)
+    if isinstance(requested_keys, dict):  # Error result
+        return requested_keys
 
     # ---- Determine bucket + prefix ----
     bucket = STAGING_BUCKET

@@ -141,12 +141,7 @@ def list_projects() -> list:
 
 def get_project(project_id: str) -> dict:
     """取得專案配置"""
-    try:
-        result = _get_projects_table().get_item(Key={'project_id': project_id})
-        return result.get('Item')
-    except ClientError:
-        logger.exception("get_project failed", extra={"src_module": "deploy_db", "operation": "get_project", "project_id": project_id, "error_type": "ClientError"})
-        return None
+    return _db.safe_get_item(_get_projects_table(), {'project_id': project_id})
 
 def add_project(project_id: str, config: dict) -> dict:
     """新增專案配置"""
