@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.91.0 (2026-04-20)
+### Refactor
+- Split mcp_execute.py (1413 lines) into 4 focused modules (#268):
+  - execute_context.py: ExecuteContext + request parsing (216 lines)
+  - execute_pipeline.py: pipeline _check_* functions + risk scoring (726 lines)
+  - execute_helpers.py: utility functions (139 lines)
+  - mcp_execute.py: entry points only (332 lines)
+- Updated 129+ test mock paths to match new module structure
+
+
 ## v3.90.0 (2026-04-18)
 ### Bug Fix
 - bouncer_query_logs: poll for results after Complete status (eventual consistency) (#385)
