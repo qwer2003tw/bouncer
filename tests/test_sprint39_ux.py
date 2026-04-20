@@ -23,7 +23,10 @@ def test_auto_approve_notification_with_changes_summary():
         mock_send.return_value = {'ok': True}
         # Force reload so notifications._telegram picks up our mock
         import importlib
-        if 'notifications' in sys.modules:
+        for _nm in ['notifications_core', 'notifications_execute', 'notifications_grant', 'notifications']:
+            if _nm in sys.modules:
+                importlib.reload(sys.modules[_nm])
+        if False:  # replaced above
             importlib.reload(sys.modules['notifications'])
         from notifications import send_auto_approve_deploy_notification as _fn
 
@@ -48,7 +51,10 @@ def test_auto_approve_notification_without_summary():
     with patch.object(_telegram_mod, 'send_message_with_entities') as mock_send:
         mock_send.return_value = {'ok': True}
         import importlib
-        if 'notifications' in sys.modules:
+        for _nm in ['notifications_core', 'notifications_execute', 'notifications_grant', 'notifications']:
+            if _nm in sys.modules:
+                importlib.reload(sys.modules[_nm])
+        if False:  # replaced above
             importlib.reload(sys.modules['notifications'])
         from notifications import send_auto_approve_deploy_notification as _fn
 
@@ -133,7 +139,10 @@ def test_datetime_entity_in_approval_notification():
     with patch.object(_telegram_mod, 'send_message_with_entities') as mock_send:
         mock_send.return_value = {'ok': True, 'result': {'message_id': 123}}
         import importlib
-        if 'notifications' in sys.modules:
+        for _nm in ['notifications_core', 'notifications_execute', 'notifications_grant', 'notifications']:
+            if _nm in sys.modules:
+                importlib.reload(sys.modules[_nm])
+        if False:  # replaced above
             importlib.reload(sys.modules['notifications'])
         from notifications import send_approval_request as _fn
 

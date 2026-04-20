@@ -23,6 +23,7 @@ Sprint 92 (#272):
 # Re-export from sub-modules — notifications.py is the public API
 # All existing `from notifications import X` and `patch('notifications.X')` continue to work
 from notifications_core import (  # noqa: F401
+    _last_notification_time,
     NotificationResult,
     _should_throttle_notification,
     _escape_markdown,

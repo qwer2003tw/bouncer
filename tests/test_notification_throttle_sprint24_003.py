@@ -26,9 +26,10 @@ os.environ.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
 def reset_throttle_state():
     """Reset throttle state before each test."""
     import notifications
-    notifications._last_notification_time = {}
+import notifications_core
+    notifications_core._last_notification_time = {}
     yield
-    notifications._last_notification_time = {}
+    notifications_core._last_notification_time = {}
 
 
 @pytest.fixture
@@ -75,7 +76,8 @@ class TestNotificationThrottling:
 
         # Simulate time passing (mock the time)
         import notifications
-        notifications._last_notification_time['test_type'] = time.time() - (NOTIFICATION_THROTTLE_SECONDS + 1)
+import notifications_core
+        notifications_core._last_notification_time['test_type'] = time.time() - (NOTIFICATION_THROTTLE_SECONDS + 1)
 
         # After throttle window, should not be throttled
         result3 = _should_throttle_notification('test_type')
@@ -133,6 +135,7 @@ class TestNotificationThrottling:
         """Trust auto-approve notification should send after throttle window."""
         from notifications import send_trust_auto_approve_notification, NOTIFICATION_THROTTLE_SECONDS
         import notifications
+import notifications_core
 
         # First call
         send_trust_auto_approve_notification(
@@ -144,7 +147,7 @@ class TestNotificationThrottling:
         assert mock_telegram.call_count == 1
 
         # Simulate time passing
-        notifications._last_notification_time['trust_approve'] = time.time() - (NOTIFICATION_THROTTLE_SECONDS + 1)
+        notifications_core._last_notification_time['trust_approve'] = time.time() - (NOTIFICATION_THROTTLE_SECONDS + 1)
 
         # Second call after window should send
         send_trust_auto_approve_notification(
