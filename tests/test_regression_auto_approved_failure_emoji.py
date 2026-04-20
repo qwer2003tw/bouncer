@@ -39,7 +39,8 @@ def _make_notifications_module():
     os.environ.setdefault('TABLE_NAME', 'clawdbot-approval-requests')
 
     # Clear cached modules so imports are fresh
-    for mod in ['notifications', 'telegram', 'commands', 'constants', 'utils',
+    for mod in ['notifications', 'notifications_core', 'notifications_execute', 'notifications_grant',
+                'telegram', 'commands', 'constants', 'utils',
                 'risk_scorer', 'template_scanner', 'scheduler_service']:
         sys.modules.pop(mod, None)
         sys.modules.pop(f'src.{mod}', None)

@@ -48,10 +48,11 @@ def _mock_entities_send():
     _tg.send_message_with_entities = mock_entities
     _tg.send_telegram_message = mock_send_fn
 
-    # Reload notifications so it picks up the mocks
+    # Reload notification sub-modules and main module so they pick up the mocks
     import importlib
-    if 'notifications' in sys.modules:
-        importlib.reload(sys.modules['notifications'])
+    for mod_name in ['notifications_core', 'notifications_execute', 'notifications_grant', 'notifications']:
+        if mod_name in sys.modules:
+            importlib.reload(sys.modules[mod_name])
 
     yield mock_entities
 
@@ -348,7 +349,8 @@ def _make_notifications_module():
     os.environ.setdefault('TABLE_NAME', 'clawdbot-approval-requests')
 
     # Clear cached modules so imports are fresh
-    for mod in ['notifications', 'telegram', 'commands', 'constants', 'utils',
+    for mod in ['notifications', 'notifications_core', 'notifications_execute', 'notifications_grant',
+                'telegram', 'commands', 'constants', 'utils',
                 'risk_scorer', 'template_scanner', 'scheduler_service']:
         sys.modules.pop(mod, None)
         sys.modules.pop(f'src.{mod}', None)

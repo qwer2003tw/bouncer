@@ -124,15 +124,18 @@ def test_changeset_uses_template_url():
 def test_approval_request_stores_notification_snapshot():
     """s44-008: send_approval_request should store notification text snapshot in DDB"""
     # Verify code change: notifications.py calls _store_notification_snapshot
-    notifications_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'src', 'notifications.py')
-    with open(notifications_path, 'r') as f:
-        content = f.read()
-        # Verify _store_notification_snapshot function exists
-        assert 'def _store_notification_snapshot(request_id: str, text: str, message_id: int)' in content
+    core_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'src', 'notifications_core.py')
+    exec_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'src', 'notifications_execute.py')
+    with open(core_path, 'r') as f:
+        core_content = f.read()
+        # Verify _store_notification_snapshot function exists in core module
+        assert 'def _store_notification_snapshot(request_id: str, text: str, message_id: int)' in core_content
+    with open(exec_path, 'r') as f:
+        exec_content = f.read()
         # Verify it's called in send_approval_request
-        assert '_store_notification_snapshot(request_id, text, message_id)' in content
+        assert '_store_notification_snapshot(request_id, text, message_id)' in exec_content
         # Verify DDB update with notification fields
-        assert 'notification_text = :t, notification_length = :l, notification_message_id = :m' in content
+        assert 'notification_text = :t, notification_length = :l, notification_message_id = :m' in core_content
 
 
 # Test 7: NotifySuccess works when build_id is missing (s44-002)

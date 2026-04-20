@@ -63,7 +63,9 @@ def _mock_entities_send():
 
     # Reload notifications so it picks up the mocks
     if 'notifications' in sys.modules:
-        importlib.reload(sys.modules['notifications'])
+        for _nm in ['notifications_core', 'notifications_execute', 'notifications_grant', 'notifications']:
+            if _nm in sys.modules:
+                importlib.reload(sys.modules[_nm])
 
     yield mock_entities
 
