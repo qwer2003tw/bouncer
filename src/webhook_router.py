@@ -12,6 +12,8 @@ from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
 from aws_clients import get_client
 
+import deployer
+import grant
 from telegram import answer_callback, update_message, escape_markdown
 from utils import response
 from metrics import emit_metric
@@ -93,12 +95,11 @@ def handle_show_page(request_id: str, callback: dict) -> dict:
 
 def handle_infra_approval(action: str, request_id: str, callback: dict, user_id: str) -> dict:
     """Handle infra_approve/infra_deny callbacks for WaitForInfraApproval SFN state."""
-    from deployer import get_deploy_record, update_deploy_record
     import json as _json
     import time as _time
 
     deploy_id = request_id
-    deploy_record = get_deploy_record(deploy_id)
+    deploy_record = deployer.get_deploy_record(deploy_id)
     task_token = deploy_record.get('infra_approval_token', '') if deploy_record else ''
     msg_id = callback.get('message', {}).get('message_id')
 
@@ -120,7 +121,7 @@ def handle_infra_approval(action: str, request_id: str, callback: dict, user_id:
             taskToken=task_token,
             output=_json.dumps({'approved': True, 'deploy_id': deploy_id}),
         )
-        update_deploy_record(deploy_id, {'infra_approval_status': 'APPROVED'})
+        deployer.update_deploy_record(deploy_id, {'infra_approval_status': 'APPROVED'})
         # Audit log: infra approval action
         logger.info("Approval action", extra={
             "src_module": "callbacks", "operation": "approval_action",
@@ -137,7 +138,7 @@ def handle_infra_approval(action: str, request_id: str, callback: dict, user_id:
             error='InfraDenied',
             cause=f'Denied by {user_id}',
         )
-        update_deploy_record(deploy_id, {'infra_approval_status': 'DENIED'})
+        deployer.update_deploy_record(deploy_id, {'infra_approval_status': 'DENIED'})
         # Audit log: infra denial action
         logger.info("Approval action", extra={
             "src_module": "callbacks", "operation": "approval_action",
@@ -199,8 +200,7 @@ def handle_grant_callbacks(action: str, request_id: str, callback: dict) -> dict
             return response(200, {'ok': True})
         return handle_grant_deny(callback, request_id)
     elif action == 'grant_revoke':
-        from grant import revoke_grant
-        success = revoke_grant(request_id)
+        success = grant.revoke_grant(request_id)
         message_id = callback.get('message', {}).get('message_id')
         if success:
             update_message(message_id, f"🛑 *Grant 已撤銷*\n\n`{request_id}`", remove_buttons=True)

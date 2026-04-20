@@ -11,6 +11,9 @@ from botocore.exceptions import ClientError
 
 from aws_lambda_powertools import Logger
 
+import commands as commands_module
+import compliance_checker
+import utils as utils_module
 # 從其他模組導入
 from utils import response, build_info_lines, generate_request_id, log_decision
 from commands import execute_command, is_dangerous
@@ -42,8 +45,7 @@ def _is_execute_failed(output: str) -> bool:
     """判斷 execute_command 輸出是否代表失敗。
     支援：❌ prefix（Bouncer 格式）和 (exit code: N) 格式（AWS CLI 直接輸出）。
     """
-    from utils import extract_exit_code
-    code = extract_exit_code(output)
+    code = utils_module.extract_exit_code(output)
     return code is not None and code != 0
 
 
@@ -169,7 +171,6 @@ def _execute_and_store_result(
     # 執行命令（native boto3 or awscli based on stored action_type）
     if item.get('action_type') == 'native':
         import json as _json
-        from commands import execute_boto3_native
         native_service = item.get('native_service', '')
         native_operation = item.get('native_operation', '')
         native_params_str = item.get('native_params', '{}')
@@ -178,7 +179,7 @@ def _execute_and_store_result(
             native_params = _json.loads(native_params_str) if isinstance(native_params_str, str) else native_params_str
         except Exception:
             native_params = {}
-        result = execute_boto3_native(
+        result = commands_module.execute_boto3_native(
             service=native_service,
             operation=native_operation,
             params=native_params,
@@ -314,8 +315,7 @@ def _auto_execute_pending_requests(trust_scope: str, account_id: str, assume_rol
 
         # SEC-013: 重跑 compliance check，不合規的 pending 命令拒絕執行
         try:
-            from compliance_checker import check_compliance
-            is_compliant, violation = check_compliance(cmd)
+            is_compliant, violation = compliance_checker.check_compliance(cmd)
             if not is_compliant:
                 logger.warning("Pending request failed compliance", extra={"src_module": "trust", "sec_rule": "SEC-013", "request_id": req_id, "violation_rule": violation.rule_id if violation else "unknown"})
                 # 更新狀態為 compliance_rejected

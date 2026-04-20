@@ -37,6 +37,7 @@ from typing import Any, Optional
 from aws_lambda_powertools import Logger
 from botocore.exceptions import ClientError
 
+import boto3
 from db import table
 
 from constants import (
@@ -277,8 +278,7 @@ def create_grant_request(
         assume_role_arn = None
         if project:
             try:
-                import boto3 as _boto3_ddb
-                ddb = _boto3_ddb.resource('dynamodb', region_name=DEFAULT_REGION)
+                ddb = boto3.resource('dynamodb', region_name=DEFAULT_REGION)
                 projects_table = ddb.Table(PROJECTS_TABLE)
                 resp = projects_table.get_item(Key={'project_id': project})
                 item = resp.get('Item', {})
