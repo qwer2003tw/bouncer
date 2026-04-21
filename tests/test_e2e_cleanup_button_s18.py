@@ -186,7 +186,7 @@ class TestE2ECleanupNormalPath:
                 del sys.modules['app']
                 import app  # Re-import from src/
 
-        with patch('notifications_core.table', mock_table), \
+        with patch('notifications_core.table', mock_table), patch('app.table', mock_table), \
              patch('app.update_message') as mock_update, \
              patch('app.emit_metric'):
             from app import handle_cleanup_expired
@@ -267,7 +267,7 @@ class TestE2ECleanupNormalPath:
                 del sys.modules['app']
                 import app  # Re-import from src/
 
-        with patch('notifications_core.table', mock_table), \
+        with patch('notifications_core.table', mock_table), patch('app.table', mock_table), \
              patch('app.update_message') as mock_update, \
              patch('app.emit_metric'):
             from app import handle_cleanup_expired
@@ -342,7 +342,7 @@ class TestE2ECleanupFallbackPath:
         import sys
         sys.modules.pop('app', None)
 
-        with patch('notifications_core.table', mock_table), \
+        with patch('notifications_core.table', mock_table), patch('app.table', mock_table), \
              patch('app.update_message') as mock_update:
             from app import handle_cleanup_expired
             result = handle_cleanup_expired(
@@ -400,7 +400,7 @@ class TestE2ECleanupFallbackPath:
         import sys
         sys.modules.pop('app', None)
 
-        with patch('notifications_core.table', mock_table), \
+        with patch('notifications_core.table', mock_table), patch('app.table', mock_table), \
              patch('app.update_message') as mock_update:
             from app import handle_cleanup_expired
             result = handle_cleanup_expired(lambda_event)
