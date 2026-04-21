@@ -74,7 +74,7 @@ class TestE2ECleanupNormalPath:
 
         from deployer import send_deploy_approval_request
         import deployer as _deployer_mod
-        with patch('app.send_telegram_message', return_value=mock_tg_response), \
+        with patch('deployer.send_telegram_message', return_value=mock_tg_response), \
              patch.object(_deployer_mod.notifications, 'post_notification_setup', mock_post_setup):
             send_deploy_approval_request(
                 request_id=FAKE_REQUEST_ID,
@@ -224,7 +224,7 @@ class TestE2ECleanupNormalPath:
 
         from deployer import send_deploy_approval_request
         import deployer as _deployer_mod
-        with patch('app.send_telegram_message', return_value=mock_tg_response), \
+        with patch('deployer.send_telegram_message', return_value=mock_tg_response), \
              patch.object(_deployer_mod.notifications, 'post_notification_setup', side_effect=capture_post_setup):
             send_deploy_approval_request(
                 request_id=FAKE_REQUEST_ID,

@@ -1330,15 +1330,15 @@ class TestSchedulerIntegration:
         self.notif = _make_notifications_module()
 
         # Provide a mock db.table for post_notification_setup
-        import db as _db
-        self._original_table = _db.table
+        import notifications_core as _nc
+        self._original_table = _nc.table
         self.mock_table = MagicMock()
-        _db.table = self.mock_table
+        _nc.table = self.mock_table
 
         yield
 
         # Restore original table to avoid state bleed
-        _db.table = self._original_table
+        _nc.table = self._original_table
 
         # Restore original modules to avoid poisoning module-scoped fixtures
         for key, mod in saved_modules.items():

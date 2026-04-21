@@ -1130,7 +1130,7 @@ class TestMCPGrantTools:
     @patch('mcp_grant.send_grant_request_notification')
     def test_request_grant_notification_failure_non_fatal(self, mock_notif, app_module):
         """Notification failure should not prevent grant creation."""
-        mock_notif.side_effect = Exception("Telegram down")
+        mock_notif.side_effect = OSError("Telegram down")
         event = _make_grant_event('bouncer_request_grant', {
             'commands': ['aws ec2 describe-instances'],
             'reason': 'check instances',

@@ -122,10 +122,10 @@ class TestDeployApprovalNoPin:
         import callbacks
         import deployer
 
-        with patch.object(deployer, 'start_deploy') as mock_start_deploy, \
+        with patch.object(callbacks, 'start_deploy') as mock_start_deploy, \
              patch.object(callbacks, 'update_message'), \
              patch.object(callbacks, 'answer_callback'), \
-             patch.object(deployer, 'update_deploy_record') as mock_update_record, \
+             patch.object(callbacks, 'update_deploy_record') as mock_update_record, \
              patch('callbacks.pin_message') as mock_pin:
 
             # Mock successful deploy start
