@@ -1519,7 +1519,7 @@ class TestGetDeployStatusFailedPath:
 
         # send_telegram_message_silent is imported inside send_deploy_failure_notification
         # via 'from telegram import ...', so patch it on the telegram module
-        with patch('telegram.send_telegram_message_silent', fake_send):
+        with patch('deployer.send_telegram_message_silent', fake_send):
             send_deploy_failure_notification('d-001', 'my-proj', error_lines)
 
         assert len(captured_texts) == 1

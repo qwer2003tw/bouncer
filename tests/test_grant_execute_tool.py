@@ -387,7 +387,7 @@ class TestGrantExecuteGrantValidation:
 class TestGrantExecuteCommandValidation:
     """命令驗證測試"""
 
-    @patch('compliance_checker.check_compliance')
+    @patch('mcp_grant.check_compliance')
     def test_compliance_violation(self, mock_compliance, mcp_module):
         """測試違反 compliance 規則"""
         mock_violation = MagicMock()
@@ -407,7 +407,7 @@ class TestGrantExecuteCommandValidation:
         assert content['status'] == 'compliance_violation'
         assert content['rule_id'] == 'TEST-001'
 
-    @patch('compliance_checker.check_compliance')
+    @patch('mcp_grant.check_compliance')
     def test_command_not_in_grant(self, mock_compliance, mcp_module):
         """測試操作不在授權清單中"""
         mock_compliance.return_value = (True, None)
@@ -423,7 +423,7 @@ class TestGrantExecuteCommandValidation:
         content = json.loads(json.loads(result['body'])['result']['content'][0]['text'])
         assert content['status'] == 'command_not_in_grant'
 
-    @patch('compliance_checker.check_compliance')
+    @patch('mcp_grant.check_compliance')
     @patch('mcp_grant.execute_boto3_native')
     @patch('mcp_grant.send_grant_execute_notification')
     def test_command_already_used(self, mock_notify, mock_exec, mock_compliance, mcp_module):
@@ -455,7 +455,7 @@ class TestGrantExecuteCommandValidation:
 class TestGrantExecuteExecution:
     """命令執行測試"""
 
-    @patch('compliance_checker.check_compliance')
+    @patch('mcp_grant.check_compliance')
     @patch('mcp_grant.execute_boto3_native')
     @patch('mcp_grant.send_grant_execute_notification')
     def test_command_execution_with_result(self, mock_notify, mock_exec, mock_compliance, mcp_module):
@@ -475,7 +475,7 @@ class TestGrantExecuteExecution:
         assert content['status'] == 'grant_executed'
         assert 'i-123456789' in content['result']
 
-    @patch('compliance_checker.check_compliance')
+    @patch('mcp_grant.check_compliance')
     @patch('mcp_grant.execute_boto3_native')
     @patch('mcp_grant.send_grant_execute_notification')
     def test_notification_failure_does_not_affect_success(self, mock_notify, mock_exec, mock_compliance, mcp_module):
@@ -496,7 +496,7 @@ class TestGrantExecuteExecution:
         content = json.loads(json.loads(result['body'])['result']['content'][0]['text'])
         assert content['status'] == 'grant_executed'
 
-    @patch('compliance_checker.check_compliance')
+    @patch('mcp_grant.check_compliance')
     @pytest.mark.skip(reason="Sprint 83: MCP no longer uses pagination, page_id removed from response")
     @patch('mcp_grant.execute_boto3_native')
     @patch('mcp_grant.send_grant_execute_notification')
@@ -524,7 +524,7 @@ class TestGrantExecuteExecution:
 class TestGrantExecuteEdgeCases:
     """邊界條件測試"""
 
-    @patch('compliance_checker.check_compliance')
+    @patch('mcp_grant.check_compliance')
     @patch('mcp_grant.execute_boto3_native')
     @patch('mcp_grant.send_grant_execute_notification')
     def test_grant_assume_role_fallback(self, mock_notify, mock_exec, mock_compliance, mcp_module):

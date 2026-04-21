@@ -31,10 +31,10 @@ class TestCallbacksDeployPin:
         import callbacks
         import deployer
 
-        with patch.object(deployer, 'start_deploy') as mock_start, \
+        with patch.object(callbacks, 'start_deploy') as mock_start, \
              patch.object(callbacks, 'update_message'), \
              patch.object(callbacks, 'answer_callback'), \
-             patch.object(deployer, 'update_deploy_record'), \
+             patch.object(callbacks, 'update_deploy_record'), \
              patch('callbacks.pin_message') as mock_pin:
 
             mock_start.return_value = {
@@ -69,10 +69,10 @@ class TestCallbacksDeployPin:
         import callbacks
         import deployer
 
-        with patch.object(deployer, 'start_deploy') as mock_start, \
+        with patch.object(callbacks, 'start_deploy') as mock_start, \
              patch.object(callbacks, 'update_message'), \
              patch.object(callbacks, 'answer_callback'), \
-             patch.object(deployer, 'update_deploy_record') as mock_update_record, \
+             patch.object(callbacks, 'update_deploy_record') as mock_update_record, \
                           patch('callbacks.pin_message') as mock_pin:
 
             mock_start.return_value = {

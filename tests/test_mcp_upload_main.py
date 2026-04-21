@@ -552,9 +552,9 @@ class TestUploadBatchS3Verification:
 
     @mock_aws
     @patch('telegram.send_telegram_message')
-    @patch('trust.get_trust_session')
-    @patch('trust.should_trust_approve_upload')
-    @patch('trust.increment_trust_upload_count')
+    @patch('mcp_upload.get_trust_session')
+    @patch('mcp_upload.should_trust_approve_upload')
+    @patch('mcp_upload.increment_trust_upload_count')
     @patch('mcp_upload.send_trust_upload_notification')
     def test_batch_trust_each_file_verified(
         self, mock_notif, mock_incr, mock_should, mock_session, mock_telegram, app_module
@@ -610,9 +610,9 @@ class TestUploadBatchS3Verification:
 
     @mock_aws
     @patch('telegram.send_telegram_message')
-    @patch('trust.get_trust_session')
-    @patch('trust.should_trust_approve_upload')
-    @patch('trust.increment_trust_upload_count')
+    @patch('mcp_upload.get_trust_session')
+    @patch('mcp_upload.should_trust_approve_upload')
+    @patch('mcp_upload.increment_trust_upload_count')
     @patch('mcp_upload.send_trust_upload_notification')
     def test_batch_trust_verification_failure_non_blocking(
         self, mock_notif, mock_incr, mock_should, mock_session, mock_telegram, app_module
@@ -710,9 +710,9 @@ class TestUploadBatchS3VerificationExtended:
 
     @mock_aws
     @patch('telegram.send_telegram_message')
-    @patch('trust.get_trust_session')
-    @patch('trust.should_trust_approve_upload')
-    @patch('trust.increment_trust_upload_count')
+    @patch('mcp_upload.get_trust_session')
+    @patch('mcp_upload.should_trust_approve_upload')
+    @patch('mcp_upload.increment_trust_upload_count')
     @patch('mcp_upload.send_trust_upload_notification')
     def test_batch_trust_single_file_verified(
         self, mock_notif, mock_incr, mock_should, mock_session, mock_telegram, app_module
@@ -764,9 +764,9 @@ class TestUploadBatchS3VerificationExtended:
 
     @mock_aws
     @patch('telegram.send_telegram_message')
-    @patch('trust.get_trust_session')
-    @patch('trust.should_trust_approve_upload')
-    @patch('trust.increment_trust_upload_count')
+    @patch('mcp_upload.get_trust_session')
+    @patch('mcp_upload.should_trust_approve_upload')
+    @patch('mcp_upload.increment_trust_upload_count')
     @patch('mcp_upload.send_trust_upload_notification')
     def test_batch_trust_size_matches_expected(
         self, mock_notif, mock_incr, mock_should, mock_session, mock_telegram, app_module
@@ -815,9 +815,9 @@ class TestUploadBatchS3VerificationExtended:
 
     @mock_aws
     @patch('telegram.send_telegram_message')
-    @patch('trust.get_trust_session')
-    @patch('trust.should_trust_approve_upload')
-    @patch('trust.increment_trust_upload_count')
+    @patch('mcp_upload.get_trust_session')
+    @patch('mcp_upload.should_trust_approve_upload')
+    @patch('mcp_upload.increment_trust_upload_count')
     @patch('mcp_upload.send_trust_upload_notification')
     def test_batch_trust_partial_failure_list(
         self, mock_notif, mock_incr, mock_should, mock_session, mock_telegram, app_module
@@ -898,9 +898,9 @@ class TestUploadBatchS3VerificationExtended:
 
     @mock_aws
     @patch('telegram.send_telegram_message')
-    @patch('trust.get_trust_session')
-    @patch('trust.should_trust_approve_upload')
-    @patch('trust.increment_trust_upload_count')
+    @patch('mcp_upload.get_trust_session')
+    @patch('mcp_upload.should_trust_approve_upload')
+    @patch('mcp_upload.increment_trust_upload_count')
     @patch('mcp_upload.send_trust_upload_notification')
     def test_batch_trust_all_fail_non_blocking(
         self, mock_notif, mock_incr, mock_should, mock_session, mock_telegram, app_module

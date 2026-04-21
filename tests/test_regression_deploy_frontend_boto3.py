@@ -201,7 +201,7 @@ def _make_s3_factory(mocks, has_deploy_role=True, assume_role_fail=False):
 def _run(item, mocks, dispatcher, has_deploy_role=True, assume_role_fail=False):
     s3_factory = _make_s3_factory(mocks, has_deploy_role=has_deploy_role, assume_role_fail=assume_role_fail)
     with patch('callbacks.get_s3_client', side_effect=s3_factory), \
-         patch('aws_clients.get_cloudfront_client', return_value=mocks['cf']), \
+         patch('callbacks.get_cloudfront_client', return_value=mocks['cf']), \
          patch('callbacks._get_table', return_value=MagicMock()), \
          patch('callbacks.answer_callback'), \
          patch('callbacks.update_message') as mock_update, \
@@ -384,7 +384,7 @@ class TestR5NoExecuteCommand:
         mocks, dispatcher = _build_mocks(has_deploy_role=True)
         s3_factory = _make_s3_factory(mocks, has_deploy_role=True)
         with patch('callbacks.get_s3_client', side_effect=s3_factory), \
-             patch('aws_clients.get_cloudfront_client', return_value=mocks['cf']), \
+             patch('callbacks.get_cloudfront_client', return_value=mocks['cf']), \
              patch('callbacks._get_table', return_value=MagicMock()), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -400,7 +400,7 @@ class TestR5NoExecuteCommand:
         mocks, dispatcher = _build_mocks(assume_role_fail=True, has_deploy_role=True)
         s3_factory = _make_s3_factory(mocks, has_deploy_role=True)
         with patch('callbacks.get_s3_client', side_effect=s3_factory), \
-             patch('aws_clients.get_cloudfront_client', return_value=mocks['cf']), \
+             patch('callbacks.get_cloudfront_client', return_value=mocks['cf']), \
              patch('callbacks._get_table', return_value=MagicMock()), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -451,7 +451,7 @@ class TestR7CFWithAssumedRole:
         mock_s3.get_object.return_value = {'Body': MagicMock(read=lambda: b'x')}
         mock_s3.put_object.return_value = {}
         with patch('callbacks.get_s3_client', return_value=mock_s3), \
-             patch('aws_clients.get_cloudfront_client') as mock_cf_factory, \
+             patch('callbacks.get_cloudfront_client') as mock_cf_factory, \
              patch('callbacks._get_table', return_value=MagicMock()), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -502,7 +502,7 @@ class TestR8CFWithLambdaRole:
         mock_s3.get_object.return_value = {'Body': MagicMock(read=lambda: b'x')}
         mock_s3.put_object.return_value = {}
         with patch('callbacks.get_s3_client', return_value=mock_s3), \
-             patch('aws_clients.get_cloudfront_client') as mock_cf_factory, \
+             patch('callbacks.get_cloudfront_client') as mock_cf_factory, \
              patch('callbacks._get_table', return_value=MagicMock()), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \

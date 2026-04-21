@@ -74,7 +74,7 @@ class TestE2ECleanupNormalPath:
 
         from deployer import send_deploy_approval_request
         import deployer as _deployer_mod
-        with patch('telegram.send_telegram_message', return_value=mock_tg_response), \
+        with patch('app.send_telegram_message', return_value=mock_tg_response), \
              patch.object(_deployer_mod.notifications, 'post_notification_setup', mock_post_setup):
             send_deploy_approval_request(
                 request_id=FAKE_REQUEST_ID,
@@ -110,7 +110,7 @@ class TestE2ECleanupNormalPath:
         import notifications as notif_mod
         import scheduler_service as sched_mod
 
-        with patch('db.table', mock_table), \
+        with patch('app.table', mock_table), \
              patch.object(sched_mod, 'get_scheduler_service', return_value=mock_svc):
             notif_mod.post_notification_setup(
                 request_id=FAKE_REQUEST_ID,
@@ -138,7 +138,7 @@ class TestE2ECleanupNormalPath:
         import notifications as notif_mod
         import scheduler_service as sched_mod
 
-        with patch('db.table', mock_table), \
+        with patch('app.table', mock_table), \
              patch.object(sched_mod, 'get_scheduler_service', return_value=mock_svc):
             notif_mod.post_notification_setup(
                 request_id=FAKE_REQUEST_ID,
@@ -224,7 +224,7 @@ class TestE2ECleanupNormalPath:
 
         from deployer import send_deploy_approval_request
         import deployer as _deployer_mod
-        with patch('telegram.send_telegram_message', return_value=mock_tg_response), \
+        with patch('app.send_telegram_message', return_value=mock_tg_response), \
              patch.object(_deployer_mod.notifications, 'post_notification_setup', side_effect=capture_post_setup):
             send_deploy_approval_request(
                 request_id=FAKE_REQUEST_ID,
@@ -460,7 +460,7 @@ class TestE2ECleanupDeployFrontendPath:
              patch('mcp_deploy_frontend.get_s3_client', return_value=mock_s3), \
              patch('mcp_deploy_frontend.table', mock_dbtable), \
              patch('mcp_deploy_frontend.send_deploy_frontend_notification', return_value=mock_notif), \
-             patch('notifications.post_notification_setup', mock_post_setup):
+             patch('execute_pipeline.post_notification_setup', mock_post_setup):
             from mcp_deploy_frontend import mcp_tool_deploy_frontend
             mcp_tool_deploy_frontend('req-e2e-df-001', {
                 'project': 'test-project',

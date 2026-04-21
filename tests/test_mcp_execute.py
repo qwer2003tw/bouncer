@@ -1097,7 +1097,7 @@ class TestMCPGrantTools:
     # bouncer_request_grant — happy path                                  #
     # ------------------------------------------------------------------ #
 
-    @patch('notifications.send_grant_request_notification')
+    @patch('mcp_grant.send_grant_request_notification')
     def test_request_grant_happy_path(self, mock_notif, app_module):
         """request_grant returns pending_approval on valid input."""
         event = _make_grant_event('bouncer_request_grant', {
@@ -1112,7 +1112,7 @@ class TestMCPGrantTools:
         assert content['status'] == 'pending_approval'
         assert 'grant_request_id' in content
 
-    @patch('notifications.send_grant_request_notification')
+    @patch('mcp_grant.send_grant_request_notification')
     def test_request_grant_with_account(self, mock_notif, app_module):
         """request_grant with explicit account_id uses that account."""
         event = _make_grant_event('bouncer_request_grant', {
@@ -1127,7 +1127,7 @@ class TestMCPGrantTools:
         content = json.loads(body['result']['content'][0]['text'])
         assert content['status'] == 'pending_approval'
 
-    @patch('notifications.send_grant_request_notification')
+    @patch('mcp_grant.send_grant_request_notification')
     def test_request_grant_notification_failure_non_fatal(self, mock_notif, app_module):
         """Notification failure should not prevent grant creation."""
         mock_notif.side_effect = Exception("Telegram down")
@@ -1256,7 +1256,7 @@ class TestMCPGrantTools:
         assert 'result' in body
         assert body['result'].get('isError') is True
 
-    @patch('notifications.send_grant_request_notification')
+    @patch('mcp_grant.send_grant_request_notification')
     def test_grant_status_found_pending(self, mock_notif, app_module):
         """grant_status returns status for existing pending grant."""
         # First create a grant
@@ -1281,7 +1281,7 @@ class TestMCPGrantTools:
         assert content['grant_id'] == grant_id
         assert content['status'] in ('pending_approval', 'active', 'expired', 'revoked')
 
-    @patch('notifications.send_grant_request_notification')
+    @patch('mcp_grant.send_grant_request_notification')
     def test_grant_status_source_consistent(self, mock_notif, app_module):
         """grant_status with same caller can query own grants (source auto-filled)."""
         # Create grant — source auto-filled by identify_caller
@@ -1317,7 +1317,7 @@ class TestMCPGrantTools:
         body = json.loads(result['body'])
         assert 'error' in body
 
-    @patch('notifications.send_grant_request_notification')
+    @patch('mcp_grant.send_grant_request_notification')
     def test_revoke_grant_success(self, mock_notif, app_module):
         """revoke_grant on existing grant returns success=True."""
         # Create a grant first
@@ -1814,7 +1814,7 @@ class TestMCPDisabledAccount:
 class TestMCPRequestGrantOptions:
     """Test request_grant with optional ttl_minutes and allow_repeat."""
 
-    @patch('notifications.send_grant_request_notification')
+    @patch('mcp_grant.send_grant_request_notification')
     def test_request_grant_with_ttl_and_repeat(self, mock_notif, app_module):
         """request_grant with ttl_minutes and allow_repeat=True creates grant."""
         event = _make_grant_event('bouncer_request_grant', {
@@ -1831,7 +1831,7 @@ class TestMCPRequestGrantOptions:
         assert content['status'] == 'pending_approval'
         assert 'expires_in' in content
 
-    @patch('notifications.send_grant_request_notification')
+    @patch('mcp_grant.send_grant_request_notification')
     def test_request_grant_ValueError_propagated(self, mock_notif, app_module):
         """request_grant with empty commands list hits ValueError path."""
         event = _make_grant_event('bouncer_request_grant', {
@@ -1853,7 +1853,7 @@ class TestMCPRequestGrantOptions:
 class TestMCPGrantStatusException:
     """Test exception paths in grant_status and revoke_grant."""
 
-    @patch('grant.get_grant_status')
+    @patch('mcp_grant.get_grant_status')
     def test_grant_status_internal_exception(self, mock_status, app_module):
         """grant_status exception returns mcp_error -32603."""
         mock_status.side_effect = Exception("DDB timeout")
@@ -1867,7 +1867,7 @@ class TestMCPGrantStatusException:
         assert 'error' in body
         assert body['error']['code'] == -32603
 
-    @patch('grant.revoke_grant')
+    @patch('mcp_grant.revoke_grant')
     def test_revoke_grant_internal_exception(self, mock_revoke, app_module):
         """revoke_grant exception returns mcp_error -32603."""
         mock_revoke.side_effect = Exception("DDB timeout")

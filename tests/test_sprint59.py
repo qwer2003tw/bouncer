@@ -141,7 +141,7 @@ class TestS59_001_PendingReminder:
                 'source_field': 'test-source',
             }
 
-            with patch('telegram.send_telegram_message_silent') as mock_send:
+            with patch('app.send_telegram_message_silent') as mock_send:
                 # Ensure src/app.py is imported (xdist isolation fix)
                 import sys
                 import os
@@ -190,7 +190,7 @@ class TestS59_001_PendingReminder:
                 'source_field': 'test-source',
             }
 
-            with patch('telegram.send_telegram_message_silent') as mock_send:
+            with patch('app.send_telegram_message_silent') as mock_send:
                 # Ensure src/app.py is imported (xdist isolation fix)
                 import sys
                 import os

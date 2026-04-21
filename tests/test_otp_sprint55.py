@@ -152,11 +152,11 @@ class TestOTPCommandCallback:
             'risk_score': 80,  # High risk
         })
 
-        with patch('otp.generate_otp', return_value='123456'), \
-             patch('otp.create_otp_record'), \
+        with patch('callbacks_command.generate_otp', return_value='123456'), \
+             patch('callbacks_command.create_otp_record'), \
              patch('callbacks_command.send_telegram_message_to') as mock_dm, \
-             patch('telegram.answer_callback') as mock_answer, \
-             patch('telegram.update_message') as mock_update:
+             patch('callbacks_command.answer_callback') as mock_answer, \
+             patch('callbacks_command.update_message') as mock_update:
 
             from callbacks_command import handle_command_callback
             result = handle_command_callback(

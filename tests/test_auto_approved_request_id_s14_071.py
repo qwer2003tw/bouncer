@@ -132,10 +132,10 @@ class TestAutoApprovedRequestId:
         }
 
         with patch('execute_pipeline.GRANT_SESSION_ENABLED', True), \
-             patch('grant.get_grant_session', return_value=grant_session), \
-             patch('grant.normalize_command', side_effect=lambda cmd: cmd.strip()), \
-             patch('grant.is_command_in_grant', return_value=True), \
-             patch('grant.try_use_grant_command', return_value=True), \
+             patch('execute_pipeline.get_grant_session', return_value=grant_session), \
+             patch('execute_pipeline.normalize_command', side_effect=lambda cmd: cmd.strip()), \
+             patch('execute_pipeline.is_command_in_grant', return_value=True), \
+             patch('execute_pipeline.try_use_grant_command', return_value=True), \
              patch('execute_pipeline.execute_command', return_value='bucket-contents'), \
              patch('execute_pipeline.emit_metric'), \
              patch('execute_pipeline.store_paged_output',

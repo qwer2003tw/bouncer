@@ -51,7 +51,7 @@ class TestHandleDeployCallbackImmediateFeedback:
              patch('callbacks._update_request_status'), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message', side_effect=mock_update_message), \
-             patch('deployer.start_deploy', side_effect=mock_start_deploy):
+             patch('callbacks.start_deploy', side_effect=mock_start_deploy):
             from callbacks import handle_deploy_callback
             handle_deploy_callback(
                 action='approve',
@@ -95,7 +95,7 @@ class TestHandleDeployCallbackImmediateFeedback:
              patch('callbacks._update_request_status'), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message', side_effect=mock_update_message), \
-             patch('deployer.start_deploy', side_effect=mock_start_deploy):
+             patch('callbacks.start_deploy', side_effect=mock_start_deploy):
             from callbacks import handle_deploy_callback
             handle_deploy_callback(
                 action='approve',
@@ -128,7 +128,7 @@ class TestHandleDeployCallbackImmediateFeedback:
              patch('callbacks._update_request_status'), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message', side_effect=mock_update_message_fail), \
-             patch('deployer.start_deploy', side_effect=mock_start_deploy):
+             patch('callbacks.start_deploy', side_effect=mock_start_deploy):
             from callbacks import handle_deploy_callback
             # Should not raise even though update_message fails
             try:
@@ -159,7 +159,7 @@ class TestHandleDeployCallbackImmediateFeedback:
              patch('callbacks._update_request_status'), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
-             patch('deployer.start_deploy', side_effect=mock_start_deploy):
+             patch('callbacks.start_deploy', side_effect=mock_start_deploy):
             from callbacks import handle_deploy_callback
             handle_deploy_callback(
                 action='deny',

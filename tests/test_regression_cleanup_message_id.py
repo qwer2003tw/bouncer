@@ -269,7 +269,7 @@ class TestPostNotificationSetupScheduler:
         # so we need to patch the scheduler_service module directly.
         import scheduler_service as sched_mod
         with patch.object(sched_mod, 'get_scheduler_service', return_value=mock_svc), \
-             patch('db.table', mock_dbtable):
+             patch('notifications_core.table', mock_dbtable):
             notif_mod.post_notification_setup(
                 request_id='req-test',
                 telegram_message_id=42000,
@@ -292,7 +292,7 @@ class TestPostNotificationSetupScheduler:
         import scheduler_service as sched_mod
 
         with patch.object(sched_mod, 'get_scheduler_service', return_value=mock_svc), \
-             patch('db.table', mock_dbtable):
+             patch('notifications_core.table', mock_dbtable):
             notif_mod.post_notification_setup(
                 request_id='req-test2',
                 telegram_message_id=0,
