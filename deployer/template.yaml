@@ -704,6 +704,53 @@ Resources:
                   - secretsmanager:DescribeSecret
                 Resource:
                   - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bouncer/*"
+              # CloudFront (distribution management)
+              - Sid: CloudFront
+                Effect: Allow
+                Action:
+                  - cloudfront:CreateDistribution
+                  - cloudfront:UpdateDistribution
+                  - cloudfront:GetDistribution
+                  - cloudfront:DeleteDistribution
+                  - cloudfront:TagResource
+                  - cloudfront:UntagResource
+                  - cloudfront:CreateInvalidation
+                Resource: "*"
+              # CodeDeploy (SAM canary/linear deployment)
+              - Sid: CodeDeploy
+                Effect: Allow
+                Action:
+                  - codedeploy:CreateApplication
+                  - codedeploy:DeleteApplication
+                  - codedeploy:CreateDeploymentGroup
+                  - codedeploy:DeleteDeploymentGroup
+                  - codedeploy:UpdateDeploymentGroup
+                  - codedeploy:GetDeployment
+                  - codedeploy:GetDeploymentGroup
+                  - codedeploy:RegisterApplicationRevision
+                  - codedeploy:CreateDeployment
+                  - codedeploy:GetApplication
+                  - codedeploy:GetApplicationRevision
+                  - codedeploy:StopDeployment
+                Resource: "*"
+              # CodeBuild (deployer build project management)
+              - Sid: CodeBuild
+                Effect: Allow
+                Action:
+                  - codebuild:CreateProject
+                  - codebuild:DeleteProject
+                  - codebuild:UpdateProject
+                  - codebuild:BatchGetProjects
+                Resource:
+                  - !Sub "arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/sam-deployer*"
+              # ACM (certificate management for API Gateway custom domain)
+              - Sid: ACM
+                Effect: Allow
+                Action:
+                  - acm:DescribeCertificate
+                  - acm:ListCertificates
+                  - acm:ListTagsForCertificate
+                Resource: "*"
       Tags:
         - Key: ManagedBy
           Value: bouncer-deployer
