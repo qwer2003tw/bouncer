@@ -580,11 +580,7 @@ Resources:
                 - logs:StartQuery
                 - logs:GetQueryResults
                 - logs:StopQuery
-              Resource:
-                - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
-                - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
-                - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/eks/*"
-                - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:API-Gateway-Execution-Logs*"
+              Resource: "*"  # Application-layer allowlist controls access; IAM stays broad to not silently break allowlist additions
 
   # ============================================================
   # API Gateway
