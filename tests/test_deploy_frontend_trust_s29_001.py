@@ -107,13 +107,13 @@ class TestTrustSessionApproval:
         with patch("mcp_deploy_frontend.get_s3_client", return_value=mock_s3), \
              patch("mcp_deploy_frontend.table", mock_table), \
              patch("mcp_deploy_frontend._get_frontend_config", return_value=_ZTP_FRONTEND_CONFIG), \
-             patch("trust.should_trust_approve", return_value=(True, trust_session, "trust approved")), \
+             patch("mcp_deploy_frontend.should_trust_approve", return_value=(True, trust_session, "trust approved")), \
              patch("mcp_deploy_frontend.deployer_projects_table", mock_projects_table), \
              patch("mcp_deploy_frontend.deployer_history_table", mock_history), \
-             patch("aws_clients.get_cloudfront_client", return_value=mock_cf), \
-             patch("trust.increment_trust_command_count", return_value=5), \
-             patch("notifications.send_trust_auto_approve_notification"), \
-             patch("utils.log_decision"), \
+             patch("mcp_deploy_frontend.get_cloudfront_client", return_value=mock_cf), \
+             patch("mcp_deploy_frontend.increment_trust_command_count", return_value=5), \
+             patch("mcp_deploy_frontend.send_trust_auto_approve_notification"), \
+             patch("mcp_deploy_frontend.log_decision"), \
              patch("mcp_deploy_frontend.DEFAULT_ACCOUNT_ID", "190825685292"):
             result = _call({
                 "project": "ztp-files",
@@ -167,9 +167,9 @@ class TestTrustSessionApproval:
         with patch("mcp_deploy_frontend.get_s3_client", return_value=mock_s3), \
              patch("mcp_deploy_frontend.table", mock_table), \
              patch("mcp_deploy_frontend._get_frontend_config", return_value=_ZTP_FRONTEND_CONFIG), \
-             patch("trust.should_trust_approve", return_value=(False, None, "trust scope not found")), \
+             patch("mcp_deploy_frontend.should_trust_approve", return_value=(False, None, "trust scope not found")), \
              patch("mcp_deploy_frontend.send_deploy_frontend_notification", return_value=mock_notif), \
-             patch("notifications.post_notification_setup"):
+             patch("mcp_deploy_frontend.post_notification_setup"):
             result = _call({
                 "project": "ztp-files",
                 "files": files,
@@ -213,10 +213,10 @@ class TestTrustSessionApproval:
         with patch("mcp_deploy_frontend.get_s3_client", return_value=mock_s3), \
              patch("mcp_deploy_frontend.table", mock_table), \
              patch("mcp_deploy_frontend._get_frontend_config", return_value=_ZTP_FRONTEND_CONFIG), \
-             patch("trust.should_trust_approve", return_value=(True, trust_session, "trust approved")), \
+             patch("mcp_deploy_frontend.should_trust_approve", return_value=(True, trust_session, "trust approved")), \
              patch("mcp_deploy_frontend.deployer_projects_table", mock_projects_table), \
              patch("mcp_deploy_frontend.send_deploy_frontend_notification", return_value=mock_notif), \
-             patch("notifications.post_notification_setup"):
+             patch("mcp_deploy_frontend.post_notification_setup"):
             result = _call({
                 "project": "ztp-files",
                 "files": files,
@@ -253,13 +253,13 @@ class TestTrustSessionApproval:
         with patch("mcp_deploy_frontend.get_s3_client", return_value=mock_s3), \
              patch("mcp_deploy_frontend.table", mock_table), \
              patch("mcp_deploy_frontend._get_frontend_config", return_value=_ZTP_FRONTEND_CONFIG), \
-             patch("trust.should_trust_approve", return_value=(True, trust_session, "trust approved")), \
+             patch("mcp_deploy_frontend.should_trust_approve", return_value=(True, trust_session, "trust approved")), \
              patch("mcp_deploy_frontend.deployer_projects_table", mock_projects_table), \
              patch("mcp_deploy_frontend.deployer_history_table", mock_history), \
-             patch("aws_clients.get_cloudfront_client", return_value=mock_cf), \
-             patch("trust.increment_trust_command_count", return_value=1), \
-             patch("notifications.send_trust_auto_approve_notification"), \
-             patch("utils.log_decision"):
+             patch("mcp_deploy_frontend.get_cloudfront_client", return_value=mock_cf), \
+             patch("mcp_deploy_frontend.increment_trust_command_count", return_value=1), \
+             patch("mcp_deploy_frontend.send_trust_auto_approve_notification"), \
+             patch("mcp_deploy_frontend.log_decision"):
             result = _call({
                 "project": "ztp-files",
                 "files": files,
@@ -300,7 +300,7 @@ class TestTrustSessionApproval:
 
         with patch("mcp_deploy_frontend.get_s3_client", return_value=mock_s3), \
              patch("mcp_deploy_frontend._get_frontend_config", return_value=_ZTP_FRONTEND_CONFIG), \
-             patch("trust.should_trust_approve", return_value=(True, trust_session, "trust approved")), \
+             patch("mcp_deploy_frontend.should_trust_approve", return_value=(True, trust_session, "trust approved")), \
              patch("mcp_deploy_frontend.deployer_projects_table", mock_projects_table):
             result = _call({
                 "project": "ztp-files",
@@ -346,13 +346,13 @@ class TestTrustSessionApproval:
         with patch("mcp_deploy_frontend.get_s3_client", return_value=mock_s3), \
              patch("mcp_deploy_frontend.table", mock_table), \
              patch("mcp_deploy_frontend._get_frontend_config", return_value=_ZTP_FRONTEND_CONFIG), \
-             patch("trust.should_trust_approve", return_value=(True, trust_session, "trust approved")), \
+             patch("mcp_deploy_frontend.should_trust_approve", return_value=(True, trust_session, "trust approved")), \
              patch("mcp_deploy_frontend.deployer_projects_table", mock_projects_table), \
              patch("mcp_deploy_frontend.deployer_history_table", mock_history), \
-             patch("aws_clients.get_cloudfront_client", return_value=mock_cf), \
-             patch("trust.increment_trust_command_count", return_value=2), \
-             patch("notifications.send_trust_auto_approve_notification"), \
-             patch("utils.log_decision"):
+             patch("mcp_deploy_frontend.get_cloudfront_client", return_value=mock_cf), \
+             patch("mcp_deploy_frontend.increment_trust_command_count", return_value=2), \
+             patch("mcp_deploy_frontend.send_trust_auto_approve_notification"), \
+             patch("mcp_deploy_frontend.log_decision"):
             result = _call({
                 "project": "ztp-files",
                 "files": files,
@@ -399,13 +399,13 @@ class TestTrustSessionAuditLogging:
         with patch("mcp_deploy_frontend.get_s3_client", return_value=mock_s3), \
              patch("mcp_deploy_frontend.table", mock_table), \
              patch("mcp_deploy_frontend._get_frontend_config", return_value=_ZTP_FRONTEND_CONFIG), \
-             patch("trust.should_trust_approve", return_value=(True, trust_session, "trust approved")), \
+             patch("mcp_deploy_frontend.should_trust_approve", return_value=(True, trust_session, "trust approved")), \
              patch("mcp_deploy_frontend.deployer_projects_table", mock_projects_table), \
              patch("mcp_deploy_frontend.deployer_history_table", mock_history), \
-             patch("aws_clients.get_cloudfront_client", return_value=mock_cf), \
-             patch("trust.increment_trust_command_count", return_value=1), \
-             patch("notifications.send_trust_auto_approve_notification"), \
-             patch("utils.log_decision", mock_log_decision):
+             patch("mcp_deploy_frontend.get_cloudfront_client", return_value=mock_cf), \
+             patch("mcp_deploy_frontend.increment_trust_command_count", return_value=1), \
+             patch("mcp_deploy_frontend.send_trust_auto_approve_notification"), \
+             patch("mcp_deploy_frontend.log_decision", mock_log_decision):
             _call({
                 "project": "ztp-files",
                 "files": files,
