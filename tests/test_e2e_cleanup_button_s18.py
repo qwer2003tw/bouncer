@@ -74,7 +74,7 @@ class TestE2ECleanupNormalPath:
 
         from deployer import send_deploy_approval_request
         import deployer as _deployer_mod
-        with patch('telegram.send_telegram_message', return_value=mock_tg_response), \
+        with patch('deployer.send_telegram_message', return_value=mock_tg_response), \
              patch.object(_deployer_mod.notifications, 'post_notification_setup', mock_post_setup):
             send_deploy_approval_request(
                 request_id=FAKE_REQUEST_ID,
@@ -108,10 +108,10 @@ class TestE2ECleanupNormalPath:
         mock_svc = MagicMock()
 
         import notifications as notif_mod
-        import scheduler_service as sched_mod
+        import notifications_core as nc_mod
 
-        with patch('db.table', mock_table), \
-             patch.object(sched_mod, 'get_scheduler_service', return_value=mock_svc):
+        with patch('notifications_core.table', mock_table), \
+             patch.object(nc_mod, 'get_scheduler_service', return_value=mock_svc):
             notif_mod.post_notification_setup(
                 request_id=FAKE_REQUEST_ID,
                 telegram_message_id=FAKE_MESSAGE_ID,
@@ -136,10 +136,10 @@ class TestE2ECleanupNormalPath:
         mock_svc = MagicMock()
 
         import notifications as notif_mod
-        import scheduler_service as sched_mod
+        import notifications_core as nc_mod
 
-        with patch('db.table', mock_table), \
-             patch.object(sched_mod, 'get_scheduler_service', return_value=mock_svc):
+        with patch('notifications_core.table', mock_table), \
+             patch.object(nc_mod, 'get_scheduler_service', return_value=mock_svc):
             notif_mod.post_notification_setup(
                 request_id=FAKE_REQUEST_ID,
                 telegram_message_id=FAKE_MESSAGE_ID,
@@ -186,7 +186,7 @@ class TestE2ECleanupNormalPath:
                 del sys.modules['app']
                 import app  # Re-import from src/
 
-        with patch('app.table', mock_table), \
+        with patch('notifications_core.table', mock_table), patch('app.table', mock_table), \
              patch('app.update_message') as mock_update, \
              patch('app.emit_metric'):
             from app import handle_cleanup_expired
@@ -224,7 +224,7 @@ class TestE2ECleanupNormalPath:
 
         from deployer import send_deploy_approval_request
         import deployer as _deployer_mod
-        with patch('telegram.send_telegram_message', return_value=mock_tg_response), \
+        with patch('deployer.send_telegram_message', return_value=mock_tg_response), \
              patch.object(_deployer_mod.notifications, 'post_notification_setup', side_effect=capture_post_setup):
             send_deploy_approval_request(
                 request_id=FAKE_REQUEST_ID,
@@ -267,7 +267,7 @@ class TestE2ECleanupNormalPath:
                 del sys.modules['app']
                 import app  # Re-import from src/
 
-        with patch('app.table', mock_table), \
+        with patch('notifications_core.table', mock_table), patch('app.table', mock_table), \
              patch('app.update_message') as mock_update, \
              patch('app.emit_metric'):
             from app import handle_cleanup_expired
@@ -342,7 +342,7 @@ class TestE2ECleanupFallbackPath:
         import sys
         sys.modules.pop('app', None)
 
-        with patch('app.table', mock_table), \
+        with patch('notifications_core.table', mock_table), patch('app.table', mock_table), \
              patch('app.update_message') as mock_update:
             from app import handle_cleanup_expired
             result = handle_cleanup_expired(
@@ -400,7 +400,7 @@ class TestE2ECleanupFallbackPath:
         import sys
         sys.modules.pop('app', None)
 
-        with patch('app.table', mock_table), \
+        with patch('notifications_core.table', mock_table), patch('app.table', mock_table), \
              patch('app.update_message') as mock_update:
             from app import handle_cleanup_expired
             result = handle_cleanup_expired(lambda_event)
@@ -460,7 +460,7 @@ class TestE2ECleanupDeployFrontendPath:
              patch('mcp_deploy_frontend.get_s3_client', return_value=mock_s3), \
              patch('mcp_deploy_frontend.table', mock_dbtable), \
              patch('mcp_deploy_frontend.send_deploy_frontend_notification', return_value=mock_notif), \
-             patch('notifications.post_notification_setup', mock_post_setup):
+             patch('mcp_deploy_frontend.post_notification_setup', mock_post_setup):
             from mcp_deploy_frontend import mcp_tool_deploy_frontend
             mcp_tool_deploy_frontend('req-e2e-df-001', {
                 'project': 'test-project',

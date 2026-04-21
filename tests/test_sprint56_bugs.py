@@ -65,9 +65,9 @@ class TestS56_001_OTPRiskScoreRecalculation:
             with patch('callbacks_command.answer_callback') as mock_answer, \
                  patch('callbacks_command.update_message'), \
                  patch('callbacks_command.send_telegram_message_to') as mock_send_otp, \
-                 patch('risk_scorer.calculate_risk', return_value=mock_risk_result), \
-                 patch('otp.generate_otp', return_value='123456'), \
-                 patch('otp.create_otp_record'):
+                 patch('callbacks_command.calculate_risk', return_value=mock_risk_result), \
+                 patch('callbacks_command.generate_otp', return_value='123456'), \
+                 patch('callbacks_command.create_otp_record'):
 
                 # Simulate approve callback
                 handle_command_callback(
@@ -203,7 +203,7 @@ class TestS56_004_ExpiryWarningStatusCheck:
             import src.db as db_mod
             db_mod.table = table
 
-            with patch('notifications.send_expiry_warning_notification') as mock_send:
+            with patch('app.send_expiry_warning_notification') as mock_send:
                 # Ensure src/app.py is imported (xdist isolation fix)
                 import sys
                 import os
@@ -251,7 +251,7 @@ class TestS56_004_ExpiryWarningStatusCheck:
             import src.db as db_mod
             db_mod.table = table
 
-            with patch('notifications.send_expiry_warning_notification') as mock_send:
+            with patch('app.send_expiry_warning_notification') as mock_send:
                 # Ensure src/app.py is imported (xdist isolation fix)
                 import sys
                 import os
@@ -295,7 +295,7 @@ class TestS56_004_ExpiryWarningStatusCheck:
             import src.db as db_mod
             db_mod.table = table
 
-            with patch('notifications.send_expiry_warning_notification') as mock_send:
+            with patch('app.send_expiry_warning_notification') as mock_send:
                 # Ensure src/app.py is imported (xdist isolation fix)
                 import sys
                 import os

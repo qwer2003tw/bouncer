@@ -41,6 +41,9 @@ from deploy_db import (  # noqa: F401 - re-exports for backward compatibility
     get_deploy_record,
     get_deploy_history,
 )
+from telegram import escape_markdown, send_telegram_message, send_telegram_message_silent  # noqa: E402
+from template_diff_analyzer import analyze_template_diff  # noqa: E402
+from utils import build_info_lines  # noqa: E402
 
 logger = Logger(service="bouncer")
 
@@ -325,7 +328,6 @@ class DeployErrorExtractor:
 def send_deploy_failure_notification(deploy_id: str, project_id: str, error_lines: list):
     """Send a Telegram notification with deploy failure details and top 3 error lines."""
     try:
-        from telegram import send_telegram_message_silent, escape_markdown
         error_text = DeployErrorExtractor.format_for_telegram(error_lines)
         error_block = f"\n\n📋 *錯誤摘要：*\n{escape_markdown(error_text)}" if error_text else ''
         text = (
@@ -744,7 +746,6 @@ def mcp_tool_deploy(req_id: str, arguments: dict, table, send_approval_func) -> 
             })
 
         # 有 github_pat_secret，进行 template diff 分析
-        from template_diff_analyzer import analyze_template_diff
         git_repo = project.get('git_repo', '')
 
         diff_result = analyze_template_diff(git_repo, branch or project.get('default_branch', 'master'), github_pat_secret)
@@ -930,8 +931,6 @@ def send_deploy_approval_request(request_id: str, project: dict, branch: str, re
                      telegram_message_id in DynamoDB and schedule EventBridge
                      cleanup — fixing the "buttons never cleared" bug (#75).
     """
-    from telegram import send_telegram_message, escape_markdown
-    from utils import build_info_lines
 
     project_id = project.get('project_id', '')
     project_name = project.get('name', project_id)

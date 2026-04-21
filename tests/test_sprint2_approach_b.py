@@ -404,8 +404,8 @@ class TestTemplateScanEscalation:
         )
 
         # Mock template scanner: no hits, score=0
-        with patch('template_scanner.scan_command_payloads', return_value=(0, [])):
-            with patch('risk_scorer.load_risk_rules') as mock_rules:
+        with patch('execute_pipeline.scan_command_payloads', return_value=(0, [])):
+            with patch('execute_pipeline.load_risk_rules') as mock_rules:
                 mock_rules_obj = MagicMock()
                 mock_rules_obj.template_rules = []
                 mock_rules.return_value = mock_rules_obj
@@ -442,8 +442,8 @@ class TestTemplateScanEscalation:
         mock_factor.details = 'Full admin policy (TP-008)'
         mock_factor.raw_score = 95
 
-        with patch('template_scanner.scan_command_payloads', return_value=(95, [mock_factor])):
-            with patch('risk_scorer.load_risk_rules') as mock_rules:
+        with patch('execute_pipeline.scan_command_payloads', return_value=(95, [mock_factor])):
+            with patch('execute_pipeline.load_risk_rules') as mock_rules:
                 mock_rules_obj = MagicMock()
                 mock_rules_obj.template_rules = [{'id': 'TP-008', 'check': 'admin_policy', 'score': 95, 'name': 'Full Admin Policy'}]
                 mock_rules.return_value = mock_rules_obj
@@ -480,8 +480,8 @@ class TestTemplateScanEscalation:
         mock_factor.details = 'Opens 0.0.0.0/0 (TP-005)'
         mock_factor.raw_score = 80
 
-        with patch('template_scanner.scan_command_payloads', return_value=(80, [mock_factor])):
-            with patch('risk_scorer.load_risk_rules') as mock_rules:
+        with patch('execute_pipeline.scan_command_payloads', return_value=(80, [mock_factor])):
+            with patch('execute_pipeline.load_risk_rules') as mock_rules:
                 mock_rules_obj = MagicMock()
                 mock_rules_obj.template_rules = [{'id': 'TP-005', 'check': 'open_ingress', 'score': 80, 'name': 'Open Ingress'}]
                 mock_rules.return_value = mock_rules_obj
@@ -517,8 +517,8 @@ class TestTemplateScanEscalation:
         mock_factor.details = 'Low risk finding'
         mock_factor.raw_score = 40
 
-        with patch('template_scanner.scan_command_payloads', return_value=(40, [mock_factor])):
-            with patch('risk_scorer.load_risk_rules') as mock_rules:
+        with patch('execute_pipeline.scan_command_payloads', return_value=(40, [mock_factor])):
+            with patch('execute_pipeline.load_risk_rules') as mock_rules:
                 mock_rules_obj = MagicMock()
                 mock_rules_obj.template_rules = [{'id': 'TP-001', 'check': 'action_wildcard', 'score': 40, 'name': 'Low'}]
                 mock_rules.return_value = mock_rules_obj

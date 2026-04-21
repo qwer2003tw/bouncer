@@ -137,7 +137,7 @@ def _run_approve(item=None, get_object_side_effect=None, put_object_side_effect=
 
     import callbacks
     with patch('callbacks.get_s3_client', return_value=mock_s3), \
-         patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
+         patch('callbacks.get_cloudfront_client', return_value=mock_cf), \
          patch('callbacks._get_table', return_value=mock_table), \
          patch('callbacks.answer_callback'), \
          patch('callbacks.update_message') as mock_update, \
@@ -235,7 +235,7 @@ class TestS3CopyCmdFormat:
         _, mock_s3, mock_cf = _make_mock_boto3()
         mock_table = MagicMock()
         with patch('callbacks.get_s3_client', return_value=mock_s3) as mock_factory, \
-             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
+             patch('callbacks.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -306,7 +306,7 @@ class TestCFInvalidationCmdFormat:
         _, mock_s3, mock_cf = _make_mock_boto3()
         mock_table = MagicMock()
         with patch('callbacks.get_s3_client', return_value=mock_s3), \
-             patch('aws_clients.get_cloudfront_client', return_value=mock_cf) as mock_cf_factory, \
+             patch('callbacks.get_cloudfront_client', return_value=mock_cf) as mock_cf_factory, \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \

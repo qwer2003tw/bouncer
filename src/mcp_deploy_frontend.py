@@ -27,6 +27,11 @@ from constants import DEFAULT_ACCOUNT_ID, APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL
 from db import table, deployer_projects_table, deployer_history_table
 from notifications import send_deploy_frontend_notification
 from utils import generate_request_id, mcp_result, mcp_error
+from aws_clients import get_cloudfront_client  # noqa: E402
+from metrics import emit_metric  # noqa: E402
+from notifications import post_notification_setup, send_trust_auto_approve_notification  # noqa: E402
+from trust import TrustRateExceeded, increment_trust_command_count, should_trust_approve  # noqa: E402
+from utils import log_decision  # noqa: E402
 
 logger = Logger(service="bouncer")
 
@@ -255,7 +260,6 @@ def _check_deploy_trust(trust_scope: str, project: str, account_id: str, source:
 
     Returns (should_trust: bool, trust_session: dict or None, reason: str)
     """
-    from trust import should_trust_approve
 
     # 1. Check trust session
     synthetic_command = f"bouncer_deploy_frontend project={project}"
@@ -446,7 +450,6 @@ def _submit_deploy_frontend_approval(
 
     # 6. Store telegram_message_id in DDB for later keyboard removal
     if notif_result.message_id:
-        from notifications import post_notification_setup
         post_notification_setup(
             request_id=request_id,
             telegram_message_id=notif_result.message_id,
@@ -483,10 +486,6 @@ def _execute_deploy_frontend_approved(
 
     Mirrors the callback approval flow but executes immediately without manual approval.
     """
-    from trust import increment_trust_command_count, TrustRateExceeded
-    from notifications import send_trust_auto_approve_notification
-    from utils import log_decision
-    from aws_clients import get_cloudfront_client
 
     # 1. Pre-process files (decode + compute metadata)
     request_id = generate_request_id(f"deploy_frontend:{project}")
@@ -610,7 +609,6 @@ def _execute_deploy_frontend_approved(
         new_count = increment_trust_command_count(trust_id)
     except TrustRateExceeded as exc:
         logger.warning("Trust rate exceeded for frontend deploy: %s", exc, extra={"src_module": "deploy_frontend", "operation": "trust_deploy", "trust_id": trust_id})
-        from metrics import emit_metric
         emit_metric('Bouncer', 'TrustRateExceeded', 1, dimensions={'Event': 'frontend_deploy'})
         return mcp_error(
             req_id,

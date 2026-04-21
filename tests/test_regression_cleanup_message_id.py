@@ -267,9 +267,9 @@ class TestPostNotificationSetupScheduler:
 
         # The function does 'from scheduler_service import get_scheduler_service' locally,
         # so we need to patch the scheduler_service module directly.
-        import scheduler_service as sched_mod
-        with patch.object(sched_mod, 'get_scheduler_service', return_value=mock_svc), \
-             patch('db.table', mock_dbtable):
+        import notifications_core as nc_mod
+        with patch.object(nc_mod, 'get_scheduler_service', return_value=mock_svc), \
+             patch('notifications_core.table', mock_dbtable):
             notif_mod.post_notification_setup(
                 request_id='req-test',
                 telegram_message_id=42000,
@@ -289,10 +289,10 @@ class TestPostNotificationSetupScheduler:
         mock_dbtable.update_item.return_value = {}
 
         import notifications as notif_mod
-        import scheduler_service as sched_mod
+        import notifications_core as nc_mod
 
-        with patch.object(sched_mod, 'get_scheduler_service', return_value=mock_svc), \
-             patch('db.table', mock_dbtable):
+        with patch.object(nc_mod, 'get_scheduler_service', return_value=mock_svc), \
+             patch('notifications_core.table', mock_dbtable):
             notif_mod.post_notification_setup(
                 request_id='req-test2',
                 telegram_message_id=0,

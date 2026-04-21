@@ -1330,15 +1330,15 @@ class TestSchedulerIntegration:
         self.notif = _make_notifications_module()
 
         # Provide a mock db.table for post_notification_setup
-        import db as _db
-        self._original_table = _db.table
+        import notifications_core as _nc
+        self._original_table = _nc.table
         self.mock_table = MagicMock()
-        _db.table = self.mock_table
+        _nc.table = self.mock_table
 
         yield
 
         # Restore original table to avoid state bleed
-        _db.table = self._original_table
+        _nc.table = self._original_table
 
         # Restore original modules to avoid poisoning module-scoped fixtures
         for key, mod in saved_modules.items():
@@ -1412,7 +1412,7 @@ class TestSchedulerIntegration:
 
     def test_post_notification_setup_stores_message_id(self):
         """post_notification_setup stores telegram_message_id in DDB."""
-        with patch('scheduler_service.get_scheduler_service') as mock_svc:
+        with patch('notifications_core.get_scheduler_service') as mock_svc:
             mock_svc.return_value = MagicMock()
             self.notif.post_notification_setup(
                 request_id='my-req-123',
@@ -1433,7 +1433,7 @@ class TestSchedulerIntegration:
     def test_post_notification_setup_ddb_error_is_non_fatal(self):
         """post_notification_setup swallows DynamoDB exceptions."""
         self.mock_table.update_item.side_effect = _make_client_error('ProvisionedThroughputExceededException', 'Throughput exceeded')
-        with patch('scheduler_service.get_scheduler_service') as mock_svc:
+        with patch('notifications_core.get_scheduler_service') as mock_svc:
             mock_svc.return_value = MagicMock()
             # Should not raise
             self.notif.post_notification_setup(
@@ -1451,7 +1451,7 @@ class TestSchedulerIntegration:
         expires_at = int(time.time()) + 120
 
         mock_service = MagicMock()
-        with patch('scheduler_service.get_scheduler_service', return_value=mock_service):
+        with patch('notifications_core.get_scheduler_service', return_value=mock_service):
             self.notif.post_notification_setup(
                 request_id='sched-req-001',
                 telegram_message_id=101,
@@ -1491,7 +1491,7 @@ class TestSchedulerIntegration:
         mock_service = MagicMock()
         mock_service.create_expiry_schedule.side_effect = _make_client_error('SchedulerServiceException', 'Scheduler API unavailable')
 
-        with patch('scheduler_service.get_scheduler_service', return_value=mock_service):
+        with patch('notifications_core.get_scheduler_service', return_value=mock_service):
             # Should NOT raise
             self.notif.post_notification_setup(
                 request_id='req-nonfatal',

@@ -26,6 +26,8 @@ from metrics import emit_metric
 
 # DynamoDB tables from db.py (no circular dependency)
 import db as _db
+from otp import create_otp_record, generate_otp  # noqa: E402
+from risk_scorer import calculate_risk  # noqa: E402
 
 logger = Logger(service="bouncer")
 
@@ -653,11 +655,9 @@ def handle_command_callback(action: str, request_id: str, item: dict, message_id
         if action == 'approve' and not item.get('otp_verified'):
             # s56-001: Recalculate risk_score in callback instead of using DDB value
             # (DDB value may be 0 if smart_decision wasn't calculated during execute)
-            from risk_scorer import calculate_risk
             risk_result = calculate_risk(command)
             risk_score = risk_result.score if risk_result else 0
             if risk_score >= OTP_RISK_THRESHOLD:
-                from otp import generate_otp, create_otp_record
 
                 otp_code = generate_otp()
                 create_otp_record(request_id, user_id, otp_code, message_id)

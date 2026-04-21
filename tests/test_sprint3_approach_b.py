@@ -317,7 +317,7 @@ class TestDeployCommitSHA:
             'target_role_arn': '',
         }
 
-        with patch('telegram.send_telegram_message') as mock_tg:
+        with patch('deployer.send_telegram_message') as mock_tg:
             deployer.send_deploy_approval_request(
                 request_id='req-deploy-001',
                 project=project,
@@ -349,7 +349,7 @@ class TestDeployCommitSHA:
             'target_role_arn': '',
         }
 
-        with patch('telegram.send_telegram_message') as mock_tg:
+        with patch('deployer.send_telegram_message') as mock_tg:
             deployer.send_deploy_approval_request(
                 request_id='req-deploy-002',
                 project=project,
@@ -380,7 +380,7 @@ class TestDeployCommitSHA:
             'target_role_arn': '',
         }
 
-        with patch('telegram.send_telegram_message') as mock_tg:
+        with patch('deployer.send_telegram_message') as mock_tg:
             deployer.send_deploy_approval_request(
                 request_id='req-deploy-003',
                 project=project,

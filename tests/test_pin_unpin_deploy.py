@@ -122,10 +122,10 @@ class TestDeployApprovalNoPin:
         import callbacks
         import deployer
 
-        with patch.object(deployer, 'start_deploy') as mock_start_deploy, \
+        with patch.object(callbacks, 'start_deploy') as mock_start_deploy, \
              patch.object(callbacks, 'update_message'), \
              patch.object(callbacks, 'answer_callback'), \
-             patch.object(deployer, 'update_deploy_record') as mock_update_record, \
+             patch.object(callbacks, 'update_deploy_record') as mock_update_record, \
              patch('callbacks.pin_message') as mock_pin:
 
             # Mock successful deploy start
@@ -201,7 +201,7 @@ class TestDeployCompleteCallsUnpin:
 
         with patch('deployer.get_deploy_record', return_value=mock_deploy_record), \
              patch.object(deployer, '_get_sfn_client', return_value=mock_sfn_client), \
-             patch('deployer.update_deploy_record', mock_update_deploy_record), \
+             patch('callbacks.update_deploy_record', mock_update_deploy_record), \
              patch('deployer.release_lock'), \
              patch('deployer.unpin_message') as mock_unpin:
 
@@ -250,7 +250,7 @@ class TestDeployCompleteCallsUnpin:
         with patch('deployer.get_deploy_record', return_value=mock_deploy_record), \
              patch.object(deployer, '_get_sfn_client', return_value=mock_sfn_client), \
              patch.object(deployer, '_get_cfn_client', return_value=mock_cfn_client), \
-             patch('deployer.update_deploy_record', mock_update_deploy_record), \
+             patch('callbacks.update_deploy_record', mock_update_deploy_record), \
              patch('deployer.release_lock'), \
              patch.object(deployer, 'send_deploy_failure_notification'), \
              patch('deployer.unpin_message') as mock_unpin:
@@ -291,7 +291,7 @@ class TestDeployCompleteCallsUnpin:
 
         with patch('deployer.get_deploy_record', return_value=mock_deploy_record_unpin), \
              patch.object(deployer, '_get_sfn_client', return_value=mock_sfn_client), \
-             patch('deployer.update_deploy_record', mock_update_record), \
+             patch('callbacks.update_deploy_record', mock_update_record), \
              patch('deployer.release_lock'), \
              patch('deployer.unpin_message') as mock_unpin:
 
@@ -334,7 +334,7 @@ class TestDeployCompleteCallsUnpin:
             'events': []
         }
 
-        with patch('deployer._get_history_table', return_value=mock_table), \
+        with patch('callbacks._get_history_table', return_value=mock_table), \
              patch.object(deployer, '_get_sfn_client', return_value=mock_sfn_client), \
              patch('deployer.release_lock'), \
              patch('deployer.unpin_message') as mock_unpin:
