@@ -15,6 +15,10 @@ from accounts import init_default_account, list_accounts
 from telegram import send_telegram_message_to
 from constants import APPROVED_CHAT_IDS
 import db as _db
+from callbacks_command import handle_command_callback  # noqa: E402
+from constants import DEFAULT_ACCOUNT_ID  # noqa: E402
+from mcp_query_logs import _list_allowlist  # noqa: E402
+from otp import get_pending_otp, validate_otp  # noqa: E402
 
 logger = Logger(service="bouncer")
 
@@ -288,7 +292,6 @@ def handle_stats_command(chat_id: str, hours: int = 24) -> dict:
 
 def handle_otp_command(chat_id: str, user_id: str, provided_code: str) -> dict:
     """處理 /otp {code} 指令 — OTP 二次驗證"""
-    from otp import get_pending_otp, validate_otp
 
     logger.info(
         "OTP command started",
@@ -354,7 +357,6 @@ def handle_otp_command(chat_id: str, user_id: str, provided_code: str) -> dict:
     # Mark item as OTP verified and re-invoke handle_command_callback
     item['otp_verified'] = True
 
-    from callbacks_command import handle_command_callback
     message_id = int(otp_record.get('message_id', 0))
 
     # Execute the command by calling handle_command_callback with otp_verified=True
@@ -372,8 +374,6 @@ def handle_otp_command(chat_id: str, user_id: str, provided_code: str) -> dict:
 
 def handle_logs_command(chat_id: str, account: str = '') -> dict:
     """處理 /logs [account] 指令 — 列出允許查詢的 log groups"""
-    from mcp_query_logs import _list_allowlist
-    from constants import DEFAULT_ACCOUNT_ID
 
     account_id = account.strip() or DEFAULT_ACCOUNT_ID
     if not account_id:

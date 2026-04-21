@@ -87,6 +87,24 @@ from constants import (  # noqa: F401
 # DynamoDB — canonical references in db.py; re-exported for backward compat
 from db import table, accounts_table  # noqa: F401
 from aws_lambda_powertools import Logger
+from compliance_checker import check_compliance  # noqa: E402
+from deployer import (  # noqa: E402
+    mcp_tool_deploy,
+    mcp_tool_deploy_cancel,
+    mcp_tool_deploy_history,
+    mcp_tool_deploy_status,
+    mcp_tool_project_list,
+)
+from notifications import send_expiry_warning_notification  # noqa: E402
+from telegram import send_telegram_message, send_telegram_message_silent  # noqa: E402
+from webhook_router import (  # noqa: E402
+    handle_general_approval,
+    handle_grant_callbacks,
+    handle_infra_approval,
+    handle_query_logs_callbacks,
+    handle_revoke_trust,
+    handle_show_page,
+)
 
 logger = Logger(service="bouncer")
 
@@ -351,7 +369,6 @@ def _send_trust_expiry_notification(
         pending_count:   Number of pending requests needing manual approval.
         pending_requests: List of pending request items (for display).
     """
-    from telegram import send_telegram_message, send_telegram_message_silent
 
     safe_source = escape_markdown(source or trust_scope or trust_id[:20])
 
@@ -416,9 +433,8 @@ def lambda_handler(event: dict, context) -> dict:
     if event.get('source') == 'bouncer-scheduler' and event.get('action') == 'expiry_warning':
         # s56-004: Check DDB status before sending warning (skip if already approved/denied)
         request_id = event.get('request_id', '')
-        from db import table as _table
         try:
-            ddb_response = _table.get_item(Key={'request_id': request_id})
+            ddb_response = table.get_item(Key={'request_id': request_id})
             item = ddb_response.get('Item')
             if not item or item.get('status') != 'pending_approval':
                 # Already approved/denied or not found, skip warning
@@ -433,7 +449,6 @@ def lambda_handler(event: dict, context) -> dict:
         telegram_message_id = item.get('telegram_message_id') or item.get('message_id')
         if telegram_message_id:
             try:
-                from telegram import update_message
                 command_preview = event.get('command_preview', '')
                 update_message(
                     int(telegram_message_id),
@@ -447,7 +462,6 @@ def lambda_handler(event: dict, context) -> dict:
             except Exception as exc:
                 logger.warning("Failed to update expired message %s: %s", telegram_message_id, exc, extra={"src_module": "app", "operation": "expiry_warning", "request_id": request_id})
                 # Fallback to sending new notification
-                from notifications import send_expiry_warning_notification
                 send_expiry_warning_notification(
                     request_id=request_id,
                     command_preview=event.get('command_preview', ''),
@@ -456,7 +470,6 @@ def lambda_handler(event: dict, context) -> dict:
         else:
             # No message_id, fallback to sending new notification
             logger.info("No telegram_message_id found for %s, sending new notification", request_id, extra={"src_module": "app", "operation": "expiry_warning", "request_id": request_id})
-            from notifications import send_expiry_warning_notification
             send_expiry_warning_notification(
                 request_id=request_id,
                 command_preview=event.get('command_preview', ''),
@@ -465,7 +478,7 @@ def lambda_handler(event: dict, context) -> dict:
 
         # Update DDB status to expired
         try:
-            _table.update_item(
+            table.update_item(
                 Key={'request_id': request_id},
                 UpdateExpression='SET #s = :s',
                 ExpressionAttributeNames={'#s': 'status'},
@@ -479,9 +492,8 @@ def lambda_handler(event: dict, context) -> dict:
     # EventBridge Scheduler pending approval reminder (sprint59-001)
     if event.get('source') == 'bouncer-scheduler' and event.get('action') == 'pending_reminder':
         request_id = event.get('request_id', '')
-        from db import table as _table
         try:
-            ddb_response = _table.get_item(Key={'request_id': request_id})
+            ddb_response = table.get_item(Key={'request_id': request_id})
             item = ddb_response.get('Item')
             if not item or item.get('status') != 'pending_approval':
                 # Already approved/denied or not found, skip reminder
@@ -493,7 +505,6 @@ def lambda_handler(event: dict, context) -> dict:
 
         # Send Telegram reminder
         try:
-            from telegram import send_telegram_message_silent, escape_markdown
             command_preview = event.get('command_preview', '')[:100]
             source_field = event.get('source_field', '')
             expires_at = int(item.get('expires_at', 0))
@@ -675,10 +686,6 @@ _DEPLOYER_TOOLS = {
 
 def _get_deployer_handler(tool_name: str):
     """Lazy-import deployer handlers (only when needed)."""
-    from deployer import (  # noqa: F811
-        mcp_tool_deploy, mcp_tool_deploy_status, mcp_tool_deploy_cancel,
-        mcp_tool_deploy_history, mcp_tool_project_list,
-    )
     return {
         'bouncer_deploy': mcp_tool_deploy,
         'bouncer_deploy_status': mcp_tool_deploy_status,
@@ -803,7 +810,6 @@ def handle_clawdbot_request(event: dict) -> dict:
 
     # SEC-011: Compliance check for REST endpoint
     try:
-        from compliance_checker import check_compliance
         is_compliant, violation = check_compliance(command)
         if not is_compliant:
             emit_metric('Bouncer', 'BlockedCommand', 1, dimensions={'Reason': 'compliance'})
@@ -913,14 +919,6 @@ def handle_clawdbot_request(event: dict) -> dict:
 
 def handle_telegram_webhook(event: dict) -> dict:
     """處理 Telegram callback (request validation and routing to webhook_router)"""
-    from webhook_router import (
-        handle_show_page,
-        handle_infra_approval,
-        handle_revoke_trust,
-        handle_grant_callbacks,
-        handle_query_logs_callbacks,
-        handle_general_approval,
-    )
 
     headers = event.get('headers', {})
 

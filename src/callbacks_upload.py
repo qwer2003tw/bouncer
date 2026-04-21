@@ -16,6 +16,8 @@ from constants import TRUST_SESSION_MAX_UPLOADS, TRUST_SESSION_MAX_COMMANDS
 from metrics import emit_metric
 from mcp_upload import execute_upload, _verify_upload
 import db as _db
+from constants import DEFAULT_ACCOUNT_ID  # noqa: E402
+from utils import generate_request_id  # noqa: E402
 
 logger = Logger()
 
@@ -195,14 +197,12 @@ def _execute_callback_upload_batch(
         try:
             s3_key = fm.get('s3_key')  # new format
             content_b64_legacy = fm.get('content_b64')  # old format fallback
-            from utils import generate_request_id as _gen_id
-            fkey = f"{date_str}/{_gen_id('batch')}/{fname}"
+            fkey = f"{date_str}/{generate_request_id('batch')}/{fname}"
             if s3_key:
                 # New path: read from staging (Lambda role), write to target (assumed role).
                 # Previously used copy_object with the assumed-role client which fails
                 # silently when the assumed role has no read access to staging bucket (#39).
-                from constants import DEFAULT_ACCOUNT_ID as _DEFAULT_ACCOUNT_ID
-                staging_bucket = f"bouncer-uploads-{_DEFAULT_ACCOUNT_ID}"
+                staging_bucket = f"bouncer-uploads-{DEFAULT_ACCOUNT_ID}"
                 obj = s3_staging.get_object(Bucket=staging_bucket, Key=s3_key)
                 body = obj['Body'].read()
                 s3_target.put_object(

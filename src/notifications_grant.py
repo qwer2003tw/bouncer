@@ -18,6 +18,7 @@ from telegram_entities import MessageBuilder, format_command_output
 from utils import extract_exit_code
 
 from notifications_core import post_notification_setup
+from telegram_entities import _utf16_len  # noqa: E402
 
 logger = Logger(service="bouncer")
 
@@ -165,7 +166,6 @@ def send_grant_execute_notification(
         result_entities, formatted_result = format_command_output(result_text)
 
         # Adjust result entity offsets
-        from telegram_entities import _utf16_len
         header_len = _utf16_len(header_text)
         for entity in result_entities:
             entity['offset'] += header_len
@@ -195,7 +195,6 @@ def send_grant_execute_notification(
         TELEGRAM_MAX_TEXT = 4096
         if len(text) > TELEGRAM_MAX_TEXT:
             # Truncate result text to fit within limit
-            from telegram_entities import _utf16_len
             truncation_notice = "\n\n[輸出已截斷，超過 Telegram 4096 字元限制]"
             available = TELEGRAM_MAX_TEXT - len(header_text) - len("\n") - len(footer_text) - len(truncation_notice)
             if available > 0:

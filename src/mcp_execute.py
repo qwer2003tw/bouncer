@@ -112,7 +112,6 @@ def mcp_tool_eks_get_token(req_id: str, arguments: dict) -> dict:
     # Resolve assume_role_arn from account
     assume_role_arn = None
     if account:
-        from accounts import get_account
         acct = get_account(account)
         if acct and acct.get('assume_role'):
             assume_role_arn = acct['assume_role']

@@ -40,6 +40,8 @@ from constants import (
     APPROVAL_TTL_BUFFER, UPLOAD_TIMEOUT,
 )
 from upload_scanner import scan_upload
+from notifications import post_notification_setup  # noqa: E402
+from trust import _is_upload_extension_blocked, _is_upload_filename_safe, get_trust_session  # noqa: E402
 
 logger = Logger(service="bouncer")
 
@@ -497,7 +499,6 @@ def _submit_upload_for_approval(ctx: UploadContext) -> dict:
     # Post-notification: store telegram_message_id + schedule expiry cleanup
     tg_message_id = tg_result.get('result', {}).get('message_id')
     if tg_message_id:
-        from notifications import post_notification_setup
         post_notification_setup(
             request_id=ctx.request_id,
             telegram_message_id=tg_message_id,
@@ -661,7 +662,6 @@ def _preprocess_upload_files(req_id: str, files: list) -> tuple:
     """Validate and preprocess files. Returns (processed_files, total_size, error)."""
     import base64
     import hashlib as _hashlib
-    from trust import _is_upload_extension_blocked, _is_upload_filename_safe
 
     processed_files = []
     total_size = 0
@@ -789,7 +789,6 @@ def _execute_trust_batch_uploads(session: dict, processed_files: list, bucket: s
 
     Returns list of uploaded file results. Stops early if quota race detected.
     """
-    from trust import increment_trust_upload_count
     uploaded = []
     s3 = get_s3_client(role_arn=assume_role, session_name='bouncer-batch-trust-upload')
 
@@ -822,7 +821,6 @@ def _try_trust_auto_approve_batch(
     if not trust_scope:
         return None
 
-    from trust import should_trust_approve_upload, get_trust_session
 
     session = get_trust_session(trust_scope, target_account_id or DEFAULT_ACCOUNT_ID)
     if not session:
@@ -958,7 +956,6 @@ def _submit_batch_for_approval(
     )
 
     if batch_notified.message_id:
-        from notifications import post_notification_setup
         post_notification_setup(
             request_id=batch_id,
             telegram_message_id=batch_notified.message_id,
