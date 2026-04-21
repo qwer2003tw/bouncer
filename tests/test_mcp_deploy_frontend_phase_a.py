@@ -234,7 +234,7 @@ class TestHappyPath:
              patch("mcp_deploy_frontend.table", mock_table), \
              patch("mcp_deploy_frontend._get_frontend_config", return_value=_ZTP_FRONTEND_CONFIG), \
              patch("mcp_deploy_frontend.send_deploy_frontend_notification", return_value=mock_notif_result) as mock_notif, \
-             patch("mcp_deploy_frontend.post_notification_setup") as mock_pns:
+             patch("notifications.post_notification_setup") as mock_pns:
             result = _call({
                 "project": "ztp-files",
                 "files": files,
@@ -438,7 +438,7 @@ class TestDeployRoleArnPhaseA:
              patch("mcp_deploy_frontend.table", mock_table), \
              patch("mcp_deploy_frontend._get_frontend_config", return_value=_ZTP_FRONTEND_CONFIG), \
              patch("mcp_deploy_frontend.send_deploy_frontend_notification", return_value=mock_notif_result), \
-             patch("mcp_deploy_frontend.post_notification_setup"):
+             patch("notifications.post_notification_setup"):
             result = _call({
                 "project": "ztp-files",
                 "files": files,
@@ -475,7 +475,7 @@ class TestDeployRoleArnPhaseA:
              patch("mcp_deploy_frontend.table", mock_table), \
              patch("mcp_deploy_frontend._get_frontend_config", return_value=config_without_role), \
              patch("mcp_deploy_frontend.send_deploy_frontend_notification", return_value=mock_notif_result), \
-             patch("mcp_deploy_frontend.post_notification_setup"):
+             patch("notifications.post_notification_setup"):
             _call({
                 "project": "test-project",
                 "files": files,

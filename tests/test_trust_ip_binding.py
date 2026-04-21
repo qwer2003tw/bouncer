@@ -67,7 +67,7 @@ class TestCreateTrustSessionStoresIP:
         mock_get_table = MagicMock(return_value=mock_table)
 
         with patch.object(_trust_module, '_get_table', mock_get_table), \
-             patch('trust.get_trust_expiry_notifier', MagicMock()):
+             patch('scheduler_service.get_trust_expiry_notifier', MagicMock()):
             create_trust_session(
                 'private-bot-main', '190825685292', 'user-123',
                 source='Private Bot',
@@ -86,7 +86,7 @@ class TestCreateTrustSessionStoresIP:
         mock_get_table = MagicMock(return_value=mock_table)
 
         with patch.object(_trust_module, '_get_table', mock_get_table), \
-             patch('trust.get_trust_expiry_notifier', MagicMock()):
+             patch('scheduler_service.get_trust_expiry_notifier', MagicMock()):
             create_trust_session(
                 'private-bot-main', '190825685292', 'user-123',
                 source='Private Bot',
@@ -141,7 +141,7 @@ class TestShouldTrustApproveIPMismatch:
         import trust as _trust_module
         item = _make_session_item(creator_ip='203.0.113.1')
         with patch.object(_trust_module, 'logger') as mock_logger, \
-             patch('trust.emit_metric', MagicMock()), \
+             patch('metrics.emit_metric', MagicMock()), \
              patch.object(_trust_module, 'TRUST_IP_BINDING_MODE', 'warn'):
             should_approve, _, _ = _run_should_trust(item, caller_ip='10.4.150.40')
 
@@ -159,7 +159,7 @@ class TestShouldTrustApproveIPMismatch:
         def capture(*args, **kwargs):
             emitted.append({'args': args, 'kwargs': kwargs})
 
-        with patch('trust.emit_metric', side_effect=capture), \
+        with patch('metrics.emit_metric', side_effect=capture), \
              patch.object(_trust_module, 'TRUST_IP_BINDING_MODE', 'warn'):
             should_approve, _, _ = _run_should_trust(item, caller_ip='10.4.150.40')
 
@@ -193,7 +193,7 @@ class TestTrustIPBindingModes:
         item = _make_session_item(creator_ip='203.0.113.1')
 
         with patch.object(_trust_module, 'TRUST_IP_BINDING_MODE', 'strict'), \
-             patch('trust.emit_metric', MagicMock()):
+             patch('metrics.emit_metric', MagicMock()):
             should_approve, session, reason = _run_should_trust(item, caller_ip='10.4.150.40')
 
         assert should_approve is False
@@ -211,7 +211,7 @@ class TestTrustIPBindingModes:
             emitted.append({'args': args, 'kwargs': kwargs})
 
         with patch.object(_trust_module, 'TRUST_IP_BINDING_MODE', 'strict'), \
-             patch('trust.emit_metric', side_effect=capture):
+             patch('metrics.emit_metric', side_effect=capture):
             should_approve, _, _ = _run_should_trust(item, caller_ip='10.4.150.40')
 
         assert should_approve is False
@@ -225,7 +225,7 @@ class TestTrustIPBindingModes:
         item = _make_session_item(creator_ip='203.0.113.1')
 
         with patch.object(_trust_module, 'TRUST_IP_BINDING_MODE', 'warn'), \
-             patch('trust.emit_metric', MagicMock()):
+             patch('metrics.emit_metric', MagicMock()):
             should_approve, _, _ = _run_should_trust(item, caller_ip='10.4.150.40')
 
         assert should_approve is True
@@ -241,7 +241,7 @@ class TestTrustIPBindingModes:
             emitted.append({'args': args, 'kwargs': kwargs})
 
         with patch.object(_trust_module, 'TRUST_IP_BINDING_MODE', 'warn'), \
-             patch('trust.emit_metric', side_effect=capture):
+             patch('metrics.emit_metric', side_effect=capture):
             should_approve, _, _ = _run_should_trust(item, caller_ip='10.4.150.40')
 
         assert should_approve is True
@@ -259,7 +259,7 @@ class TestTrustIPBindingModes:
             emitted.append({'args': args, 'kwargs': kwargs})
 
         with patch.object(_trust_module, 'TRUST_IP_BINDING_MODE', 'disabled'), \
-             patch('trust.emit_metric', side_effect=capture):
+             patch('metrics.emit_metric', side_effect=capture):
             should_approve, _, _ = _run_should_trust(item, caller_ip='10.4.150.40')
 
         assert should_approve is True
@@ -278,7 +278,7 @@ class TestTrustIPBindingModes:
         # Simulate invalid mode by setting TRUST_IP_BINDING_MODE to 'warn'
         # The constants.py logic should normalize invalid values to 'warn'
         with patch.object(_trust_module, 'TRUST_IP_BINDING_MODE', 'warn'), \
-             patch('trust.emit_metric', MagicMock()):
+             patch('metrics.emit_metric', MagicMock()):
             should_approve, _, _ = _run_should_trust(item, caller_ip='10.4.150.40')
 
         # Should behave like warn mode: allow the request

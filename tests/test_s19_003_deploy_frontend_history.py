@@ -126,7 +126,7 @@ class TestDeployFrontendHistoryWrite:
         _s3_idx = {'n': 0}
         def _s3_f(role_arn=None, **kw): i = _s3_idx['n']; _s3_idx['n'] += 1; return _s3_seq[i] if i < len(_s3_seq) else MagicMock()
         with patch('callbacks.get_s3_client', side_effect=_s3_f), \
-             patch('callbacks.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -156,13 +156,13 @@ class TestDeployFrontendHistoryWrite:
         _s3_idx = {'n': 0}
         def _s3_f(role_arn=None, **kw): i = _s3_idx['n']; _s3_idx['n'] += 1; return _s3_seq[i] if i < len(_s3_seq) else MagicMock()
         with patch('callbacks.get_s3_client', side_effect=_s3_f), \
-             patch('callbacks.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status'), \
              patch('callbacks.emit_metric'), \
-             patch('callbacks._get_history_table', return_value=mock_history_table), \
+             patch('deployer._get_history_table', return_value=mock_history_table), \
              patch('telegram.send_message_with_entities'):
             _call_callback(action='approve', item=_make_item())
 
@@ -197,13 +197,13 @@ class TestDeployFrontendHistoryWrite:
         _s3_idx = {'n': 0}
         def _s3_f(role_arn=None, **kw): i = _s3_idx['n']; _s3_idx['n'] += 1; return _s3_seq[i] if i < len(_s3_seq) else MagicMock()
         with patch('callbacks.get_s3_client', side_effect=_s3_f), \
-             patch('callbacks.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status'), \
              patch('callbacks.emit_metric'), \
-             patch('callbacks._get_history_table', return_value=mock_history_table), \
+             patch('deployer._get_history_table', return_value=mock_history_table), \
              patch('telegram.send_message_with_entities'):
             _call_callback(action='approve', item=_make_item())
 
@@ -226,13 +226,13 @@ class TestDeployFrontendHistoryWrite:
         _s3_idx = {'n': 0}
         def _s3_f(role_arn=None, **kw): i = _s3_idx['n']; _s3_idx['n'] += 1; return _s3_seq[i] if i < len(_s3_seq) else MagicMock()
         with patch('callbacks.get_s3_client', side_effect=_s3_f), \
-             patch('callbacks.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status'), \
              patch('callbacks.emit_metric'), \
-             patch('callbacks._get_history_table', return_value=mock_history_table), \
+             patch('deployer._get_history_table', return_value=mock_history_table), \
              patch('telegram.send_message_with_entities'):
             _call_callback(action='approve', item=_make_item())
 
@@ -253,13 +253,13 @@ class TestDeployFrontendHistoryWrite:
         _s3_idx = {'n': 0}
         def _s3_f(role_arn=None, **kw): i = _s3_idx['n']; _s3_idx['n'] += 1; return _s3_seq[i] if i < len(_s3_seq) else MagicMock()
         with patch('callbacks.get_s3_client', side_effect=_s3_f), \
-             patch('callbacks.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status'), \
              patch('callbacks.emit_metric'), \
-             patch('callbacks._get_history_table', return_value=mock_history_table), \
+             patch('deployer._get_history_table', return_value=mock_history_table), \
              patch('telegram.send_message_with_entities'):
             result = _call_callback(action='approve', item=_make_item())
 
@@ -276,7 +276,7 @@ class TestDeployFrontendHistoryWrite:
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status'), \
-             patch('callbacks._get_history_table', return_value=mock_history_table), \
+             patch('deployer._get_history_table', return_value=mock_history_table), \
              patch('telegram.send_message_with_entities'):
             result = _call_callback(action='deny', item=_make_item())
 
@@ -293,13 +293,13 @@ class TestDeployFrontendHistoryWrite:
         _s3_idx = {'n': 0}
         def _s3_f(role_arn=None, **kw): i = _s3_idx['n']; _s3_idx['n'] += 1; return _s3_seq[i] if i < len(_s3_seq) else MagicMock()
         with patch('callbacks.get_s3_client', side_effect=_s3_f), \
-             patch('callbacks.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status'), \
              patch('callbacks.emit_metric'), \
-             patch('callbacks._get_history_table', return_value=mock_history_table), \
+             patch('deployer._get_history_table', return_value=mock_history_table), \
              patch('telegram.send_message_with_entities'):
             _call_callback(
                 action='approve',
@@ -320,13 +320,13 @@ class TestDeployFrontendHistoryWrite:
         _s3_idx = {'n': 0}
         def _s3_f(role_arn=None, **kw): i = _s3_idx['n']; _s3_idx['n'] += 1; return _s3_seq[i] if i < len(_s3_seq) else MagicMock()
         with patch('callbacks.get_s3_client', side_effect=_s3_f), \
-             patch('callbacks.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
              patch('callbacks._update_request_status'), \
              patch('callbacks.emit_metric'), \
-             patch('callbacks._get_history_table', return_value=mock_history_table), \
+             patch('deployer._get_history_table', return_value=mock_history_table), \
              patch('telegram.send_message_with_entities'):
             _call_callback(action='approve', item=_make_item())
 
@@ -348,7 +348,7 @@ class TestWriteFrontendDeployHistoryUnit:
         from callbacks import _write_frontend_deploy_history
         mock_history_table = MagicMock()
 
-        with patch('callbacks._get_history_table', return_value=mock_history_table):
+        with patch('deployer._get_history_table', return_value=mock_history_table):
             _write_frontend_deploy_history(
                 request_id='test-req-001',
                 project='my-project',
@@ -381,7 +381,7 @@ class TestWriteFrontendDeployHistoryUnit:
         from callbacks import _write_frontend_deploy_history
         mock_history_table = MagicMock()
 
-        with patch('callbacks._get_history_table', return_value=mock_history_table):
+        with patch('deployer._get_history_table', return_value=mock_history_table):
             _write_frontend_deploy_history(
                 request_id='test-req-002',
                 project='proj',
@@ -406,7 +406,7 @@ class TestWriteFrontendDeployHistoryUnit:
         from callbacks import _write_frontend_deploy_history
         mock_history_table = MagicMock()
 
-        with patch('callbacks._get_history_table', return_value=mock_history_table):
+        with patch('deployer._get_history_table', return_value=mock_history_table):
             _write_frontend_deploy_history(
                 request_id='test-req-003',
                 project='proj',
@@ -429,7 +429,7 @@ class TestWriteFrontendDeployHistoryUnit:
         """If _get_history_table raises, function does not propagate exception."""
         from callbacks import _write_frontend_deploy_history
 
-        with patch('callbacks._get_history_table', side_effect=Exception('DDB down')):
+        with patch('deployer._get_history_table', side_effect=Exception('DDB down')):
             # Should not raise
             _write_frontend_deploy_history(
                 request_id='test-req-004',

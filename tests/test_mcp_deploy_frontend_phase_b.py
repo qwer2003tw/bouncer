@@ -163,7 +163,7 @@ class TestDenyAction:
         _, mock_s3_target, mock_s3_staging, mock_cf, _ = _patch_all()
         mock_table = MagicMock()
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -177,7 +177,7 @@ class TestDenyAction:
         _, mock_s3_target, mock_s3_staging, mock_cf, _ = _patch_all()
         mock_table = MagicMock()
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)) as mock_s3_factory, \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -190,7 +190,7 @@ class TestDenyAction:
         _, mock_s3_target, mock_s3_staging, mock_cf, _ = _patch_all()
         mock_table = MagicMock()
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -202,7 +202,7 @@ class TestDenyAction:
         _, mock_s3_target, mock_s3_staging, mock_cf, _ = _patch_all()
         mock_table = MagicMock()
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message') as mock_update, \
@@ -221,7 +221,7 @@ class TestApproveFullSuccess:
     def _run(self):
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message') as mock_update, \
@@ -333,7 +333,7 @@ class TestApprovePartialFailure:
             get_object_side_effect=get_object_side_effect
         )
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -384,7 +384,7 @@ class TestApproveFullFailure:
             get_object_side_effect=get_object_side_effect
         )
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -419,7 +419,7 @@ class TestCFInvalidationFailure:
             cf_side_effect=ClientError({'Error': {'Code': 'TooManyInvalidationsInProgress', 'Message': 'CF rate limit exceeded'}}, 'CreateInvalidation')
         )
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message') as mock_update, \
@@ -480,7 +480,7 @@ class TestDDBFields:
     def test_deployed_details_is_json_list(self):
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -499,7 +499,7 @@ class TestDDBFields:
     def test_failed_details_empty_on_full_success(self):
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -554,7 +554,7 @@ class TestApproveProgressUpdate:
         """update_message should be called with '進度:' during the copy loop."""
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message') as mock_update, \
@@ -602,7 +602,7 @@ class TestDeployRoleArnPhaseB:
         """When deploy_role_arn is set, get_s3_client is called with role_arn."""
         _, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)) as mock_s3_factory, \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -619,7 +619,7 @@ class TestDeployRoleArnPhaseB:
         """When deploy_role_arn present, get_s3_client is called with role_arn for s3_target."""
         _, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)) as mock_s3_factory, \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -637,7 +637,7 @@ class TestDeployRoleArnPhaseB:
         """CF client created via get_cloudfront_client with role_arn when deploy_role_arn present."""
         _, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf) as mock_cf_factory, \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf) as mock_cf_factory, \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -655,7 +655,7 @@ class TestDeployRoleArnPhaseB:
         """When deploy_role_arn absent, s3 clients use Lambda role (no credentials)."""
         _, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -672,7 +672,7 @@ class TestDeployRoleArnPhaseB:
         """When deploy_role_arn absent, CF client uses Lambda role."""
         _, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -687,7 +687,7 @@ class TestDeployRoleArnPhaseB:
         """When deploy_role_arn is explicitly None, s3 uses Lambda role."""
         _, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -723,7 +723,7 @@ class TestStagingCleanupAfterDeploy:
         mock_s3_staging.delete_object.side_effect = delete_object_side_effect
 
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -809,7 +809,7 @@ class TestStagingCleanupAfterDeploy:
             get_object_side_effect=get_fail
         )
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -828,7 +828,7 @@ class TestStagingCleanupAfterDeploy:
             get_object_side_effect=get_fail
         )
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -848,7 +848,7 @@ class TestStagingCleanupAfterDeploy:
             put_object_side_effect=put_fail
         )
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -871,7 +871,7 @@ class TestStagingCleanupAfterDeploy:
             put_object_side_effect=put_fail_second
         )
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -889,7 +889,7 @@ class TestDeployHistoryWrite:
         """_write_frontend_deploy_history must be called once on full success."""
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -904,7 +904,7 @@ class TestDeployHistoryWrite:
         """_write_frontend_deploy_history must receive the project name from DDB item."""
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -920,7 +920,7 @@ class TestDeployHistoryWrite:
         """_write_frontend_deploy_history receives deploy_status='deployed' on full success."""
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -941,7 +941,7 @@ class TestDeployHistoryWrite:
             get_object_side_effect=get_fail
         )
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -957,7 +957,7 @@ class TestDeployHistoryWrite:
         """_write_frontend_deploy_history must NOT be called when action=deny."""
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -972,7 +972,7 @@ class TestDeployHistoryWrite:
         """_write_frontend_deploy_history receives correct success_count and fail_count."""
         mock_boto3, mock_s3_target, mock_s3_staging, mock_cf, mock_table = _patch_all()
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \
@@ -991,7 +991,7 @@ class TestDeployHistoryWrite:
             cf_side_effect=ClientError({'Error': {'Code': 'TooManyInvalidationsInProgress', 'Message': 'CF error'}}, 'CreateInvalidation')
         )
         with patch('callbacks.get_s3_client', side_effect=_get_s3_client_factory(mock_s3_target, mock_s3_staging)), \
-             patch('mcp_deploy_frontend.get_cloudfront_client', return_value=mock_cf), \
+             patch('aws_clients.get_cloudfront_client', return_value=mock_cf), \
              patch('callbacks._get_table', return_value=mock_table), \
              patch('callbacks.answer_callback'), \
              patch('callbacks.update_message'), \

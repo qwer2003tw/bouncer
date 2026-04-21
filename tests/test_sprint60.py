@@ -159,7 +159,7 @@ class TestS60004EscalationSchedule:
                 'escalation': True,  # Escalation flag
             }
 
-            with patch('app.send_telegram_message_silent') as mock_send:
+            with patch('telegram.send_telegram_message_silent') as mock_send:
                 # Ensure src/app.py is imported (xdist isolation fix)
                 import sys
                 import os
@@ -210,7 +210,7 @@ class TestS60004EscalationSchedule:
                 # escalation not set (or False)
             }
 
-            with patch('app.send_telegram_message_silent') as mock_send:
+            with patch('telegram.send_telegram_message_silent') as mock_send:
                 # Ensure src/app.py is imported (xdist isolation fix)
                 import sys
                 import os

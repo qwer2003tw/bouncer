@@ -59,8 +59,8 @@ class TestCmdPreviewFallback:
 
     def _call_send_notification(self, app_mod, pending_requests):
         """Call _send_trust_expiry_notification directly."""
-        with patch('app.send_telegram_message_silent') as mock_silent, \
-             patch('app.send_telegram_message') as mock_msg:
+        with patch('telegram.send_telegram_message_silent') as mock_silent, \
+             patch('telegram.send_telegram_message') as mock_msg:
             app_mod._send_trust_expiry_notification(
                 trust_id='trust-test-001',
                 source='Test Bot',

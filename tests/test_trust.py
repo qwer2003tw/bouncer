@@ -255,7 +255,7 @@ class TestTrustMore:
 class TestTrustAutoApprove:
     """Trust Session 自動批准測試"""
     
-    @patch('app.send_telegram_message_silent')
+    @patch('telegram.send_telegram_message_silent')
     def test_trust_auto_approve_flow(self, mock_silent, app_module):
         """信任時段內的自動批准流程"""
         import mcp_execute
@@ -1095,7 +1095,7 @@ class TestHandleTrustExpiry:
     # ── Scenario 2+3: queries pending and sends notification ─────────────────
 
     @patch('telegram.send_message_with_entities')
-    @patch('app.send_telegram_message_silent')
+    @patch('telegram.send_telegram_message_silent')
     def test_handle_trust_expiry_with_pending_requests(self, mock_silent, mock_entities, app_module):
         """handler finds pending requests and sends a notification with correct count."""
         import time
@@ -1151,7 +1151,7 @@ class TestHandleTrustExpiry:
         # Telegram notification should have been sent (trust_session_summary uses send_message_with_entities)
         assert mock_entities.called or mock_silent.called
 
-    @patch('app.send_telegram_message_silent')
+    @patch('telegram.send_telegram_message_silent')
     def test_handle_trust_expiry_no_pending_requests(self, mock_silent, app_module):
         """Edge case: no pending requests → notification sent, count=0."""
         import time
@@ -1189,7 +1189,7 @@ class TestHandleTrustExpiry:
         # Notification still sent (informing 0 pending)
         assert mock_silent.called
 
-    @patch('app.send_telegram_message_silent')
+    @patch('telegram.send_telegram_message_silent')
     def test_handle_trust_expiry_missing_trust_id(self, mock_silent, app_module):
         """Missing trust_id → skipped gracefully, no notification."""
         event = {
@@ -1204,7 +1204,7 @@ class TestHandleTrustExpiry:
         assert body['reason'] == 'missing_trust_id'
         mock_silent.assert_not_called()
 
-    @patch('app.send_telegram_message_silent')
+    @patch('telegram.send_telegram_message_silent')
     def test_handle_trust_expiry_trust_not_found(self, mock_silent, app_module):
         """Trust session already revoked → skipped gracefully."""
         event = {
@@ -1219,8 +1219,8 @@ class TestHandleTrustExpiry:
         assert body['reason'] == 'not_found'
         mock_silent.assert_not_called()
 
-    @patch('app.send_telegram_message')
-    @patch('app.send_telegram_message_silent')
+    @patch('telegram.send_telegram_message')
+    @patch('telegram.send_telegram_message_silent')
     def test_handle_trust_expiry_notification_content(self, mock_silent, mock_msg, app_module):
         """Notification text mentions pending count when N > 0."""
         import time
@@ -1278,7 +1278,7 @@ class TestHandleTrustExpiry:
         assert '1' in combined  # pending count or trust ID
         assert len(all_texts) > 0  # at least one notification sent
 
-    @patch('app.send_telegram_message_silent')
+    @patch('telegram.send_telegram_message_silent')
     def test_lambda_handler_routes_trust_expiry(self, mock_silent, app_module):
         """lambda_handler correctly routes trust_expiry action."""
         import time

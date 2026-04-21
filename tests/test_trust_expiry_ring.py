@@ -42,8 +42,8 @@ class TestTrustExpiryRing:
 
     def test_no_pending_sends_silent(self, app_mod):
         """With 0 pending requests, should use send_telegram_message_silent."""
-        with patch('app.send_telegram_message_silent') as mock_silent, \
-             patch('app.send_telegram_message') as mock_ring:
+        with patch('telegram.send_telegram_message_silent') as mock_silent, \
+             patch('telegram.send_telegram_message') as mock_ring:
             app_mod._send_trust_expiry_notification(
                 trust_id='trust-no-pending',
                 source='Test Bot',
@@ -56,8 +56,8 @@ class TestTrustExpiryRing:
 
     def test_with_pending_sends_ring(self, app_mod):
         """With pending requests, should use send_telegram_message (rings)."""
-        with patch('app.send_telegram_message_silent') as mock_silent, \
-             patch('app.send_telegram_message') as mock_ring:
+        with patch('telegram.send_telegram_message_silent') as mock_silent, \
+             patch('telegram.send_telegram_message') as mock_ring:
             pending = [
                 {'request_id': 'req-001', 'command': 'aws s3 ls'},
             ]
@@ -73,8 +73,8 @@ class TestTrustExpiryRing:
 
     def test_multiple_pending_sends_ring(self, app_mod):
         """With multiple pending requests, should still ring."""
-        with patch('app.send_telegram_message_silent') as mock_silent, \
-             patch('app.send_telegram_message') as mock_ring:
+        with patch('telegram.send_telegram_message_silent') as mock_silent, \
+             patch('telegram.send_telegram_message') as mock_ring:
             pending = [
                 {'request_id': f'req-{i:03d}', 'command': f'aws s3 ls {i}'}
                 for i in range(7)
@@ -91,8 +91,8 @@ class TestTrustExpiryRing:
 
     def test_pending_message_contains_count(self, app_mod):
         """Notification text should mention the pending count."""
-        with patch('app.send_telegram_message') as mock_ring, \
-             patch('app.send_telegram_message_silent'):
+        with patch('telegram.send_telegram_message') as mock_ring, \
+             patch('telegram.send_telegram_message_silent'):
             pending = [
                 {'request_id': 'req-001', 'command': 'aws ec2 describe-instances'},
                 {'request_id': 'req-002', 'command': 'aws s3 ls'},
@@ -110,8 +110,8 @@ class TestTrustExpiryRing:
 
     def test_no_pending_message_indicates_no_action(self, app_mod):
         """Silent notification text should indicate no pending requests."""
-        with patch('app.send_telegram_message_silent') as mock_silent, \
-             patch('app.send_telegram_message'):
+        with patch('telegram.send_telegram_message_silent') as mock_silent, \
+             patch('telegram.send_telegram_message'):
             app_mod._send_trust_expiry_notification(
                 trust_id='trust-silent-check',
                 source='Test Bot',
@@ -126,8 +126,8 @@ class TestTrustExpiryRing:
 
     def test_pending_count_1_triggers_ring(self, app_mod):
         """Boundary: exactly 1 pending should trigger ring (not silent)."""
-        with patch('app.send_telegram_message_silent') as mock_silent, \
-             patch('app.send_telegram_message') as mock_ring:
+        with patch('telegram.send_telegram_message_silent') as mock_silent, \
+             patch('telegram.send_telegram_message') as mock_ring:
             app_mod._send_trust_expiry_notification(
                 trust_id='trust-boundary',
                 source='Boundary Test',
@@ -140,8 +140,8 @@ class TestTrustExpiryRing:
 
     def test_trust_id_in_notification_text(self, app_mod):
         """Trust ID should appear in the notification text."""
-        with patch('app.send_telegram_message_silent') as mock_silent, \
-             patch('app.send_telegram_message'):
+        with patch('telegram.send_telegram_message_silent') as mock_silent, \
+             patch('telegram.send_telegram_message'):
             trust_id = 'trust-abc123xyz'
             app_mod._send_trust_expiry_notification(
                 trust_id=trust_id,

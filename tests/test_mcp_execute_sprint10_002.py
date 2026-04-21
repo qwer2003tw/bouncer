@@ -246,10 +246,10 @@ class TestGrantSessionAwsCliFailure:
         }
 
         with patch('execute_pipeline.GRANT_SESSION_ENABLED', True), \
-             patch('execute_pipeline.get_grant_session', return_value=grant), \
-             patch('execute_pipeline.normalize_command', return_value=ctx_mock.command), \
-             patch('execute_pipeline.is_command_in_grant', return_value=True), \
-             patch('execute_pipeline.try_use_grant_command', return_value=True), \
+             patch('grant.get_grant_session', return_value=grant), \
+             patch('grant.normalize_command', return_value=ctx_mock.command), \
+             patch('grant.is_command_in_grant', return_value=True), \
+             patch('grant.try_use_grant_command', return_value=True), \
              patch('execute_pipeline.execute_command', return_value=cmd_result), \
              patch('execute_pipeline.emit_metric'), \
              patch('execute_pipeline.store_paged_output', return_value=PaginatedOutput(
