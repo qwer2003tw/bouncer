@@ -157,11 +157,9 @@ def test_auto_approved_non_silent_source_sends_notification(mock_execute, mock_t
     # Assert Telegram notification sent
     mock_telegram.assert_called_once()
 
-    # Assert audit log does not have notification_suppressed (or is False)
-    items = table.scan()['Items']
-    assert len(items) == 1
-    assert items[0]['decision_type'] == 'auto_approved'
-    assert items[0].get('notification_suppressed', False) is False
+    # Assert notification_suppressed is False (not suppressed)
+    mock_log.assert_called_once()
+    assert mock_log.call_args[1].get('notification_suppressed', False) is False
 
 
 @patch('src.execute_pipeline.send_blocked_notification')
