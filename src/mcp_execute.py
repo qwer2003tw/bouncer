@@ -234,6 +234,10 @@ def mcp_tool_execute_native(req_id: str, arguments: dict) -> dict:
             'isError': True
         })
 
+    # Resolve account: aws.account (canonical) → bouncer.account (fallback)
+    if not account_id:
+        account_id = bouncer_section.get('account', None)
+
     # Convert boto3 operation to kebab-case for synthetic command (for compliance checking)
     # e.g. create_cluster -> create-cluster
     operation_kebab = operation.replace('_', '-')
