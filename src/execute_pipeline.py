@@ -12,6 +12,7 @@ from typing import Optional
 from botocore.exceptions import ClientError
 from aws_lambda_powertools import Logger
 
+from config_store import _is_silent_source
 from execute_context import ExecuteContext
 from execute_helpers import _safe_risk_category, _safe_risk_factors
 from utils import mcp_result, generate_request_id, log_decision, generate_display_summary, record_execution_error, extract_exit_code
@@ -391,7 +392,10 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
     paged = store_paged_output(request_id, result)
 
     # Silent Telegram notification for safelist auto-approve (sprint24-003: throttled)
-    if not _should_throttle_notification('auto_approve'):
+    # Silent notification mode (#380): skip notification for configured sources
+    notification_suppressed = _is_silent_source(ctx.source)
+
+    if not notification_suppressed and not _should_throttle_notification('auto_approve'):
         try:
             reason_line = f"\U0001f4ac *原因：* {escape_markdown(ctx.reason or '(未填寫)')}\n" if ctx.reason else ""
             account_line = (
@@ -432,7 +436,13 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
         except Exception:  # noqa: BLE001 — notification is best-effort
             logger.warning("[EXECUTE] Result notification failed (non-critical)", exc_info=True, extra={"src_module": "execute", "operation": "auto_approve_notification"})
     else:
-        logger.info("Skipped auto-approve notification for command: %s...", ctx.command[:50], extra={"src_module": "execute", "operation": "auto_approve_notification"})
+        if notification_suppressed:
+            logger.info("Notification suppressed for silent source", extra={
+                "src_module": "execute", "operation": "silent_source",
+                "source": ctx.source, "command": ctx.command[:100]
+            })
+        else:
+            logger.info("Skipped auto-approve notification for command: %s...", ctx.command[:50], extra={"src_module": "execute", "operation": "auto_approve_notification"})
 
     log_decision(
         table=table,
@@ -449,6 +459,7 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
         mode='mcp',
         command_status='failed' if is_failed else 'success',
         result=result,  # store full result, not paged first page
+        notification_suppressed=notification_suppressed,
     )
 
     # Record execution error to DDB if command failed (sprint9-001)

@@ -874,3 +874,50 @@ MCP_TOOLS['bouncer_whoami'] = {
         'required': [],
     },
 }
+
+MCP_TOOLS['bouncer_config_get'] = {
+    'description': 'Get a dynamic config value from bouncer-config DynamoDB table. Returns the value or default if not found.',
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'key': {
+                'type': 'string',
+                'description': 'Config key to retrieve'
+            },
+            'default': {
+                'description': 'Default value if key not found (any type)'
+            },
+        },
+        'required': ['key'],
+    },
+}
+
+MCP_TOOLS['bouncer_config_set'] = {
+    'description': 'Set a dynamic config value in bouncer-config DynamoDB table. Value can be any JSON-serializable type.',
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'key': {
+                'type': 'string',
+                'description': 'Config key to set'
+            },
+            'value': {
+                'description': 'Value to store (any JSON-serializable type: string, number, boolean, array, object)'
+            },
+            'updated_by': {
+                'type': 'string',
+                'description': 'Identity of who is updating this config (default: mcp)'
+            },
+        },
+        'required': ['key', 'value'],
+    },
+}
+
+MCP_TOOLS['bouncer_config_list'] = {
+    'description': 'List all dynamic config keys and values from bouncer-config DynamoDB table.',
+    'parameters': {
+        'type': 'object',
+        'properties': {},
+        'required': [],
+    },
+}

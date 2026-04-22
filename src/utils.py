@@ -284,6 +284,7 @@ def log_decision(table, request_id, command, reason, source, account_id,
                  decision_type, risk_score=None, risk_factors=None,
                  sequence_modifier=None, exit_code: Optional[int] = None,
                  error_output: Optional[str] = None, result: Optional[str] = None,
+                 notification_suppressed: bool = False,
                  **kwargs):
     """統一的決策記錄函數 — 記錄所有審批決策到 requests 表"""
     now = int(time.time())
@@ -324,6 +325,8 @@ def log_decision(table, request_id, command, reason, source, account_id,
             item['result'] = truncated + '\n[truncated — result exceeded 300KB]'
         else:
             item['result'] = result
+    if notification_suppressed:
+        item['notification_suppressed'] = notification_suppressed
     item.update({k: v for k, v in kwargs.items() if v is not None})
     try:
         table.put_item(Item=item)
