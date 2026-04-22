@@ -8,11 +8,18 @@ from unittest.mock import patch, MagicMock
 
 def _reset_caches():
     """Reset all module-level caches so they reinitialize inside mock context."""
-    from src import config_store, db
+    from src import config_store, db, execute_pipeline
     config_store._cache.clear()
     config_store._ddb_table = None
     if hasattr(db, '_table'):
         db._table = None
+    # Reset cached table binding in execute_pipeline (from db import table)
+    import boto3
+    try:
+        dynamodb = boto3.resource('dynamodb')
+        execute_pipeline.table = dynamodb.Table('bouncer-prod-requests')
+    except Exception:
+        pass
 
 
 @pytest.fixture
