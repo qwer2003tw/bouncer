@@ -83,6 +83,7 @@ def test_auto_approved_silent_source_no_notification(mock_execute, mock_telegram
         grant_id=None,
         smart_decision=None,
         template_scan_result=None,
+        sync_mode=False,
         is_native=False,
     )
 
@@ -144,6 +145,7 @@ def test_auto_approved_non_silent_source_sends_notification(mock_execute, mock_t
         grant_id=None,
         smart_decision=None,
         template_scan_result=None,
+        sync_mode=False,
         is_native=False,
     )
 
@@ -163,7 +165,7 @@ def test_auto_approved_non_silent_source_sends_notification(mock_execute, mock_t
 
 
 @mock_aws
-@patch('src.notifications.send_telegram_message')
+@patch('src.telegram.send_telegram_message')
 def test_blocked_silent_source_still_sends_notification(mock_telegram, ddb_tables, monkeypatch):
     """Test blocked command with silent source → notification still sent (silent only applies to auto_approved)."""
     monkeypatch.setenv('TABLE_NAME', 'bouncer-prod-requests')
@@ -200,6 +202,7 @@ def test_blocked_silent_source_still_sends_notification(mock_telegram, ddb_table
         grant_id=None,
         smart_decision=None,
         template_scan_result=None,
+        sync_mode=False,
         is_native=False,
     )
 
@@ -296,6 +299,7 @@ def test_manual_approval_silent_source_sends_notification(mock_post_setup, mock_
         grant_id=None,
         smart_decision=None,
         template_scan_result=None,
+        sync_mode=False,
         is_native=False,
     )
 
