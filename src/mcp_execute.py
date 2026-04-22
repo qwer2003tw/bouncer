@@ -21,8 +21,9 @@ from execute_helpers import _extract_actual_decision, _log_smart_approval_shadow
 from chain_analyzer import check_chain_risks
 from commands import generate_eks_token
 from accounts import get_account, init_default_account, list_accounts, validate_account_id
-from utils import mcp_result
+from utils import mcp_result, mcp_error
 from constants import DEFAULT_ACCOUNT_ID, DEFAULT_REGION, MCP_MAX_WAIT
+from agent_keys import identify_agent
 
 logger = Logger(service="bouncer")
 
@@ -41,6 +42,19 @@ def mcp_tool_execute(req_id: str, arguments: dict) -> dict:
     ctx = _parse_execute_request(req_id, arguments)
     if not isinstance(ctx, ExecuteContext):
         return ctx  # validation error — already an MCP response dict
+
+    # Phase 1.5: Agent identity check (#418) — server-side source override
+    bouncer_key = arguments.get('bouncer_key') or arguments.get('bouncer', {}).get('key')
+    if bouncer_key:
+        agent = identify_agent(bouncer_key)
+        if agent:
+            # Server-side source override — cannot be spoofed
+            ctx.source = agent['agent_name']
+            ctx.agent_id = agent['agent_id']
+            ctx.verified_identity = True
+        else:
+            # Invalid key — reject request
+            return mcp_error(req_id, -32001, "Invalid or expired agent key")
 
     # Phase 2: Smart approval shadow scoring (before any decision)
     _score_risk(ctx)
@@ -332,6 +346,19 @@ def mcp_tool_execute_native(req_id: str, arguments: dict) -> dict:
         native_params=params,
         native_region=region,
     )
+
+    # Phase 1.5: Agent identity check (#418) — server-side source override
+    bouncer_key = arguments.get('bouncer_key') or bouncer_section.get('key')
+    if bouncer_key:
+        agent = identify_agent(bouncer_key)
+        if agent:
+            # Server-side source override — cannot be spoofed
+            ctx.source = agent['agent_name']
+            ctx.agent_id = agent['agent_id']
+            ctx.verified_identity = True
+        else:
+            # Invalid key — reject request
+            return mcp_error(req_id, -32001, "Invalid or expired agent key")
 
     # Phase 2: Smart approval shadow scoring (before any decision)
     _score_risk(ctx)

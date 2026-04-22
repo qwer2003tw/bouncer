@@ -285,6 +285,8 @@ def log_decision(table, request_id, command, reason, source, account_id,
                  sequence_modifier=None, exit_code: Optional[int] = None,
                  error_output: Optional[str] = None, result: Optional[str] = None,
                  notification_suppressed: bool = False,
+                 agent_id: Optional[str] = None,
+                 verified_identity: bool = False,
                  **kwargs):
     """統一的決策記錄函數 — 記錄所有審批決策到 requests 表"""
     now = int(time.time())
@@ -301,6 +303,10 @@ def log_decision(table, request_id, command, reason, source, account_id,
         'decision_latency_ms': 0,
         'ttl': now + AUDIT_TTL_LONG,  # 90 天保留（blocked/compliance 30 天）
     }
+    if agent_id:
+        item['agent_id'] = agent_id
+    if verified_identity:
+        item['verified_identity'] = verified_identity
     if decision_type in ('blocked', 'compliance_violation'):
         item['ttl'] = now + AUDIT_TTL_SHORT  # 30 天
     if risk_score is not None:

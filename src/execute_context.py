@@ -78,6 +78,9 @@ class ExecuteContext:
     native_operation: Optional[str] = None  # boto3 operation (e.g. 'create_cluster')
     native_params: Optional[dict] = None  # boto3 params dict
     native_region: Optional[str] = None  # AWS region
+    # Per-agent API key fields (#418)
+    agent_id: Optional[str] = None  # server-verified agent identity (e.g. "private-bot")
+    verified_identity: bool = False  # True if source was set by server via API key
 
 
 def _parse_execute_request(req_id, arguments: dict) -> 'dict | ExecuteContext':

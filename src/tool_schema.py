@@ -921,3 +921,72 @@ MCP_TOOLS['bouncer_config_list'] = {
         'required': [],
     },
 }
+
+# ========== Agent API Key Management Tools ==========
+MCP_TOOLS['bouncer_agent_key_create'] = {
+    'description': 'Create a new per-agent API key for server-side identity verification. Returns the full key ONCE (never stored in plaintext).',
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'agent_id': {
+                'type': 'string',
+                'description': 'Agent identifier (e.g. "private-bot", "deploy-agent")'
+            },
+            'agent_name': {
+                'type': 'string',
+                'description': 'Human-readable agent name (e.g. "Steven\'s Private Bot")'
+            },
+            'expires_in_days': {
+                'type': 'integer',
+                'description': 'Optional expiry in days (e.g. 90). Omit for no expiry.'
+            },
+        },
+        'required': ['agent_id', 'agent_name'],
+    },
+}
+
+MCP_TOOLS['bouncer_agent_key_revoke'] = {
+    'description': 'Revoke an existing agent API key. Use key_prefix (shown in list output) to identify the key.',
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'key_prefix': {
+                'type': 'string',
+                'description': 'Key prefix (e.g. "bncr_priv_a1b2c3d4")'
+            },
+            'agent_id': {
+                'type': 'string',
+                'description': 'Agent identifier (must match the key owner)'
+            },
+        },
+        'required': ['key_prefix', 'agent_id'],
+    },
+}
+
+MCP_TOOLS['bouncer_agent_key_list'] = {
+    'description': 'List all agent API keys (metadata only, never returns full key or hash).',
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'agent_id': {
+                'type': 'string',
+                'description': 'Optional: filter by agent_id'
+            },
+        },
+        'required': [],
+    },
+}
+
+MCP_TOOLS['bouncer_agent_key_rotate'] = {
+    'description': 'Rotate an agent API key (create new key for existing agent). Old keys remain active until manually revoked.',
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'agent_id': {
+                'type': 'string',
+                'description': 'Agent identifier'
+            },
+        },
+        'required': ['agent_id'],
+    },
+}
