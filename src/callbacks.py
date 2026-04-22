@@ -714,6 +714,7 @@ def _deploy_files_to_frontend(files_manifest: list, s3_staging, s3_target, reque
     """
     deployed = []
     failed = []
+    total_bytes = 0
     staging_bucket = params['staging_bucket']
     frontend_bucket = params['frontend_bucket']
     file_count = params['file_count']
@@ -738,6 +739,7 @@ def _deploy_files_to_frontend(files_manifest: list, s3_staging, s3_target, reque
                 ContentType=content_type,
                 CacheControl=cache_control,
             )
+            total_bytes += len(body)
             deployed.append({'filename': filename, 's3_key': filename})
             logger.info("uploaded file=%s size=%d content_type=%s request_id=%s project=%s", filename, len(body), content_type, request_id, project, extra={"src_module": "callbacks", "operation": "deploy_frontend_upload", "file_name": filename, "request_id": request_id, "project": project})
         except Exception as e:  # noqa: BLE001
@@ -756,7 +758,7 @@ def _deploy_files_to_frontend(files_manifest: list, s3_staging, s3_target, reque
             except Exception:  # noqa: BLE001 — progress update is best-effort
                 logger.warning("Progress update failed at step %d (non-critical)", i + 1, extra={"src_module": "callbacks", "operation": "deploy_frontend_progress", "step": i + 1}, exc_info=True)  # [DEPLOY-FRONTEND] Progress update failed at step
 
-    return deployed, failed
+    return deployed, failed, total_bytes
 
 
 def _invalidate_cloudfront(success_count: int, deploy_role_arn: str, distribution_id: str, request_id: str) -> bool:
@@ -961,7 +963,7 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
 
     # 2. Deploy files to frontend bucket
     s3_staging = get_s3_client()
-    deployed, failed = _deploy_files_to_frontend(
+    deployed, failed, actual_total_bytes = _deploy_files_to_frontend(
         files_manifest, s3_staging, s3_target, request_id, message_id, params, user_id
     )
 
@@ -969,6 +971,11 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
     cf_invalidation_failed = _invalidate_cloudfront(
         len(deployed), params['deploy_role_arn'], params['distribution_id'], request_id
     )
+
+    # Update total_size from actual bytes transferred (fixes #421: presigned path has 0)
+    if actual_total_bytes > 0:
+        params['total_size'] = actual_total_bytes
+        params['size_str'] = format_size_human(actual_total_bytes)
 
     # 4. Finalize: update DDB, metrics, history, and send notifications
     return _finalize_deploy_frontend(
