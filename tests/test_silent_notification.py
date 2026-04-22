@@ -6,37 +6,35 @@ import boto3
 from unittest.mock import patch, MagicMock
 
 
+def _reset_caches():
+    """Reset all module-level caches so they reinitialize inside mock context."""
+    from src import config_store, db
+    config_store._cache.clear()
+    config_store._ddb_table = None
+    if hasattr(db, '_table'):
+        db._table = None
+
+
 @pytest.fixture
 def ddb_tables():
-    """Create mock DynamoDB tables."""
+    """Create mock DynamoDB tables with proper cache reset."""
     with mock_aws():
         dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
-
-        # Requests table
-        requests_table = dynamodb.create_table(
+        dynamodb.create_table(
             TableName='bouncer-prod-requests',
-            KeySchema=[
-                {'AttributeName': 'request_id', 'KeyType': 'HASH'}
-            ],
-            AttributeDefinitions=[
-                {'AttributeName': 'request_id', 'AttributeType': 'S'}
-            ],
+            KeySchema=[{'AttributeName': 'request_id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[{'AttributeName': 'request_id', 'AttributeType': 'S'}],
             BillingMode='PAY_PER_REQUEST'
         )
-
-        # Config table
-        config_table = dynamodb.create_table(
+        dynamodb.create_table(
             TableName='bouncer-config',
-            KeySchema=[
-                {'AttributeName': 'config_key', 'KeyType': 'HASH'}
-            ],
-            AttributeDefinitions=[
-                {'AttributeName': 'config_key', 'AttributeType': 'S'}
-            ],
+            KeySchema=[{'AttributeName': 'config_key', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[{'AttributeName': 'config_key', 'AttributeType': 'S'}],
             BillingMode='PAY_PER_REQUEST'
         )
-
-        yield {'requests': requests_table, 'config': config_table}
+        _reset_caches()
+        yield
+        _reset_caches()
 
 
 @patch('src.execute_pipeline.send_telegram_message_silent')
@@ -46,11 +44,7 @@ def test_auto_approved_silent_source_no_notification(mock_execute, mock_telegram
     monkeypatch.setenv('TABLE_NAME', 'bouncer-prod-requests')
     monkeypatch.setenv('CONFIG_TABLE', 'bouncer-config')
 
-    # Clear module-level caches
-    from src import config_store, db
-    config_store._cache.clear()
-    config_store._ddb_table = None
-    db._table = None
+
 
     # Set silent_sources config
     from src.config_store import set_config
@@ -107,11 +101,7 @@ def test_auto_approved_non_silent_source_sends_notification(mock_execute, mock_t
     monkeypatch.setenv('TABLE_NAME', 'bouncer-prod-requests')
     monkeypatch.setenv('CONFIG_TABLE', 'bouncer-config')
 
-    # Clear module-level caches
-    from src import config_store, db
-    config_store._cache.clear()
-    config_store._ddb_table = None
-    db._table = None
+
 
     # Set silent_sources config (does not match source)
     from src.config_store import set_config
@@ -167,11 +157,7 @@ def test_blocked_silent_source_still_sends_notification(mock_blocked_notif, ddb_
     monkeypatch.setenv('TABLE_NAME', 'bouncer-prod-requests')
     monkeypatch.setenv('CONFIG_TABLE', 'bouncer-config')
 
-    # Clear module-level caches
-    from src import config_store, db
-    config_store._cache.clear()
-    config_store._ddb_table = None
-    db._table = None
+
 
     # Set silent_sources config
     from src.config_store import set_config
@@ -214,10 +200,7 @@ def test_wildcard_matching(ddb_tables, monkeypatch):
     """Test silent source wildcard matching (prefix*)."""
     monkeypatch.setenv('CONFIG_TABLE', 'bouncer-config')
 
-    # Clear module-level cache
-    from src import config_store
-    config_store._cache.clear()
-    config_store._ddb_table = None
+
 
     from src.config_store import set_config, _is_silent_source
 
@@ -239,10 +222,7 @@ def test_empty_config_all_notifications_sent(ddb_tables, monkeypatch):
     """Test empty silent_sources config → all notifications sent."""
     monkeypatch.setenv('CONFIG_TABLE', 'bouncer-config')
 
-    # Clear module-level cache
-    from src import config_store
-    config_store._cache.clear()
-    config_store._ddb_table = None
+
 
     from src.config_store import _is_silent_source
 
@@ -260,11 +240,7 @@ def test_manual_approval_silent_source_sends_notification(mock_post_setup, mock_
     monkeypatch.setenv('TABLE_NAME', 'bouncer-prod-requests')
     monkeypatch.setenv('CONFIG_TABLE', 'bouncer-config')
 
-    # Clear module-level caches
-    from src import config_store, db
-    config_store._cache.clear()
-    config_store._ddb_table = None
-    db._table = None
+
 
     # Set silent_sources config
     from src.config_store import set_config
@@ -311,10 +287,7 @@ def test_is_silent_source_edge_cases(ddb_tables, monkeypatch):
     """Test _is_silent_source edge cases."""
     monkeypatch.setenv('CONFIG_TABLE', 'bouncer-config')
 
-    # Clear module-level cache
-    from src import config_store
-    config_store._cache.clear()
-    config_store._ddb_table = None
+
 
     from src.config_store import set_config, _is_silent_source
 
