@@ -66,6 +66,10 @@ MCP_TOOLS = {
                             'type': 'boolean',
                             'description': '同步模式：等待審批結果（可能超時），預設 false',
                             'default': False
+                        },
+                        'account': {
+                            'type': 'string',
+                            'description': '目標 AWS 帳號 ID（12 位數字）。等同 aws.account，放這裡也可以。不填則使用預設帳號'
                         }
                     },
                     'required': ['trust_scope']
