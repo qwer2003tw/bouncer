@@ -164,8 +164,8 @@ def test_auto_approved_non_silent_source_sends_notification(mock_execute, mock_t
 
 
 @mock_aws
-@patch('src.telegram.send_telegram_message')
-def test_blocked_silent_source_still_sends_notification(mock_telegram, ddb_tables, monkeypatch):
+@patch('src.execute_pipeline.send_blocked_notification')
+def test_blocked_silent_source_still_sends_notification(mock_blocked_notif, ddb_tables, monkeypatch):
     """Test blocked command with silent source → notification still sent (silent only applies to auto_approved)."""
     monkeypatch.setenv('TABLE_NAME', 'bouncer-prod-requests')
     monkeypatch.setenv('CONFIG_TABLE', 'bouncer-config')
@@ -210,7 +210,7 @@ def test_blocked_silent_source_still_sends_notification(mock_telegram, ddb_table
         _check_blocked(ctx)
 
     # Assert Telegram notification sent (blocked notifications are not suppressed)
-    assert mock_telegram.call_count >= 1
+    assert mock_blocked_notif.call_count >= 1
 
 
 @mock_aws
