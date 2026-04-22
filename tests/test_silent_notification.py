@@ -63,7 +63,7 @@ def test_auto_approved_silent_source_no_notification(mock_execute, mock_telegram
 
     # Mock command execution
     mock_execute.return_value = 'command output'
-    mock_paged.return_value = MagicMock(telegram_pages=1)
+    from types import SimpleNamespace; mock_paged.return_value = SimpleNamespace(paged=False, result='command output', page=1, total_pages=1, output_length=14, next_page=None, telegram_pages=1)
 
     # Import after mocking
     from src.execute_pipeline import _check_auto_approve
@@ -122,7 +122,7 @@ def test_auto_approved_non_silent_source_sends_notification(mock_execute, mock_t
 
     # Mock command execution
     mock_execute.return_value = 'command output'
-    mock_paged.return_value = MagicMock(telegram_pages=1)
+    from types import SimpleNamespace; mock_paged.return_value = SimpleNamespace(paged=False, result='command output', page=1, total_pages=1, output_length=14, next_page=None, telegram_pages=1)
 
     # Import after mocking
     from src.execute_pipeline import _check_auto_approve
