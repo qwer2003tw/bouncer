@@ -161,6 +161,8 @@ def _check_compliance(ctx: ExecuteContext) -> Optional[dict]:
                 risk_factors=_safe_risk_factors(ctx.smart_decision),
                 violation_rule_id=violation.rule_id,
                 violation_rule_name=violation.rule_name,
+                agent_id=ctx.agent_id,
+                verified_identity=ctx.verified_identity,
             )
             return mcp_result(ctx.req_id, {
                 'content': [{
@@ -212,6 +214,8 @@ def _check_blocked(ctx: ExecuteContext) -> Optional[dict]:
             risk_score=ctx.smart_decision.final_score if ctx.smart_decision else None,
             risk_category=_safe_risk_category(ctx.smart_decision),
             risk_factors=_safe_risk_factors(ctx.smart_decision),
+            agent_id=ctx.agent_id,
+            verified_identity=ctx.verified_identity,
         )
         return mcp_result(ctx.req_id, {
             'content': [{
@@ -334,6 +338,8 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
             grant_id=grant_id,
             mode='mcp',
             command_status='failed' if is_failed else 'success',
+            agent_id=ctx.agent_id,
+            verified_identity=ctx.verified_identity,
         )
 
         # Record execution error to DDB if command failed (sprint9-001)
@@ -460,6 +466,8 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
         command_status='failed' if is_failed else 'success',
         result=result,  # store full result, not paged first page
         notification_suppressed=notification_suppressed,
+        agent_id=ctx.agent_id,
+        verified_identity=ctx.verified_identity,
     )
 
     # Record execution error to DDB if command failed (sprint9-001)
@@ -607,6 +615,8 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
         trust_session_id=trust_session['request_id'],
         mode='mcp',
         command_status='failed' if is_failed else 'success',
+        agent_id=ctx.agent_id,
+        verified_identity=ctx.verified_identity,
     )
 
     # Record execution error to DDB if command failed (sprint9-001)
