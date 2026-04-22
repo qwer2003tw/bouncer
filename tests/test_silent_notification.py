@@ -1,6 +1,5 @@
 """Tests for silent notification mode (#380)."""
 
-import json
 import pytest
 from moto import mock_aws
 import boto3
@@ -90,7 +89,7 @@ def test_auto_approved_silent_source_no_notification(mock_execute, mock_telegram
     # Call _check_auto_approve
     with patch('src.execute_pipeline.is_auto_approve', return_value=True):
         with patch('src.execute_pipeline._should_throttle_notification', return_value=False):
-            result = _check_auto_approve(ctx)
+            _check_auto_approve(ctx)
 
     # Assert no Telegram notification sent
     mock_telegram.assert_not_called()
@@ -152,7 +151,7 @@ def test_auto_approved_non_silent_source_sends_notification(mock_execute, mock_t
     # Call _check_auto_approve
     with patch('src.execute_pipeline.is_auto_approve', return_value=True):
         with patch('src.execute_pipeline._should_throttle_notification', return_value=False):
-            result = _check_auto_approve(ctx)
+            _check_auto_approve(ctx)
 
     # Assert Telegram notification sent
     mock_telegram.assert_called_once()
@@ -208,7 +207,7 @@ def test_blocked_silent_source_still_sends_notification(mock_telegram, ddb_table
 
     # Call _check_blocked
     with patch('src.commands.get_block_reason', return_value='User management is blocked'):
-        result = _check_blocked(ctx)
+        _check_blocked(ctx)
 
     # Assert Telegram notification sent (blocked notifications are not suppressed)
     assert mock_telegram.call_count >= 1
@@ -305,7 +304,7 @@ def test_manual_approval_silent_source_sends_notification(mock_post_setup, mock_
 
     # Call _submit_for_approval
     with patch('src.execute_pipeline.get_scheduler_service', return_value=MagicMock()):
-        result = _submit_for_approval(ctx)
+        _submit_for_approval(ctx)
 
     # Assert approval request notification sent (manual approval ignores silent config)
     mock_send_approval.assert_called_once()
