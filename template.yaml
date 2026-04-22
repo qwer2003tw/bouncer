@@ -241,6 +241,30 @@ Resources:
           Value: "Smart approval shadow mode data collection"
 
   # ============================================================
+  # DynamoDB - Dynamic Config Store (#380)
+  # ============================================================
+  ConfigTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: bouncer-config
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: config_key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: config_key
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: Bouncer
+        - Key: auto-delete
+          Value: "no"
+
+  # ============================================================
   # IAM - Default 帳號 BouncerRole（命令執行用）
   # Lambda assume 此 role 後執行 AWS CLI 命令
   # 與 cross-account BouncerRole 權限一致
@@ -443,6 +467,7 @@ Resources:
           ACCOUNTS_TABLE_NAME: !Ref AccountsTable
           COMMAND_HISTORY_TABLE: !Ref CommandHistoryTable
           SHADOW_TABLE: !Ref ShadowApprovalsTable
+          CONFIG_TABLE: !Ref ConfigTable
           ENABLE_HMAC: !Ref EnableHmac
           MCP_MAX_WAIT: !Ref McpMaxWait
           DEFAULT_ACCOUNT_ID: !Ref DefaultAccountId
@@ -469,6 +494,8 @@ Resources:
             TableName: !Ref CommandHistoryTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ShadowApprovalsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConfigTable
         # Deployer tables
         - DynamoDBCrudPolicy:
             TableName: bouncer-projects

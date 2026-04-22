@@ -1179,32 +1179,18 @@ class TestDeployNotificationFallback:
     def test_notification_fallback_from_role_arn(self, app_module):
         """target_account 空，從 target_role_arn 解析帳號 ID 顯示在通知中"""
         from deployer import send_deploy_approval_request
-        import urllib.request
 
         project = {
             'project_id': 'test-fallback',
             'name': 'Fallback Test',
             'stack_name': 'fallback-stack',
             'target_role_arn': 'arn:aws:iam::222222222222:role/BouncerRole',
-            # 注意：沒有 target_account
         }
 
-        with patch('urllib.request.urlopen') as mock_urlopen:
-            mock_resp = MagicMock()
-            mock_resp.read.return_value = b'{"ok":true,"result":{"message_id":1}}'
-            mock_resp.__enter__ = lambda s: mock_resp
-            mock_resp.__exit__ = MagicMock(return_value=False)
-            mock_urlopen.return_value = mock_resp
-
+        with patch('deployer.send_telegram_message', return_value={'ok': True, 'result': {'message_id': 1}}) as mock_tg:
             send_deploy_approval_request('deploy-test-123', project, 'main', 'test', 'test-bot')
-
-            # 檢查發送的訊息包含解析出的帳號
-            call_args = mock_urlopen.call_args
-            request_obj = call_args[0][0]
-            body = request_obj.data.decode('utf-8')
-            import json
-            params = json.loads(body)
-            text = params['text']
+            mock_tg.assert_called_once()
+            text = mock_tg.call_args[0][0]
             assert '222222222222' in text
             assert '帳號' in text
 
@@ -1220,21 +1206,10 @@ class TestDeployNotificationFallback:
             'target_role_arn': 'arn:aws:iam::222222222222:role/BouncerRole',
         }
 
-        with patch('urllib.request.urlopen') as mock_urlopen:
-            mock_resp = MagicMock()
-            mock_resp.read.return_value = b'{"ok":true,"result":{"message_id":1}}'
-            mock_resp.__enter__ = lambda s: mock_resp
-            mock_resp.__exit__ = MagicMock(return_value=False)
-            mock_urlopen.return_value = mock_resp
-
+        with patch('deployer.send_telegram_message', return_value={'ok': True, 'result': {'message_id': 1}}) as mock_tg:
             send_deploy_approval_request('deploy-test-456', project, 'main', 'test', 'test-bot')
-
-            call_args = mock_urlopen.call_args
-            request_obj = call_args[0][0]
-            body = request_obj.data.decode('utf-8')
-            import json
-            params = json.loads(body)
-            text = params['text']
+            mock_tg.assert_called_once()
+            text = mock_tg.call_args[0][0]
             assert 'Dev (222222222222)' in text
 
     def test_notification_no_account_at_all(self, app_module):
@@ -1247,21 +1222,10 @@ class TestDeployNotificationFallback:
             'stack_name': 'local-stack',
         }
 
-        with patch('urllib.request.urlopen') as mock_urlopen:
-            mock_resp = MagicMock()
-            mock_resp.read.return_value = b'{"ok":true,"result":{"message_id":1}}'
-            mock_resp.__enter__ = lambda s: mock_resp
-            mock_resp.__exit__ = MagicMock(return_value=False)
-            mock_urlopen.return_value = mock_resp
-
+        with patch('deployer.send_telegram_message', return_value={'ok': True, 'result': {'message_id': 1}}) as mock_tg:
             send_deploy_approval_request('deploy-test-789', project, 'main', 'test', 'test-bot')
-
-            call_args = mock_urlopen.call_args
-            request_obj = call_args[0][0]
-            body = request_obj.data.decode('utf-8')
-            import json
-            params = json.loads(body)
-            text = params['text']
+            mock_tg.assert_called_once()
+            text = mock_tg.call_args[0][0]
             assert '帳號' not in text
 
 
