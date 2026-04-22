@@ -39,7 +39,6 @@ def ddb_tables():
         yield {'requests': requests_table, 'config': config_table}
 
 
-@mock_aws
 @patch('src.execute_pipeline.send_telegram_message_silent')
 @patch('src.execute_pipeline.execute_command')
 def test_auto_approved_silent_source_no_notification(mock_execute, mock_telegram, ddb_tables, monkeypatch):
@@ -101,7 +100,6 @@ def test_auto_approved_silent_source_no_notification(mock_execute, mock_telegram
     assert items[0]['notification_suppressed'] is True
 
 
-@mock_aws
 @patch('src.execute_pipeline.send_telegram_message_silent')
 @patch('src.execute_pipeline.execute_command')
 def test_auto_approved_non_silent_source_sends_notification(mock_execute, mock_telegram, ddb_tables, monkeypatch):
@@ -163,7 +161,6 @@ def test_auto_approved_non_silent_source_sends_notification(mock_execute, mock_t
     assert items[0].get('notification_suppressed', False) is False
 
 
-@mock_aws
 @patch('src.execute_pipeline.send_blocked_notification')
 def test_blocked_silent_source_still_sends_notification(mock_blocked_notif, ddb_tables, monkeypatch):
     """Test blocked command with silent source → notification still sent (silent only applies to auto_approved)."""
@@ -213,7 +210,6 @@ def test_blocked_silent_source_still_sends_notification(mock_blocked_notif, ddb_
     assert mock_blocked_notif.call_count >= 1
 
 
-@mock_aws
 def test_wildcard_matching(ddb_tables, monkeypatch):
     """Test silent source wildcard matching (prefix*)."""
     monkeypatch.setenv('CONFIG_TABLE', 'bouncer-config')
