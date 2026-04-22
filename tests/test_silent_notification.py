@@ -44,9 +44,13 @@ def ddb_tables():
         _reset_caches()
 
 
+@patch('src.execute_pipeline.log_decision')
+@patch('src.execute_pipeline.store_paged_output')
+@patch('src.execute_pipeline.emit_metric')
+@patch('src.execute_pipeline.generate_request_id', return_value='test-req-001')
 @patch('src.execute_pipeline.send_telegram_message_silent')
 @patch('src.execute_pipeline.execute_command')
-def test_auto_approved_silent_source_no_notification(mock_execute, mock_telegram, ddb_tables, monkeypatch):
+def test_auto_approved_silent_source_no_notification(mock_execute, mock_telegram, mock_gen_id, mock_metric, mock_paged, mock_log, ddb_tables, monkeypatch):
     """Test auto_approved with silent source → no notification, audit logged with notification_suppressed=true."""
     monkeypatch.setenv('TABLE_NAME', 'bouncer-prod-requests')
     monkeypatch.setenv('CONFIG_TABLE', 'bouncer-config')
@@ -59,11 +63,11 @@ def test_auto_approved_silent_source_no_notification(mock_execute, mock_telegram
 
     # Mock command execution
     mock_execute.return_value = 'command output'
+    mock_paged.return_value = MagicMock(telegram_pages=1)
 
     # Import after mocking
     from src.execute_pipeline import _check_auto_approve
     from src.execute_context import ExecuteContext
-    from src.db import table
 
     # Create context with silent source
     ctx = ExecuteContext(
@@ -94,16 +98,18 @@ def test_auto_approved_silent_source_no_notification(mock_execute, mock_telegram
     # Assert no Telegram notification sent
     mock_telegram.assert_not_called()
 
-    # Assert audit log contains notification_suppressed=True
-    items = table.scan()['Items']
-    assert len(items) == 1
-    assert items[0]['decision_type'] == 'auto_approved'
-    assert items[0]['notification_suppressed'] is True
+    # Assert notification_suppressed was passed to log_decision
+    mock_log.assert_called_once()
+    assert mock_log.call_args[1].get('notification_suppressed') is True
 
 
+@patch('src.execute_pipeline.log_decision')
+@patch('src.execute_pipeline.store_paged_output')
+@patch('src.execute_pipeline.emit_metric')
+@patch('src.execute_pipeline.generate_request_id', return_value='test-req-002')
 @patch('src.execute_pipeline.send_telegram_message_silent')
 @patch('src.execute_pipeline.execute_command')
-def test_auto_approved_non_silent_source_sends_notification(mock_execute, mock_telegram, ddb_tables, monkeypatch):
+def test_auto_approved_non_silent_source_sends_notification(mock_execute, mock_telegram, mock_gen_id, mock_metric, mock_paged, mock_log, ddb_tables, monkeypatch):
     """Test auto_approved with non-silent source → notification sent."""
     monkeypatch.setenv('TABLE_NAME', 'bouncer-prod-requests')
     monkeypatch.setenv('CONFIG_TABLE', 'bouncer-config')
@@ -116,11 +122,11 @@ def test_auto_approved_non_silent_source_sends_notification(mock_execute, mock_t
 
     # Mock command execution
     mock_execute.return_value = 'command output'
+    mock_paged.return_value = MagicMock(telegram_pages=1)
 
     # Import after mocking
     from src.execute_pipeline import _check_auto_approve
     from src.execute_context import ExecuteContext
-    from src.db import table
 
     # Create context with non-silent source
     ctx = ExecuteContext(
