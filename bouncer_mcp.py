@@ -1577,15 +1577,15 @@ def handle_request(request: dict) -> dict:
         elif tool_name == 'bouncer_query_logs':
             result = tool_query_logs(arguments)
         elif tool_name == 'bouncer_logs_allowlist':
-            tool_result = tool_logs_allowlist(arguments)
+            result = tool_logs_allowlist(arguments)
         elif tool_name == 'bouncer_agent_key_create':
-            tool_result = tool_agent_key_create(arguments)
+            result = tool_agent_key_create(arguments)
         elif tool_name == 'bouncer_agent_key_revoke':
-            tool_result = tool_agent_key_revoke(arguments)
+            result = tool_agent_key_revoke(arguments)
         elif tool_name == 'bouncer_agent_key_list':
-            tool_result = tool_agent_key_list(arguments)
+            result = tool_agent_key_list(arguments)
         elif tool_name == 'bouncer_agent_key_rotate':
-            tool_result = tool_agent_key_rotate(arguments)
+            result = tool_agent_key_rotate(arguments)
         else:
             return error_response(req_id, -32602, f'Unknown tool: {tool_name}')
 
