@@ -683,10 +683,8 @@ TOOL_HANDLERS = {
     'bouncer_config_get': mcp_tool_config_get,
     'bouncer_config_set': mcp_tool_config_set,
     'bouncer_config_list': mcp_tool_config_list,
-    'bouncer_agent_key_create': mcp_tool_agent_key_create,
     'bouncer_agent_key_revoke': mcp_tool_agent_key_revoke,
     'bouncer_agent_key_list': mcp_tool_agent_key_list,
-    'bouncer_agent_key_rotate': mcp_tool_agent_key_rotate,
 }
 
 # Deployer handlers are lazy-imported to avoid cold-start cost
