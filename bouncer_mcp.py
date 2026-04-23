@@ -1629,10 +1629,6 @@ def main():
             print(json.dumps(error_response(None, -32603, f'Internal error: {e}')), flush=True)
 
 
-if __name__ == '__main__':
-    main()
-
-
 def tool_agent_key_create(arguments: dict) -> dict:
     """Create a new agent API key."""
     if not SECRET:
@@ -1683,3 +1679,7 @@ def tool_agent_key_rotate(arguments: dict) -> dict:
     }
     result = http_request('POST', '/mcp', payload)
     return parse_mcp_result(result) or result
+if __name__ == '__main__':
+    main()
+
+
