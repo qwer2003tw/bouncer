@@ -23,7 +23,7 @@ from commands import generate_eks_token
 from accounts import get_account, init_default_account, list_accounts, validate_account_id
 from utils import mcp_result, mcp_error
 from constants import DEFAULT_ACCOUNT_ID, DEFAULT_REGION, MCP_MAX_WAIT
-from agent_keys import identify_agent
+from agent_keys import identify_agent, check_scope_authorization
 
 logger = Logger(service="bouncer")
 
@@ -45,8 +45,9 @@ def mcp_tool_execute(req_id: str, arguments: dict) -> dict:
 
     # Phase 1.5: Agent identity check (#418) — server-side source override
     bouncer_key = arguments.get('bouncer_key') or arguments.get('bouncer', {}).get('key')
+    agent = None
     if bouncer_key:
-        agent = identify_agent(bouncer_key)
+        agent = identify_agent(bouncer_key, caller_ip=ctx.caller_ip)
         if agent:
             # Server-side source override — cannot be spoofed
             ctx.source = agent['agent_name']
@@ -59,8 +60,35 @@ def mcp_tool_execute(req_id: str, arguments: dict) -> dict:
     # Phase 2: Smart approval shadow scoring (before any decision)
     _score_risk(ctx)
 
+    # Phase 2.3: Agent scope enforcement — check allowed_commands/accounts (before risk-based max_risk_score)
+    if agent and ctx.command:
+        # Check allowed_commands and allowed_accounts first (risk_score not yet available)
+        scope_error = check_scope_authorization(
+            agent, ctx.command, ctx.account_id, risk_score=0
+        )
+        if scope_error:
+            logger.warning("Agent scope violation", extra={
+                "src_module": "execute", "operation": "scope_check",
+                "agent_id": agent['agent_id'], "scope": agent.get('scope'),
+                "command": ctx.command[:100], "error": scope_error
+            })
+            return mcp_error(req_id, -32001, f"Scope violation: {scope_error}")
+
     # Phase 2.5: Template scan — escalate to MANUAL on HIGH/CRITICAL hits
     _scan_template(ctx)
+
+    # Phase 2.5.5: Agent scope risk check — now that risk_score is available, check max_risk_score
+    if agent and ctx.smart_decision:
+        max_risk_score = agent.get('max_risk_score')
+        if max_risk_score is not None and ctx.smart_decision.final_score > max_risk_score:
+            error_msg = f"Risk score {ctx.smart_decision.final_score} exceeds max_risk_score {max_risk_score}"
+            logger.warning("Agent scope violation (risk)", extra={
+                "src_module": "execute", "operation": "scope_check_risk",
+                "agent_id": agent['agent_id'], "scope": agent.get('scope'),
+                "risk_score": ctx.smart_decision.final_score,
+                "max_risk_score": max_risk_score
+            })
+            return mcp_error(req_id, -32001, f"Scope violation: {error_msg}")
 
     # Phase 2.6: Chain risk pre-check — validate each sub-command individually
     # when command contains && (reject entire chain if any sub-command is blocked)
@@ -349,8 +377,9 @@ def mcp_tool_execute_native(req_id: str, arguments: dict) -> dict:
 
     # Phase 1.5: Agent identity check (#418) — server-side source override
     bouncer_key = arguments.get('bouncer_key') or bouncer_section.get('key')
+    agent = None
     if bouncer_key:
-        agent = identify_agent(bouncer_key)
+        agent = identify_agent(bouncer_key, caller_ip=ctx.caller_ip)
         if agent:
             # Server-side source override — cannot be spoofed
             ctx.source = agent['agent_name']
@@ -363,8 +392,35 @@ def mcp_tool_execute_native(req_id: str, arguments: dict) -> dict:
     # Phase 2: Smart approval shadow scoring (before any decision)
     _score_risk(ctx)
 
+    # Phase 2.3: Agent scope enforcement — check allowed_commands/accounts (before risk-based max_risk_score)
+    if agent and ctx.command:
+        # Check allowed_commands and allowed_accounts first (risk_score not yet available)
+        scope_error = check_scope_authorization(
+            agent, ctx.command, ctx.account_id, risk_score=0
+        )
+        if scope_error:
+            logger.warning("Agent scope violation", extra={
+                "src_module": "execute", "operation": "scope_check",
+                "agent_id": agent['agent_id'], "scope": agent.get('scope'),
+                "command": ctx.command[:100], "error": scope_error
+            })
+            return mcp_error(req_id, -32001, f"Scope violation: {scope_error}")
+
     # Phase 2.5: Template scan — escalate to MANUAL on HIGH/CRITICAL hits
     _scan_template(ctx)
+
+    # Phase 2.5.5: Agent scope risk check — now that risk_score is available, check max_risk_score
+    if agent and ctx.smart_decision:
+        max_risk_score = agent.get('max_risk_score')
+        if max_risk_score is not None and ctx.smart_decision.final_score > max_risk_score:
+            error_msg = f"Risk score {ctx.smart_decision.final_score} exceeds max_risk_score {max_risk_score}"
+            logger.warning("Agent scope violation (risk)", extra={
+                "src_module": "execute", "operation": "scope_check_risk",
+                "agent_id": agent['agent_id'], "scope": agent.get('scope'),
+                "risk_score": ctx.smart_decision.final_score,
+                "max_risk_score": max_risk_score
+            })
+            return mcp_error(req_id, -32001, f"Scope violation: {error_msg}")
 
     # Phase 2.6: Chain risk pre-check — skip for native (no && chains in native mode)
     # Native calls don't support command chaining

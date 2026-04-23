@@ -25,6 +25,10 @@ def mcp_tool_agent_key_create(req_id, arguments: dict) -> dict:
             agent_id: str (e.g. "private-bot")
             agent_name: str (e.g. "Steven's Private Bot")
             expires_in_days: int (optional, days until expiry)
+            scope: str (optional, e.g. "daily-inspection", "interactive", "debug")
+            allowed_commands: list (optional, e.g. ["ec2 describe-*", "s3 ls*"])
+            allowed_accounts: list (optional, e.g. ["190825685292", "992382394211"])
+            max_risk_score: int (optional, e.g. 30)
         }
 
     Returns:
@@ -34,6 +38,10 @@ def mcp_tool_agent_key_create(req_id, arguments: dict) -> dict:
     agent_id = arguments.get('agent_id', '').strip()
     agent_name = arguments.get('agent_name', '').strip()
     expires_in_days = arguments.get('expires_in_days')
+    scope = arguments.get('scope')
+    allowed_commands = arguments.get('allowed_commands')
+    allowed_accounts = arguments.get('allowed_accounts')
+    max_risk_score = arguments.get('max_risk_score')
 
     if not agent_id:
         return mcp_error(req_id, -32602, "Missing required parameter: agent_id")
@@ -56,21 +64,36 @@ def mcp_tool_agent_key_create(req_id, arguments: dict) -> dict:
             agent_name=agent_name,
             created_by='mcp',
             expires_at=expires_at,
+            scope=scope,
+            allowed_commands=allowed_commands,
+            allowed_accounts=allowed_accounts,
+            max_risk_score=max_risk_score,
         )
+
+        response_data = {
+            'status': 'success',
+            'key': result['key'],
+            'agent_id': result['agent_id'],
+            'agent_name': result['agent_name'],
+            'key_prefix': result['key_prefix'],
+            'created_at': result['created_at'],
+            'expires_at': result.get('expires_at'),
+            'warning': 'This key will ONLY be shown once. Store it securely.',
+        }
+        # Include scope fields in response
+        if result.get('scope'):
+            response_data['scope'] = result['scope']
+        if result.get('allowed_commands'):
+            response_data['allowed_commands'] = result['allowed_commands']
+        if result.get('allowed_accounts'):
+            response_data['allowed_accounts'] = result['allowed_accounts']
+        if result.get('max_risk_score') is not None:
+            response_data['max_risk_score'] = result['max_risk_score']
 
         return mcp_result(req_id, {
             'content': [{
                 'type': 'text',
-                'text': json.dumps({
-                    'status': 'success',
-                    'key': result['key'],
-                    'agent_id': result['agent_id'],
-                    'agent_name': result['agent_name'],
-                    'key_prefix': result['key_prefix'],
-                    'created_at': result['created_at'],
-                    'expires_at': result.get('expires_at'),
-                    'warning': 'This key will ONLY be shown once. Store it securely.',
-                })
+                'text': json.dumps(response_data)
             }]
         })
 

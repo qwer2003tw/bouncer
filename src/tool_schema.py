@@ -940,6 +940,24 @@ MCP_TOOLS['bouncer_agent_key_create'] = {
                 'type': 'integer',
                 'description': 'Optional expiry in days (e.g. 90). Omit for no expiry.'
             },
+            'scope': {
+                'type': 'string',
+                'description': 'Optional scope identifier (e.g. "daily-inspection", "interactive", "debug")'
+            },
+            'allowed_commands': {
+                'type': 'array',
+                'items': {'type': 'string'},
+                'description': 'Optional command whitelist (e.g. ["ec2 describe-*", "s3 ls*"]) — wildcard (*) supported for prefix matching'
+            },
+            'allowed_accounts': {
+                'type': 'array',
+                'items': {'type': 'string'},
+                'description': 'Optional AWS account whitelist (e.g. ["190825685292", "992382394211"])'
+            },
+            'max_risk_score': {
+                'type': 'integer',
+                'description': 'Optional max risk score (0-100, e.g. 30) — commands with risk > this will be rejected'
+            },
         },
         'required': ['agent_id', 'agent_name'],
     },

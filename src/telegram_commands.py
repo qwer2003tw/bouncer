@@ -87,6 +87,10 @@ def handle_telegram_command(message: dict) -> dict:
         account = parts[1] if len(parts) >= 2 else ''
         return handle_logs_command(chat_id, account)
 
+    # /key {agent_id} {scope} {duration} - create temp key
+    if text.startswith('/key ') or text.startswith('/key@'):
+        return handle_key_command(chat_id, user_id, text)
+
     # /help - 顯示指令列表
     if text == '/help' or text.startswith('/help@') or text == '/start' or text.startswith('/start@'):
         return handle_help_command(chat_id)
@@ -398,6 +402,100 @@ def handle_logs_command(chat_id: str, account: str = '') -> dict:
     return response(200, {'ok': True})
 
 
+def handle_key_command(chat_id: str, user_id: str, text: str) -> dict:
+    """Handle /key command — create temporary agent key.
+
+    Format: /key {agent_id} {scope} {duration}
+    Duration: 15m, 30m, 1h, 2h, 4h, 8h
+
+    Sends key via private message to the user (not in group chat).
+    """
+    parts = text.split()
+    # Parse: /key agent_id scope duration
+    # Example: /key private-bot debug 30m
+    # Example: /key public-bot scheduled 2h
+
+    if len(parts) < 4:
+        send_telegram_message_to(chat_id, "❌ 用法：/key {agent_id} {scope} {duration}\n範例：/key private-bot debug 30m")
+        return response(200, {'ok': True})
+
+    agent_id = parts[1].strip()
+    scope = parts[2].strip()
+    duration_str = parts[3].strip()
+
+    # Parse duration: 15m/30m/1h/2h/4h/8h → seconds
+    duration_seconds = None
+    if duration_str.endswith('m'):
+        try:
+            minutes = int(duration_str[:-1])
+            duration_seconds = minutes * 60
+        except ValueError:
+            send_telegram_message_to(chat_id, f"❌ 無效的時長格式：{duration_str}\n支援格式：15m, 30m, 1h, 2h, 4h, 8h")
+            return response(200, {'ok': True})
+    elif duration_str.endswith('h'):
+        try:
+            hours = int(duration_str[:-1])
+            duration_seconds = hours * 3600
+        except ValueError:
+            send_telegram_message_to(chat_id, f"❌ 無效的時長格式：{duration_str}\n支援格式：15m, 30m, 1h, 2h, 4h, 8h")
+            return response(200, {'ok': True})
+    else:
+        send_telegram_message_to(chat_id, f"❌ 無效的時長格式：{duration_str}\n支援格式：15m, 30m, 1h, 2h, 4h, 8h")
+        return response(200, {'ok': True})
+
+    # Max duration: 8h
+    max_duration = 8 * 3600
+    if duration_seconds > max_duration:
+        send_telegram_message_to(chat_id, f"❌ 時長不可超過 8 小時，您設定的是：{duration_str}")
+        return response(200, {'ok': True})
+
+    # Min duration: 15m
+    min_duration = 15 * 60
+    if duration_seconds < min_duration:
+        send_telegram_message_to(chat_id, f"❌ 時長不可少於 15 分鐘，您設定的是：{duration_str}")
+        return response(200, {'ok': True})
+
+    # Create key with scope + expires_at
+    from agent_keys import create_agent_key
+    expires_at = int(time.time()) + duration_seconds
+
+    try:
+        result = create_agent_key(
+            agent_id=agent_id,
+            agent_name=f"Temp: {agent_id}",
+            created_by=f"telegram:{user_id}",
+            expires_at=expires_at,
+            scope=scope,
+        )
+
+        # Calculate expiry time display
+        import datetime
+        expiry_dt = datetime.datetime.utcfromtimestamp(expires_at)
+        expiry_str = expiry_dt.strftime('%Y-%m-%d %H:%M:%S UTC')
+
+        # Send key via DM to user (send_telegram_message_to with user's chat_id)
+        # Note: user_id is the chat_id for DM
+        key_message = (
+            f"🔑 臨時 Agent Key 已建立\n\n"
+            f"Agent ID: `{agent_id}`\n"
+            f"Scope: `{scope}`\n"
+            f"過期時間: {expiry_str}\n"
+            f"Key Prefix: `{result['key_prefix']}`\n\n"
+            f"Key（僅顯示一次）：\n`{result['key']}`\n\n"
+            f"⚠️ 此訊息只顯示一次，請立即儲存 key"
+        )
+        send_telegram_message_to(user_id, key_message)
+
+        # Send confirmation to chat (without key)
+        send_telegram_message_to(chat_id, f"✅ 臨時 key 已建立並發送給 @{user_id}（有效期：{duration_str}）")
+
+    except Exception as e:
+        logger.exception("Failed to create temp key: %s", e, extra={"src_module": "telegram_commands", "operation": "handle_key", "agent_id": agent_id, "error": str(e)})
+        send_telegram_message_to(chat_id, f"❌ 建立 key 失敗：{str(e)}")
+
+    return response(200, {'ok': True})
+
+
 def handle_help_command(chat_id: str) -> dict:
     """處理 /help 指令"""
     text = """🔐 Bouncer Commands
@@ -408,6 +506,7 @@ def handle_help_command(chat_id: str) -> dict:
 /stats [hours] - 統計資訊（預設 24h）
 /otp {code} - OTP 二次驗證（用於高風險命令）
 /logs [account] - 列出允許查詢的 log groups
+/key {agent_id} {scope} {duration} - 建立臨時 agent key（如 /key bot debug 30m）
 /help - 顯示此說明"""
 
     send_telegram_message_to(chat_id, text, parse_mode=None)
