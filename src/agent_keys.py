@@ -75,14 +75,65 @@ def _generate_key(agent_id: str) -> tuple[str, str]:
     return full_key, key_prefix
 
 
-def identify_agent(key: str) -> Optional[dict]:
+def check_scope_authorization(agent: dict, command: str, account_id: str, risk_score: int = 0) -> Optional[str]:
+    """Check if agent's scope allows this command.
+
+    Args:
+        agent: Agent dict from identify_agent() (includes scope fields)
+        command: Command to check (e.g. "ec2 describe-instances", "s3:list_objects_v2")
+        account_id: AWS account ID
+        risk_score: Command risk score (0-100)
+
+    Returns:
+        None if allowed, error message string if denied.
+
+    Logic:
+        - allowed_commands: if set, command must match at least one pattern (trailing * = prefix match)
+        - allowed_accounts: if set, account_id must be in list
+        - max_risk_score: if set, risk_score must be <= max_risk_score
+    """
+    # Check allowed_commands
+    allowed_commands = agent.get('allowed_commands')
+    if allowed_commands:
+        matched = False
+        for pattern in allowed_commands:
+            if pattern.endswith('*'):
+                # Prefix match (wildcard)
+                prefix = pattern[:-1]
+                if command.startswith(prefix):
+                    matched = True
+                    break
+            else:
+                # Exact match
+                if command == pattern:
+                    matched = True
+                    break
+        if not matched:
+            return f"Command '{command[:100]}' not in allowed_commands list"
+
+    # Check allowed_accounts
+    allowed_accounts = agent.get('allowed_accounts')
+    if allowed_accounts and account_id not in allowed_accounts:
+        return f"Account '{account_id}' not in allowed_accounts list"
+
+    # Check max_risk_score
+    max_risk_score = agent.get('max_risk_score')
+    if max_risk_score is not None and risk_score > max_risk_score:
+        return f"Risk score {risk_score} exceeds max_risk_score {max_risk_score}"
+
+    return None
+
+
+def identify_agent(key: str, caller_ip: str = None) -> Optional[dict]:
     """Identify agent by API key.
 
     Args:
         key: Full API key (bncr_...)
+        caller_ip: Optional caller IP address (for last_ip tracking)
 
     Returns:
-        {agent_id, agent_name} if valid, None if invalid/revoked/expired
+        {agent_id, agent_name, scope, allowed_commands, allowed_accounts, max_risk_score} if valid,
+        None if invalid/revoked/expired
     """
     if not key or not key.startswith('bncr_'):
         return None
@@ -121,10 +172,36 @@ def identify_agent(key: str) -> Optional[dict]:
             logger.debug("Agent key expired", extra={"src_module": "agent_keys", "operation": "identify_agent", "agent_id": item.get('agent_id')})
             return None
 
+        # Update last_used_at and last_ip
+        now = int(time.time())
+        update_expr = 'SET last_used_at = :now'
+        expr_values = {':now': now}
+        if caller_ip:
+            update_expr += ', last_ip = :ip'
+            expr_values[':ip'] = caller_ip
+        try:
+            table.update_item(
+                Key={'config_key': pk},
+                UpdateExpression=update_expr,
+                ExpressionAttributeValues=expr_values
+            )
+        except Exception as update_err:
+            logger.warning("Failed to update last_used_at: %s", update_err, extra={"src_module": "agent_keys", "operation": "update_last_used"})
+
         result = {
             'agent_id': item['agent_id'],
             'agent_name': item['agent_name'],
         }
+
+        # Include scope fields if present
+        if 'scope' in item:
+            result['scope'] = item['scope']
+        if 'allowed_commands' in item:
+            result['allowed_commands'] = item['allowed_commands']
+        if 'allowed_accounts' in item:
+            result['allowed_accounts'] = item['allowed_accounts']
+        if 'max_risk_score' in item:
+            result['max_risk_score'] = int(item['max_risk_score'])
 
         # Store in cache
         with _cache_lock:
@@ -137,7 +214,16 @@ def identify_agent(key: str) -> Optional[dict]:
         return None
 
 
-def create_agent_key(agent_id: str, agent_name: str, created_by: str, expires_at: Optional[int] = None) -> dict:
+def create_agent_key(
+    agent_id: str,
+    agent_name: str,
+    created_by: str,
+    expires_at: Optional[int] = None,
+    scope: Optional[str] = None,
+    allowed_commands: Optional[list] = None,
+    allowed_accounts: Optional[list] = None,
+    max_risk_score: Optional[int] = None,
+) -> dict:
     """Create a new agent API key.
 
     Args:
@@ -145,6 +231,10 @@ def create_agent_key(agent_id: str, agent_name: str, created_by: str, expires_at
         agent_name: Human-readable agent name (e.g. "Steven's Private Bot")
         created_by: Who created this key (e.g. "admin", "mcp")
         expires_at: Optional Unix timestamp for expiry (None = never expires)
+        scope: Optional scope identifier (e.g. "daily-inspection", "interactive", "debug")
+        allowed_commands: Optional command whitelist (e.g. ["ec2 describe-*", "s3 ls*"]) — wildcard supported
+        allowed_accounts: Optional account whitelist (e.g. ["190825685292", "992382394211"])
+        max_risk_score: Optional max risk score (e.g. 30) — reject if risk > this
 
     Returns:
         {key: "bncr_...", agent_id, agent_name, key_prefix, created_at}
@@ -171,6 +261,16 @@ def create_agent_key(agent_id: str, agent_name: str, created_by: str, expires_at
         if expires_at:
             item['expires_at'] = expires_at
 
+        # Store scope fields
+        if scope:
+            item['scope'] = scope
+        if allowed_commands:
+            item['allowed_commands'] = allowed_commands
+        if allowed_accounts:
+            item['allowed_accounts'] = allowed_accounts
+        if max_risk_score is not None:
+            item['max_risk_score'] = max_risk_score
+
         table.put_item(Item=item)
 
         logger.info("Agent key created", extra={
@@ -179,6 +279,7 @@ def create_agent_key(agent_id: str, agent_name: str, created_by: str, expires_at
             "agent_id": agent_id,
             "key_prefix": key_prefix,
             "created_by": created_by,
+            "scope": scope,
         })
 
         return {
@@ -188,6 +289,10 @@ def create_agent_key(agent_id: str, agent_name: str, created_by: str, expires_at
             'key_prefix': key_prefix,
             'created_at': now,
             'expires_at': expires_at,
+            'scope': scope,
+            'allowed_commands': allowed_commands,
+            'allowed_accounts': allowed_accounts,
+            'max_risk_score': max_risk_score,
         }
 
     except Exception as e:
@@ -305,6 +410,19 @@ def list_agent_keys(agent_id: Optional[str] = None) -> list:
                 entry['revoked_at'] = int(item['revoked_at'])
             if 'created_by' in item:
                 entry['created_by'] = item['created_by']
+            # Include scope fields
+            if 'scope' in item:
+                entry['scope'] = item['scope']
+            if 'allowed_commands' in item:
+                entry['allowed_commands'] = item['allowed_commands']
+            if 'allowed_accounts' in item:
+                entry['allowed_accounts'] = item['allowed_accounts']
+            if 'max_risk_score' in item:
+                entry['max_risk_score'] = int(item['max_risk_score'])
+            if 'last_used_at' in item:
+                entry['last_used_at'] = int(item['last_used_at'])
+            if 'last_ip' in item:
+                entry['last_ip'] = item['last_ip']
             result.append(entry)
 
         # Sort by created_at descending
