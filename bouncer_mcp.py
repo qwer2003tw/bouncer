@@ -1273,6 +1273,7 @@ def tool_execute_native(arguments: dict) -> dict:
             'source': bouncer_args.get('source', 'OpenClaw Agent'),
             'trust_scope': bouncer_args.get('trust_scope'),
             'approval_timeout': bouncer_args.get('approval_timeout', 600),
+            'key': bouncer_args.get('key'),
         }.items() if v is not None},
     }
 
