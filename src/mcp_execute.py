@@ -45,6 +45,10 @@ def mcp_tool_execute(req_id: str, arguments: dict) -> dict:
 
     # Phase 1.5: Agent identity check (#418) — server-side source override
     bouncer_key = arguments.get('bouncer_key') or arguments.get('bouncer', {}).get('key')
+    # Redact key from arguments immediately to prevent accidental logging
+    arguments.pop('bouncer_key', None)
+    if isinstance(arguments.get('bouncer'), dict):
+        arguments['bouncer'].pop('key', None)
     agent = None
     if bouncer_key:
         agent = identify_agent(bouncer_key, caller_ip=ctx.caller_ip)
@@ -377,6 +381,10 @@ def mcp_tool_execute_native(req_id: str, arguments: dict) -> dict:
 
     # Phase 1.5: Agent identity check (#418) — server-side source override
     bouncer_key = arguments.get('bouncer_key') or bouncer_section.get('key')
+    # Redact key from arguments immediately to prevent accidental logging
+    arguments.pop('bouncer_key', None)
+    if isinstance(bouncer_section, dict):
+        bouncer_section.pop('key', None)
     agent = None
     if bouncer_key:
         agent = identify_agent(bouncer_key, caller_ip=ctx.caller_ip)

@@ -172,21 +172,23 @@ def identify_agent(key: str, caller_ip: str = None) -> Optional[dict]:
             logger.debug("Agent key expired", extra={"src_module": "agent_keys", "operation": "identify_agent", "agent_id": item.get('agent_id')})
             return None
 
-        # Update last_used_at and last_ip
+        # Update last_used_at and last_ip (throttled: skip if updated within 5 min)
         now = int(time.time())
-        update_expr = 'SET last_used_at = :now'
-        expr_values = {':now': now}
-        if caller_ip:
-            update_expr += ', last_ip = :ip'
-            expr_values[':ip'] = caller_ip
-        try:
-            table.update_item(
-                Key={'config_key': pk},
-                UpdateExpression=update_expr,
-                ExpressionAttributeValues=expr_values
-            )
-        except Exception as update_err:
-            logger.warning("Failed to update last_used_at: %s", update_err, extra={"src_module": "agent_keys", "operation": "update_last_used"})
+        last_updated = item.get('last_used_at', 0)
+        if now - int(last_updated) > 300:  # 5 min throttle
+            update_expr = 'SET last_used_at = :now'
+            expr_values = {':now': now}
+            if caller_ip:
+                update_expr += ', last_ip = :ip'
+                expr_values[':ip'] = caller_ip
+            try:
+                table.update_item(
+                    Key={'config_key': pk},
+                    UpdateExpression=update_expr,
+                    ExpressionAttributeValues=expr_values
+                )
+            except Exception as update_err:
+                logger.warning("Failed to update last_used_at: %s", update_err, extra={"src_module": "agent_keys", "operation": "update_last_used"})
 
         result = {
             'agent_id': item['agent_id'],
@@ -260,6 +262,8 @@ def create_agent_key(
 
         if expires_at:
             item['expires_at'] = expires_at
+            # DDB TTL: auto-delete 24h after expiry
+            item['ttl'] = expires_at + 86400
 
         # Store scope fields
         if scope:
