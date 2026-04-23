@@ -724,7 +724,6 @@ TOOLS = [
         }
     },
     {
-        'name': 'bouncer_agent_key_create',
         'description': 'Create a new agent API key with optional scope and command restrictions.',
         'inputSchema': {
             'type': 'object',
@@ -763,7 +762,6 @@ TOOLS = [
         }
     },
     {
-        'name': 'bouncer_agent_key_rotate',
         'description': 'Create a new key for an agent. Old keys stay active until manually revoked.',
         'inputSchema': {
             'type': 'object',
@@ -1578,14 +1576,10 @@ def handle_request(request: dict) -> dict:
             result = tool_query_logs(arguments)
         elif tool_name == 'bouncer_logs_allowlist':
             result = tool_logs_allowlist(arguments)
-        elif tool_name == 'bouncer_agent_key_create':
-            result = tool_agent_key_create(arguments)
         elif tool_name == 'bouncer_agent_key_revoke':
             result = tool_agent_key_revoke(arguments)
         elif tool_name == 'bouncer_agent_key_list':
             result = tool_agent_key_list(arguments)
-        elif tool_name == 'bouncer_agent_key_rotate':
-            result = tool_agent_key_rotate(arguments)
         else:
             return error_response(req_id, -32602, f'Unknown tool: {tool_name}')
 
@@ -1629,19 +1623,6 @@ def main():
             print(json.dumps(error_response(None, -32603, f'Internal error: {e}')), flush=True)
 
 
-def tool_agent_key_create(arguments: dict) -> dict:
-    """Create a new agent API key."""
-    if not SECRET:
-        return {'error': 'BOUNCER_SECRET not configured'}
-    payload = {
-        'jsonrpc': '2.0', 'id': 'agent_key_create',
-        'method': 'tools/call',
-        'params': {'name': 'bouncer_agent_key_create', 'arguments': arguments}
-    }
-    result = http_request('POST', '/mcp', payload)
-    return parse_mcp_result(result) or result
-
-
 def tool_agent_key_revoke(arguments: dict) -> dict:
     """Revoke an agent API key."""
     if not SECRET:
@@ -1668,17 +1649,6 @@ def tool_agent_key_list(arguments: dict) -> dict:
     return parse_mcp_result(result) or result
 
 
-def tool_agent_key_rotate(arguments: dict) -> dict:
-    """Rotate an agent API key."""
-    if not SECRET:
-        return {'error': 'BOUNCER_SECRET not configured'}
-    payload = {
-        'jsonrpc': '2.0', 'id': 'agent_key_rotate',
-        'method': 'tools/call',
-        'params': {'name': 'bouncer_agent_key_rotate', 'arguments': arguments}
-    }
-    result = http_request('POST', '/mcp', payload)
-    return parse_mcp_result(result) or result
 if __name__ == '__main__':
     main()
 
