@@ -723,6 +723,56 @@ TOOLS = [
             'required': ['action']
         }
     },
+    {
+        'name': 'bouncer_agent_key_create',
+        'description': 'Create a new agent API key with optional scope and command restrictions.',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'agent_id': {'type': 'string', 'description': 'Agent identifier (e.g. private-bot)'},
+                'agent_name': {'type': 'string', 'description': 'Human-readable agent name'},
+                'scope': {'type': 'string', 'description': 'Key scope (e.g. interactive, daily-inspection)'},
+                'allowed_commands': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Allowed command patterns (wildcard * supported)'},
+                'allowed_accounts': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Allowed AWS account IDs'},
+                'max_risk_score': {'type': 'integer', 'description': 'Max risk score allowed (0-100)'},
+                'expires_in_days': {'type': 'integer', 'description': 'Key expiry in days (optional)'},
+            },
+            'required': ['agent_id', 'agent_name']
+        }
+    },
+    {
+        'name': 'bouncer_agent_key_revoke',
+        'description': 'Revoke an agent API key by prefix.',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'key_prefix': {'type': 'string', 'description': 'Key prefix (e.g. bncr_priv_a1b2c3d4)'},
+                'agent_id': {'type': 'string', 'description': 'Agent identifier'},
+            },
+            'required': ['key_prefix', 'agent_id']
+        }
+    },
+    {
+        'name': 'bouncer_agent_key_list',
+        'description': 'List agent API keys (never shows full key or hash).',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'agent_id': {'type': 'string', 'description': 'Filter by agent ID (optional)'},
+            }
+        }
+    },
+    {
+        'name': 'bouncer_agent_key_rotate',
+        'description': 'Create a new key for an agent. Old keys stay active until manually revoked.',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'agent_id': {'type': 'string', 'description': 'Agent identifier'},
+            },
+            'required': ['agent_id']
+        }
+    },
 ]
 
 # ============================================================================
@@ -1527,7 +1577,15 @@ def handle_request(request: dict) -> dict:
         elif tool_name == 'bouncer_query_logs':
             result = tool_query_logs(arguments)
         elif tool_name == 'bouncer_logs_allowlist':
-            result = tool_logs_allowlist(arguments)
+            tool_result = tool_logs_allowlist(arguments)
+        elif tool_name == 'bouncer_agent_key_create':
+            tool_result = tool_agent_key_create(arguments)
+        elif tool_name == 'bouncer_agent_key_revoke':
+            tool_result = tool_agent_key_revoke(arguments)
+        elif tool_name == 'bouncer_agent_key_list':
+            tool_result = tool_agent_key_list(arguments)
+        elif tool_name == 'bouncer_agent_key_rotate':
+            tool_result = tool_agent_key_rotate(arguments)
         else:
             return error_response(req_id, -32602, f'Unknown tool: {tool_name}')
 
@@ -1573,3 +1631,55 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+def tool_agent_key_create(arguments: dict) -> dict:
+    """Create a new agent API key."""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+    payload = {
+        'jsonrpc': '2.0', 'id': 'agent_key_create',
+        'method': 'tools/call',
+        'params': {'name': 'bouncer_agent_key_create', 'arguments': arguments}
+    }
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
+def tool_agent_key_revoke(arguments: dict) -> dict:
+    """Revoke an agent API key."""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+    payload = {
+        'jsonrpc': '2.0', 'id': 'agent_key_revoke',
+        'method': 'tools/call',
+        'params': {'name': 'bouncer_agent_key_revoke', 'arguments': arguments}
+    }
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
+def tool_agent_key_list(arguments: dict) -> dict:
+    """List agent API keys."""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+    payload = {
+        'jsonrpc': '2.0', 'id': 'agent_key_list',
+        'method': 'tools/call',
+        'params': {'name': 'bouncer_agent_key_list', 'arguments': arguments}
+    }
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
+
+
+def tool_agent_key_rotate(arguments: dict) -> dict:
+    """Rotate an agent API key."""
+    if not SECRET:
+        return {'error': 'BOUNCER_SECRET not configured'}
+    payload = {
+        'jsonrpc': '2.0', 'id': 'agent_key_rotate',
+        'method': 'tools/call',
+        'params': {'name': 'bouncer_agent_key_rotate', 'arguments': arguments}
+    }
+    result = http_request('POST', '/mcp', payload)
+    return parse_mcp_result(result) or result
