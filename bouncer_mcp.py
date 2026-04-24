@@ -724,22 +724,6 @@ TOOLS = [
         }
     },
     {
-        'description': 'Create a new agent API key with optional scope and command restrictions.',
-        'inputSchema': {
-            'type': 'object',
-            'properties': {
-                'agent_id': {'type': 'string', 'description': 'Agent identifier (e.g. private-bot)'},
-                'agent_name': {'type': 'string', 'description': 'Human-readable agent name'},
-                'scope': {'type': 'string', 'description': 'Key scope (e.g. interactive, daily-inspection)'},
-                'allowed_commands': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Allowed command patterns (wildcard * supported)'},
-                'allowed_accounts': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Allowed AWS account IDs'},
-                'max_risk_score': {'type': 'integer', 'description': 'Max risk score allowed (0-100)'},
-                'expires_in_days': {'type': 'integer', 'description': 'Key expiry in days (optional)'},
-            },
-            'required': ['agent_id', 'agent_name']
-        }
-    },
-    {
         'name': 'bouncer_agent_key_revoke',
         'description': 'Revoke an agent API key by prefix.',
         'inputSchema': {
@@ -761,17 +745,7 @@ TOOLS = [
             }
         }
     },
-    {
-        'description': 'Create a new key for an agent. Old keys stay active until manually revoked.',
-        'inputSchema': {
-            'type': 'object',
-            'properties': {
-                'agent_id': {'type': 'string', 'description': 'Agent identifier'},
-            },
-            'required': ['agent_id']
-        }
-    },
-]
+    ]
 
 # ============================================================================
 # HTTP 請求
