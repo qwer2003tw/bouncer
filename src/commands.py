@@ -2,6 +2,8 @@
 Bouncer - 命令分類與執行模組
 處理 AWS CLI 命令的分類（blocked/dangerous/auto-approve）和執行
 """
+from __future__ import annotations
+
 import os
 import re
 import threading

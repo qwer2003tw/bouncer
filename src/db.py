@@ -5,6 +5,8 @@ Lazy init: boto3 resources are NOT created at import time to avoid
 moto mock isolation issues in tests and reduce cold-start OOM risk.
 """
 
+from __future__ import annotations
+
 import os
 import logging
 import boto3

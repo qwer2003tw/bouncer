@@ -255,6 +255,77 @@ def _validate_files(files: list) -> Optional[str]:
 # Helper: Trust session check
 # ---------------------------------------------------------------------------
 
+def _cleanup_stale_assets(s3_target, frontend_bucket: str, deployed_keys: set, request_id: str, project: str) -> dict:
+    """Remove stale assets from frontend bucket after deploy.
+
+    Lists all objects under assets/ prefix, deletes any not in deployed_keys.
+    Only cleans assets/ — root files (index.html, favicon.ico) are NOT touched.
+
+    Args:
+        s3_target: S3 client (may be assumed-role client)
+        frontend_bucket: Target bucket name
+        deployed_keys: Set of S3 keys that were just deployed
+        request_id: For logging
+        project: For logging
+
+    Returns:
+        dict: {deleted_count: int, deleted_bytes: int, errors: list}
+    """
+    deleted_count = 0
+    deleted_bytes = 0
+    errors = []
+
+    try:
+        # List all objects under assets/ prefix
+        paginator = s3_target.get_paginator('list_objects_v2')
+        stale_keys = []
+
+        for page in paginator.paginate(Bucket=frontend_bucket, Prefix='assets/'):
+            for obj in page.get('Contents', []):
+                key = obj['Key']
+                if key not in deployed_keys:
+                    stale_keys.append({'Key': key})
+                    deleted_bytes += obj.get('Size', 0)
+
+        if not stale_keys:
+            logger.info("No stale assets to clean up", extra={
+                "src_module": "deploy_frontend",
+                "operation": "cleanup_stale_assets",
+                "request_id": request_id,
+                "project": project,
+            })
+            return {'deleted_count': 0, 'deleted_bytes': 0, 'errors': []}
+
+        # Delete in batches of 1000 (S3 limit)
+        for i in range(0, len(stale_keys), 1000):
+            batch = stale_keys[i:i+1000]
+            s3_target.delete_objects(
+                Bucket=frontend_bucket,
+                Delete={'Objects': batch}
+            )
+            deleted_count += len(batch)
+
+        logger.info("Cleaned up %d stale assets (%d bytes)", deleted_count, deleted_bytes, extra={
+            "src_module": "deploy_frontend",
+            "operation": "cleanup_stale_assets",
+            "request_id": request_id,
+            "project": project,
+            "deleted_count": deleted_count,
+            "deleted_bytes": deleted_bytes,
+        })
+    except Exception as e:
+        logger.warning("Stale asset cleanup failed (non-critical): %s", e, extra={
+            "src_module": "deploy_frontend",
+            "operation": "cleanup_stale_assets",
+            "request_id": request_id,
+            "project": project,
+            "error": str(e),
+        })
+        errors.append(str(e))
+
+    return {'deleted_count': deleted_count, 'deleted_bytes': deleted_bytes, 'errors': errors}
+
+
 def _check_deploy_trust(trust_scope: str, project: str, account_id: str, source: str) -> tuple:
     """Check if trust_scope allows auto-approval for frontend deployment.
 
@@ -585,6 +656,10 @@ def _execute_deploy_frontend_approved(
             logger.exception("Trust deploy failed for %s: %s", filename, exc, extra={"src_module": "deploy_frontend", "operation": "trust_deploy_file", "file_name": filename, "error": str(exc)})
             failed.append({"filename": filename, "reason": str(exc)})
 
+    # 4.5. Clean up stale assets (best-effort, don't fail deploy if cleanup fails)
+    deployed_keys = set(deployed)
+    cleanup_result = _cleanup_stale_assets(s3_target, frontend_bucket, deployed_keys, request_id, project)
+
     # 5. CloudFront invalidation
     cf_invalidation_failed = False
     distribution_id = project_config["distribution_id"]
@@ -659,10 +734,19 @@ def _execute_deploy_frontend_approved(
     remaining = int(trust_session.get("expires_at", 0)) - now
     remaining_str = f"{remaining // 60}:{remaining % 60:02d}" if remaining > 0 else "0:00"
 
+    cleanup_summary = ""
+    if cleanup_result.get('deleted_count', 0) > 0:
+        from utils import format_size_human
+        deleted_count = cleanup_result['deleted_count']
+        deleted_bytes = cleanup_result['deleted_bytes']
+        deleted_size_human = format_size_human(deleted_bytes)
+        cleanup_summary = f"\n🧹 Cleaned up {deleted_count} stale files ({deleted_size_human})"
+
     result_summary = (
         f"✅ Deployed {len(deployed)} files to {frontend_bucket}\n"
         f"CloudFront: {'✅' if not cf_invalidation_failed else '⚠️ invalidation failed'}\n"
         + (f"⚠️ Failed: {len(failed)} files" if failed else "")
+        + cleanup_summary
     )
 
     send_trust_auto_approve_notification(

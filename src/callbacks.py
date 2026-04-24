@@ -706,11 +706,82 @@ def _assume_deploy_role(deploy_role_arn: str, request_id: str, files_manifest: l
         })
 
 
+def _cleanup_stale_assets(s3_target, frontend_bucket: str, deployed_keys: set, request_id: str, project: str) -> dict:
+    """Remove stale assets from frontend bucket after deploy.
+
+    Lists all objects under assets/ prefix, deletes any not in deployed_keys.
+    Only cleans assets/ — root files (index.html, favicon.ico) are NOT touched.
+
+    Args:
+        s3_target: S3 client (may be assumed-role client)
+        frontend_bucket: Target bucket name
+        deployed_keys: Set of S3 keys that were just deployed
+        request_id: For logging
+        project: For logging
+
+    Returns:
+        dict: {deleted_count: int, deleted_bytes: int, errors: list}
+    """
+    deleted_count = 0
+    deleted_bytes = 0
+    errors = []
+
+    try:
+        # List all objects under assets/ prefix
+        paginator = s3_target.get_paginator('list_objects_v2')
+        stale_keys = []
+
+        for page in paginator.paginate(Bucket=frontend_bucket, Prefix='assets/'):
+            for obj in page.get('Contents', []):
+                key = obj['Key']
+                if key not in deployed_keys:
+                    stale_keys.append({'Key': key})
+                    deleted_bytes += obj.get('Size', 0)
+
+        if not stale_keys:
+            logger.info("No stale assets to clean up", extra={
+                "src_module": "callbacks",
+                "operation": "cleanup_stale_assets",
+                "request_id": request_id,
+                "project": project,
+            })
+            return {'deleted_count': 0, 'deleted_bytes': 0, 'errors': []}
+
+        # Delete in batches of 1000 (S3 limit)
+        for i in range(0, len(stale_keys), 1000):
+            batch = stale_keys[i:i+1000]
+            s3_target.delete_objects(
+                Bucket=frontend_bucket,
+                Delete={'Objects': batch}
+            )
+            deleted_count += len(batch)
+
+        logger.info("Cleaned up %d stale assets (%d bytes)", deleted_count, deleted_bytes, extra={
+            "src_module": "callbacks",
+            "operation": "cleanup_stale_assets",
+            "request_id": request_id,
+            "project": project,
+            "deleted_count": deleted_count,
+            "deleted_bytes": deleted_bytes,
+        })
+    except Exception as e:
+        logger.warning("Stale asset cleanup failed (non-critical): %s", e, extra={
+            "src_module": "callbacks",
+            "operation": "cleanup_stale_assets",
+            "request_id": request_id,
+            "project": project,
+            "error": str(e),
+        })
+        errors.append(str(e))
+
+    return {'deleted_count': deleted_count, 'deleted_bytes': deleted_bytes, 'errors': errors}
+
+
 def _deploy_files_to_frontend(files_manifest: list, s3_staging, s3_target, request_id: str, message_id: int, params: dict, user_id: str) -> tuple:
     """Deploy files from staging bucket to frontend bucket.
 
     Returns:
-        tuple: (deployed_list, failed_list)
+        tuple: (deployed_list, failed_list, total_bytes, cleanup_result)
     """
     deployed = []
     failed = []
@@ -758,7 +829,11 @@ def _deploy_files_to_frontend(files_manifest: list, s3_staging, s3_target, reque
             except Exception:  # noqa: BLE001 — progress update is best-effort
                 logger.warning("Progress update failed at step %d (non-critical)", i + 1, extra={"src_module": "callbacks", "operation": "deploy_frontend_progress", "step": i + 1}, exc_info=True)  # [DEPLOY-FRONTEND] Progress update failed at step
 
-    return deployed, failed, total_bytes
+    # Clean up stale assets (best-effort, don't fail deploy if cleanup fails)
+    deployed_keys = {d['filename'] for d in deployed}
+    cleanup_result = _cleanup_stale_assets(s3_target, frontend_bucket, deployed_keys, request_id, project)
+
+    return deployed, failed, total_bytes, cleanup_result
 
 
 def _invalidate_cloudfront(success_count: int, deploy_role_arn: str, distribution_id: str, request_id: str) -> bool:
@@ -785,7 +860,7 @@ def _invalidate_cloudfront(success_count: int, deploy_role_arn: str, distributio
         return True
 
 
-def _finalize_deploy_frontend(deployed: list, failed: list, cf_invalidation_failed: bool, table, request_id: str,
+def _finalize_deploy_frontend(deployed: list, failed: list, cf_invalidation_failed: bool, cleanup_result: dict, table, request_id: str,
                                user_id: str, message_id: int, params: dict, item: dict) -> dict:
     """Finalize deploy frontend: update DDB, emit metrics, write history, send notifications.
 
@@ -839,6 +914,14 @@ def _finalize_deploy_frontend(deployed: list, failed: list, cf_invalidation_fail
     cf_warn = "\n⚠️ *CloudFront Invalidation 失敗* (S3 已完成)" if cf_invalidation_failed else ""
     fail_line = f"\n❗ 失敗: {fail_count} 個" if fail_count > 0 else ""
 
+    # Add cleanup info if assets were cleaned up
+    cleanup_line = ""
+    if cleanup_result.get('deleted_count', 0) > 0:
+        deleted_count = cleanup_result['deleted_count']
+        deleted_bytes = cleanup_result['deleted_bytes']
+        deleted_size_human = format_size_human(deleted_bytes)
+        cleanup_line = f"\n🧹 清理 {deleted_count} 個舊檔案 ({deleted_size_human})"
+
     if deploy_status == 'deploy_failed':
         status_emoji = '❌'
         title = '前端部署失敗'
@@ -860,7 +943,8 @@ def _finalize_deploy_frontend(deployed: list, failed: list, cf_invalidation_fail
         f"🌐 *目標 Bucket：* `{escape_markdown(params['frontend_bucket'])}`\n"
         f"☁️ *CloudFront：* `{escape_markdown(params['distribution_id'])}`\n"
         f"💬 *原因：* {params['safe_reason']}"
-        f"{cf_warn}",
+        f"{cf_warn}"
+        f"{cleanup_line}",
     )
 
     # Send Telegram result notification (silent)
@@ -963,7 +1047,7 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
 
     # 2. Deploy files to frontend bucket
     s3_staging = get_s3_client()
-    deployed, failed, actual_total_bytes = _deploy_files_to_frontend(
+    deployed, failed, actual_total_bytes, cleanup_result = _deploy_files_to_frontend(
         files_manifest, s3_staging, s3_target, request_id, message_id, params, user_id
     )
 
@@ -979,7 +1063,7 @@ def handle_deploy_frontend_callback(action: str, request_id: str, item: dict, me
 
     # 4. Finalize: update DDB, metrics, history, and send notifications
     return _finalize_deploy_frontend(
-        deployed, failed, cf_invalidation_failed, table, request_id, user_id, message_id, params, item
+        deployed, failed, cf_invalidation_failed, cleanup_result, table, request_id, user_id, message_id, params, item
     )
 
 
