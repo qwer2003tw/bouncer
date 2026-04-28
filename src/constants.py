@@ -534,4 +534,12 @@ AUTO_APPROVE_PREFIXES = [
     # Pricing (唯讀)
     'aws pricing get-products',
     'aws pricing describe-services',
+
+    # Bedrock / Bedrock Agent (唯讀)
+    'aws bedrock list-',
+    'aws bedrock get-',
+    'aws bedrock-agent list-',
+    'aws bedrock-agent get-',
+    'aws bedrock-runtime list-',
+    'aws bedrock-runtime get-',
 ]
