@@ -358,7 +358,7 @@ def _check_grant_session(ctx: ExecuteContext) -> Optional[dict]:
         }
         if is_failed:
             response_data['exit_code'] = _exit_code
-        if ctx.warnings:
+        if getattr(ctx, "warnings", None):
             response_data['warnings'] = ctx.warnings
 
         # No paging metadata in MCP response (Sprint 83)
@@ -486,7 +486,7 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
     }
     if is_failed:
         response_data['exit_code'] = _exit_code
-    if ctx.warnings:
+    if getattr(ctx, "warnings", None):
         response_data['warnings'] = ctx.warnings
 
     # No paging metadata in MCP response (Sprint 83)
@@ -643,7 +643,7 @@ def _check_trust_session(ctx: ExecuteContext) -> Optional[dict]:
     }
     if is_failed:
         response_data['exit_code'] = _exit_code
-    if ctx.warnings:
+    if getattr(ctx, "warnings", None):
         response_data['warnings'] = ctx.warnings
 
     # No paging metadata in MCP response (Sprint 83)
