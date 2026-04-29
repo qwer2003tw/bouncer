@@ -173,6 +173,7 @@ def test_request_presigned_empty_files(mock_get_project_config):
 # Test 6: Confirm deploy - success
 # ---------------------------------------------------------------------------
 
+@patch.dict('os.environ', {'FRONTEND_AUTO_APPROVE': 'false'})
 @patch('mcp_deploy_frontend.send_deploy_frontend_notification')
 @patch('mcp_deploy_frontend.table')
 @patch('mcp_deploy_frontend.get_s3_client')
