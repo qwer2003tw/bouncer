@@ -370,3 +370,145 @@ class TestMcpToolExecuteNative:
 
         assert 'error' in json.dumps(result)
         assert 'must be a dict' in json.dumps(result)
+
+    @mock_aws
+    def test_unknown_aws_keys_warning(self, mock_table, mock_notifications):
+        """Test warning when unknown keys in aws section (#414)"""
+        from mcp_execute import mcp_tool_execute_native
+
+        # Mock auto-approve to get a success response
+        with patch('mcp_execute._score_risk'), \
+             patch('mcp_execute._scan_template'), \
+             patch('mcp_execute._check_compliance') as mock_compliance, \
+             patch('mcp_execute._check_blocked') as mock_blocked, \
+             patch('mcp_execute._check_auto_approve') as mock_auto:
+            mock_compliance.return_value = None
+            mock_blocked.return_value = None
+            mock_auto.return_value = {
+                'id': 'req-123',
+                'jsonrpc': '2.0',
+                'result': {
+                    'content': [{
+                        'type': 'text',
+                        'text': json.dumps({
+                            'status': 'auto_approved',
+                            'request_id': 'test-req',
+                            'result': '{"Buckets": []}',
+                            'warnings': ["Unknown keys in aws section (ignored): ['foo_bar']"]
+                        })
+                    }]
+                }
+            }
+
+            result = mcp_tool_execute_native('req-123', {
+                'aws': {
+                    'service': 's3',
+                    'operation': 'list_buckets',
+                    'params': {},
+                    'foo_bar': 123,  # unknown key
+                },
+                'bouncer': {
+                    'trust_scope': 'test-scope',
+                    'reason': 'test',
+                }
+            })
+
+            result_str = json.dumps(result)
+            assert 'warnings' in result_str
+            assert 'foo_bar' in result_str
+
+    @mock_aws
+    def test_unknown_bouncer_keys_warning(self, mock_table, mock_notifications):
+        """Test warning when unknown keys in bouncer section (#414)"""
+        from mcp_execute import mcp_tool_execute_native
+
+        # Mock auto-approve to get a success response
+        with patch('mcp_execute._score_risk'), \
+             patch('mcp_execute._scan_template'), \
+             patch('mcp_execute._check_compliance') as mock_compliance, \
+             patch('mcp_execute._check_blocked') as mock_blocked, \
+             patch('mcp_execute._check_auto_approve') as mock_auto:
+            mock_compliance.return_value = None
+            mock_blocked.return_value = None
+            mock_auto.return_value = {
+                'id': 'req-123',
+                'jsonrpc': '2.0',
+                'result': {
+                    'content': [{
+                        'type': 'text',
+                        'text': json.dumps({
+                            'status': 'auto_approved',
+                            'request_id': 'test-req',
+                            'result': '{"Buckets": []}',
+                            'warnings': ["Unknown keys in bouncer section (ignored): ['unknown_key']"]
+                        })
+                    }]
+                }
+            }
+
+            result = mcp_tool_execute_native('req-123', {
+                'aws': {
+                    'service': 's3',
+                    'operation': 'list_buckets',
+                    'params': {},
+                },
+                'bouncer': {
+                    'trust_scope': 'test-scope',
+                    'reason': 'test',
+                    'source': 'test-source',
+                    'unknown_key': 'x',  # unknown key
+                }
+            })
+
+            result_str = json.dumps(result)
+            assert 'warnings' in result_str
+            assert 'unknown_key' in result_str
+
+    @mock_aws
+    def test_known_keys_no_warning(self, mock_table, mock_notifications):
+        """Test no warnings with all known keys (#414)"""
+        from mcp_execute import mcp_tool_execute_native
+
+        # Mock auto-approve to get a success response
+        with patch('mcp_execute._score_risk'), \
+             patch('mcp_execute._scan_template'), \
+             patch('mcp_execute._check_compliance') as mock_compliance, \
+             patch('mcp_execute._check_blocked') as mock_blocked, \
+             patch('mcp_execute._check_auto_approve') as mock_auto:
+            mock_compliance.return_value = None
+            mock_blocked.return_value = None
+            mock_auto.return_value = {
+                'id': 'req-123',
+                'jsonrpc': '2.0',
+                'result': {
+                    'content': [{
+                        'type': 'text',
+                        'text': json.dumps({
+                            'status': 'auto_approved',
+                            'request_id': 'test-req',
+                            'result': '{"Buckets": []}'
+                        })
+                    }]
+                }
+            }
+
+            result = mcp_tool_execute_native('req-123', {
+                'aws': {
+                    'service': 's3',
+                    'operation': 'list_buckets',
+                    'params': {},
+                    'region': 'us-east-1',
+                    'account': '123456789012',
+                },
+                'bouncer': {
+                    'trust_scope': 'test-scope',
+                    'reason': 'test',
+                    'source': 'test-source',
+                    'context': 'test context',
+                    'approval_timeout': 600,
+                    'sync': False,
+                }
+            })
+
+            result_str = json.dumps(result)
+            assert 'warnings' not in result_str

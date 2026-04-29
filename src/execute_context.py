@@ -81,6 +81,8 @@ class ExecuteContext:
     # Per-agent API key fields (#418)
     agent_id: Optional[str] = None  # server-verified agent identity (e.g. "private-bot")
     verified_identity: bool = False  # True if source was set by server via API key
+    # Warnings for unknown parameters (#414)
+    warnings: Optional[list] = None  # List of warning messages for unknown parameters
 
 
 def _parse_execute_request(req_id, arguments: dict) -> 'dict | ExecuteContext':
