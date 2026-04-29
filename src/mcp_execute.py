@@ -284,6 +284,19 @@ def mcp_tool_execute_native(req_id: str, arguments: dict) -> dict:
     if not account_id:
         account_id = bouncer_section.get('account', None)
 
+    # Sprint 99 (#414): Detect unknown parameters in aws/bouncer sections
+    KNOWN_AWS_KEYS = {'service', 'operation', 'params', 'region', 'account'}
+    KNOWN_BOUNCER_KEYS = {'reason', 'source', 'trust_scope', 'context', 'approval_timeout', 'sync', 'account', '_caller', 'key'}
+
+    warnings = []
+    unknown_aws = set(aws_section.keys()) - KNOWN_AWS_KEYS
+    unknown_bouncer = set(bouncer_section.keys()) - KNOWN_BOUNCER_KEYS
+
+    if unknown_aws:
+        warnings.append(f"Unknown keys in aws section (ignored): {sorted(unknown_aws)}")
+    if unknown_bouncer:
+        warnings.append(f"Unknown keys in bouncer section (ignored): {sorted(unknown_bouncer)}")
+
     # Convert boto3 operation to kebab-case for synthetic command (for compliance checking)
     # e.g. create_cluster -> create-cluster
     operation_kebab = operation.replace('_', '-')
@@ -313,33 +326,42 @@ def mcp_tool_execute_native(req_id: str, arguments: dict) -> dict:
         account_id = str(account_id).strip()
         valid, error = validate_account_id(account_id)
         if not valid:
+            error_data = {'status': 'error', 'error': error}
+            if warnings:
+                error_data['warnings'] = warnings
             return mcp_result(req_id, {
-                'content': [{'type': 'text', 'text': json.dumps({'status': 'error', 'error': error})}],
+                'content': [{'type': 'text', 'text': json.dumps(error_data)}],
                 'isError': True
             })
 
         account = get_account(account_id)
         if not account:
             available = [a['account_id'] for a in list_accounts()]
+            error_data = {
+                'status': 'error',
+                'error_code': 'ACCOUNT_NOT_FOUND',
+                'error': f'帳號 {account_id} 未配置',
+                'available_accounts': available,
+                'suggestion': f'使用可用帳號之一：{", ".join(available)}，或聯繫管理員新增此帳號'
+            }
+            if warnings:
+                error_data['warnings'] = warnings
             return mcp_result(req_id, {
-                'content': [{'type': 'text', 'text': json.dumps({
-                    'status': 'error',
-                    'error_code': 'ACCOUNT_NOT_FOUND',
-                    'error': f'帳號 {account_id} 未配置',
-                    'available_accounts': available,
-                    'suggestion': f'使用可用帳號之一：{", ".join(available)}，或聯繫管理員新增此帳號'
-                })}],
+                'content': [{'type': 'text', 'text': json.dumps(error_data)}],
                 'isError': True
             })
 
         if not account.get('enabled', True):
+            error_data = {
+                'status': 'error',
+                'error_code': 'ACCOUNT_DISABLED',
+                'error': f'帳號 {account_id} 已停用',
+                'suggestion': '聯繫管理員啟用此帳號，或使用其他已啟用的帳號'
+            }
+            if warnings:
+                error_data['warnings'] = warnings
             return mcp_result(req_id, {
-                'content': [{'type': 'text', 'text': json.dumps({
-                    'status': 'error',
-                    'error_code': 'ACCOUNT_DISABLED',
-                    'error': f'帳號 {account_id} 已停用',
-                    'suggestion': '聯繫管理員啟用此帳號，或使用其他已啟用的帳號'
-                })}],
+                'content': [{'type': 'text', 'text': json.dumps(error_data)}],
                 'isError': True
             })
 
@@ -377,6 +399,8 @@ def mcp_tool_execute_native(req_id: str, arguments: dict) -> dict:
         native_operation=operation,
         native_params=params,
         native_region=region,
+        # Warnings
+        warnings=warnings if warnings else None,
     )
 
     # Phase 1.5: Agent identity check (#418) — server-side source override
