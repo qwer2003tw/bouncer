@@ -546,8 +546,18 @@ def _format_approval_response(
     )
     # Overwrite the approval message (remove buttons from it)
     # s56-003: Add error handling for update_message to avoid 400 errors
+    # Sprint 99 #434: Retain context instead of replacing with "見下方結果"
     try:
-        update_message(message_id, f"{result_emoji} *已執行* — 見下方結果", remove_buttons=True)
+        update_message(
+            message_id,
+            f"{result_emoji} *已執行*\n\n"
+            f"🆔 *ID：* `{request_id}`\n"
+            f"{info['source_line']}"
+            f"{info['account_line']}"
+            f"📋 *命令：*\n`{info['cmd_preview']}`\n\n"
+            f"💬 *原因：* {info['safe_reason']}",
+            remove_buttons=True,
+        )
     except Exception as _exc:  # noqa: BLE001 — best-effort
         logger.debug("Post-execute update_message failed (non-critical): %s", _exc, extra={"src_module": "callbacks", "operation": "post_execute_update", "message_id": message_id})
 

@@ -386,13 +386,91 @@ def test_handle_command_callback_approve_success(
     # 驗證 answer_callback 被呼叫
     mock_answer.assert_called()
 
-    # 驗證 update_message 被呼叫
+    # 驗證 update_message 被呼叫 (Sprint 99 #434: should retain context)
     assert mock_update.call_count >= 1
+    # Check the final update_message call retains context (not just "見下方結果")
+    final_update_call = mock_update.call_args
+    final_update_text = final_update_call[0][1]
+    assert request_id in final_update_text, "Update message should contain request_id"
+    assert 'aws s3 ls' in final_update_text, "Update message should contain command"
+    assert '見下方結果' not in final_update_text, "Update message should not contain '見下方結果'"
 
     # 驗證 send_telegram_message_silent 被呼叫（發送結果）
     mock_send.assert_called_once()
     call_args = mock_send.call_args[0][0]
     assert '✅' in call_args  # 成功標記
+
+
+@patch('callbacks_command.answer_callback')
+@patch('callbacks_command.update_message')
+@patch('callbacks_command.execute_command')
+@patch('callbacks_command.store_paged_output')
+@patch('callbacks_command.emit_metric')
+@patch('callbacks_command.send_chat_action')
+@patch('callbacks_command.send_telegram_message_silent')
+def test_regression_434_approval_message_retains_context(
+    mock_send, mock_chat, mock_emit, mock_store, mock_exec, mock_update, mock_answer,
+    callbacks_module, mock_dynamodb
+):
+    """Sprint 99 #434: Approval message should retain context, not just '見下方結果'
+
+    This test explicitly verifies that after approval execution:
+    1. update_message is called with remove_buttons=True
+    2. The message text contains the request_id
+    3. The message text contains the command preview
+    4. The message text does NOT contain '見下方結果'
+    """
+    table = mock_dynamodb.Table('clawdbot-approval-requests')
+    request_id = 'test-req-434'
+    test_command = 'aws ec2 describe-instances --region us-west-2'
+
+    # 建立請求
+    created_at = int(time.time())
+    table.put_item(Item={
+        'request_id': request_id,
+        'status': 'pending_approval',
+        'command': test_command,
+        'source': 'regression-test',
+        'reason': 'Verify #434 fix',
+        'account_id': '222222222222',
+        'account_name': 'RegressionTest',
+        'trust_scope': '',
+        'created_at': created_at,
+        'ttl': created_at + 600
+    })
+
+    # Mock 執行結果
+    mock_exec.return_value = "i-1234567890abcdef0 (exit code: 0)"
+    from paging import PaginatedOutput
+    mock_store.return_value = PaginatedOutput(paged=False, result='output')
+
+    item = table.get_item(Key={'request_id': request_id})['Item']
+    callbacks_module.handle_command_callback(
+        action='approve',
+        request_id=request_id,
+        item=item,
+        message_id=54321,
+        callback_id='cb434',
+        user_id='user434',
+        source_ip='10.20.30.40'
+    )
+
+    # Verify update_message was called
+    assert mock_update.call_count >= 1, "update_message should be called"
+
+    # Get the final update_message call (should be the one that removes buttons)
+    final_call = mock_update.call_args
+    message_id_arg = final_call[0][0]
+    message_text = final_call[0][1]
+    remove_buttons = final_call[1].get('remove_buttons', False)
+
+    # Explicit assertions for #434
+    assert message_id_arg == 54321, "Should update the correct message"
+    assert remove_buttons is True, "Should remove buttons"
+    assert request_id in message_text, f"Message should contain request_id '{request_id}'"
+    assert 'aws ec2 describe-instances' in message_text, "Message should contain command"
+    assert '見下方結果' not in message_text, "Message should NOT contain '見下方結果' (#434 regression)"
+    assert '已執行' in message_text, "Message should indicate execution completed"
 
 
 @patch('callbacks_command.answer_callback')
