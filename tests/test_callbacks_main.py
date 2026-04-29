@@ -598,7 +598,8 @@ class TestCallbackHandlersFull:
             'status': 'pending_approval',
             'source': 'test',
             'reason': 'test deploy',
-            'ttl': int(time.time()) + 300
+            'ttl': int(time.time()) + 300,
+            'approval_expiry': int(time.time()) + 300
         })
         
         event = {
