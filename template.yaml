@@ -485,6 +485,8 @@ Resources:
           SCHEDULER_ROLE_ARN: !GetAtt SchedulerInvokeRole.Arn
           AWS_LAMBDA_FUNCTION_ARN: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:bouncer-${Environment}-function'
           SCHEDULER_ENABLED: "true"
+          # Frontend deploy auto-approve (sprint99)
+          FRONTEND_AUTO_APPROVE: "true"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref RequestsTable
