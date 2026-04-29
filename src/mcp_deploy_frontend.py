@@ -14,6 +14,7 @@ Phase B (callback / actual S3 deploy / CloudFront invalidation) is NOT included 
 import base64
 import binascii
 import json
+import os
 import time
 from typing import Optional
 
@@ -26,12 +27,13 @@ from aws_clients import get_s3_client
 from constants import DEFAULT_ACCOUNT_ID, APPROVAL_TIMEOUT_DEFAULT, APPROVAL_TTL_BUFFER, UPLOAD_TIMEOUT, DEFAULT_REGION, TTL_30_DAYS, PROJECTS_TABLE
 from db import table, deployer_projects_table, deployer_history_table
 from notifications import send_deploy_frontend_notification
-from utils import generate_request_id, mcp_result, mcp_error
+from utils import generate_request_id, mcp_result, mcp_error, format_size_human
 from aws_clients import get_cloudfront_client  # noqa: E402
 from metrics import emit_metric  # noqa: E402
 from notifications import post_notification_setup, send_trust_auto_approve_notification  # noqa: E402
 from trust import TrustRateExceeded, increment_trust_command_count, should_trust_approve  # noqa: E402
 from utils import log_decision  # noqa: E402
+from telegram import send_telegram_message_silent  # noqa: E402
 
 logger = Logger(service="bouncer")
 
@@ -940,6 +942,116 @@ def mcp_tool_request_frontend_presigned(req_id: str, arguments: dict) -> dict:
 # Presigned URL Flow - Step 2: Confirm deployment
 # ---------------------------------------------------------------------------
 
+def _finalize_auto_approved_deploy(table, request_id: str, project: str, reason: str, source: str,
+                                    staging_bucket: str, frontend_bucket: str, distribution_id: str,
+                                    files_manifest: list, deployed: list, failed: list, total_bytes: int,
+                                    cf_invalidation_failed: bool, deploy_status: str):
+    """Finalize auto-approved deploy: update DDB, emit metrics, write history, send silent notification."""
+    success_count = len(deployed)
+    fail_count = len(failed)
+
+    # Update DDB with deploy results
+    extra_attrs = {
+        'deploy_status': deploy_status,
+        'deployed_count': success_count,
+        'failed_count': fail_count,
+        'deployed_files': json.dumps([d['filename'] for d in deployed]),
+        'failed_files': json.dumps([f['filename'] for f in failed]),
+        'deployed_details': json.dumps(deployed),
+        'failed_details': json.dumps(failed),
+        'cf_invalidation_failed': cf_invalidation_failed,
+        'total_size': total_bytes,
+    }
+
+    try:
+        table.update_item(
+            Key={'request_id': request_id},
+            UpdateExpression='SET #st = :st, deploy_status = :ds, deployed_count = :dc, failed_count = :fc, '
+                           'deployed_files = :df, failed_files = :ff, deployed_details = :dd, '
+                           'failed_details = :fd, cf_invalidation_failed = :cf, total_size = :ts',
+            ExpressionAttributeNames={'#st': 'status'},
+            ExpressionAttributeValues={
+                ':st': 'auto_approved',
+                ':ds': deploy_status,
+                ':dc': success_count,
+                ':fc': fail_count,
+                ':df': extra_attrs['deployed_files'],
+                ':ff': extra_attrs['failed_files'],
+                ':dd': extra_attrs['deployed_details'],
+                ':fd': extra_attrs['failed_details'],
+                ':cf': cf_invalidation_failed,
+                ':ts': total_bytes,
+            }
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Failed to update DDB for auto-approved deploy %s: %s", request_id, e, extra={
+            "src_module": "deploy_frontend", "operation": "auto_approve_finalize",
+            "request_id": request_id, "error": str(e)
+        })
+
+    # Emit metrics
+    emit_metric('Bouncer', 'DeployFrontend', 1, dimensions={'Status': deploy_status, 'Project': project})
+
+    # Write to deploy_history table
+    try:
+        history_item = {
+            'request_id': request_id,
+            'timestamp': int(time.time()),
+            'action': 'deploy_frontend',
+            'project': project,
+            'deploy_status': deploy_status,
+            'source': source or 'unknown',
+            'reason': reason,
+            'file_count': len(files_manifest),
+            'success_count': success_count,
+            'fail_count': fail_count,
+            'frontend_bucket': frontend_bucket,
+            'distribution_id': distribution_id,
+            'cf_invalidation_failed': cf_invalidation_failed,
+            'ttl': int(time.time()) + TTL_30_DAYS,
+        }
+        deployer_history_table.put_item(Item=history_item)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Failed to write deploy history for %s: %s", request_id, e, extra={
+            "src_module": "deploy_frontend", "operation": "auto_approve_history",
+            "request_id": request_id, "error": str(e)
+        })
+
+    # Send silent notification (informational, not approval request)
+    size_str = format_size_human(total_bytes)
+    cf_warn = "\n⚠️ *CloudFront Invalidation 失敗* (S3 已完成)" if cf_invalidation_failed else ""
+    fail_line = f"\n❗ 失敗: {fail_count} 個" if fail_count > 0 else ""
+
+    if deploy_status == 'deploy_failed':
+        status_emoji = '❌'
+        title = '前端部署自動批准並執行（失敗）'
+    elif deploy_status == 'partial_deploy':
+        status_emoji = '⚠️'
+        title = '前端部署自動批准並執行（部分成功）'
+    else:
+        status_emoji = '✅'
+        title = '前端部署自動批准並執行'
+
+    notification_text = (
+        f"{status_emoji} *{title}*\n\n"
+        f"📋 *請求 ID：* `{request_id}`\n"
+        f"📦 *專案：* {project}\n"
+        f"📄 成功: {success_count}/{len(files_manifest)} 個檔案 ({size_str})"
+        f"{fail_line}\n"
+        f"💬 *原因：* {reason}\n"
+        f"📡 *來源：* {source or 'unknown'}"
+        f"{cf_warn}"
+    )
+
+    try:
+        send_telegram_message_silent(notification_text)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to send silent notification for auto-approved deploy %s: %s", request_id, e, extra={
+            "src_module": "deploy_frontend", "operation": "auto_approve_notify",
+            "request_id": request_id, "error": str(e)
+        })
+
+
 def mcp_tool_confirm_frontend_deploy(req_id: str, arguments: dict) -> dict:
     """Step 2 of presigned deploy: verify uploads, create approval request.
     Verifies all files exist in staging via head_object, then creates DDB approval record.
@@ -992,9 +1104,24 @@ def mcp_tool_confirm_frontend_deploy(req_id: str, arguments: dict) -> dict:
     if missing:
         return mcp_result(req_id, {"content": [{"type": "text", "text": json.dumps({"status": "error", "error": f"Missing files in staging: {missing}. Upload them first using presigned URLs."})}], "isError": True})
 
+    # Auto-approve frontend deploy when conditions are met:
+    # 1. All files verified in staging (already checked above)
+    # 2. Source is from a known bot (not None/unknown)
+    # 3. File count is reasonable (< 500 files)
+    FRONTEND_AUTO_APPROVE_ENABLED = os.environ.get('FRONTEND_AUTO_APPROVE', 'true').lower() == 'true'
+
+    should_auto_approve = (
+        FRONTEND_AUTO_APPROVE_ENABLED
+        and source  # source must be provided (not None or empty)
+        and source != 'unknown'
+        and len(files_manifest) < 500  # sanity check
+    )
+
     # Build approval record (same structure as _submit_deploy_frontend_approval)
     now = int(time.time())
     confirm_request_id = generate_request_id(f"deploy_frontend:{project}")
+
+    deploy_role_arn = frontend_config.get("deploy_role_arn") or project_config.get("deploy_role_arn")
 
     item = {
         "request_id": confirm_request_id,
@@ -1008,13 +1135,141 @@ def mcp_tool_confirm_frontend_deploy(req_id: str, arguments: dict) -> dict:
         "frontend_bucket": frontend_config["frontend_bucket"],
         "distribution_id": frontend_config["distribution_id"],
         "region": frontend_config.get("region", DEFAULT_REGION),
-        "deploy_role_arn": frontend_config.get("deploy_role_arn") or project_config.get("deploy_role_arn"),
+        "deploy_role_arn": deploy_role_arn,
         "staging_bucket": staging_bucket,
         "file_count": len(files_manifest),
         "created_at": now,
         "ttl": now + APPROVAL_TIMEOUT_DEFAULT + APPROVAL_TTL_BUFFER,
     }
 
+    # Execute auto-approve flow if conditions are met
+    if should_auto_approve:
+        logger.info("Frontend deploy auto-approve triggered", extra={
+            "src_module": "deploy_frontend", "operation": "auto_approve",
+            "request_id": confirm_request_id, "project": project,
+            "file_count": len(files_manifest), "source": source
+        })
+
+        # Update item status to auto_approved
+        item["status"] = "auto_approved"
+
+        try:
+            table.put_item(Item=item)
+        except Exception as exc:  # noqa: BLE001
+            return mcp_result(req_id, {"content": [{"type": "text", "text": json.dumps({"status": "error", "error": f"Failed to create approval record: {exc}"})}], "isError": True})
+
+        # Execute deploy inline (replicate callback approve logic)
+        deployed = []
+        failed = []
+        total_bytes = 0
+        cf_invalidation_failed = False
+
+        # 1. Assume deploy role
+        s3_staging = get_s3_client()
+        if deploy_role_arn:
+            try:
+                s3_target = get_s3_client(role_arn=deploy_role_arn, session_name=f"bouncer-deploy-{confirm_request_id[:16]}")
+            except ClientError as e:
+                logger.exception("AssumeRole failed for %s: %s", deploy_role_arn, e, extra={
+                    "src_module": "deploy_frontend", "operation": "auto_approve_assume_role",
+                    "deploy_role_arn": deploy_role_arn, "error": str(e)
+                })
+                failed = [{'filename': fm.get('filename', 'unknown'), 'reason': f'AssumeRole failed: {e}'} for fm in files_manifest]
+                deploy_status = 'deploy_failed'
+                _finalize_auto_approved_deploy(
+                    table, confirm_request_id, project, reason, source, staging_bucket,
+                    frontend_config["frontend_bucket"], frontend_config["distribution_id"],
+                    files_manifest, deployed, failed, total_bytes, cf_invalidation_failed, deploy_status
+                )
+                return mcp_result(req_id, {"content": [{"type": "text", "text": json.dumps({
+                    "status": "auto_approved",
+                    "request_id": confirm_request_id,
+                    "deploy_status": deploy_status,
+                    "error": f"AssumeRole failed: {e}"
+                })}], "isError": True})
+        else:
+            s3_target = s3_staging
+
+        # 2. Deploy files to frontend bucket
+        for fm in files_manifest:
+            filename = fm.get('filename', 'unknown')
+            staged_key = fm.get('s3_key', '')
+            content_type = fm.get('content_type', 'application/octet-stream')
+            cache_control = fm.get('cache_control', 'no-cache')
+
+            try:
+                # Read from staging
+                obj = s3_staging.get_object(Bucket=staging_bucket, Key=staged_key)
+                body = obj['Body'].read()
+
+                # Write to frontend
+                s3_target.put_object(
+                    Bucket=frontend_config["frontend_bucket"],
+                    Key=filename,
+                    Body=body,
+                    ContentType=content_type,
+                    CacheControl=cache_control,
+                )
+                total_bytes += len(body)
+                deployed.append({'filename': filename, 's3_key': filename})
+                logger.info("uploaded file=%s size=%d content_type=%s request_id=%s project=%s", filename, len(body), content_type, confirm_request_id, project, extra={
+                    "src_module": "deploy_frontend", "operation": "auto_approve_upload",
+                    "file_name": filename, "request_id": confirm_request_id, "project": project
+                })
+            except Exception as e:  # noqa: BLE001
+                logger.exception("upload_failed file=%s error=%s request_id=%s project=%s", filename, str(e)[:200], confirm_request_id, project, extra={
+                    "src_module": "deploy_frontend", "operation": "auto_approve_upload",
+                    "file_name": filename, "request_id": confirm_request_id, "project": project, "error": str(e)[:200]
+                })
+                failed.append({'filename': filename, 'reason': str(e)[:200]})
+
+        # 3. CloudFront invalidation
+        if len(deployed) > 0:
+            try:
+                cf = get_cloudfront_client(role_arn=deploy_role_arn)
+                cf.create_invalidation(
+                    DistributionId=frontend_config["distribution_id"],
+                    InvalidationBatch={
+                        'Paths': {'Quantity': 1, 'Items': ['/*']},
+                        'CallerReference': confirm_request_id,
+                    },
+                )
+            except ClientError as e:
+                logger.exception("CloudFront invalidation failed for dist=%s: %s", frontend_config["distribution_id"], e, extra={
+                    "src_module": "deploy_frontend", "operation": "auto_approve_cloudfront",
+                    "distribution_id": frontend_config["distribution_id"], "error": str(e)
+                })
+                cf_invalidation_failed = True
+
+        # 4. Determine deploy status
+        success_count = len(deployed)
+        fail_count = len(failed)
+        if success_count == 0:
+            deploy_status = 'deploy_failed'
+        elif fail_count == 0:
+            deploy_status = 'deployed'
+        else:
+            deploy_status = 'partial_deploy'
+
+        # 5. Finalize: update DDB, metrics, history, notification
+        _finalize_auto_approved_deploy(
+            table, confirm_request_id, project, reason, source, staging_bucket,
+            frontend_config["frontend_bucket"], frontend_config["distribution_id"],
+            files_manifest, deployed, failed, total_bytes, cf_invalidation_failed, deploy_status
+        )
+
+        # Return success response
+        return mcp_result(req_id, {"content": [{"type": "text", "text": json.dumps({
+            "status": "auto_approved",
+            "request_id": confirm_request_id,
+            "deploy_status": deploy_status,
+            "file_count": len(files_manifest),
+            "deployed_count": success_count,
+            "failed_count": fail_count,
+            "message": f"Frontend deploy auto-approved and executed. Status: {deploy_status}"
+        })}]})
+
+    # Manual approval path (original flow)
     try:
         table.put_item(Item=item)
     except Exception as exc:  # noqa: BLE001
