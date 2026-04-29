@@ -1058,3 +1058,11 @@ All notable changes to this project will be documented in this file.
 ### Tests
 - Backend: 886 passed (+18 regression tests) / coverage 81.52%
 
+
+## v3.99.0 (2026-04-29)
+
+### Sprint 99
+
+- **fix(#434):** Approval result message now retains full context (command, reason, account, request ID) instead of replacing with unhelpful '見下方結果'
+- **feat(#414):** `bouncer_execute_native` warns on unknown parameters in aws/bouncer sections via `warnings` response field
+- **feat:** Frontend deploy auto-approve — deploys auto-execute when source is provided and all files verified in staging (controlled by `FRONTEND_AUTO_APPROVE` env var)
