@@ -69,6 +69,7 @@ from mcp_agent_key import (
 from callbacks import (
     _is_execute_failed,
 )
+from callbacks_silence import handle_silence_callback
 from telegram_commands import (  # noqa: F401
     handle_telegram_command, handle_accounts_command,
     handle_help_command, handle_pending_command, handle_trust_command,
@@ -979,6 +980,9 @@ def handle_telegram_webhook(event: dict) -> dict:
     action, request_id = data.split(':', 1)
 
     # Route to specialized handlers
+    if action == 'silence':
+        return handle_silence_callback(request_id, callback, user_id)
+
     if action == 'show_page':
         return handle_show_page(request_id, callback)
 

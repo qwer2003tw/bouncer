@@ -15,6 +15,7 @@ from aws_lambda_powertools import Logger
 from config_store import _is_silent_source
 from execute_context import ExecuteContext
 from execute_helpers import _safe_risk_category, _safe_risk_factors
+from silent_rules import is_silenced as is_notification_silenced
 from utils import mcp_result, generate_request_id, log_decision, generate_display_summary, record_execution_error, extract_exit_code
 from commands import get_block_reason, is_auto_approve, execute_command, execute_boto3_native
 from paging import store_paged_output
@@ -399,9 +400,28 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
     emit_metric('Bouncer', 'CommandExecution', 1, dimensions={'Status': cmd_status, 'Path': 'auto_approve'})
     paged = store_paged_output(request_id, result)
 
+    # Extract service and action from command for silent rules
+    _cmd_parts = ctx.command.split()
+    _svc = _cmd_parts[1] if len(_cmd_parts) > 1 else ''
+    _act = _cmd_parts[2] if len(_cmd_parts) > 2 else ''
+
     # Silent Telegram notification for safelist auto-approve (sprint24-003: throttled)
     # Silent notification mode (#380): skip notification for configured sources
     notification_suppressed = _is_silent_source(ctx.source)
+
+    # Check if notification is silenced by user rule (#387)
+    silent_rule = is_notification_silenced(ctx.source or '', _svc, _act) if not notification_suppressed else None
+    if silent_rule:
+        notification_suppressed = True
+        logger.info("Notification silenced by rule", extra={
+            "src_module": "execute",
+            "operation": "silent_rule_matched",
+            "rule_id": silent_rule.get('rule_id'),
+            "source": ctx.source,
+            "service": _svc,
+            "action": _act,
+            "command": ctx.command[:100]
+        })
 
     if not notification_suppressed and not _should_throttle_notification('auto_approve'):
         try:
@@ -440,6 +460,17 @@ def _check_auto_approve(ctx: ExecuteContext) -> Optional[dict]:
                         'callback_data': f'show_page:{request_id}:2',
                     }]]
                 }
+
+            # Add silence button for successful auto-approved commands (#387)
+            # Only add for success (not failures) and only if service/action are available
+            if not is_failed and _svc and _act:
+                silence_callback = f"silence:{request_id}:{_svc}:{_act}"
+                silence_button = {'text': '🔕 靜默此類型', 'callback_data': silence_callback}
+                if _reply_markup:
+                    _reply_markup['inline_keyboard'].append([silence_button])
+                else:
+                    _reply_markup = {'inline_keyboard': [[silence_button]]}
+
             send_telegram_message_silent(_notif_text, reply_markup=_reply_markup)
         except Exception:  # noqa: BLE001 — notification is best-effort
             logger.warning("[EXECUTE] Result notification failed (non-critical)", exc_info=True, extra={"src_module": "execute", "operation": "auto_approve_notification"})

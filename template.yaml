@@ -265,6 +265,41 @@ Resources:
           Value: "no"
 
   # ============================================================
+  # DynamoDB - Silent Rules (#387)
+  # Stores user preferences to silence auto-approved notifications
+  # for specific (source, service:action) combinations
+  # ============================================================
+  SilentRulesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub "bouncer-silent-rules-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: rule_id
+          AttributeType: S
+        - AttributeName: source_action
+          AttributeType: S
+      KeySchema:
+        - AttributeName: rule_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: source-action-index
+          KeySchema:
+            - AttributeName: source_action
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: Bouncer
+        - Key: auto-delete
+          Value: "no"
+
+  # ============================================================
   # IAM - Default 帳號 BouncerRole（命令執行用）
   # Lambda assume 此 role 後執行 AWS CLI 命令
   # 與 cross-account BouncerRole 權限一致
@@ -468,6 +503,7 @@ Resources:
           COMMAND_HISTORY_TABLE: !Ref CommandHistoryTable
           SHADOW_TABLE: !Ref ShadowApprovalsTable
           CONFIG_TABLE: !Ref ConfigTable
+          SILENT_RULES_TABLE: !Ref SilentRulesTable
           ENABLE_HMAC: !Ref EnableHmac
           MCP_MAX_WAIT: !Ref McpMaxWait
           DEFAULT_ACCOUNT_ID: !Ref DefaultAccountId
@@ -498,6 +534,8 @@ Resources:
             TableName: !Ref ShadowApprovalsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ConfigTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SilentRulesTable
         # Deployer tables
         - DynamoDBCrudPolicy:
             TableName: bouncer-projects
