@@ -19,6 +19,7 @@ from callbacks_command import handle_command_callback  # noqa: E402
 from constants import DEFAULT_ACCOUNT_ID  # noqa: E402
 from mcp_query_logs import _list_allowlist  # noqa: E402
 from otp import get_pending_otp, validate_otp  # noqa: E402
+from silent_rules import list_rules, revoke_rule  # noqa: E402
 
 logger = Logger(service="bouncer")
 
@@ -90,6 +91,20 @@ def handle_telegram_command(message: dict) -> dict:
     # /key {agent_id} {scope} {duration} - create temp key
     if text.startswith('/key ') or text.startswith('/key@'):
         return handle_key_command(chat_id, user_id, text)
+
+    # /silent_list - 列出靜默規則
+    if text == '/silent_list' or text.startswith('/silent_list@'):
+        return handle_silent_list_command(chat_id)
+
+    # /silent_revoke {rule_id} - 撤銷靜默規則
+    if text.startswith('/silent_revoke ') or text.startswith('/silent_revoke@'):
+        parts = text.split()
+        if len(parts) >= 2:
+            rule_id = parts[1].strip()
+            return handle_silent_revoke_command(chat_id, rule_id)
+        else:
+            send_telegram_message_to(chat_id, "❌ 用法：/silent_revoke {rule_id}\n範例：/silent_revoke sr-abc123")
+            return response(200, {'ok': True})
 
     # /help - 顯示指令列表
     if text == '/help' or text.startswith('/help@') or text == '/start' or text.startswith('/start@'):
@@ -496,6 +511,69 @@ def handle_key_command(chat_id: str, user_id: str, text: str) -> dict:
     return response(200, {'ok': True})
 
 
+def handle_silent_list_command(chat_id: str) -> dict:
+    """處理 /silent_list 指令 - 列出所有靜默規則"""
+    try:
+        rules = list_rules()
+        if not rules:
+            send_telegram_message_to(chat_id, "📭 沒有靜默規則")
+            return response(200, {'ok': True})
+
+        lines = ["🔕 靜默規則列表\n"]
+        for rule in rules:
+            rule_id = rule.get('rule_id', 'unknown')
+            source = rule.get('source', '')
+            service = rule.get('service', '')
+            action = rule.get('action', '')
+            hit_count = rule.get('hit_count', 0)
+            created_at = rule.get('created_at', 0)
+            created_by = rule.get('created_by', '')
+
+            # Format timestamp
+            import datetime
+            ts = datetime.datetime.fromtimestamp(int(created_at)).strftime('%Y-%m-%d %H:%M')
+
+            lines.append(
+                f"• `{rule_id}`\n"
+                f"  {source} | {service}:{action}\n"
+                f"  觸發次數：{hit_count} | 建立：{ts} by {created_by}\n"
+            )
+
+        text = "\n".join(lines)
+        send_telegram_message_to(chat_id, text)
+
+    except Exception as e:
+        logger.exception("Failed to list silent rules: %s", e, extra={
+            "src_module": "telegram_commands",
+            "operation": "handle_silent_list",
+            "error": str(e)
+        })
+        send_telegram_message_to(chat_id, f"❌ 列出靜默規則失敗：{str(e)}")
+
+    return response(200, {'ok': True})
+
+
+def handle_silent_revoke_command(chat_id: str, rule_id: str) -> dict:
+    """處理 /silent_revoke 指令 - 撤銷靜默規則"""
+    try:
+        success = revoke_rule(rule_id)
+        if success:
+            send_telegram_message_to(chat_id, f"✅ 已撤銷靜默規則 `{rule_id}`")
+        else:
+            send_telegram_message_to(chat_id, "❌ 撤銷靜默規則失敗")
+
+    except Exception as e:
+        logger.exception("Failed to revoke silent rule: %s", e, extra={
+            "src_module": "telegram_commands",
+            "operation": "handle_silent_revoke",
+            "rule_id": rule_id,
+            "error": str(e)
+        })
+        send_telegram_message_to(chat_id, f"❌ 撤銷靜默規則失敗：{str(e)}")
+
+    return response(200, {'ok': True})
+
+
 def handle_help_command(chat_id: str) -> dict:
     """處理 /help 指令"""
     text = """🔐 Bouncer Commands
@@ -507,6 +585,8 @@ def handle_help_command(chat_id: str) -> dict:
 /otp {code} - OTP 二次驗證（用於高風險命令）
 /logs [account] - 列出允許查詢的 log groups
 /key {agent_id} {scope} {duration} - 建立臨時 agent key（如 /key bot debug 30m）
+/silent_list - 列出所有靜默規則
+/silent_revoke {rule_id} - 撤銷靜默規則
 /help - 顯示此說明"""
 
     send_telegram_message_to(chat_id, text, parse_mode=None)
