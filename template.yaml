@@ -746,18 +746,22 @@ Resources:
   ApiGateway5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub "${Environment}-bouncer-api-5xx"
-      MetricName: 5XXError
+      AlarmName: !Sub "bouncer-${Environment}-api-5xx"
+      AlarmDescription: "API Gateway 5xx errors > 3 in 5 minutes"
       Namespace: AWS/ApiGateway
+      MetricName: 5XXError
       Dimensions:
         - Name: ApiName
           Value: !Ref BouncerApi
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
-      Threshold: 5
+      Threshold: 3
       ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
       AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
         - !Ref AlarmNotificationTopic
 
   # ============================================================
@@ -766,18 +770,46 @@ Resources:
   LambdaDurationAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub "${Environment}-bouncer-slow-lambda"
-      MetricName: Duration
+      AlarmName: !Sub "bouncer-${Environment}-lambda-duration-p99"
+      AlarmDescription: "Lambda P99 duration > 25s (approaching 29s timeout)"
       Namespace: AWS/Lambda
+      MetricName: Duration
       Dimensions:
         - Name: FunctionName
           Value: !Ref ApprovalFunction
       ExtendedStatistic: p99
       Period: 300
-      EvaluationPeriods: 1
-      Threshold: 50000
+      EvaluationPeriods: 2
+      Threshold: 25000
       ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
       AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
+
+  # ============================================================
+  # CloudWatch Alarm - DynamoDB Throttling
+  # ============================================================
+  DynamoDBThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "bouncer-${Environment}-ddb-throttle"
+      AlarmDescription: "DynamoDB throttling detected (ReadThrottleEvents + WriteThrottleEvents > 0)"
+      Namespace: AWS/DynamoDB
+      MetricName: ThrottledRequests
+      Dimensions:
+        - Name: TableName
+          Value: !Ref RequestsTable
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
         - !Ref AlarmNotificationTopic
 
   # ============================================================
@@ -920,6 +952,71 @@ Resources:
       KeyId: !Ref PublicBotApiKey
       KeyType: API_KEY
       UsagePlanId: !Ref ApiUsagePlan
+
+  # ============================================================
+  # CloudWatch Dashboard - Monitoring Overview
+  # ============================================================
+  BouncerDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "bouncer-${Environment}"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "Lambda Invocations & Errors",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  ["AWS/Lambda", "Invocations", "FunctionName", "${ApprovalFunction}"],
+                  ["AWS/Lambda", "Errors", "FunctionName", "${ApprovalFunction}"]
+                ],
+                "period": 300,
+                "stat": "Sum"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "Lambda Duration (P50/P99)",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  ["AWS/Lambda", "Duration", "FunctionName", "${ApprovalFunction}", {"stat": "p50"}],
+                  ["AWS/Lambda", "Duration", "FunctionName", "${ApprovalFunction}", {"stat": "p99"}]
+                ],
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "API Gateway 5xx / 4xx",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  ["AWS/ApiGateway", "5XXError", "ApiName", "${BouncerApi}", {"stat": "Sum"}],
+                  ["AWS/ApiGateway", "4XXError", "ApiName", "${BouncerApi}", {"stat": "Sum"}]
+                ],
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "DynamoDB Throttles",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  ["AWS/DynamoDB", "ThrottledRequests", "TableName", "${RequestsTable}", {"stat": "Sum"}]
+                ],
+                "period": 300
+              }
+            }
+          ]
+        }
 
   # ============================================================
   # EventBridge Scheduler (sprint7-002)
